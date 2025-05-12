@@ -1,0 +1,23 @@
+# Dependency directories
+vendor/
+node_modules/
+
+# Environment files
+.env
+*.env*
+
+# Log files
+*.log
+
+# System files
+.DS_Store
+
+# Database config files
+db_config.php
+
+# IDE specific files
+.idea/
+.vscode/
+
+# Local development files
+*.local.php

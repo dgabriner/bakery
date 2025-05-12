@@ -1,0 +1,26 @@
+{
+    "areas": [],
+    "projects": [
+        {
+            "id": "e8d6b0e7-d9d4-4370-833d-7f965dd86b43",
+            "name": "test",
+            "status": "In Progress",
+            "context": "@home",
+            "next_action": "",
+            "notes": "",
+            "due_date": "",
+            "last_updated": "2025-05-09 20:20:43"
+        },
+        {
+            "id": "14cba69a-2430-4419-be27-87bf59585523",
+            "name": "12",
+            "status": "Waiting",
+            "context": "@computer",
+            "next_action": "",
+            "notes": "",
+            "due_date": "",
+            "last_updated": "2025-05-09 20:20:55"
+        }
+    ],
+    "tasks": []
+}
