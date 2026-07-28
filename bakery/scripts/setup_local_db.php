@@ -1,0 +1,122 @@
+<?php
+/**
+ * Create/reset bakerysf_local from sanitized schema + fixtures.
+ * CLI only. Refuses non-local hosts/names. Does not print passwords.
+ *
+ * Usage:
+ *   C:\php\php.exe bakery/scripts/setup_local_db.php
+ *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset
+ */
+define('ACCESS_ALLOWED', true);
+
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "CLI only.\n");
+    exit(1);
+}
+
+$root = dirname(__DIR__);
+require_once $root . '/includes/env_loader.php';
+
+$envPath = $root . DIRECTORY_SEPARATOR . '.env';
+if (!is_readable($envPath)) {
+    fwrite(STDERR, "Missing bakery/.env — copy from .env.example first.\n");
+    exit(1);
+}
+bakery_load_env_file($envPath);
+
+$host = $_ENV['DB_HOST'] ?? '';
+$port = $_ENV['DB_PORT'] ?? '3306';
+$name = $_ENV['DB_NAME'] ?? '';
+$user = $_ENV['DB_USER'] ?? '';
+$pass = $_ENV['DB_PASS'] ?? '';
+
+$hostLower = strtolower($host);
+$nameLower = strtolower($name);
+
+if (strpos($hostLower, 'sourflour') !== false || strpos($hostLower, 'dreamhost') !== false) {
+    fwrite(STDERR, "Refusing: DB_HOST looks like production.\n");
+    exit(1);
+}
+if (!in_array($hostLower, ['127.0.0.1', 'localhost', '::1'], true)) {
+    fwrite(STDERR, "Refusing: DB_HOST must be 127.0.0.1 or localhost for this script.\n");
+    exit(1);
+}
+if ($nameLower === 'bakerysf' || (strpos($nameLower, '_local') === false && strpos($nameLower, 'test') === false)) {
+    fwrite(STDERR, "Refusing: DB_NAME must be a nonproduction name like bakerysf_local.\n");
+    exit(1);
+}
+
+$reset = in_array('--reset', $argv, true);
+
+try {
+    $server = new PDO(
+        "mysql:host={$host};port={$port};charset=utf8mb4",
+        $user,
+        $pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+
+    if ($reset) {
+        $server->exec('DROP DATABASE IF EXISTS `' . str_replace('`', '``', $name) . '`');
+        echo "Dropped database {$name}\n";
+    }
+
+    $server->exec(
+        'CREATE DATABASE IF NOT EXISTS `' . str_replace('`', '``', $name) . '`
+         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+    );
+    echo "Ensured database {$name}\n";
+
+    $db = new PDO(
+        "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4",
+        $user,
+        $pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+
+    $schemaFile = $root . '/database/schema/001_baseline.sql';
+    $fixtureFile = $root . '/database/fixtures/001_demo_data.sql';
+
+    run_sql_file($db, $schemaFile);
+    echo "Applied schema: database/schema/001_baseline.sql\n";
+
+    run_sql_file($db, $fixtureFile);
+    echo "Applied fixtures: database/fixtures/001_demo_data.sql\n";
+
+    $customers = (int)$db->query('SELECT COUNT(*) FROM customers')->fetchColumn();
+    $products = (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn();
+    echo "Fixture counts: customers={$customers}, products={$products}\n";
+    echo "Local database ready.\n";
+    exit(0);
+} catch (Throwable $e) {
+    fwrite(STDERR, "Setup failed: " . $e->getMessage() . "\n");
+    fwrite(STDERR, "Is MySQL/MariaDB running locally? See docs/LOCAL_SETUP.md\n");
+    exit(1);
+}
+
+/**
+ * Execute a multi-statement SQL file.
+ */
+function run_sql_file(PDO $db, $path) {
+    if (!is_readable($path)) {
+        throw new RuntimeException("SQL file not readable: {$path}");
+    }
+    $sql = file_get_contents($path);
+    // Remove line comments starting with --
+    $lines = preg_split("/\r\n|\n|\r/", $sql);
+    $buf = '';
+    foreach ($lines as $line) {
+        $trim = ltrim($line);
+        if (strpos($trim, '--') === 0) {
+            continue;
+        }
+        $buf .= $line . "\n";
+    }
+    $statements = array_filter(array_map('trim', explode(';', $buf)));
+    foreach ($statements as $statement) {
+        if ($statement === '') {
+            continue;
+        }
+        $db->exec($statement);
+    }
+}
