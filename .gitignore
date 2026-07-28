@@ -21,3 +21,19 @@ db_config.php
 
 # Local development files
 *.local.php
+
+# --- Sour Flour / bakery safety (Checkpoint 0A) ---
+!.env.example
+!bakery/.env.example
+bakery/logs/
+bakery/**/*.log
+bakery/oauth_tokens.json
+bakery/**/oauth_tokens.json
+bakery/uploads/driver_photos/**
+!bakery/uploads/driver_photos/.htaccess
+bakery/bakerysf_schema.sql
+bakery/update_customer_addresses.sql
+bakery/update_customer_addresses_correct.sql
+bakery/update_customer_coordinates.sql
+bakery/update_final_customer_coordinates.sql
+bakery/update_missing_customer_coordinates.sql

@@ -1,0 +1,62 @@
+# =============================================================================
+# Bakery Manager / Sour Flour OS — local .gitignore (Checkpoint 0A)
+# Never commit secrets, production data, uploads, logs, or OAuth tokens.
+# =============================================================================
+
+# --- Environment and local overrides ---
+.env
+.env.*
+!.env.example
+*.local.php
+local_config.php
+includes/local_*.php
+
+# --- Secrets and tokens (runtime) ---
+oauth_tokens.json
+**/oauth_tokens.json
+*.pem
+*.p12
+*.key
+credentials.json
+client_secret*.json
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Uploads and generated media (keep directory rules only) ---
+uploads/driver_photos/**
+!uploads/driver_photos/.htaccess
+uploads/**
+!uploads/driver_photos/
+!uploads/driver_photos/.htaccess
+
+# --- Production / PII-bearing SQL (do not commit as-is) ---
+bakerysf_schema.sql
+update_customer_addresses.sql
+update_customer_addresses_correct.sql
+update_customer_coordinates.sql
+update_final_customer_coordinates.sql
+update_missing_customer_coordinates.sql
+database_contents.txt
+*_contents.txt
+*_data_dump.sql
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Test / temp artifacts ---
+.phpunit.result.cache
+coverage/
+tmp/
+temp/
+*.tmp
+
+# Note: Root repo .gitignore ignores vendor/. Until Composer is introduced,
+# PHPMailer under bakery/vendor/ requires an explicit root negation to commit.
+# See docs/CHECKPOINT_0A_REPOSITORY_CLASSIFICATION.md.
