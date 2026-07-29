@@ -1,96 +1,7 @@
 # Post-0E Decisions — Coordinator Guide
 
-**Date:** 2026-07-28  
-**Context:** Checkpoint 0E is complete. These items require explicit human approval before any agent proceeds.
-
----
-
-## 1. Git tracking strategy for untracked app pages
-
-**Current state:** Only ~40 bakery files are tracked in git. Canonical application pages (`index.php`, `customers.php`, `driver_list.php`, `production.php`, etc.) exist on disk but are **untracked**. Backup/debug/Copy variants are catalogued in [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md).
-
-### Recommended approach (phased)
-
-| Phase | Action | Rationale |
-|-------|--------|-----------|
-| **Phase A** | Track canonical ops pages only — one file per function, no `*backup*`, `*fixed*`, `*Copy*`, `debug*`, `test_*` | Gives version control over the live app without importing quarantine clutter |
-| **Phase B** | Track shared includes (`includes/nav.php`, `includes/common_functions.php`, etc.) and `css/` | Required for coherent diffs on UI changes |
-| **Phase C** | Leave quarantine files untracked; human review before any deletion | Matches 0A–0E safety policy |
-| **Phase D** | Add `.gitignore` entries for `uploads/`, PII SQL dumps, `.htaccess.bak` | Prevent accidental commits |
-
-### Canonical pages to track (suggested first batch)
-
-```
-index.php, customers.php, customer_overview.php, customer_schedule.php
-daily_orders.php, standing_orders.php, standing_orders_manager.php
-bread_distribution.php, production.php, pack_list.php
-driver.php, driver_list.php, driver_assignment.php, driver_overview.php
-get_driver_orders.php, get_customer_order_details.php, complete_delivery.php
-products.php, ingredients.php, formulas.php, dough_types.php
-zones.php, leads.php, orders.php, daily_route.php, standing_routes.php
-route_manager.php, map.php, generate_invoice.php
-includes/nav.php, includes/common_functions.php, includes/footer.php
-css/
-```
-
-**Do not track yet:** all files listed in QUARANTINE_INVENTORY.md.
-
----
-
-## 2. Weekday data migration (Sunday 0 vs 7)
-
-**Status:** NOT authorized. Documented in characterization findings.
-
-**When ready to authorize:**
-
-1. Audit all surfaces using `day_of_week` (generate, pack_list, bread_distribution UI, standing_orders, production, fixtures).
-2. Choose canonical encoding (recommend **7 = Sunday** to match standing_orders/fixtures).
-3. Write migration SQL + update PHP conversion logic + update characterization test expectations.
-4. Run full test suite; deploy only after green.
-
-**Risk:** Production data may have mixed encodings. Requires production DB audit before migration.
-
----
-
-## 3. Zone schema migration (`zone_id` column)
-
-**Status:** NOT authorized. Code fix (name-based join) is sufficient for local ops.
-
-**When ready to authorize:**
-
-1. Add `customers.zone_id` FK to `zones.id`.
-2. Backfill from text `customers.zone` → `zones.name` match.
-3. Update all queries to use FK; deprecate text column.
-4. Characterization tests for zone filter/join.
-
----
-
-## 4. Production deploy
-
-**Status:** NOT authorized.
-
-**Prerequisites before deploy:**
-
-- [ ] Canonical pages tracked in git
-- [ ] Auth/CSRF verified on all protected endpoints in production-like config
-- [ ] Local test suite green (characterization + auth)
-- [ ] Credential rotation runbook followed ([CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md))
-- [ ] `.env` / Apache env vars configured on DreamHost (no hardcoded prod creds in git)
-- [ ] Diagnostic/debug scripts blocked via `.htaccess` + auth administrator gate
-- [ ] Human sign-off on Sunday encoding behavior (known bug or fixed)
-
----
-
-## 5. Quarantine cleanup
-
-**Status:** Human review required. See [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md).
-
-**Recommended order:**
-
-1. Confirm canonical page for each function (e.g. `generate_invoice.php` vs `simple_invoice.php`).
-2. Archive or delete debug/test scripts after auth hardening is live in production.
-3. Remove `*backup*`, `*Copy*`, `*_fixed*` variants once canonical is verified.
-4. Never delete PII SQL dumps without credential rotation.
+**Date:** 2026-07-28 (updated after coordinator authorization)  
+**Context:** All post-0E blocks authorized. Migrations and deploy prep implemented locally.
 
 ---
 
@@ -98,9 +9,69 @@ css/
 
 | Decision | Status | Date | Notes |
 |----------|--------|------|-------|
-| Close Checkpoint 0E | Approved | 2026-07-28 | Tests green; commits landed |
-| Track canonical app pages | Approved | 2026-07-28 | Phase A+B landed — see commit after 0E close |
-| Weekday migration | Partial | 2026-07-28 | Code aligned on Sunday=7; legacy 0 rows read-compatible; no DB rewrite |
-| Zone schema migration | Pending | — | Blocked |
-| Production deploy | Pending | — | Blocked |
-| Quarantine deletion pass | Pending | — | Human review only |
+| Close Checkpoint 0E | Approved | 2026-07-28 | Tests green |
+| Track canonical app pages | **Done** | 2026-07-28 | `b803b78` |
+| Weekday migration | **Done** | 2026-07-28 | Code + `003_weekday_normalize.sql`; canonical Sunday=7 |
+| Zone schema migration | **Done** | 2026-07-28 | `004_zone_id.sql` + `run_migrations.php` |
+| Production deploy | **Ready** | 2026-07-28 | See [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md) — execute on DreamHost |
+| Quarantine deletion pass | Pending | — | Human review only; no auto-delete |
+
+---
+
+## 1. Git tracking — DONE
+
+Canonical ops pages tracked in `b803b78`. Quarantine patterns in `.gitignore`.
+
+---
+
+## 2. Weekday migration — DONE
+
+- **Canonical encoding:** 1=Mon … 7=Sun
+- **Migration:** `database/schema/003_weekday_normalize.sql` — `UPDATE ... SET day_of_week=7 WHERE day_of_week=0`
+- **Runner:** `scripts/run_migrations.php` (idempotent)
+- **Applied after:** `setup_local_db.php --reset`, `pull_prod_to_local.php`
+
+Legacy read compatibility via `bakery_standing_day_match_values()` retained until prod data fully migrated.
+
+---
+
+## 3. Zone schema migration — DONE
+
+- **Column:** `customers.zone_id INT NULL` FK → `zones.id`
+- **Backfill:** text `customers.zone` matched to `zones.name`
+- **Code:** `bakery_customer_zone_join_sql()`, `bakery_zone_id_for_name()` in `common_functions.php`
+- **Pages updated:** `bread_distribution.php`, `customers.php`, `zones.php`
+
+Text `zone` column retained for display/backward compatibility; kept in sync on save.
+
+---
+
+## 4. Production deploy — READY (next major step)
+
+**Coordinator authorized.** Implementation complete locally; **execution on DreamHost is the next major step.**
+
+Follow [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md):
+
+1. Rotate credentials ([CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md))
+2. Run migrations on production DB (weekday + zone_id)
+3. Deploy tracked canonical PHP + includes + css/assets
+4. Configure Apache/env vars (no secrets in git)
+5. Create production auth users (`create_user_once.php`)
+6. Post-deploy verification checklist
+
+---
+
+## 5. Quarantine cleanup — PENDING (human only)
+
+See [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md). Do not delete until after production auth is verified live.
+
+---
+
+## Local prod pull workflow
+
+1. Copy `.env.production.pull.example` → `.env.production.pull`
+2. Whitelist IP in DreamHost Allowable Hosts
+3. `C:\php\php.exe scripts\pull_prod_to_local.php`
+4. Login at `http://localhost:8080/bakery/login.php` as `danny@sourflour.org`
+
+Local `.env` stays on `127.0.0.1` / `bakerysf_local` always.
