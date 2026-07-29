@@ -7,6 +7,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.pull.example
 *.local.php
 local_config.php
 includes/local_*.php
@@ -41,6 +42,8 @@ update_missing_customer_coordinates.sql
 database_contents.txt
 *_contents.txt
 *_data_dump.sql
+storage/dumps/
+.env.production.pull
 
 # --- OS / IDE ---
 .DS_Store
@@ -56,6 +59,35 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# --- Quarantine / legacy variants (see docs/QUARANTINE_INVENTORY.md) ---
+.htaccess.bak
+*_backup.php
+*backup.php
+*_fixed.php
+*_optimized.php
+*_working.php
+*Copy*.php
+debug*.php
+simple-debug.php
+simple_performance_test.php
+table_debug.php
+test.php
+test_*.php
+test.html
+test_*.ps1
+db_test.php
+route_tester.php
+run_sql_setup.php
+check_photo_db.php
+find_photo_ids.php
+get_customers_no_address.php
+simple_invoice.php
+generate_invoice_simple.php
+generate_invoice_working.php
+products_new.php
+bakerysf_schema.sql
+add_delivery_times.sql
 
 # Note: Root repo .gitignore ignores vendor/. Until Composer is introduced,
 # PHPMailer under bakery/vendor/ requires an explicit root negation to commit.

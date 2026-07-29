@@ -1,6 +1,6 @@
 # Current State — Sour Flour OS / Bakery Manager
 
-**Last updated:** 2026-07-28 (Checkpoint 0E closed)  
+**Last updated:** 2026-07-28 (Post-0E: canonical pages tracked)  
 **Application path:** `bakery/` in monorepo `windsurf-project`
 
 Short pointer for humans and parallel agents. For full operating rules, read the shared brief first.

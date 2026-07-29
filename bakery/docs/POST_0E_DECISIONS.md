@@ -99,7 +99,7 @@ css/
 | Decision | Status | Date | Notes |
 |----------|--------|------|-------|
 | Close Checkpoint 0E | Approved | 2026-07-28 | Tests green; commits landed |
-| Track canonical app pages | Pending | — | Awaiting coordinator |
+| Track canonical app pages | Approved | 2026-07-28 | Phase A+B landed — see commit after 0E close |
 | Weekday migration | Pending | — | Blocked |
 | Zone schema migration | Pending | — | Blocked |
 | Production deploy | Pending | — | Blocked |

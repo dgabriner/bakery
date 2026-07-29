@@ -1,0 +1,528 @@
+/* Photo Functionality Styles */
+
+/* Delivery Item Photo Integration */
+.delivery-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.photo-btn {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.photo-btn:hover {
+    background: #45a049;
+}
+
+.photo-summary {
+    margin-top: 8px;
+    padding: 8px;
+    background: #f9f9f9;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.photo-count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.photo-type-count {
+    background: #e3f2fd;
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+/* Photo Summary Card */
+.photo-summary-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.photo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+    margin-top: 15px;
+}
+
+.photo-thumb {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    background: #f5f5f5;
+}
+
+.photo-thumb:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.photo-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+}
+
+.photo-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    color: white;
+    padding: 8px;
+    font-size: 11px;
+}
+
+.photo-type {
+    display: block;
+    font-weight: 600;
+}
+
+.customer-name {
+    display: block;
+    opacity: 0.9;
+    font-size: 10px;
+}
+
+.more-photos {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #e0e0e0;
+    color: #666;
+    font-weight: 600;
+}
+
+.more-count {
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+/* Photo Modal */
+.photo-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    align-items: center;
+    justify-content: center;
+}
+
+.photo-modal-content {
+    background-color: #fefefe;
+    margin: auto;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    width: 90%;
+    max-width: 800px;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-50px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.photo-modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.photo-modal-header h3 {
+    margin: 0;
+    color: #333;
+}
+
+.photo-modal-close {
+    color: #aaa;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: color 0.3s;
+}
+
+.photo-modal-close:hover {
+    color: #000;
+}
+
+.photo-modal-body {
+    padding: 20px;
+}
+
+/* Photo Upload Section */
+.photo-upload-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 2px dashed #ddd;
+}
+
+.photo-upload-section h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+}
+
+.photo-upload-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+.photo-type-select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    font-size: 14px;
+}
+
+.btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-primary {
+    background: #2196F3;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #1976D2;
+}
+
+.btn-success {
+    background: #4CAF50;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #45a049;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Photo Preview */
+.photo-preview {
+    margin-top: 15px;
+    text-align: center;
+}
+
+.photo-preview img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.photo-preview textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+/* Upload Progress */
+.upload-progress {
+    margin-top: 15px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #4CAF50;
+    transition: width 0.3s;
+    animation: progressPulse 1.5s infinite;
+}
+
+@keyframes progressPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.progress-text {
+    text-align: center;
+    font-size: 14px;
+    color: #666;
+}
+
+/* Existing Photos Section */
+.existing-photos-section h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+}
+
+.existing-photos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.existing-photo-item {
+    position: relative;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.existing-photo-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+.existing-photo-item img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    object-position: center;
+    border-radius: 8px;
+    border: 2px solid #ddd;
+    transition: border-color 0.3s;
+}
+
+.existing-photo-item:hover img {
+    border-color: #007bff;
+}
+
+.photo-label {
+    padding: 8px;
+    text-align: center;
+    font-size: 12px;
+}
+
+.photo-type-label {
+    display: block;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 2px;
+}
+
+.photo-time {
+    color: #666;
+    font-size: 11px;
+}
+
+.loading-photos,
+.no-photos,
+.error-photos {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px;
+    color: #666;
+    font-style: italic;
+}
+
+.error-photos {
+    color: #d32f2f;
+}
+
+/* Photo Viewer Modal */
+.photo-viewer-modal {
+    display: none;
+    position: fixed;
+    z-index: 1100;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.9);
+    align-items: center;
+    justify-content: center;
+}
+
+.photo-viewer-content {
+    position: relative;
+    max-width: 90%;
+    max-height: 90%;
+    text-align: center;
+}
+
+.photo-viewer-close {
+    position: absolute;
+    top: -40px;
+    right: 0;
+    color: white;
+    font-size: 32px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 1101;
+}
+
+.photo-viewer-close:hover {
+    opacity: 0.7;
+}
+
+#viewerImage {
+    max-width: 100%;
+    max-height: 80vh;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.photo-viewer-info {
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 10px;
+    text-align: left;
+}
+
+.photo-viewer-info h4 {
+    margin: 0 0 8px 0;
+    color: white;
+}
+
+.photo-viewer-info p {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.9;
+    white-space: pre-line;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .photo-modal-content {
+        width: 95%;
+        margin: 10px;
+    }
+    
+    .photo-upload-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .photo-upload-controls > * {
+        width: 100%;
+        text-align: center;
+    }
+    
+    .existing-photos-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 10px;
+    }
+    
+    .photo-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 8px;
+    }
+    
+    .delivery-actions {
+        flex-direction: column;
+        gap: 6px;
+    }
+}
+
+@media (max-width: 480px) {
+    .photo-modal-body {
+        padding: 15px;
+    }
+    
+    .existing-photos-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .photo-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .photo-viewer-content {
+        max-width: 95%;
+        max-height: 95%;
+    }
+    
+    #viewerImage {
+        max-height: 70vh;
+    }
+}
+
+/* Integration with existing styles */
+.stats-grid .stat-item:nth-child(3) {
+    border-right: 1px solid #eee;
+}
+
+.driver-dashboard .photo-summary-card {
+    order: 3; /* Place after deliveries but before stats */
+}
+
+/* Ensure proper sizing for photo grid thumbnails */
+.photo-grid .photo-thumb {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    background: #f5f5f5;
+}
+
+.photo-grid .photo-thumb:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+} 

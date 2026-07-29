@@ -1,0 +1,12 @@
+# Prevent direct access to uploaded files
+Options -Indexes
+# Allow only image files
+<FilesMatch "\.(jpg|jpeg|png|webp)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+# Deny everything else
+<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|jsp|asp|sh|cgi)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
