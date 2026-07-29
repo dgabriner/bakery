@@ -121,20 +121,24 @@ foreach ($customers as $c) {
     }
     assert_true($match, "customer zone text matches zones.name for '{$c['zone']}'");
 }
-// Simulate bread_distribution filter bug: WHERE c.zone = ? with int id
-$zoneId = (int)$zones[0]['id'];
-$stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
-$stmt->execute([$zoneId]);
-$badCount = (int)$stmt->fetchColumn();
+// bread_distribution.php uses name-based filter and JOIN (0E fix)
 $stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
 $stmt->execute([$zones[0]['name']]);
 $goodCount = (int)$stmt->fetchColumn();
-assert_eq(0, $badCount, 'CURRENT BUG: filtering c.zone by zones.id returns 0 rows');
 assert_true($goodCount > 0, "filtering c.zone by zones.name returns rows ($goodCount)");
-finding(
-    'zone_join',
-    'bread_distribution.php casts zone filter to int and JOINs c.zone = z.id, but customers.zone stores zone name text'
-);
+$stmt = $db->prepare("
+    SELECT COUNT(*) FROM customers c
+    LEFT JOIN zones z ON c.zone = z.name
+    WHERE c.zone = ?
+");
+$stmt->execute([$zones[0]['name']]);
+$joinCount = (int)$stmt->fetchColumn();
+assert_true($joinCount > 0, "name-based zone JOIN (c.zone = z.name) returns rows ($joinCount)");
+$zoneId = (int)$zones[0]['id'];
+$stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
+$stmt->execute([(string)$zoneId]);
+$badCount = (int)$stmt->fetchColumn();
+assert_eq(0, $badCount, 'filtering c.zone by zones.id still returns 0 — customers store text names not ids');
 
 echo "\n=== Production totals (day 1 / Monday, encoding 1-7) ===\n";
 $prod = $db->prepare("
@@ -208,13 +212,52 @@ $inv->execute([$oid]);
 $invRow = $inv->fetch();
 assert_true(abs((float)$invRow['total_amount'] - (float)$invRow['line_sum']) < 0.01, 'invoice order total matches sum of lines');
 
-echo "\n=== get_driver_orders.php contract (missing file) ===\n";
-$exists = file_exists($root . '/get_driver_orders.php');
-assert_true(!$exists, 'get_driver_orders.php is currently missing (expected until 0E)');
-finding(
-    'get_driver_orders_contract',
-    'driver_list.php POSTs driver_id + date; expects JSON {success, orders[]} with fields: daily_order_id, customer_name, customer_address, zone, route_order, scheduled_delivery_time, total_amount (same shape as server-side query in driver_list.php lines 47-66)'
-);
+echo "\n=== get_driver_orders.php contract ===\n";
+assert_true(file_exists($root . '/get_driver_orders.php'), 'get_driver_orders.php exists');
+
+$driverOrdersStmt = $db->prepare("
+    SELECT
+        c.name AS customer_name,
+        c.address AS customer_address,
+        c.zone,
+        do.id AS daily_order_id,
+        do.total_amount,
+        doa.route_order,
+        doa.scheduled_delivery_time
+    FROM daily_orders do
+    INNER JOIN customers c ON do.customer_id = c.id
+    INNER JOIN daily_order_assignments doa ON do.id = doa.daily_order_id
+    INNER JOIN drivers d ON doa.driver_id = d.id
+    WHERE doa.driver_id = ? AND do.order_date = ?
+    ORDER BY doa.route_order, c.zone, c.name
+");
+$driverOrdersStmt->execute([1, '2026-08-03']);
+$driverOrderRows = $driverOrdersStmt->fetchAll();
+assert_true(count($driverOrderRows) > 0, 'driver 1 has assigned orders on 2026-08-03 for contract check');
+
+$contractFields = [
+    'daily_order_id',
+    'customer_name',
+    'customer_address',
+    'zone',
+    'route_order',
+    'scheduled_delivery_time',
+    'total_amount',
+];
+foreach ($driverOrderRows as $row) {
+    foreach ($contractFields as $field) {
+        assert_true(array_key_exists($field, $row), "canonical query row includes $field");
+    }
+    assert_true(is_numeric($row['daily_order_id']), 'daily_order_id is numeric');
+    assert_true(is_string($row['customer_name']) && $row['customer_name'] !== '', 'customer_name is non-empty string');
+    assert_true(is_string($row['customer_address']), 'customer_address is string');
+    assert_true(is_string($row['zone']) && $row['zone'] !== '', 'zone is non-empty string in fixtures');
+    assert_true(is_numeric($row['route_order']), 'route_order is numeric');
+    assert_true(is_numeric($row['total_amount']), 'total_amount is numeric');
+}
+
+$driverOrdersStmt->execute([1, '2099-01-01']);
+assert_eq([], $driverOrdersStmt->fetchAll(), 'no assignments returns empty result set for contract empty-array case');
 
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
@@ -240,7 +283,7 @@ $md .= "| bread_distribution.php UI inputs | 0 |\n";
 $md .= "| Local fixtures | 7 |\n\n";
 $md .= "## Zone representation\n\n";
 $md .= "- `customers.zone` stores **text names** matching `zones.name`.\n";
-$md .= "- `bread_distribution.php` incorrectly filters/joins using `zones.id`.\n\n";
+$md .= "- `bread_distribution.php` filters/joins by zone **name** (`c.zone = z.name`) as of Checkpoint 0E.\n\n";
 $md .= "## get_driver_orders.php contract\n\n";
 $md .= "```\nPOST application/x-www-form-urlencoded\ndriver_id={int}&date={YYYY-MM-DD}\n\nResponse JSON:\n{\n  \"success\": true,\n  \"orders\": [\n    {\n      \"daily_order_id\": int,\n      \"customer_name\": string,\n      \"customer_address\": string,\n      \"zone\": string,\n      \"route_order\": int,\n      \"scheduled_delivery_time\": string|null,\n      \"total_amount\": number\n    }\n  ]\n}\n```\n\nCanonical SQL source: `driver_list.php` server query joining `daily_orders`, `customers`, `daily_order_assignments`, `drivers` filtered by `doa.driver_id` and `do.order_date`.\n";
 file_put_contents($findingsPath, $md);
