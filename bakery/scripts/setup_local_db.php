@@ -83,10 +83,16 @@ try {
     run_sql_file($db, $fixtureFile);
     echo "Applied fixtures: database/fixtures/001_demo_data.sql\n";
 
+    $authFile = $root . '/database/schema/002_auth.sql';
+    if (is_readable($authFile)) {
+        run_sql_file($db, $authFile);
+        echo "Applied schema: database/schema/002_auth.sql\n";
+    }
+
     $customers = (int)$db->query('SELECT COUNT(*) FROM customers')->fetchColumn();
     $products = (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn();
     echo "Fixture counts: customers={$customers}, products={$products}\n";
-    echo "Local database ready.\n";
+    echo "Local database ready. Run scripts/seed_local_users.php for login accounts.\n";
     exit(0);
 } catch (Throwable $e) {
     fwrite(STDERR, "Setup failed: " . $e->getMessage() . "\n");

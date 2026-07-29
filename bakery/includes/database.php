@@ -179,11 +179,16 @@ if (PHP_SAPI !== 'cli') {
     try {
         $db = check_mysql_connection();
         require_once __DIR__ . '/common_functions.php';
+        require_once __DIR__ . '/auth.php';
+        bakery_enforce_request_security($db);
     } catch (Exception $e) {
         error_log("Database connection failed: " . $e->getMessage());
         die('<div class="error"><strong>Connection Error:</strong> Unable to connect to database. Please try again later.</div>');
     }
 } elseif (file_exists(__DIR__ . '/common_functions.php')) {
     require_once __DIR__ . '/common_functions.php';
+    if (file_exists(__DIR__ . '/auth.php')) {
+        require_once __DIR__ . '/auth.php';
+    }
 }
  

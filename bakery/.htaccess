@@ -1,0 +1,19 @@
+# Deny direct web access to common diagnostic / setup scripts when using Apache.
+# Application-level auth also restricts these to administrators (Checkpoint 0D).
+
+<FilesMatch "^(test|debug|db_test|table_debug|run_sql_setup|setup_directories|simple-debug|simple_performance_test|check_photo_db|find_photo_ids|oauth_setup)\.php$">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "^test_.*\.php$">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "^debug_.*\.php$">
+    Require all denied
+</FilesMatch>
+
+# Block raw SQL dumps and logs if present under docroot
+<FilesMatch "\.(sql|log|env)$">
+    Require all denied
+</FilesMatch>

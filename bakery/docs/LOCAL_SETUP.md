@@ -63,13 +63,49 @@ copy .env.example .env
 
 C:\php\php.exe scripts\verify_local_env.php
 C:\php\php.exe scripts\setup_local_db.php --reset
+C:\php\php.exe scripts\seed_local_users.php
 C:\php\php.exe scripts\verify_local_env.php
+```
+
+If `bakery_local` access is denied after recreating MariaDB data, sync the DB user to `.env` (does not print secrets):
+
+```powershell
+C:\php\php.exe scripts\sync_local_db_user.php
 ```
 
 ### Reset fixtures
 
 ```powershell
 C:\php\php.exe scripts\setup_local_db.php --reset
+C:\php\php.exe scripts\seed_local_users.php
+```
+
+## Authentication (Checkpoint 0D)
+
+Login is required for all app pages except `login.php` and `health_local.php`.
+
+| Email | Role | Local password |
+|-------|------|----------------|
+| `admin@local.test` | administrator | `LocalAdmin!234` |
+| `manager@local.test` | manager | `LocalManager!234` |
+| `driver@local.test` | driver | `LocalDriver!234` |
+
+These are **nonproduction fixtures only**. Never reuse them in production.
+
+Emergency local admin reset (CLI, `APP_ENV=local` only):
+
+```powershell
+C:\php\php.exe scripts\reset_local_admin.php
+# or with a custom password:
+C:\php\php.exe scripts\reset_local_admin.php "YourNewLocalPassword"
+```
+
+There is **no** permanent `AUTH_ENABLED=false` bypass.
+
+### Auth / CSRF tests
+
+```powershell
+C:\php\php.exe tests\run_auth_tests.php
 ```
 
 ## Run the app locally
@@ -81,12 +117,12 @@ cd C:\Users\918825809\CascadeProjects\windsurf-project
 C:\php\php.exe -S 127.0.0.1:8080 -t bakery
 ```
 
-Then open: `http://127.0.0.1:8080/index.php`
+Then open: `http://127.0.0.1:8080/login.php`
 
 Expected:
 
 - Amber **LOCAL ENVIRONMENT** banner showing `bakerysf_local @ 127.0.0.1`
-- No production hostnames
+- Unauthenticated `/index.php` redirects to login
 - Email actions write to `bakery/logs/mail.log` instead of sending
 
 **Note:** Many pages hardcode `/bakery/` asset paths. If CSS 404s under the built-in server, either:
@@ -101,14 +137,16 @@ Expected:
 - Local/dev + host containing `sourflour` / `dreamhost` → refused
 - `MAIL_DRIVER=log` → no SMTP/OAuth send
 - `MAPS_ENABLED=false` → empty Maps key acceptable
+- Auth gate on web requests after DB connect; CSRF required on state-changing methods
+- Diagnostics restricted to administrator (+ Apache `.htaccess` deny rules)
 
 ## Production deploy warning
 
-Deploying this Checkpoint 0B config change to production **requires** setting environment variables first (see `docs/CREDENTIAL_ROTATION_RUNBOOK.md`). The old hardcoded fallbacks were removed intentionally.
+Deploying this config change to production **requires** setting environment variables first (see `docs/CREDENTIAL_ROTATION_RUNBOOK.md`). The old hardcoded fallbacks were removed intentionally. Seed users must **not** be deployed.
 
-## Test credentials (nonproduction)
+## Demo data (nonproduction)
 
-After fixtures load, there is still **no login system** (Checkpoint 0D). Use the fictional fixture customers/drivers in the UI:
+After fixtures load:
 
 - Customers: Demo Cafe Alpha, Demo Market Beta, Demo Spot Gamma
 - Drivers: Demo Driver Ava, Demo Driver Ben
