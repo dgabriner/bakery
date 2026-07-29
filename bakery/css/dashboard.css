@@ -1,0 +1,313 @@
+/* Operations dashboard (index.php) */
+
+.ops-dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem 1.25rem 2.5rem;
+}
+
+.ops-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.ops-header h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.75rem;
+    color: #2c3e50;
+}
+
+.ops-date-line {
+    margin: 0;
+    color: #6c757d;
+    font-size: 1rem;
+}
+
+.ops-date-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ops-date-nav a {
+    display: inline-block;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    color: #2c3e50;
+    text-decoration: none;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.ops-date-nav a:hover {
+    border-color: #3498db;
+    color: #3498db;
+}
+
+.ops-date-nav .ops-today-link {
+    background: #3498db;
+    border-color: #3498db;
+    color: #fff;
+}
+
+.ops-date-nav .ops-today-link:hover {
+    background: #2980b9;
+    border-color: #2980b9;
+    color: #fff;
+}
+
+.ops-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.75rem;
+}
+
+.ops-card {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.ops-card-value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #2c3e50;
+}
+
+.ops-card-label {
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.ops-card-sub {
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: #95a5a6;
+}
+
+.ops-card.accent-pending .ops-card-value { color: #e67e22; }
+.ops-card.accent-delivered .ops-card-value { color: #27ae60; }
+.ops-card.accent-standing .ops-card-value { color: #8e44ad; }
+.ops-card.accent-customers .ops-card-value { color: #2980b9; }
+
+.ops-section {
+    margin-bottom: 1.75rem;
+}
+
+.ops-section h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.15rem;
+    color: #2c3e50;
+}
+
+.ops-quick-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.ops-quick-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #2c3e50;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ops-quick-link:hover {
+    border-color: #3498db;
+    box-shadow: 0 2px 10px rgba(52, 152, 219, 0.12);
+    text-decoration: none;
+    color: #3498db;
+}
+
+.ops-quick-link-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.ops-quick-link-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.ops-quick-link-desc {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.1rem;
+}
+
+/* 7-day bar chart */
+.ops-chart {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.ops-chart-bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.35rem;
+    height: 120px;
+    margin-top: 0.5rem;
+}
+
+.ops-chart-bar-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    min-width: 0;
+}
+
+.ops-chart-bar {
+    width: 100%;
+    max-width: 48px;
+    margin-top: auto;
+    background: #bdc3c7;
+    border-radius: 4px 4px 0 0;
+    min-height: 2px;
+    transition: background 0.15s;
+}
+
+.ops-chart-bar.is-today {
+    background: #3498db;
+}
+
+.ops-chart-bar-wrap:hover .ops-chart-bar {
+    background: #2980b9;
+}
+
+.ops-chart-count {
+    font-size: 0.7rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+    min-height: 1em;
+}
+
+.ops-chart-label {
+    font-size: 0.7rem;
+    color: #95a5a6;
+    margin-top: 0.35rem;
+    text-align: center;
+}
+
+/* Driver assignment list */
+.ops-assignments {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.ops-assignment-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #f1f3f5;
+}
+
+.ops-assignment-row:last-child {
+    border-bottom: none;
+}
+
+.ops-status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.ops-status-pending { background: #fff3cd; color: #856404; }
+.ops-status-in_transit { background: #cce5ff; color: #004085; }
+.ops-status-delivered { background: #d4edda; color: #155724; }
+.ops-status-failed { background: #f8d7da; color: #721c24; }
+
+.ops-assignment-customer {
+    font-weight: 600;
+    flex: 1;
+    min-width: 140px;
+}
+
+.ops-assignment-meta {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.ops-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: #6c757d;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.ops-alert {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.ops-alert-warning {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+}
+
+@media (max-width: 768px) {
+    .ops-dashboard {
+        padding: 0.75rem 1rem 2rem;
+    }
+
+    .ops-header h1 {
+        font-size: 1.4rem;
+    }
+
+    .ops-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .ops-card-value {
+        font-size: 1.6rem;
+    }
+
+    .ops-quick-links {
+        grid-template-columns: 1fr;
+    }
+
+    .ops-chart-bars {
+        height: 100px;
+    }
+}
+
+@media (max-width: 400px) {
+    .ops-cards {
+        grid-template-columns: 1fr;
+    }
+}

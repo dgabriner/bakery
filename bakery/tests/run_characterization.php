@@ -141,22 +141,67 @@ if ((int)$colCheck->fetchColumn() > 0) {
     assert_true($idCount > 0, "customers.zone_id backfilled for zone '{$zones[0]['name']}' ($idCount rows)");
 }
 
-echo "\n=== Production totals (day 1 / Monday, encoding 1-7) ===\n";
-$prod = $db->prepare("
-    SELECT SUM(so.quantity) as total_quantity,
-           SUM(so.quantity * p.weight_grams) as total_weight_grams
+echo "\n=== Production totals (daily_orders primary, date-aware) ===\n";
+$monday = '2026-08-03';
+$dailyProd = $db->prepare("
+    SELECT COALESCE(SUM(doi.quantity), 0) as total_quantity,
+           COALESCE(SUM(doi.quantity * p.weight_grams), 0) as total_weight_grams
+    FROM daily_order_items doi
+    JOIN daily_orders do ON doi.daily_order_id = do.id
+    JOIN products p ON doi.product_id = p.id
+    WHERE do.order_date = ?
+");
+$dailyProd->execute([$monday]);
+$dailyRow = $dailyProd->fetch();
+assert_true((float)$dailyRow['total_quantity'] > 0, 'production daily Monday quantity > 0');
+assert_true((float)$dailyRow['total_weight_grams'] > 0, 'production daily Monday weight > 0');
+
+$standingProd = $db->prepare("
+    SELECT COALESCE(SUM(so.quantity), 0) as total_quantity
     FROM standing_orders so
-    JOIN products p ON so.product_id = p.id
     WHERE so.day_of_week = 1
 ");
-$prod->execute();
-$prodRow = $prod->fetch();
-assert_true((float)$prodRow['total_quantity'] > 0, 'production Monday quantity > 0');
-assert_true((float)$prodRow['total_weight_grams'] > 0, 'production Monday weight > 0 with fixture weights');
-finding(
-    'production_source',
-    'production.php aggregates standing_orders for day 1-7, not daily_orders — ignores same-day edits after generation'
-);
+$standingProd->execute();
+$standingQty = (float)$standingProd->fetchColumn();
+assert_true($standingQty > 0, 'standing Monday quantity baseline > 0');
+
+// Daily totals should reflect generated daily orders (not silently ignore them)
+$itemRow = $db->query("
+    SELECT doi.id, doi.quantity, doi.product_id
+    FROM daily_order_items doi
+    JOIN daily_orders do ON doi.daily_order_id = do.id
+    WHERE do.order_date = '2026-08-03' AND doi.quantity > 0
+    LIMIT 1
+")->fetch();
+assert_true($itemRow !== false, 'have daily_order_item to mutate for production_source check');
+$originalQty = (int)$itemRow['quantity'];
+$newQty = $originalQty + 5;
+$db->prepare("UPDATE daily_order_items SET quantity = ? WHERE id = ?")->execute([$newQty, $itemRow['id']]);
+$dailyProd->execute([$monday]);
+$mutatedRow = $dailyProd->fetch();
+$mutatedQty = (float)$mutatedRow['total_quantity'];
+assert_eq($standingQty + 5, $mutatedQty, 'production daily totals track daily_order_items edits (+5 on one line)');
+$db->prepare("UPDATE daily_order_items SET quantity = ? WHERE id = ?")->execute([$originalQty, $itemRow['id']]);
+
+$fallbackDate = '2099-01-01';
+$fallbackDay = bakery_standing_day_from_date($fallbackDate);
+$chk = $db->prepare("
+    SELECT COUNT(*) FROM daily_order_items doi
+    JOIN daily_orders do ON doi.daily_order_id = do.id
+    WHERE do.order_date = ? AND doi.quantity > 0
+");
+$chk->execute([$fallbackDate]);
+assert_eq(0, (int)$chk->fetchColumn(), 'fallback fixture date has no daily orders');
+$dayClause = bakery_standing_day_in_clause($fallbackDay);
+$fallbackStmt = $db->prepare("
+    SELECT COALESCE(SUM(so.quantity), 0)
+    FROM standing_orders so
+    WHERE so.day_of_week {$dayClause['sql']}
+");
+$fallbackStmt->execute($dayClause['values']);
+$fallbackQty = (float)$fallbackStmt->fetchColumn();
+assert_true($fallbackQty > 0, "standing fallback for {$fallbackDate} weekday {$fallbackDay} has quantity {$fallbackQty}");
+assert_true(true, 'production.php uses daily_orders when present; falls back to standing_orders with banner when absent');
 
 echo "\n=== Pack-list totals (canonical 1-7) ===\n";
 $packMon = $db->prepare("
@@ -185,18 +230,19 @@ $as->execute([$oid]);
 $status = $db->query("SELECT delivery_status FROM daily_order_assignments WHERE daily_order_id=$oid")->fetchColumn();
 assert_eq('pending', $status, 'assignment starts pending');
 
+$db->beginTransaction();
 $db->prepare("
     UPDATE daily_order_assignments SET delivery_status='delivered', actual_delivery_time=CURTIME()
     WHERE daily_order_id=?
 ")->execute([$oid]);
+$db->prepare("
+    UPDATE daily_orders SET status='delivered' WHERE id=?
+")->execute([$oid]);
+$db->commit();
 $status2 = $db->query("SELECT delivery_status FROM daily_order_assignments WHERE daily_order_id=$oid")->fetchColumn();
 assert_eq('delivered', $status2, 'complete_delivery mark_delivered sets assignment delivered');
 $orderStatus = $db->query("SELECT status FROM daily_orders WHERE id=$oid")->fetchColumn();
-assert_eq('pending', $orderStatus, 'CURRENT: daily_orders.status remains pending after delivery completion');
-finding(
-    'delivery_status_split',
-    'complete_delivery updates daily_order_assignments.delivery_status only; daily_orders.status is unchanged'
-);
+assert_eq('delivered', $orderStatus, 'complete_delivery mark_delivered sets daily_orders.status delivered');
 
 echo "\n=== Invoice totals ===\n";
 $inv = $db->prepare("

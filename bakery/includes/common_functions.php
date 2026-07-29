@@ -413,3 +413,244 @@ function bakery_zone_id_for_name(PDO $db, $zoneName) {
 function bakery_customer_zone_join_sql() {
     return 'LEFT JOIN zones z ON (c.zone_id IS NOT NULL AND c.zone_id = z.id) OR (c.zone_id IS NULL AND c.zone = z.name)';
 }
+
+/**
+ * Whether migration 005 inventory columns exist on ingredients.
+ */
+function bakery_ingredients_inventory_ready(PDO $db) {
+    if (!table_exists($db, 'ingredients')) {
+        return false;
+    }
+    static $ready = null;
+    if ($ready !== null) {
+        return $ready;
+    }
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?
+           AND COLUMN_NAME IN (?, ?, ?)'
+    );
+    $stmt->execute(['ingredients', 'quantity_on_hand', 'reorder_level', 'supplier_name']);
+    $ready = (int)$stmt->fetchColumn() === 3;
+    return $ready;
+}
+
+/**
+ * True when an ingredient row is at or below its reorder level.
+ * Requires reorder_level to be set (non-null).
+ */
+function bakery_ingredient_is_low_stock(array $ingredient) {
+    if (!array_key_exists('reorder_level', $ingredient) || $ingredient['reorder_level'] === null || $ingredient['reorder_level'] === '') {
+        return false;
+    }
+    $reorder = (float)$ingredient['reorder_level'];
+    $qty = ($ingredient['quantity_on_hand'] === null || $ingredient['quantity_on_hand'] === '')
+        ? 0.0
+        : (float)$ingredient['quantity_on_hand'];
+    return $qty <= $reorder;
+}
+
+/**
+ * Ingredients at or below reorder level (quantity_on_hand <= reorder_level).
+ * For future production integration (see production.php). Returns [] when
+ * migration 005 columns are not present.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function bakery_low_stock_ingredients(PDO $db) {
+    if (!bakery_ingredients_inventory_ready($db)) {
+        return [];
+    }
+    $stmt = $db->query(
+        'SELECT id, name, unit, quantity_on_hand, reorder_level, supplier_name
+         FROM ingredients
+         WHERE reorder_level IS NOT NULL
+           AND COALESCE(quantity_on_hand, 0) <= reorder_level
+         ORDER BY name'
+    );
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Resolve dashboard date from input or ?date=; defaults to today (Y-m-d).
+ */
+function bakery_dashboard_resolve_date($input = null) {
+    if ($input === null && isset($_GET['date'])) {
+        $input = $_GET['date'];
+    }
+    if ($input === null || $input === '') {
+        return date('Y-m-d');
+    }
+    $input = trim((string)$input);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $input) || strtotime($input) === false) {
+        return date('Y-m-d');
+    }
+    return $input;
+}
+
+/**
+ * Daily ops snapshot for a calendar date (uses canonical Sunday=7 weekday helpers).
+ *
+ * @return array{
+ *   date: string,
+ *   weekday: int,
+ *   daily_order_count: int,
+ *   customers_with_orders: int,
+ *   assignments_pending: int,
+ *   assignments_delivered: int,
+ *   standing_order_lines: int,
+ *   unassigned_orders: int
+ * }
+ */
+function bakery_dashboard_ops_snapshot(PDO $db, $date) {
+    $snapshot = [
+        'date' => $date,
+        'weekday' => bakery_standing_day_from_date($date),
+        'daily_order_count' => 0,
+        'customers_with_orders' => 0,
+        'assignments_pending' => 0,
+        'assignments_delivered' => 0,
+        'standing_order_lines' => 0,
+        'unassigned_orders' => 0,
+    ];
+
+    if (table_exists($db, 'daily_orders')) {
+        $stmt = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE order_date = ?');
+        $stmt->execute([$date]);
+        $snapshot['daily_order_count'] = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(DISTINCT customer_id) FROM daily_orders WHERE order_date = ?');
+        $stmt->execute([$date]);
+        $snapshot['customers_with_orders'] = (int)$stmt->fetchColumn();
+    }
+
+    if (table_exists($db, 'daily_order_assignments')) {
+        $stmt = $db->prepare("
+            SELECT
+                COALESCE(SUM(CASE WHEN delivery_status IN ('pending', 'in_transit') THEN 1 ELSE 0 END), 0) AS pending,
+                COALESCE(SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END), 0) AS delivered
+            FROM daily_order_assignments
+            WHERE delivery_date = ?
+        ");
+        $stmt->execute([$date]);
+        $row = $stmt->fetch();
+        $snapshot['assignments_pending'] = (int)($row['pending'] ?? 0);
+        $snapshot['assignments_delivered'] = (int)($row['delivered'] ?? 0);
+
+        if (table_exists($db, 'daily_orders')) {
+            $stmt = $db->prepare("
+                SELECT COUNT(*)
+                FROM daily_orders do
+                WHERE do.order_date = ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM daily_order_assignments doa
+                    WHERE doa.daily_order_id = do.id AND doa.delivery_date = ?
+                )
+            ");
+            $stmt->execute([$date, $date]);
+            $snapshot['unassigned_orders'] = (int)$stmt->fetchColumn();
+        }
+    }
+
+    if (table_exists($db, 'standing_orders')) {
+        $dayClause = bakery_standing_day_in_clause(bakery_standing_day_from_date($date));
+        $stmt = $db->prepare("
+            SELECT COUNT(*) FROM standing_orders
+            WHERE quantity > 0 AND day_of_week {$dayClause['sql']}
+        ");
+        $stmt->execute($dayClause['values']);
+        $snapshot['standing_order_lines'] = (int)$stmt->fetchColumn();
+    }
+
+    return $snapshot;
+}
+
+/**
+ * Daily order counts for the last N days ending on $endDate (for mini chart).
+ *
+ * @return array<int, array{date: string, count: int, label: string, is_today: bool}>
+ */
+function bakery_dashboard_orders_by_day(PDO $db, $endDate, $days = 7) {
+    $days = max(1, (int)$days);
+    $result = [];
+    $counts = [];
+
+    if (table_exists($db, 'daily_orders')) {
+        $startDate = date('Y-m-d', strtotime($endDate . ' -' . ($days - 1) . ' days'));
+        $stmt = $db->prepare('
+            SELECT order_date, COUNT(*) AS cnt
+            FROM daily_orders
+            WHERE order_date BETWEEN ? AND ?
+            GROUP BY order_date
+        ');
+        $stmt->execute([$startDate, $endDate]);
+        while ($row = $stmt->fetch()) {
+            $counts[$row['order_date']] = (int)$row['cnt'];
+        }
+    }
+
+    for ($i = $days - 1; $i >= 0; $i--) {
+        $d = date('Y-m-d', strtotime($endDate . " -$i days"));
+        $result[] = [
+            'date' => $d,
+            'count' => $counts[$d] ?? 0,
+            'label' => date('D', strtotime($d)),
+            'is_today' => ($d === $endDate),
+        ];
+    }
+
+    return $result;
+}
+
+/**
+ * Driver-scoped dashboard: today's assignments for one driver.
+ *
+ * @return array{
+ *   assignments: array,
+ *   pending: int,
+ *   delivered: int,
+ *   total: int
+ * }
+ */
+function bakery_dashboard_driver_view(PDO $db, $driverId, $date) {
+    $view = [
+        'assignments' => [],
+        'pending' => 0,
+        'delivered' => 0,
+        'total' => 0,
+    ];
+
+    if ($driverId <= 0 || !table_exists($db, 'daily_order_assignments') || !table_exists($db, 'daily_orders')) {
+        return $view;
+    }
+
+    $stmt = $db->prepare("
+        SELECT
+            doa.delivery_status,
+            doa.route_order,
+            doa.scheduled_delivery_time,
+            c.name AS customer_name,
+            c.address AS customer_address,
+            c.zone,
+            do.id AS daily_order_id
+        FROM daily_order_assignments doa
+        JOIN daily_orders do ON do.id = doa.daily_order_id
+        JOIN customers c ON do.customer_id = c.id
+        WHERE doa.driver_id = ? AND doa.delivery_date = ? AND do.order_date = ?
+        ORDER BY doa.route_order, c.name
+    ");
+    $stmt->execute([$driverId, $date, $date]);
+    $view['assignments'] = $stmt->fetchAll();
+
+    foreach ($view['assignments'] as $assignment) {
+        $view['total']++;
+        if ($assignment['delivery_status'] === 'delivered') {
+            $view['delivered']++;
+        } elseif (in_array($assignment['delivery_status'], ['pending', 'in_transit'], true)) {
+            $view['pending']++;
+        }
+    }
+
+    return $view;
+}

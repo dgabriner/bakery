@@ -326,6 +326,7 @@ $all_ingredients = $db->query("SELECT * FROM ingredients ORDER BY name")->fetchA
 
 <div class="container">
     <h1>Dough Formulas</h1>
+    <p><a href="ingredients.php">Manage ingredient inventory</a></p>
 
     <?php if (isset($error)): ?>
         <div class="error-message">

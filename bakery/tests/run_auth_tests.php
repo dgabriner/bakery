@@ -330,9 +330,18 @@ try {
         t_assert(false, 'could not start PHP built-in server for HTTP checks');
     }
 } finally {
+    // Windows: proc_terminate alone can leave php -S listening and block later suites.
     if ($serverStarted && is_resource($serverProc)) {
-        proc_terminate($serverProc);
-        proc_close($serverProc);
+        $status = @proc_get_status($serverProc);
+        if (is_array($status) && !empty($status['pid'])) {
+            if (stripos(PHP_OS, 'WIN') === 0) {
+                @exec('taskkill /F /T /PID ' . (int)$status['pid'] . ' 2>NUL');
+            } else {
+                @posix_kill((int)$status['pid'], 15);
+            }
+        }
+        @proc_terminate($serverProc);
+        @proc_close($serverProc);
     }
 }
 

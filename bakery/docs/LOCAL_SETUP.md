@@ -78,12 +78,17 @@ C:\php\php.exe scripts\seed_local_users.php
 C:\php\php.exe scripts\verify_local_env.php
 ```
 
-If `bakery_local` access is denied after recreating MariaDB data, sync the DB user to `.env` (does not print secrets):
+If `bakery_local` access is denied after recreating MariaDB data, sync or bootstrap the DB user from `.env` (does not print secrets):
 
 ```powershell
+# Prefer sync if admin access already works:
 C:\php\php.exe scripts\sync_local_db_user.php
+
+# Or bootstrap via local MariaDB admin (default root / empty password on Scoop):
+C:\php\php.exe scripts\bootstrap_local_db_user.php
 ```
 
+Optional: set `LOCAL_DB_ADMIN_USER` / `LOCAL_DB_ADMIN_PASS` in `.env` if root is password-protected.
 ### Reset fixtures
 
 ```powershell

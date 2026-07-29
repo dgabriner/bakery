@@ -9,17 +9,47 @@ require_once 'includes/database.php';
 // Set page title
 $page_title = 'Ingredients';
 
+function ingredients_parse_decimal($value) {
+    if ($value === null || $value === '') {
+        return null;
+    }
+    return round((float)$value, 3);
+}
+
+function ingredients_stock_fields_from_post() {
+    return [
+        'quantity_on_hand' => ingredients_parse_decimal($_POST['quantity_on_hand'] ?? null),
+        'reorder_level' => ingredients_parse_decimal($_POST['reorder_level'] ?? null),
+        'supplier_name' => trim((string)($_POST['supplier_name'] ?? '')) ?: null,
+    ];
+}
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         switch ($_POST['action']) {
             case 'add_ingredient':
                 try {
-                    $stmt = $db->prepare("INSERT INTO ingredients (name, unit) VALUES (?, ?)");
-                    $stmt->execute([
-                        $_POST['name'],
-                        $_POST['unit']
-                    ]);
+                    $stock = ingredients_stock_fields_from_post();
+                    if (bakery_ingredients_inventory_ready($db)) {
+                        $stmt = $db->prepare(
+                            'INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name)
+                             VALUES (?, ?, ?, ?, ?)'
+                        );
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                            $stock['quantity_on_hand'],
+                            $stock['reorder_level'],
+                            $stock['supplier_name'],
+                        ]);
+                    } else {
+                        $stmt = $db->prepare('INSERT INTO ingredients (name, unit) VALUES (?, ?)');
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                        ]);
+                    }
                     header("Location: ingredients.php?success=added");
                     exit;
                 } catch (Exception $e) {
@@ -29,12 +59,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'edit_ingredient':
                 try {
-                    $stmt = $db->prepare("UPDATE ingredients SET name = ?, unit = ? WHERE id = ?");
-                    $stmt->execute([
-                        $_POST['name'],
-                        $_POST['unit'],
-                        $_POST['id']
-                    ]);
+                    $stock = ingredients_stock_fields_from_post();
+                    if (bakery_ingredients_inventory_ready($db)) {
+                        $stmt = $db->prepare(
+                            'UPDATE ingredients
+                             SET name = ?, unit = ?, quantity_on_hand = ?, reorder_level = ?, supplier_name = ?
+                             WHERE id = ?'
+                        );
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                            $stock['quantity_on_hand'],
+                            $stock['reorder_level'],
+                            $stock['supplier_name'],
+                            $_POST['id'],
+                        ]);
+                    } else {
+                        $stmt = $db->prepare('UPDATE ingredients SET name = ?, unit = ? WHERE id = ?');
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                            $_POST['id'],
+                        ]);
+                    }
                     header("Location: ingredients.php?success=updated");
                     exit;
                 } catch (Exception $e) {
@@ -82,6 +129,9 @@ if (isset($_GET['success'])) {
             break;
     }
 }
+
+$inventory_ready = bakery_ingredients_inventory_ready($db);
+$low_stock_ingredients = $inventory_ready ? bakery_low_stock_ingredients($db) : [];
 ?>
 
 <style>
@@ -285,6 +335,67 @@ if (isset($_GET['success'])) {
 .btn-primary:hover {
     background-color: #1976d2;
 }
+
+.low-stock-panel {
+    background: #fff3e0;
+    border: 1px solid #ffb74d;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.low-stock-panel h2 {
+    margin: 0 0 0.75rem 0;
+    color: #e65100;
+    font-size: 1.1rem;
+}
+
+.low-stock-panel ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.low-stock-panel li {
+    margin-bottom: 0.35rem;
+}
+
+.low-stock-badge {
+    display: inline-block;
+    background: #ff5722;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+
+.ingredient-stock {
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: #495057;
+}
+
+.ingredient-stock div {
+    margin-bottom: 0.25rem;
+}
+
+.ingredient-card.low-stock {
+    border: 2px solid #ff9800;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+@media (max-width: 600px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}
 </style>
 
 <div class="ingredients-container">
@@ -302,6 +413,26 @@ if (isset($_GET['success'])) {
         </div>
     <?php endif; ?>
 
+    <?php if ($inventory_ready && count($low_stock_ingredients) > 0): ?>
+        <div class="low-stock-panel" role="status">
+            <h2>Low stock: <?php echo count($low_stock_ingredients); ?> ingredient<?php echo count($low_stock_ingredients) === 1 ? '' : 's'; ?></h2>
+            <ul>
+                <?php foreach ($low_stock_ingredients as $low): ?>
+                    <li>
+                        <?php echo htmlspecialchars($low['name']); ?> —
+                        <?php echo htmlspecialchars(number_format((float)($low['quantity_on_hand'] ?? 0), 3, '.', '')); ?>
+                        <?php echo htmlspecialchars($low['unit'] ?? ''); ?>
+                        (reorder at <?php echo htmlspecialchars(number_format((float)$low['reorder_level'], 3, '.', '')); ?>)
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php elseif ($inventory_ready): ?>
+        <div class="success-message" style="text-align: left;">
+            All tracked ingredients are above reorder levels.
+        </div>
+    <?php endif; ?>
+
     <div class="ingredients-grid">
         <!-- Add New Ingredient Card -->
         <div class="add-ingredient-card" onclick="showAddModal()">
@@ -315,17 +446,43 @@ if (isset($_GET['success'])) {
         try {
             $ingredients = $db->query("SELECT * FROM ingredients ORDER BY name")->fetchAll();
             foreach ($ingredients as $ingredient):
+                $isLowStock = bakery_ingredient_is_low_stock($ingredient);
         ?>
-            <div class="ingredient-card">
+            <div class="ingredient-card<?php echo $isLowStock ? ' low-stock' : ''; ?>">
                 <div class="ingredient-content">
-                    <h3 class="ingredient-name"><?php echo htmlspecialchars($ingredient['name'] ?? ''); ?></h3>
+                    <h3 class="ingredient-name">
+                        <?php echo htmlspecialchars($ingredient['name'] ?? ''); ?>
+                        <?php if ($isLowStock): ?>
+                            <span class="low-stock-badge">Low stock</span>
+                        <?php endif; ?>
+                    </h3>
                     <div class="ingredient-unit">Unit: <?php echo htmlspecialchars($ingredient['unit'] ?? 'Not specified'); ?></div>
+                    <?php if ($inventory_ready): ?>
+                    <div class="ingredient-stock">
+                        <div>On hand: <?php
+                            echo $ingredient['quantity_on_hand'] === null || $ingredient['quantity_on_hand'] === ''
+                                ? '—'
+                                : htmlspecialchars(number_format((float)$ingredient['quantity_on_hand'], 3, '.', ''));
+                        ?></div>
+                        <div>Reorder at: <?php
+                            echo $ingredient['reorder_level'] === null || $ingredient['reorder_level'] === ''
+                                ? '—'
+                                : htmlspecialchars(number_format((float)$ingredient['reorder_level'], 3, '.', ''));
+                        ?></div>
+                        <?php if (!empty($ingredient['supplier_name'])): ?>
+                            <div>Supplier: <?php echo htmlspecialchars($ingredient['supplier_name']); ?></div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                     <div class="ingredient-actions">
                         <button class="btn-action btn-edit" onclick="showEditModal(<?php 
                             echo htmlspecialchars(json_encode([
                                 'id' => $ingredient['id'],
                                 'name' => $ingredient['name'] ?? '',
-                                'unit' => $ingredient['unit'] ?? ''
+                                'unit' => $ingredient['unit'] ?? '',
+                                'quantity_on_hand' => $ingredient['quantity_on_hand'] ?? '',
+                                'reorder_level' => $ingredient['reorder_level'] ?? '',
+                                'supplier_name' => $ingredient['supplier_name'] ?? '',
                             ])); 
                         ?>)">Edit</button>
                         <button class="btn-action btn-delete" onclick="confirmDelete(<?php 
@@ -353,6 +510,7 @@ if (isset($_GET['success'])) {
             <h2>Add New Ingredient</h2>
         </div>
         <form method="POST">
+            <?php echo bakery_csrf_field(); ?>
             <input type="hidden" name="action" value="add_ingredient">
             
             <div class="form-group">
@@ -376,6 +534,23 @@ if (isset($_GET['success'])) {
                 </select>
             </div>
 
+            <?php if ($inventory_ready): ?>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="quantity_on_hand">Quantity on hand</label>
+                    <input type="number" id="quantity_on_hand" name="quantity_on_hand" step="0.001" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="reorder_level">Reorder level</label>
+                    <input type="number" id="reorder_level" name="reorder_level" step="0.001" min="0">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="supplier_name">Supplier (optional)</label>
+                <input type="text" id="supplier_name" name="supplier_name" maxlength="255">
+            </div>
+            <?php endif; ?>
+
             <div class="modal-actions">
                 <button type="button" class="btn-action btn-secondary" onclick="hideModal('addModal')">Cancel</button>
                 <button type="submit" class="btn-action btn-primary">Add Ingredient</button>
@@ -391,6 +566,7 @@ if (isset($_GET['success'])) {
             <h2>Edit Ingredient</h2>
         </div>
         <form method="POST">
+            <?php echo bakery_csrf_field(); ?>
             <input type="hidden" name="action" value="edit_ingredient">
             <input type="hidden" name="id" id="edit_id">
             
@@ -415,6 +591,23 @@ if (isset($_GET['success'])) {
                 </select>
             </div>
 
+            <?php if ($inventory_ready): ?>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit_quantity_on_hand">Quantity on hand</label>
+                    <input type="number" id="edit_quantity_on_hand" name="quantity_on_hand" step="0.001" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="edit_reorder_level">Reorder level</label>
+                    <input type="number" id="edit_reorder_level" name="reorder_level" step="0.001" min="0">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="edit_supplier_name">Supplier (optional)</label>
+                <input type="text" id="edit_supplier_name" name="supplier_name" maxlength="255">
+            </div>
+            <?php endif; ?>
+
             <div class="modal-actions">
                 <button type="button" class="btn-action btn-secondary" onclick="hideModal('editModal')">Cancel</button>
                 <button type="submit" class="btn-action btn-primary">Save Changes</button>
@@ -433,6 +626,18 @@ function showEditModal(ingredient) {
     document.getElementById('edit_id').value = ingredient.id;
     document.getElementById('edit_name').value = ingredient.name;
     document.getElementById('edit_unit').value = ingredient.unit;
+    const qtyField = document.getElementById('edit_quantity_on_hand');
+    if (qtyField) {
+        qtyField.value = ingredient.quantity_on_hand ?? '';
+    }
+    const reorderField = document.getElementById('edit_reorder_level');
+    if (reorderField) {
+        reorderField.value = ingredient.reorder_level ?? '';
+    }
+    const supplierField = document.getElementById('edit_supplier_name');
+    if (supplierField) {
+        supplierField.value = ingredient.supplier_name ?? '';
+    }
     modal.style.display = 'block';
 }
 
@@ -442,9 +647,11 @@ function hideModal(modalId) {
 
 function confirmDelete(ingredient) {
     if (confirm(`Are you sure you want to delete ${ingredient.name}? This cannot be undone if the ingredient is not used in any formulas.`)) {
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const form = document.createElement('form');
         form.method = 'POST';
         form.innerHTML = `
+            <input type="hidden" name="csrf_token" value="${csrf}">
             <input type="hidden" name="action" value="delete_ingredient">
             <input type="hidden" name="id" value="${ingredient.id}">
         `;

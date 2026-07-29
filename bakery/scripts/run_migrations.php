@@ -157,6 +157,29 @@ try {
         echo "Skip 004_zone_id (already applied)\n";
     }
 
+    // 005 — ingredient inventory columns
+    if (!bakery_migration_applied($db, '005_inventory')) {
+        echo "Applying migration 005_inventory...\n";
+        if (!table_exists($db, 'ingredients')) {
+            echo "  Note: ingredients table missing — skipping inventory columns\n";
+        } else {
+            if (!bakery_column_exists($db, 'ingredients', 'quantity_on_hand')) {
+                $db->exec(
+                    'ALTER TABLE ingredients
+                     ADD COLUMN quantity_on_hand DECIMAL(12,3) NULL DEFAULT NULL AFTER unit,
+                     ADD COLUMN reorder_level DECIMAL(12,3) NULL DEFAULT NULL AFTER quantity_on_hand,
+                     ADD COLUMN supplier_name VARCHAR(255) NULL DEFAULT NULL AFTER reorder_level'
+                );
+                echo "  Added inventory columns to ingredients\n";
+            }
+            bakery_run_sql_file($db, $migrationsDir . '/005_inventory.sql');
+        }
+        bakery_mark_migration($db, '005_inventory');
+        echo "  OK\n";
+    } else {
+        echo "Skip 005_inventory (already applied)\n";
+    }
+
     echo "Migrations complete.\n";
     exit(0);
 } catch (Throwable $e) {

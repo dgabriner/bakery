@@ -18,6 +18,21 @@
         return localStorage.getItem('tracking_driver_id');
     }
     
+    function getCsrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function getBasePath() {
+        var path = window.location.pathname || '';
+        if (path.indexOf('/bakery/') !== -1) {
+            return '/bakery/';
+        }
+        var parts = path.split('/');
+        parts.pop();
+        return parts.length ? parts.join('/') + '/' : '/';
+    }
+
     // Log GPS coordinate via AJAX
     function logGPSCoordinate(latitude, longitude, driverId) {
         const formData = new FormData();
@@ -26,11 +41,15 @@
         formData.append('latitude', latitude);
         formData.append('longitude', longitude);
         formData.append('timestamp', new Date().toISOString());
-        
-        // Try multiple endpoints to log GPS data
+        var csrf = getCsrfToken();
+        if (csrf) {
+            formData.append('csrf_token', csrf);
+        }
+
+        var base = getBasePath();
         const endpoints = [
-            '/bakery/driver.php',
-            '/bakery/global_gps_handler.php'
+            base + 'global_gps_handler.php',
+            base + 'driver.php'
         ];
         
         // Try each endpoint until one succeeds
@@ -95,9 +114,14 @@
         );
     }
     
-    // Initialize tracking for driver page
+    function isDriverTabletPage() {
+        var page = (window.location.pathname || '').split('/').pop() || '';
+        return page === 'driver.php' || page === 'driver_list.php';
+    }
+
+    // Initialize tracking on driver tablet pages
     function initDriverTracking() {
-        if (!isTrackingActive()) {
+        if (!isTrackingActive() || !isDriverTabletPage()) {
             return;
         }
         

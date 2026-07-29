@@ -110,9 +110,6 @@ class PhotoHandler {
      * @return array Validation result
      */
     private function validateFile($file) {
-        // Log file details for debugging
-        error_log("Photo upload debug - File details: " . print_r($file, true));
-        
         // Check for upload errors
         if ($file['error'] !== UPLOAD_ERR_OK) {
             $errors = [
@@ -398,6 +395,60 @@ class PhotoHandler {
         }
     }
     
+    /**
+     * Confirm driver/customer/daily_order assignment for a delivery date.
+     *
+     * @return array|null Assignment row with customer_name and route_order, or null
+     */
+    public function verifyDeliveryAssignment(PDO $db, $driverId, $customerId, $dailyOrderId, $date) {
+        try {
+            $stmt = $db->prepare("
+                SELECT doa.id AS assignment_id,
+                       c.name AS customer_name,
+                       doa.route_order,
+                       doa.delivery_status
+                FROM daily_order_assignments doa
+                INNER JOIN daily_orders do ON do.id = doa.daily_order_id
+                INNER JOIN customers c ON do.customer_id = c.id
+                WHERE doa.driver_id = ?
+                  AND do.customer_id = ?
+                  AND do.id = ?
+                  AND do.order_date = ?
+                LIMIT 1
+            ");
+            $stmt->execute([(int)$driverId, (int)$customerId, (int)$dailyOrderId, $date]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $row ?: null;
+        } catch (Exception $e) {
+            error_log('Assignment verification error: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Standard JSON payload after a successful upload (UX confirmation).
+     */
+    public function buildUploadSuccessResponse(array $assignment, array $photoData, $photoId) {
+        return [
+            'success' => true,
+            'photo_id' => (int)$photoId,
+            'message' => sprintf(
+                'Photo saved for %s (stop #%s)',
+                $assignment['customer_name'],
+                $assignment['route_order']
+            ),
+            'assignment' => [
+                'customer_name' => $assignment['customer_name'],
+                'route_order' => (int)$assignment['route_order'],
+                'daily_order_id' => (int)($photoData['daily_order_id'] ?? 0),
+            ],
+            'photo' => [
+                'photo_type' => $photoData['photo_type'],
+                'file_path' => $photoData['file_path'],
+            ],
+        ];
+    }
+
     /**
      * Get photos for a specific driver and date
      * 

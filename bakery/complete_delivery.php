@@ -1,7 +1,11 @@
 <?php
 /**
  * Delivery completion API — uses shared config/database (Checkpoint 0B).
- * Hardcoded production credentials removed.
+ * Auth + CSRF enforced via includes/database.php (Checkpoint 0D).
+ *
+ * Unified delivery status on completion (both tables set to 'delivered'):
+ * - daily_order_assignments.delivery_status: pending|in_transit|delivered|failed|cancelled
+ * - daily_orders.status: pending|confirmed|in_production|ready|out_for_delivery|delivered|invoiced
  */
 define('ACCESS_ALLOWED', true);
 
@@ -11,6 +15,40 @@ require_once __DIR__ . '/includes/database.php';
 header('Content-Type: application/json');
 error_reporting(0);
 ini_set('display_errors', 0);
+
+/**
+ * Mark assignment and parent daily_order as delivered in one transaction.
+ * Safe to call when caller already holds an open transaction.
+ */
+function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId): void {
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+
+    try {
+        $assignmentStmt = $db->prepare(
+            "UPDATE daily_order_assignments
+             SET delivery_status = 'delivered', actual_delivery_time = CURTIME()
+             WHERE daily_order_id = ?"
+        );
+        $assignmentStmt->execute([$dailyOrderId]);
+
+        $orderStmt = $db->prepare(
+            "UPDATE daily_orders SET status = 'delivered' WHERE id = ?"
+        );
+        $orderStmt->execute([$dailyOrderId]);
+
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Exception $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
 
 try {
     $db = check_mysql_connection();
@@ -27,12 +65,7 @@ try {
                 throw new Exception('Daily order ID is required');
             }
             $dailyOrderId = (int)$_POST['daily_order_id'];
-            $stmt = $db->prepare(
-                "UPDATE daily_order_assignments
-                 SET delivery_status = 'delivered', actual_delivery_time = CURTIME()
-                 WHERE daily_order_id = ?"
-            );
-            $stmt->execute([$dailyOrderId]);
+            bakery_mark_delivery_delivered($db, $dailyOrderId);
             echo json_encode([
                 'success' => true,
                 'message' => 'Delivery marked as completed successfully'
@@ -134,12 +167,7 @@ try {
             $tot = $db->prepare('UPDATE daily_orders SET total_amount = ? WHERE id = ?');
             $tot->execute([$total, $dailyOrderId]);
 
-            $deliv = $db->prepare(
-                "UPDATE daily_order_assignments
-                 SET delivery_status = 'delivered', actual_delivery_time = CURTIME()
-                 WHERE daily_order_id = ?"
-            );
-            $deliv->execute([$dailyOrderId]);
+            bakery_mark_delivery_delivered($db, $dailyOrderId);
 
             $db->commit();
             echo json_encode([

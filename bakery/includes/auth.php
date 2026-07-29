@@ -65,6 +65,7 @@ function bakery_diagnostic_scripts() {
  */
 function bakery_driver_scripts() {
     return [
+        'index.php',
         'driver.php',
         'driver_list.php',
         'complete_delivery.php',

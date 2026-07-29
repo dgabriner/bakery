@@ -6,8 +6,99 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-// Add viewport meta tag for mobile responsiveness
-echo '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">';
+/**
+ * Driver tablet AJAX: photo list/upload (CSRF enforced via database bootstrap).
+ */
+if (PHP_SAPI !== 'cli' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['driver_action'])) {
+    require_once 'includes/photo_handler.php';
+    header('Content-Type: application/json');
+
+    $photoHandler = new PhotoHandler();
+    $action = (string)$_POST['driver_action'];
+
+    try {
+        if ($action === 'list_photos') {
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $customerId = (int)($_POST['customer_id'] ?? 0);
+            $date = trim((string)($_POST['date'] ?? ''));
+            $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
+
+            if ($driverId <= 0 || $customerId <= 0 || $dailyOrderId <= 0 || $date === '') {
+                throw new Exception('driver_id, customer_id, daily_order_id, and date are required');
+            }
+
+            $assignment = $photoHandler->verifyDeliveryAssignment($db, $driverId, $customerId, $dailyOrderId, $date);
+            if (!$assignment) {
+                throw new Exception('Photo assignment not found for this stop');
+            }
+
+            $photos = $photoHandler->getPhotos($db, $driverId, $date, $customerId);
+            echo json_encode([
+                'success' => true,
+                'assignment' => [
+                    'customer_name' => $assignment['customer_name'],
+                    'route_order' => (int)$assignment['route_order'],
+                    'daily_order_id' => $dailyOrderId,
+                ],
+                'photos' => $photos,
+            ]);
+            exit;
+        }
+
+        if ($action === 'upload_photo') {
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $customerId = (int)($_POST['customer_id'] ?? 0);
+            $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
+            $date = trim((string)($_POST['date'] ?? ''));
+            $photoType = trim((string)($_POST['photo_type'] ?? 'Before'));
+
+            if ($driverId <= 0 || $customerId <= 0 || $dailyOrderId <= 0 || $date === '') {
+                throw new Exception('driver_id, customer_id, daily_order_id, and date are required');
+            }
+            if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
+                throw new Exception('No photo file received');
+            }
+
+            $assignment = $photoHandler->verifyDeliveryAssignment($db, $driverId, $customerId, $dailyOrderId, $date);
+            if (!$assignment) {
+                throw new Exception('Cannot attach photo: stop is not assigned to this driver on this date');
+            }
+
+            $latitude = isset($_POST['latitude']) && $_POST['latitude'] !== '' ? (float)$_POST['latitude'] : null;
+            $longitude = isset($_POST['longitude']) && $_POST['longitude'] !== '' ? (float)$_POST['longitude'] : null;
+            $notes = trim((string)($_POST['notes'] ?? ''));
+
+            $upload = $photoHandler->processUpload(
+                $_FILES['photo'],
+                $driverId,
+                $customerId,
+                $photoType,
+                $notes,
+                $latitude,
+                $longitude
+            );
+
+            if (!$upload['success']) {
+                throw new Exception($upload['error'] ?? 'Upload failed');
+            }
+
+            $upload['data']['daily_order_id'] = $dailyOrderId;
+            $save = $photoHandler->saveToDatabase($db, $driverId, $customerId, $upload['data']);
+            if (!$save['success']) {
+                throw new Exception($save['error'] ?? 'Failed to save photo record');
+            }
+
+            echo json_encode($photoHandler->buildUploadSuccessResponse($assignment, $upload['data'], $save['photo_id']));
+            exit;
+        }
+
+        throw new Exception('Unknown driver_action');
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        exit;
+    }
+}
 
 // Get selected driver and date
 $selectedDriverId = isset($_GET['driver_id']) ? intval($_GET['driver_id']) : 0;
@@ -49,6 +140,7 @@ if ($selectedDriverId > 0 && $driver) {
                 c.id as customer_id,
                 c.name as customer_name,
                 c.address as customer_address,
+                c.phone as customer_phone,
                 c.zone,
                 do.id as daily_order_id,
                 do.total_amount,
@@ -99,6 +191,7 @@ if ($selectedDriverId > 0 && $driver) {
                     'customer_id' => $row['customer_id'],
                     'customer_name' => $row['customer_name'],
                     'customer_address' => $row['customer_address'],
+                    'customer_phone' => $row['customer_phone'] ?? '',
                     'zone' => $zone,
                     'daily_order_id' => $row['daily_order_id'],
                     'total_amount' => $row['total_amount'],
@@ -123,914 +216,74 @@ if ($selectedDriverId > 0 && $driver) {
     }
 }
 
+$serverDeliveredOrderIds = [];
+foreach ($driverDeliveries as $zoneStops) {
+    foreach ($zoneStops as $stop) {
+        if (($stop['delivery_status'] ?? '') === 'delivered') {
+            $serverDeliveredOrderIds[] = (int)$stop['daily_order_id'];
+        }
+    }
+}
+$completedStopsCount = count($serverDeliveredOrderIds);
+$routeStopTotal = $totalStops ?? 0;
+
+$routeStopMeta = [];
+foreach ($driverDeliveries as $zoneStops) {
+    foreach ($zoneStops as $stop) {
+        $routeStopMeta[(int)$stop['daily_order_id']] = [
+            'customer_id' => (int)$stop['customer_id'],
+            'customer_name' => $stop['customer_name'],
+            'customer_address' => $stop['customer_address'],
+            'customer_phone' => $stop['customer_phone'] ?? '',
+            'route_order' => (int)$stop['route_order'],
+            'delivery_status' => $stop['delivery_status'] ?? 'pending',
+        ];
+    }
+}
+
+function driver_status_badge_class($status) {
+    $normalized = strtolower(trim((string)$status));
+    if ($normalized === '') {
+        $normalized = 'pending';
+    }
+    $allowed = ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'];
+    if (!in_array($normalized, $allowed, true)) {
+        $normalized = 'pending';
+    }
+    return 'status-badge status-badge--' . $normalized;
+}
+
+function driver_format_status_label($status) {
+    $normalized = strtolower(trim((string)$status));
+    return $normalized !== '' ? ucwords(str_replace('_', ' ', $normalized)) : 'Pending';
+}
+
+function driver_phone_href($phone) {
+    $digits = preg_replace('/\D+/', '', (string)$phone);
+    return $digits !== '' ? 'tel:' . $digits : '';
+}
+
+function driver_maps_href($address) {
+    $encoded = rawurlencode((string)$address);
+    return $encoded !== '' ? 'https://maps.google.com/?q=' . $encoded : '';
+}
+
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
 
-<style>
-/* Mobile-first responsive design */
-* {
-    box-sizing: border-box;
-}
 
-.driver-list-container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 10px;
-    min-height: 100vh;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.page-header {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    color: #2c3e50;
-    padding: 20px;
-    border-radius: 15px;
-    margin-bottom: 20px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.page-header h1 {
-    margin: 0 0 10px 0;
-    font-size: 1.8rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.page-header p {
-    margin: 0;
-    font-size: 1rem;
-    color: #6c757d;
-    font-weight: 500;
-}
-
-.selector-container {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.selector-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.selector-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.selector-label {
-    font-weight: 600;
-    color: #2c3e50;
-    font-size: 1rem;
-    margin-bottom: 5px;
-}
-
-.selector-input {
-    padding: 15px 20px;
-    border: 2px solid #e9ecef;
-    border-radius: 12px;
-    font-size: 16px; /* Prevents zoom on iOS */
-    background: white;
-    transition: all 0.3s ease;
-    cursor: pointer;
-    min-height: 50px; /* Touch-friendly height */
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-}
-
-.selector-input:focus {
-    outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.selector-input:hover {
-    border-color: #667eea;
-}
-
-.go-button {
-    padding: 15px 30px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    min-height: 50px; /* Touch-friendly height */
-    width: 100%;
-}
-
-.go-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-}
-
-.go-button:active {
-    transform: translateY(0);
-}
-
-.date-navigation {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-    text-align: center;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.date-info {
-    margin-bottom: 15px;
-}
-
-.date-info h2 {
-    margin: 0 0 8px 0;
-    color: #2c3e50;
-    font-size: 1.5rem;
-    font-weight: 600;
-}
-
-.date-info .order-count {
-    color: #6c757d;
-    font-size: 1rem;
-    font-weight: 500;
-}
-
-.date-controls {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.date-controls a {
-    padding: 12px 20px;
-    text-decoration: none;
-    border-radius: 10px;
-    font-weight: 600;
-    transition: all 0.3s ease;
-    font-size: 0.9rem;
-    min-height: 45px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.date-controls .btn-outline {
-    background: rgba(255, 255, 255, 0.8);
-    color: #6c757d;
-    border: 2px solid #e9ecef;
-}
-
-.date-controls .btn-outline:hover {
-    background: white;
-    border-color: #667eea;
-    color: #667eea;
-    transform: translateY(-2px);
-}
-
-.date-controls .btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.stats-container {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 15px;
-}
-
-.stat-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 15px;
-    border-radius: 12px;
-    text-align: center;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-}
-
-.stat-number {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.stat-label {
-    font-size: 0.8rem;
-    opacity: 0.9;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.deliveries-container {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    overflow: hidden;
-}
-
-.zone-section {
-    margin-bottom: 0;
-    border-bottom: 1px solid rgba(0,0,0,0.1);
-}
-
-.zone-section:last-child {
-    border-bottom: none;
-}
-
-.zone-header {
-    background: rgba(0,0,0,0.05);
-    padding: 15px 20px;
-    font-weight: 600;
-    color: #2c3e50;
-    font-size: 1.1rem;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    min-height: 50px; /* Touch-friendly */
-}
-
-.zone-header:hover {
-    background: rgba(0,0,0,0.08);
-}
-
-.zone-color-indicator {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.zone-stops-count {
-    background: rgba(0,0,0,0.1);
-    color: #2c3e50;
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    margin-left: auto;
-}
-
-.zone-content {
-    padding: 0;
-}
-
-.customer-stop {
-    padding: 15px 20px;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-    transition: all 0.3s ease;
-    cursor: pointer;
-    min-height: 60px; /* Touch-friendly */
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.customer-stop:last-child {
-    border-bottom: none;
-}
-
-.customer-stop:hover {
-    background: rgba(0,0,0,0.02);
-}
-
-.customer-stop:active {
-    background: rgba(0,0,0,0.05);
-}
-
-.stop-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.stop-number {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-}
-
-.customer-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.customer-name {
-    font-weight: 600;
-    color: #2c3e50;
-    font-size: 1rem;
-    margin-bottom: 2px;
-    word-break: break-word;
-}
-
-.customer-address {
-    color: #6c757d;
-    font-size: 0.85rem;
-    word-break: break-word;
-}
-
-.stop-details {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
-    color: #6c757d;
-}
-
-.stop-detail {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.stop-detail i {
-    font-size: 0.9rem;
-}
-
-.order-details {
-    background: rgba(0,0,0,0.02);
-    border-radius: 8px;
-    padding: 10px;
-    margin-top: 8px;
-    font-size: 0.8rem;
-    display: none;
-}
-
-.order-details.expanded {
-    display: block;
-}
-
-.product-line-group {
-    margin-bottom: 8px;
-}
-
-.product-line-header {
-    font-weight: 600;
-    color: #2c3e50;
-    margin-bottom: 4px;
-    font-size: 0.85rem;
-}
-
-.product-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-    font-size: 0.75rem;
-}
-
-.product-item:last-child {
-    border-bottom: none;
-}
-
-.product-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.product-name {
-    font-weight: 500;
-    color: #2c3e50;
-    word-break: break-word;
-}
-
-.product-meta {
-    color: #6c757d;
-    font-size: 0.7rem;
-}
-
-.product-quantity {
-    font-weight: 600;
-    color: #667eea;
-    margin: 0 8px;
-}
-
-.product-total {
-    font-weight: 600;
-    color: #2c3e50;
-    min-width: 60px;
-    text-align: right;
-}
-
-.special-instructions {
-    background: #fff3cd;
-    border: 1px solid #ffeaa7;
-    border-radius: 6px;
-    padding: 8px;
-    margin-top: 8px;
-    font-size: 0.75rem;
-    color: #856404;
-}
-
-/* Mobile-specific improvements */
-@media (max-width: 768px) {
-    .driver-list-container {
-        padding: 5px;
-    }
-    
-    .page-header {
-        padding: 15px;
-        margin-bottom: 15px;
-    }
-    
-    .page-header h1 {
-        font-size: 1.5rem;
-    }
-    
-    .selector-container {
-        padding: 15px;
-        margin-bottom: 15px;
-    }
-    
-    .selector-grid {
-        gap: 15px;
-    }
-    
-    .date-navigation {
-        padding: 15px;
-        margin-bottom: 15px;
-    }
-    
-    .date-info h2 {
-        font-size: 1.3rem;
-    }
-    
-    .date-controls {
-        gap: 8px;
-    }
-    
-    .date-controls a {
-        padding: 10px 15px;
-        font-size: 0.8rem;
-        min-height: 40px;
-    }
-    
-    .stats-container {
-        padding: 15px;
-        margin-bottom: 15px;
-    }
-    
-    .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-    }
-    
-    .stat-card {
-        padding: 12px;
-    }
-    
-    .stat-number {
-        font-size: 1.3rem;
-    }
-    
-    .zone-header {
-        padding: 12px 15px;
-        font-size: 1rem;
-        min-height: 45px;
-    }
-    
-    .customer-stop {
-        padding: 12px 15px;
-        min-height: 55px;
-    }
-    
-    .stop-number {
-        width: 25px;
-        height: 25px;
-        font-size: 0.8rem;
-    }
-    
-    .customer-name {
-        font-size: 0.9rem;
-    }
-    
-    .customer-address {
-        font-size: 0.8rem;
-    }
-    
-    .stop-details {
-        gap: 10px;
-        font-size: 0.75rem;
-    }
-    
-    .order-details {
-        padding: 8px;
-        font-size: 0.75rem;
-    }
-    
-    .product-item {
-        font-size: 0.7rem;
-        padding: 3px 0;
-    }
-    
-    .product-name {
-        font-size: 0.7rem;
-    }
-    
-    .product-meta {
-        font-size: 0.65rem;
-    }
-    
-    .product-total {
-        min-width: 50px;
-        font-size: 0.7rem;
-    }
-}
-
-/* Touch-friendly improvements */
-@media (hover: none) and (pointer: coarse) {
-    .customer-stop {
-        min-height: 70px;
-    }
-    
-    .zone-header {
-        min-height: 55px;
-    }
-    
-    .go-button {
-        min-height: 55px;
-    }
-    
-    .selector-input {
-        min-height: 55px;
-    }
-    
-    .date-controls a {
-        min-height: 50px;
-    }
-}
-
-/* Landscape mobile optimization */
-@media (max-width: 768px) and (orientation: landscape) {
-    .page-header {
-        padding: 10px 15px;
-    }
-    
-    .page-header h1 {
-        font-size: 1.3rem;
-        margin-bottom: 5px;
-    }
-    
-    .selector-grid {
-        flex-direction: row;
-        gap: 15px;
-    }
-    
-    .selector-group {
-        flex: 1;
-    }
-    
-    .stats-grid {
-        grid-template-columns: repeat(4, 1fr);
-    }
-}
-
-/* High DPI displays */
-@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
-    .zone-color-indicator {
-        border: 1px solid rgba(0,0,0,0.1);
-    }
-}
-
-/* Reduced motion for accessibility */
-@media (prefers-reduced-motion: reduce) {
-    * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    .driver-list-container {
-        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-    }
-    
-    .page-header,
-    .selector-container,
-    .date-navigation,
-    .stats-container,
-    .deliveries-container {
-        background: rgba(255, 255, 255, 0.1);
-        color: #ecf0f1;
-    }
-    
-    .zone-header {
-        background: rgba(255, 255, 255, 0.05);
-        color: #ecf0f1;
-    }
-    
-    .customer-stop:hover {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    .customer-name {
-        color: #ecf0f1;
-    }
-    
-    .customer-address {
-        color: #bdc3c7;
-    }
-}
-
-/* Additional mobile optimizations */
-@media (max-width: 480px) {
-    .driver-list-container {
-        padding: 2px;
-    }
-    
-    .page-header {
-        padding: 10px;
-        margin-bottom: 10px;
-    }
-    
-    .page-header h1 {
-        font-size: 1.3rem;
-    }
-    
-    .selector-container {
-        padding: 10px;
-        margin-bottom: 10px;
-    }
-    
-    .date-navigation {
-        padding: 10px;
-        margin-bottom: 10px;
-    }
-    
-    .stats-container {
-        padding: 10px;
-        margin-bottom: 10px;
-    }
-    
-    .stats-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
-    }
-    
-    .zone-header {
-        padding: 10px;
-        font-size: 0.9rem;
-    }
-    
-    .customer-stop {
-        padding: 10px;
-    }
-    
-    .stop-details {
-        flex-direction: column;
-        gap: 5px;
-    }
-}
-
-/* Prevent text selection on interactive elements */
-.customer-stop,
-.zone-header,
-.go-button,
-.date-controls a {
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-}
-
-/* Improve touch targets */
-.customer-stop,
-.zone-header {
-    cursor: pointer;
-    -webkit-tap-highlight-color: rgba(102, 126, 234, 0.1);
-}
-
-/* Smooth scrolling for mobile */
-html {
-    scroll-behavior: smooth;
-}
-
-/* Optimize for mobile performance */
-* {
-    -webkit-tap-highlight-color: transparent;
-}
-
-/* Better focus indicators for accessibility */
-.selector-input:focus,
-.go-button:focus,
-.date-controls a:focus {
-    outline: 2px solid #667eea;
-    outline-offset: 2px;
-}
-
-.modal { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center; }
-.modal-content { background:#fff; border-radius:10px; max-width:95vw; width:400px; margin:auto; padding:24px; position:relative; max-height:90vh; overflow-y:auto; }
-.close-modal { position:absolute; top:10px; right:16px; font-size:1.5rem; cursor:pointer; }
-.modal-content h2 { color: #2c3e50; font-size: 1.3rem; margin-bottom: 20px; }
-.modal-content p { color: #6c757d; margin-bottom: 20px; }
-.btn-outline { background: transparent; color: #6c757d; border: 2px solid #6c757d; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
-.btn-outline:hover { background: #6c757d; color: white; }
-.product-item input[type="number"] { width: 70px; padding: 8px; border: 2px solid #e9ecef; border-radius: 6px; text-align: center; font-weight: 600; transition: border-color 0.3s ease; }
-.product-item input[type="number"]:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
-.product-item input[type="number"]::-webkit-inner-spin-button,
-.product-item input[type="number"]::-webkit-outer-spin-button { opacity: 1; height: 20px; }
-.complete-delivery-btn { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; min-height: 35px; }
-.complete-delivery-btn:hover { transform: translateY(-1px); box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3); }
-.complete-delivery-btn:active { transform: translateY(0); }
-.complete-delivery-btn:disabled { background: #6c757d; cursor: not-allowed; transform: none; box-shadow: none; }
-
-.view-toggle {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 1000;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-radius: 10px;
-    padding: 5px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.view-toggle .btn-group {
-    display: flex;
-    gap: 2px;
-}
-
-.view-toggle .btn {
-    padding: 8px 12px;
-    font-size: 0.8rem;
-    border-radius: 8px;
-    border: none;
-    background: transparent;
-    color: #6c757d;
-    transition: all 0.3s ease;
-    white-space: nowrap;
-}
-
-.view-toggle .btn:hover {
-    background: rgba(102, 126, 234, 0.1);
-    color: #667eea;
-}
-
-.view-toggle .btn.active {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-}
-
-.view-toggle .btn i {
-    margin-right: 4px;
-}
-
-/* Delivery mode specific styles */
-#deliveryView .deliveries-container {
-    margin-top: 20px;
-}
-
-#deliveryView .customer-stop {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-radius: 15px;
-    margin: 10px 0;
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
-}
-
-#deliveryView .customer-stop:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
-}
-
-#deliveryView .customer-name {
-    color: white;
-    font-weight: 700;
-}
-
-#deliveryView .customer-address {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-#deliveryView .stop-details {
-    color: rgba(255, 255, 255, 0.9);
-}
-
-#deliveryView .complete-delivery-btn {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    font-weight: 600;
-    padding: 10px 20px;
-    border-radius: 10px;
-    transition: all 0.3s ease;
-}
-
-#deliveryView .complete-delivery-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-    transform: translateY(-1px);
-}
-
-/* Mobile responsive for view toggle */
-@media (max-width: 768px) {
-    .view-toggle {
-        top: 10px;
-        right: 10px;
-        padding: 3px;
-    }
-    
-    .view-toggle .btn {
-        padding: 6px 8px;
-        font-size: 0.7rem;
-    }
-    
-    .view-toggle .btn i {
-        margin-right: 2px;
-    }
-}
-
-/* Empty state styling */
-.empty-state {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    padding: 40px 20px;
-    border-radius: 15px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.empty-state h3 {
-    color: #2c3e50;
-    margin-bottom: 10px;
-}
-
-.empty-state p {
-    color: #6c757d;
-    margin: 0;
-}
-
-/* Container adjustments for view toggle */
-.driver-list-container {
-    padding-top: 80px; /* Make room for fixed toggle */
-}
-
-@media (max-width: 768px) {
-    .driver-list-container {
-        padding-top: 70px;
-    }
-}
-</style>
+<link rel=\"stylesheet\" href=\"/bakery/css/driver.css\">
+<script src=\"/bakery/includes/global_tracking.js\"></script>
 
 <div class="driver-list-container">
     <div class="view-toggle">
         <div class="btn-group" role="group">
             <button type="button" class="btn btn-outline-primary" id="mainViewBtn">
-                <i class="bi bi-list-ul"></i> Full Route
+                <i class="bi bi-list-ul"></i> <span class="btn-label">Full Route</span>
             </button>
             <button type="button" class="btn btn-outline-success" id="deliveryViewBtn">
-                <i class="bi bi-truck"></i> Delivery Mode
+                <i class="bi bi-truck"></i> <span class="btn-label">Delivery Mode</span>
             </button>
         </div>
     </div>
@@ -1074,6 +327,25 @@ html {
             </div>
 
             <?php if ($selectedDriverId > 0 && $driver): ?>
+
+            <div class="offline-hint" role="note">
+                <strong>On-device cache</strong>
+                Delivery mode saves completed stops in this browser (<code>delivered_orders_{driver}_{date}</code>).
+                Route data is cached as <code>driver_orders_cache_{driver}_{date}</code> for offline viewing.
+                Server status refreshes when you are back online.
+            </div>
+
+            <?php if ($routeStopTotal > 0): ?>
+            <div class="driver-sticky-bar" id="routeStickyBar" aria-live="polite">
+                <p class="sticky-title"><?php echo htmlspecialchars($driver['name']); ?> — <?php echo date('M j, Y', strtotime($selectedDate)); ?></p>
+                <div class="route-progress-text" id="stickyProgressText">
+                    <?php echo $completedStopsCount; ?> of <?php echo $routeStopTotal; ?> stops complete
+                </div>
+                <div class="route-progress-track" aria-hidden="true">
+                    <div class="route-progress-fill" id="stickyProgressFill" style="width: <?php echo $routeStopTotal > 0 ? round(($completedStopsCount / $routeStopTotal) * 100) : 0; ?>%;"></div>
+                </div>
+            </div>
+            <?php endif; ?>
             
             <!-- Date Navigation -->
             <div class="date-navigation">
@@ -1127,13 +399,28 @@ html {
                             </div>
                             <div class="zone-content">
                                 <?php foreach ($stops as $stop): ?>
-                                    <div class="customer-stop" onclick="toggleOrderDetails(<?php echo $stop['daily_order_id']; ?>, '<?php echo htmlspecialchars($stop['customer_name']); ?>', '<?php echo htmlspecialchars($stop['customer_address']); ?>')">
-                                        <div class="stop-header">
-                                            <div class="stop-number"><?php echo $stop['route_order']; ?></div>
+                                    <?php
+                                    $stopStatus = $stop['delivery_status'] ?? 'pending';
+                                    $isDeliveredStop = $stopStatus === 'delivered';
+                                    $phoneHref = driver_phone_href($stop['customer_phone'] ?? '');
+                                    $mapsHref = driver_maps_href($stop['customer_address'] ?? '');
+                                    ?>
+                                    <div class="customer-stop<?php echo $isDeliveredStop ? ' is-delivered' : ''; ?>" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>">
+                                        <div class="stop-header" onclick="toggleOrderDetails(<?php echo (int)$stop['daily_order_id']; ?>, <?php echo json_encode($stop['customer_name']); ?>, <?php echo json_encode($stop['customer_address']); ?>)">
+                                            <div class="stop-number"><?php echo (int)$stop['route_order']; ?></div>
                                             <div class="customer-info">
                                                 <div class="customer-name"><?php echo htmlspecialchars($stop['customer_name']); ?></div>
                                                 <div class="customer-address"><?php echo htmlspecialchars($stop['customer_address']); ?></div>
                                             </div>
+                                            <span class="<?php echo driver_status_badge_class($stopStatus); ?>"><?php echo driver_format_status_label($stopStatus); ?></span>
+                                        </div>
+                                        <div class="contact-actions">
+                                            <?php if ($phoneHref): ?>
+                                            <a class="contact-link contact-link--phone" href="<?php echo htmlspecialchars($phoneHref); ?>" onclick="event.stopPropagation();">📞 Call</a>
+                                            <?php endif; ?>
+                                            <?php if ($mapsHref): ?>
+                                            <a class="contact-link contact-link--address" href="<?php echo htmlspecialchars($mapsHref); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation();">🗺 Navigate</a>
+                                            <?php endif; ?>
                                         </div>
                                         <div class="stop-details">
                                             <div class="stop-detail">
@@ -1144,17 +431,18 @@ html {
                                                 <i class="fas fa-dollar-sign"></i>
                                                 <span>$<?php echo number_format($stop['total_amount'], 2); ?></span>
                                             </div>
-                                            <div class="stop-detail">
-                                                <i class="fas fa-info-circle"></i>
-                                                <span><?php echo ucfirst($stop['delivery_status'] ?: 'pending'); ?></span>
-                                            </div>
                                         </div>
-                                        <div style="margin-top: 8px; text-align: right;">
-                                            <button class="complete-delivery-btn" onclick="openCompleteDeliveryModal(<?php echo $stop['daily_order_id']; ?>, '<?php echo htmlspecialchars($stop['customer_name']); ?>')">Complete Delivery</button>
+                                        <div class="stop-actions">
+                                            <?php if (!$isDeliveredStop): ?>
+                                            <button type="button" class="photo-btn-inline" onclick="event.stopPropagation(); openPhotoUploadForStop(<?php echo (int)$stop['daily_order_id']; ?>)">📷 Photo</button>
+                                            <button type="button" class="complete-delivery-btn" onclick="event.stopPropagation(); openCompleteDeliveryModal(<?php echo (int)$stop['daily_order_id']; ?>, <?php echo json_encode($stop['customer_name']); ?>)">Complete</button>
+                                            <?php else: ?>
+                                            <span class="status-badge status-badge--delivered">✓ Delivered</span>
+                                            <?php endif; ?>
                                         </div>
-                                        <div class="order-details" id="order-details-<?php echo $stop['daily_order_id']; ?>">
+                                        <div class="order-details" id="order-details-<?php echo (int)$stop['daily_order_id']; ?>">
                                             <div style="text-align: center; color: #6c757d; font-style: italic;">
-                                                Click to view order details...
+                                                Tap header to view order details...
                                             </div>
                                         </div>
                                     </div>
@@ -1289,6 +577,23 @@ html {
   <div class="modal-content" style="background:#fff; border-radius:10px; max-width:95vw; width:400px; margin:auto; padding:24px; position:relative;">
     <span class="close-modal" onclick="closeCompleteDeliveryModal()" style="position:absolute; top:10px; right:16px; font-size:1.5rem; cursor:pointer;">&times;</span>
     <h2 id="modal-customer-name" style="margin-top:0;"></h2>
+    <div id="modal-photo-section" class="modal-photo-section">
+      <h3>Delivery photo (optional)</h3>
+      <div id="modal-photo-assignment" class="photo-assignment-confirm"></div>
+      <div class="photo-upload-row">
+        <select id="modal-photo-type" class="selector-input" style="min-height:48px; flex:1;">
+          <option value="Before">Before</option>
+          <option value="After">After</option>
+          <option value="Receipt">Receipt</option>
+        </select>
+        <input type="file" id="modal-photo-file" accept="image/*" capture="environment">
+      </div>
+      <button type="button" class="go-button" id="modal-photo-upload-btn" style="width:100%; margin-top:8px;">Upload photo for this stop</button>
+      <div class="photo-upload-progress" id="modal-photo-progress">
+        <div class="photo-upload-progress-bar"><div class="photo-upload-progress-fill" id="modal-photo-progress-fill"></div></div>
+      </div>
+      <div id="modal-photo-status" class="photo-upload-status" role="status"></div>
+    </div>
     <div id="modal-step-initial">
       <p>How was the delivery?</p>
       <button onclick="completeDeliveryAsPlanned()" class="go-button" style="margin-bottom:10px; width:100%;">Delivery as planned</button>
@@ -1304,6 +609,171 @@ html {
 let deliveryData = [];
 let deliveredOrders = [];
 let deliveryHistory = [];
+const serverDeliveredOrderIds = <?php echo json_encode($serverDeliveredOrderIds); ?>;
+const routeStopMeta = <?php echo json_encode($routeStopMeta); ?>;
+const driverPageConfig = {
+    driverId: <?php echo $selectedDriverId ?: 'null'; ?>,
+    date: <?php echo json_encode($selectedDate); ?>
+};
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+function phoneDigits(phone) {
+    return String(phone || '').replace(/\D+/g, '');
+}
+
+function buildContactActions(orderId) {
+    const meta = routeStopMeta[orderId] || {};
+    const parts = [];
+    const digits = phoneDigits(meta.customer_phone);
+    if (digits) {
+        parts.push('<a class="contact-link contact-link--phone" href="tel:' + digits + '" onclick="event.stopPropagation();">📞 Call</a>');
+    }
+    if (meta.customer_address) {
+        parts.push('<a class="contact-link contact-link--address" href="https://maps.google.com/?q=' + encodeURIComponent(meta.customer_address) + '" target="_blank" rel="noopener" onclick="event.stopPropagation();">🗺 Navigate</a>');
+    }
+    return parts.length ? '<div class="contact-actions">' + parts.join('') + '</div>' : '';
+}
+
+function statusBadgeClass(status) {
+    const normalized = String(status || 'pending').toLowerCase().replace(/\s+/g, '_');
+    const allowed = ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'];
+    const key = allowed.includes(normalized) ? normalized : 'pending';
+    return 'status-badge status-badge--' + key;
+}
+
+function formatStatusLabel(status) {
+    const normalized = String(status || 'pending').toLowerCase();
+    if (!normalized) return 'Pending';
+    return normalized.split('_').map(function(w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
+}
+
+function updateStickyProgress(completed, total) {
+    const textEl = document.getElementById('stickyProgressText');
+    const fillEl = document.getElementById('stickyProgressFill');
+    if (textEl) {
+        textEl.textContent = completed + ' of ' + total + ' stops complete';
+    }
+    if (fillEl && total > 0) {
+        fillEl.style.width = Math.round((completed / total) * 100) + '%';
+    }
+}
+
+function getOrdersCacheKey(driverId, date) {
+    return 'driver_orders_cache_' + driverId + '_' + date;
+}
+
+function setPhotoStatus(message, type) {
+    const el = document.getElementById('modal-photo-status');
+    if (!el) return;
+    el.textContent = message || '';
+    el.className = 'photo-upload-status' + (type ? ' is-' + type : '');
+}
+
+function resetPhotoUploadUi() {
+    const fileInput = document.getElementById('modal-photo-file');
+    const progress = document.getElementById('modal-photo-progress');
+    const fill = document.getElementById('modal-photo-progress-fill');
+    const btn = document.getElementById('modal-photo-upload-btn');
+    if (fileInput) fileInput.value = '';
+    if (progress) progress.classList.remove('is-active');
+    if (fill) fill.style.width = '0%';
+    if (btn) btn.disabled = false;
+    setPhotoStatus('', '');
+}
+
+function updateModalPhotoAssignment(orderId) {
+    const meta = routeStopMeta[orderId] || {};
+    const el = document.getElementById('modal-photo-assignment');
+    if (!el) return;
+    if (!meta.customer_name) {
+        el.textContent = 'Stop #' + orderId;
+        return;
+    }
+    el.textContent = 'Attaching to: ' + meta.customer_name + ' (stop #' + (meta.route_order || '?') + ', order #' + orderId + ')';
+}
+
+function openPhotoUploadForStop(orderId) {
+    openCompleteDeliveryModal(orderId, (routeStopMeta[orderId] || {}).customer_name || 'Customer');
+}
+
+function uploadModalPhoto() {
+    const orderId = currentDeliveryOrderId;
+    const meta = routeStopMeta[orderId];
+    const fileInput = document.getElementById('modal-photo-file');
+    const btn = document.getElementById('modal-photo-upload-btn');
+    const progress = document.getElementById('modal-photo-progress');
+    const fill = document.getElementById('modal-photo-progress-fill');
+
+    if (!orderId || !meta || !meta.customer_id) {
+        setPhotoStatus('Cannot upload: stop assignment not found on this page.', 'error');
+        return;
+    }
+    if (!fileInput || !fileInput.files || !fileInput.files.length) {
+        setPhotoStatus('Choose a photo first.', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('driver_action', 'upload_photo');
+    formData.append('driver_id', driverPageConfig.driverId);
+    formData.append('customer_id', meta.customer_id);
+    formData.append('daily_order_id', orderId);
+    formData.append('date', driverPageConfig.date);
+    formData.append('photo_type', document.getElementById('modal-photo-type').value);
+    formData.append('photo', fileInput.files[0]);
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(pos) {
+            formData.append('latitude', pos.coords.latitude);
+            formData.append('longitude', pos.coords.longitude);
+            sendPhotoUpload(formData, btn, progress, fill);
+        }, function() {
+            sendPhotoUpload(formData, btn, progress, fill);
+        }, { timeout: 5000 });
+    } else {
+        sendPhotoUpload(formData, btn, progress, fill);
+    }
+}
+
+function sendPhotoUpload(formData, btn, progress, fill) {
+    btn.disabled = true;
+    progress.classList.add('is-active');
+    fill.style.width = '35%';
+    setPhotoStatus('Uploading photo…', 'loading');
+
+    fetch('driver_list.php', { method: 'POST', body: formData })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            fill.style.width = '100%';
+            if (data.success) {
+                setPhotoStatus(data.message || 'Photo uploaded.', 'success');
+                fileInputClear();
+            } else {
+                setPhotoStatus(data.error || 'Upload failed.', 'error');
+                btn.disabled = false;
+            }
+        })
+        .catch(function(err) {
+            setPhotoStatus('Upload error: ' + err.message, 'error');
+            btn.disabled = false;
+        })
+        .finally(function() {
+            setTimeout(function() {
+                progress.classList.remove('is-active');
+                fill.style.width = '0%';
+            }, 800);
+        });
+}
+
+function fileInputClear() {
+    const fileInput = document.getElementById('modal-photo-file');
+    if (fileInput) fileInput.value = '';
+}
 
 // View toggle functionality
 function showMainView() {
@@ -1332,30 +802,53 @@ function loadDeliveryData() {
     
     if (!driverId) return;
     
-    // Load delivered orders from localStorage
+    // Load delivered orders from localStorage and merge server-side delivered state
     const storageKey = `delivered_orders_${driverId}_${date}`;
     deliveredOrders = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    serverDeliveredOrderIds.forEach(function(id) {
+        if (!deliveredOrders.includes(id)) {
+            deliveredOrders.push(id);
+        }
+    });
     deliveryHistory = JSON.parse(localStorage.getItem(storageKey + '_history') || '[]');
-    
-    // Get all orders for this driver and date
+
+    const cacheKey = getOrdersCacheKey(driverId, date);
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+        try {
+            deliveryData = JSON.parse(cached);
+            updateDeliveryView();
+        } catch (e) {
+            console.warn('Invalid orders cache', e);
+        }
+    }
+
     fetch('get_driver_orders.php', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `driver_id=${driverId}&date=${date}`
+        body: 'driver_id=' + driverId + '&date=' + encodeURIComponent(date)
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             deliveryData = data.orders;
+            localStorage.setItem(cacheKey, JSON.stringify(deliveryData));
             updateDeliveryView();
         } else {
             console.error('Error loading delivery data:', data.error);
+            if (!deliveryData.length && cached) {
+                document.getElementById('deliveryStatus').textContent = 'Showing cached route (offline)';
+            }
         }
     })
     .catch(error => {
         console.error('Fetch error:', error);
+        if (deliveryData.length) {
+            const statusEl = document.getElementById('deliveryStatus');
+            if (statusEl) statusEl.textContent = 'Offline — showing cached route';
+        }
     });
 }
 
@@ -1367,7 +860,8 @@ function updateDeliveryView() {
     // Update progress
     const progress = deliveredOrders.length;
     const total = deliveryData.length;
-    document.getElementById('deliveryProgress').textContent = `${progress}/${total}`;
+    document.getElementById('deliveryProgress').textContent = progress + '/' + total;
+    updateStickyProgress(progress, total);
     
     // Update total amount
     const totalAmount = deliveryData.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
@@ -1389,51 +883,44 @@ function updateDeliveryView() {
 
 // Show current delivery
 function showCurrentDelivery(order) {
+    const meta = routeStopMeta[order.daily_order_id] || {};
+    const status = deliveredOrders.includes(order.daily_order_id) ? 'delivered' : (meta.delivery_status || 'pending');
+    const statusLabel = formatStatusLabel(status);
     const container = document.getElementById('currentDeliveryContainer');
-    container.innerHTML = `
-        <div class="deliveries-container">
-            <div class="zone-section">
-                <div class="zone-header">
-                    <div class="zone-color-indicator" style="background-color: ${getZoneColor(order.zone)};"></div>
-                    <span>${order.zone}</span>
-                    <div class="zone-stops-count">Stop ${order.route_order}</div>
-                </div>
-                <div class="zone-content">
-                    <div class="customer-stop" onclick="toggleOrderDetails(${order.daily_order_id}, '${order.customer_name}', '${order.customer_address}')">
-                        <div class="stop-header">
-                            <div class="stop-number">${order.route_order}</div>
-                            <div class="customer-info">
-                                <div class="customer-name">${order.customer_name}</div>
-                                <div class="customer-address">${order.customer_address}</div>
-                            </div>
-                        </div>
-                        <div class="stop-details">
-                            <div class="stop-detail">
-                                <i class="fas fa-clock"></i>
-                                <span>${order.scheduled_delivery_time || 'No time set'}</span>
-                            </div>
-                            <div class="stop-detail">
-                                <i class="fas fa-dollar-sign"></i>
-                                <span>$${parseFloat(order.total_amount).toFixed(2)}</span>
-                            </div>
-                            <div class="stop-detail">
-                                <i class="fas fa-info-circle"></i>
-                                <span>Pending</span>
-                            </div>
-                        </div>
-                        <div style="margin-top: 8px; text-align: right;">
-                            <button class="complete-delivery-btn" onclick="markAsDelivered(${order.daily_order_id}, '${order.customer_name}')">Mark as Delivered</button>
-                        </div>
-                        <div class="order-details" id="order-details-${order.daily_order_id}">
-                            <div style="text-align: center; color: #6c757d; font-style: italic;">
-                                Click to view order details...
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
+    container.innerHTML =
+        '<div class="deliveries-container">' +
+            '<div class="zone-section">' +
+                '<div class="zone-header">' +
+                    '<div class="zone-color-indicator" style="background-color: ' + getZoneColor(order.zone) + ';"></div>' +
+                    '<span>' + escapeHtml(order.zone) + '</span>' +
+                    '<div class="zone-stops-count">Stop ' + order.route_order + '</div>' +
+                '</div>' +
+                '<div class="zone-content">' +
+                    '<div class="customer-stop' + (status === 'delivered' ? ' is-delivered' : '') + '">' +
+                        '<div class="stop-header" onclick="toggleOrderDetails(' + order.daily_order_id + ', ' + JSON.stringify(order.customer_name) + ', ' + JSON.stringify(order.customer_address) + ')">' +
+                            '<div class="stop-number">' + order.route_order + '</div>' +
+                            '<div class="customer-info">' +
+                                '<div class="customer-name">' + escapeHtml(order.customer_name) + '</div>' +
+                                '<div class="customer-address">' + escapeHtml(order.customer_address) + '</div>' +
+                            '</div>' +
+                            '<span class="' + statusBadgeClass(status) + '">' + escapeHtml(statusLabel) + '</span>' +
+                        '</div>' +
+                        buildContactActions(order.daily_order_id) +
+                        '<div class="stop-details">' +
+                            '<div class="stop-detail"><i class="fas fa-clock"></i><span>' + escapeHtml(order.scheduled_delivery_time || 'No time set') + '</span></div>' +
+                            '<div class="stop-detail"><i class="fas fa-dollar-sign"></i><span>$' + parseFloat(order.total_amount).toFixed(2) + '</span></div>' +
+                        '</div>' +
+                        '<div class="stop-actions">' +
+                            '<button type="button" class="photo-btn-inline" onclick="event.stopPropagation(); openPhotoUploadForStop(' + order.daily_order_id + ')">📷 Photo</button>' +
+                            '<button type="button" class="complete-delivery-btn" onclick="event.stopPropagation(); markAsDelivered(' + order.daily_order_id + ', ' + JSON.stringify(order.customer_name) + ')">Complete</button>' +
+                        '</div>' +
+                        '<div class="order-details" id="order-details-' + order.daily_order_id + '">' +
+                            '<div style="text-align: center; color: #6c757d; font-style: italic;">Tap header to view order details...</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
 }
 
 // Show completion message
@@ -1466,6 +953,9 @@ function openCompleteDeliveryModal(orderId, customerName) {
     document.getElementById('modal-step-initial').style.display = '';
     document.getElementById('modal-step-modify').style.display = 'none';
     document.getElementById('modal-step-loading').style.display = 'none';
+    document.getElementById('modal-photo-section').style.display = '';
+    updateModalPhotoAssignment(orderId);
+    resetPhotoUploadUi();
     document.getElementById('complete-delivery-modal').style.display = 'flex';
 }
 
@@ -1791,6 +1281,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add event listeners for view toggle
     document.getElementById('mainViewBtn').addEventListener('click', showMainView);
     document.getElementById('deliveryViewBtn').addEventListener('click', showDeliveryView);
+
+    const photoUploadBtn = document.getElementById('modal-photo-upload-btn');
+    if (photoUploadBtn) {
+        photoUploadBtn.addEventListener('click', uploadModalPhoto);
+    }
     
     // Update form button state
     function updateForm() {
@@ -1817,8 +1312,10 @@ document.addEventListener('DOMContentLoaded', function() {
     window.showDeliveryHistory = showDeliveryHistory;
     window.closeDeliveryHistory = closeDeliveryHistory;
     window.undoSpecificDelivery = undoSpecificDelivery;
-    
-    // Initialize form state
+    window.openCompleteDeliveryModal = openCompleteDeliveryModal;
+    window.openPhotoUploadForStop = openPhotoUploadForStop;
+    window.uploadModalPhoto = uploadModalPhoto;
+    window.closeCompleteDeliveryModal = closeCompleteDeliveryModal;
     updateForm();
     updateDeliveryForm();
     
@@ -1859,6 +1356,7 @@ document.addEventListener('DOMContentLoaded', function() {
 let currentDeliveryOrderId = null;
 function closeCompleteDeliveryModal() {
     document.getElementById('complete-delivery-modal').style.display = 'none';
+    resetPhotoUploadUi();
 }
 function showModifyOrderForm() {
     if (!currentDeliveryOrderId) return;

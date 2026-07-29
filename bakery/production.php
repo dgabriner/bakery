@@ -8,7 +8,7 @@ require_once 'includes/database.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
-// Days of the week for the dropdown
+// Days of the week for display
 $days = [
     1 => 'Monday',
     2 => 'Tuesday',
@@ -19,32 +19,72 @@ $days = [
     7 => 'Sunday'
 ];
 
-// Default to current day of week (1-7, where 1 is Monday)
-$selectedDay = isset($_GET['day']) ? (int)$_GET['day'] : date('N');
+// Date picker (default: today)
+$selectedDate = isset($_GET['date']) ? trim((string)$_GET['date']) : date('Y-m-d');
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || strtotime($selectedDate) === false) {
+    $selectedDate = date('Y-m-d');
+}
+$selectedDay = bakery_standing_day_from_date($selectedDate);
+$productionSource = 'daily';
+$usingStandingFallback = false;
 
-// Fetch production data for the selected day
+// Fetch production data for the selected date
 $integrityWarnings = [];
 try {
-    // Get all standing orders for the selected day with formula information and weights
-    $orders = $db->prepare("
-        SELECT 
-            p.id as product_id,
-            p.name as product_name,
-            p.weight_grams,
-            p.dough_type_id,
-            dt.name as dough_type_name,
-            dt.id as dt_id,
-            SUM(so.quantity) as total_quantity,
-            SUM(so.quantity * p.weight_grams) as total_weight_grams
-        FROM standing_orders so
-        JOIN products p ON so.product_id = p.id
-        LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-        WHERE so.day_of_week = ?
-        GROUP BY p.id, p.name, p.weight_grams, p.dough_type_id, dt.name, dt.id
-        HAVING total_quantity > 0
-        ORDER BY dt.name, p.name
+    $dailyCheck = $db->prepare("
+        SELECT COUNT(*)
+        FROM daily_order_items doi
+        JOIN daily_orders do ON doi.daily_order_id = do.id
+        WHERE do.order_date = ? AND doi.quantity > 0
     ");
-    $orders->execute([$selectedDay]);
+    $dailyCheck->execute([$selectedDate]);
+    $hasDailyOrders = (int)$dailyCheck->fetchColumn() > 0;
+
+    if ($hasDailyOrders) {
+        $orders = $db->prepare("
+            SELECT 
+                p.id as product_id,
+                p.name as product_name,
+                p.weight_grams,
+                p.dough_type_id,
+                dt.name as dough_type_name,
+                dt.id as dt_id,
+                SUM(doi.quantity) as total_quantity,
+                SUM(doi.quantity * p.weight_grams) as total_weight_grams
+            FROM daily_order_items doi
+            JOIN daily_orders do ON doi.daily_order_id = do.id
+            JOIN products p ON doi.product_id = p.id
+            LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
+            WHERE do.order_date = ?
+            GROUP BY p.id, p.name, p.weight_grams, p.dough_type_id, dt.name, dt.id
+            HAVING total_quantity > 0
+            ORDER BY dt.name, p.name
+        ");
+        $orders->execute([$selectedDate]);
+    } else {
+        $productionSource = 'standing';
+        $usingStandingFallback = true;
+        $dayClause = bakery_standing_day_in_clause($selectedDay);
+        $orders = $db->prepare("
+            SELECT 
+                p.id as product_id,
+                p.name as product_name,
+                p.weight_grams,
+                p.dough_type_id,
+                dt.name as dough_type_name,
+                dt.id as dt_id,
+                SUM(so.quantity) as total_quantity,
+                SUM(so.quantity * p.weight_grams) as total_weight_grams
+            FROM standing_orders so
+            JOIN products p ON so.product_id = p.id
+            LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
+            WHERE so.day_of_week {$dayClause['sql']}
+            GROUP BY p.id, p.name, p.weight_grams, p.dough_type_id, dt.name, dt.id
+            HAVING total_quantity > 0
+            ORDER BY dt.name, p.name
+        ");
+        $orders->execute($dayClause['values']);
+    }
     $productionData = $orders->fetchAll();
 
     $integrityWarnings = [];
@@ -267,21 +307,30 @@ $page_title = 'Production Schedule';
 <div class="container">
     <h1>Production Schedule</h1>
     
-    <!-- Day Selector -->
+    <!-- Date Selector -->
     <div class="day-selector">
         <form method="get" action="production.php" class="form-inline">
             <div class="form-group">
-                <label for="day">Select Day:</label>
-                <select name="day" id="day" class="form-control" onchange="this.form.submit()">
-                    <?php foreach ($days as $dayNum => $dayName): ?>
-                        <option value="<?php echo $dayNum; ?>" <?php echo $selectedDay == $dayNum ? 'selected' : ''; ?>>
-                            <?php echo $dayName; ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                <label for="date">Production date:</label>
+                <input type="date" name="date" id="date" class="form-control"
+                       value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+                       onchange="this.form.submit()">
             </div>
         </form>
     </div>
+
+    <?php if ($usingStandingFallback): ?>
+        <div class="alert alert-info">
+            <strong>No daily orders for <?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>
+                (<?php echo $days[$selectedDay]; ?>).</strong>
+            Showing standing-order totals for this weekday instead. Generate daily orders to reflect same-day edits.
+        </div>
+    <?php elseif ($productionSource === 'daily'): ?>
+        <div class="alert alert-info production-source-banner">
+            Totals from <strong>daily orders</strong> for <?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>
+            (<?php echo $days[$selectedDay]; ?>).
+        </div>
+    <?php endif; ?>
     
     <?php if (!empty($integrityWarnings)): ?>
         <div class="alert alert-warning">
@@ -385,7 +434,7 @@ $page_title = 'Production Schedule';
         <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
     <?php else: ?>
         <div class="production-summary">
-            <h2>Production for <?php echo $days[$selectedDay]; ?></h2>
+            <h2>Production for <?php echo $days[$selectedDay]; ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></h2>
             
             <?php if (empty($groupedData)): ?>
                 <p>No production scheduled for this day.</p>
@@ -645,6 +694,16 @@ $page_title = 'Production Schedule';
         color: #856404;
         background-color: #fff3cd;
         border-color: #ffc107;
+    }
+
+    .alert-info {
+        color: #0c5460;
+        background-color: #d1ecf1;
+        border-color: #bee5eb;
+    }
+
+    .production-source-banner {
+        margin-bottom: 12px;
     }
 
     .integrity-warning-list {

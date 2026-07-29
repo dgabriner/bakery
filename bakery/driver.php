@@ -46,12 +46,14 @@ if ($selectedDriverId > 0 && $driver) {
                 c.id as customer_id,
                 c.name as customer_name,
                 c.address as customer_address,
+                c.phone as customer_phone,
                 c.zone,
                 do.id as daily_order_id,
                 do.total_amount,
                 doa.route_order,
                 doa.scheduled_delivery_time,
                 doa.delivery_status,
+                doa.driver_id,
                 d.name as driver_name
             FROM daily_orders do
             INNER JOIN customers c ON do.customer_id = c.id
@@ -83,6 +85,7 @@ if ($selectedDriverId > 0 && $driver) {
                 'customer_id' => $row['customer_id'],
                 'customer_name' => $row['customer_name'],
                 'customer_address' => $row['customer_address'],
+                'customer_phone' => $row['customer_phone'] ?? '',
                 'zone' => $zone,
                 'daily_order_id' => $row['daily_order_id'],
                 'total_amount' => $row['total_amount'],
@@ -108,7 +111,19 @@ if ($selectedDriverId > 0 && $driver) {
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+
+$driverCompletedStops = 0;
+foreach ($driverDeliveries as $zoneStops) {
+    foreach ($zoneStops as $stop) {
+        if (($stop['delivery_status'] ?? '') === 'delivered') {
+            $driverCompletedStops++;
+        }
+    }
+}
 ?>
+
+<link rel="stylesheet" href="/bakery/css/driver.css">
+<script src="/bakery/includes/global_tracking.js"></script>
 
 <style>
 .driver-container {
@@ -563,10 +578,10 @@ require_once 'includes/nav.php';
 }
 </style>
 
-<div class="driver-container">
+<div class="driver-container driver-page-container">
     <div class="page-header">
-        <h1>🚛 Driver Details</h1>
-        <p>View daily order assignments and details for a specific driver</p>
+        <h1>Driver Route</h1>
+        <p>Daily stops with tap-to-call and navigation</p>
     </div>
 
     <!-- Driver Selector -->
@@ -590,7 +605,7 @@ require_once 'includes/nav.php';
     <div class="date-navigation">
         <div class="date-info">
             <h2>Orders for <?php echo htmlspecialchars($driver['name']); ?> on <?php echo date('l, F j, Y', strtotime($selectedDate)); ?></h2>
-            <span class="order-count">Total Orders: <?php echo count($driverDeliveries) > 0 ? array_sum(array_map('count', $driverDeliveries)) : 0; ?></span>
+            <span class="order-count"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops ?? 0; ?> stops complete</span>
         </div>
         <div class="date-controls">
             <a href="?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo date('Y-m-d', strtotime($selectedDate . ' -1 day')); ?>" class="btn btn-outline">← Previous Day</a>
@@ -598,6 +613,14 @@ require_once 'includes/nav.php';
             <a href="?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo date('Y-m-d', strtotime($selectedDate . ' +1 day')); ?>" class="btn btn-outline">Next Day →</a>
         </div>
     </div>
+
+    <?php if (($totalStops ?? 0) > 0): ?>
+    <div class="driver-sticky-bar" aria-live="polite">
+        <p class="sticky-title">Route progress</p>
+        <div class="route-progress-text"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops; ?> stops complete</div>
+        <div class="route-progress-track"><div class="route-progress-fill" style="width: <?php echo $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 100) : 0; ?>%;"></div></div>
+    </div>
+    <?php endif; ?>
 
     <!-- Statistics -->
     <div class="stats-overview">
@@ -661,18 +684,25 @@ require_once 'includes/nav.php';
                 </div>
                 
                 <div class="stops-list">
-                    <?php foreach ($zoneStops as $stop): ?>
+                    <?php foreach ($zoneStops as $stop):
+                        $phoneHref = preg_replace('/\D+/', '', (string)($stop['customer_phone'] ?? ''));
+                        $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
+                        $mapsHref = $stop['customer_address'] ? 'https://maps.google.com/?q=' . rawurlencode($stop['customer_address']) : '';
+                        $stopStatus = $stop['delivery_status'] ?? 'pending';
+                        $statusClass = in_array($stopStatus, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $stopStatus : 'pending';
+                    ?>
                     <div class="stop-item" 
                         style="--zone-color: <?php echo $stop['zone_color']; ?>; --zone-color-dark: <?php echo $stop['zone_color']; ?>"
-                        title="Zone: <?php echo htmlspecialchars($stop['zone']); ?> | Address: <?php echo htmlspecialchars($stop['customer_address']); ?>"
                         data-customer-id="<?php echo $stop['customer_id']; ?>"
-                        data-daily-order-id="<?php echo $stop['daily_order_id']; ?>"
-                        data-customer-name="<?php echo htmlspecialchars($stop['customer_name']); ?>"
-                        data-driver-name="<?php echo htmlspecialchars($stop['driver_name']); ?>"
-                        data-day-name="<?php echo date('l', strtotime($selectedDate)); ?>">
+                        data-daily-order-id="<?php echo $stop['daily_order_id']; ?>">
                         <div class="stop-header">
                             <div class="customer-name"><?php echo htmlspecialchars($stop['customer_name']); ?></div>
-                            <div class="driver-initial"><?php echo $stop['driver_initial']; ?></div>
+                            <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $statusClass))); ?></span>
+                        </div>
+                        <div class="contact-actions">
+                            <?php if ($phoneHref): ?><a class="contact-link contact-link--phone" href="<?php echo htmlspecialchars($phoneHref); ?>">📞 Call</a><?php endif; ?>
+                            <?php if ($mapsHref): ?><a class="contact-link contact-link--address" href="<?php echo htmlspecialchars($mapsHref); ?>" target="_blank" rel="noopener">🗺 Navigate</a><?php endif; ?>
+                            <a class="contact-link" href="driver_list.php?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo urlencode($selectedDate); ?>&view=delivery">📷 Photos / Complete</a>
                         </div>
                         <div class="stop-details">
                             <div class="route-order">#<?php echo $stop['route_order'] ?: 'TBD'; ?></div>

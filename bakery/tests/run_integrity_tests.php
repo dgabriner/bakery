@@ -119,6 +119,80 @@ try {
     throw $e;
 }
 
+echo "\n=== Production missing-weight detection (daily_orders path) ===\n";
+$db->beginTransaction();
+try {
+    $db->exec("INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES ('Integrity Daily No Weight', 1, 1.00, NULL)");
+    $productId = (int)$db->lastInsertId();
+    $orderDate = '2099-06-01';
+    $db->prepare("INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (1, ?, 'pending', 0)")
+        ->execute([$orderDate]);
+    $dailyOrderId = (int)$db->lastInsertId();
+    $db->prepare("INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, 4, 1.00, 4.00)")
+        ->execute([$dailyOrderId, $productId]);
+
+    $stmt = $db->prepare("
+        SELECT p.name, p.weight_grams, SUM(doi.quantity) AS total_quantity
+        FROM daily_order_items doi
+        JOIN daily_orders do ON doi.daily_order_id = do.id
+        JOIN products p ON doi.product_id = p.id
+        WHERE do.order_date = ? AND doi.product_id = ?
+        GROUP BY p.id, p.name, p.weight_grams
+    ");
+    $stmt->execute([$orderDate, $productId]);
+    $row = $stmt->fetch();
+    assert_true((int)$row['total_quantity'] > 0, 'daily order item exists for no-weight product');
+    assert_true($row['weight_grams'] === null || (int)$row['weight_grams'] <= 0, 'daily product has missing weight');
+
+    $wouldWarn = (int)$row['total_quantity'] > 0
+        && ($row['weight_grams'] === null || (int)$row['weight_grams'] <= 0);
+    assert_true($wouldWarn, 'production daily path would flag missing weight_grams');
+
+    $db->rollBack();
+} catch (Exception $e) {
+    $db->rollBack();
+    throw $e;
+}
+
+echo "\n=== Ingredient low-stock detection ===\n";
+assert_true(bakery_ingredients_inventory_ready($db), 'migration 005 inventory columns present');
+
+$db->beginTransaction();
+try {
+    $db->exec(
+        "INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name)
+         VALUES ('Integrity Test Low Stock', 'kg', 5.000, 10.000, 'Test Supplier')"
+    );
+    $lowId = (int)$db->lastInsertId();
+
+    $db->exec(
+        "INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level)
+         VALUES ('Integrity Test OK Stock', 'kg', 50.000, 10.000)"
+    );
+    $okId = (int)$db->lastInsertId();
+
+    $lowStock = bakery_low_stock_ingredients($db);
+    $lowIds = array_map('intval', array_column($lowStock, 'id'));
+    assert_true(in_array($lowId, $lowIds, true), 'fixture low-stock ingredient detected');
+    assert_true(!in_array($okId, $lowIds, true), 'well-stocked fixture ingredient excluded');
+
+    $fixture = null;
+    foreach ($lowStock as $row) {
+        if ((int)$row['id'] === $lowId) {
+            $fixture = $row;
+            break;
+        }
+    }
+    assert_true($fixture !== null, 'low-stock helper returns fixture row');
+    assert_eq('Integrity Test Low Stock', $fixture['name'], 'low-stock row name matches fixture');
+    assert_true(bakery_ingredient_is_low_stock($fixture), 'bakery_ingredient_is_low_stock true for fixture');
+
+    $db->rollBack();
+} catch (Exception $e) {
+    $db->rollBack();
+    throw $e;
+}
+
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
 echo "Failed: {$GLOBALS['TEST_FAIL']}\n";
