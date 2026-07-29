@@ -2,6 +2,17 @@
 
 This guide configures a **local-only** Bakery Manager environment that cannot fall back to production credentials.
 
+## Agent wave pointer (0D/0E)
+
+For branch, checkpoint status, parallel agent ownership, and quarantine policy, see:
+
+- [CURRENT_STATE.md](CURRENT_STATE.md) — branch, checkpoint table, quick commands
+- [agent-briefs/00_SHARED_CONTEXT.md](agent-briefs/00_SHARED_CONTEXT.md) — mandatory shared context for all agents
+- [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md) — backup/debug/test files (**DO NOT DELETE** in this wave)
+- [MARIADB_USER_PROCESS.md](MARIADB_USER_PROCESS.md) — Scoop MariaDB without Windows admin
+- [CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md) — production credential rotation (link only; no secrets here)
+- [CURSOR_OPS_DRAFT.md](CURSOR_OPS_DRAFT.md) — draft Cursor/AGENTS.md guidance
+
 ## Prerequisites
 
 | Tool | Notes |
