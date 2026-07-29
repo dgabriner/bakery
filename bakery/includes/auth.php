@@ -17,6 +17,7 @@ define('BAKERY_SESSION_ABSOLUTE_SECONDS', 12 * 60 * 60);
 function bakery_public_scripts() {
     return [
         'login.php',
+        'logout.php',
         'health_local.php',
     ];
 }
@@ -68,6 +69,7 @@ function bakery_driver_scripts() {
         'driver_list.php',
         'complete_delivery.php',
         'get_customer_order_details.php',
+        'get_driver_orders.php',
         'global_gps_handler.php',
         'call_headquarters.php',
     ];
