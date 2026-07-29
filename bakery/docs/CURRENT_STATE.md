@@ -18,6 +18,8 @@ Short pointer for humans and parallel agents. For full operating rules, read the
 
 Stage explicit paths only. **Never** `git add bakery/` as a broad add.
 
+**Git tracking (Post-0E Phase A+B):** Canonical ops pages, shared includes, `css/`, `assets/`, safe DDL, and integrity tests are tracked in commit `b803b78`. Quarantine/debug/test variants remain untracked and are blocked by `.gitignore` patterns — see [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md).
+
 ---
 
 ## Checkpoint status
