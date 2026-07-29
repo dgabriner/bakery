@@ -4,30 +4,47 @@ This guide configures a **local-only** Bakery Manager environment that cannot fa
 
 ## Prerequisites
 
-| Tool | Status on this workstation (2026-07-28) | Notes |
-|------|------------------------------------------|-------|
-| PHP 8.3 | Found at `C:\php\php.exe` (`pdo_mysql` enabled) | Add to PATH optionally |
-| MySQL or MariaDB | **Not installed** at inspection time | Required before DB boot |
-| Docker | Not found | Optional alternative |
+| Tool | Notes |
+|------|-------|
+| PHP 8.3+ | This workstation: `C:\php\php.exe` (`pdo_mysql` enabled) |
+| MariaDB/MySQL | Prefer **user-scoped Scoop** (no admin). Avoid Windows services if you lack elevation. |
 
-Until a local MySQL/MariaDB server is installed and running, schema load and page boot against the database cannot complete.
+### Recommended: Scoop MariaDB (no admin)
 
-### Install options (choose one)
+```powershell
+# One-time: install Scoop + MariaDB into your user profile
+irm get.scoop.sh | iex
+scoop install mariadb
 
-1. **MariaDB** via winget: `winget install --id MariaDB.Server -e`
-2. **MySQL** via winget: `winget install --id Oracle.MySQL -e`
-3. **XAMPP** (includes MariaDB): `winget install --id ApacheFriends.Xampp.8.2 -e`
+# Start MariaDB as a user process (NOT a Windows service — no admin)
+mysqld --standalone --console
+# Or backgrounded:
+# Start-Process mysqld.exe -ArgumentList '--standalone','--console' -WindowStyle Hidden
 
-After install, create a local DB user (example):
+# Stop: find the process and end it (no admin)
+Get-Process mysqld -ErrorAction SilentlyContinue | Stop-Process
+```
+
+Create local DB user (example; choose your own local password):
 
 ```sql
-CREATE USER 'bakery_local'@'localhost' IDENTIFIED BY 'choose_a_local_password';
-CREATE DATABASE bakerysf_local CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS bakerysf_local CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'bakery_local'@'127.0.0.1' IDENTIFIED BY 'your_local_password';
+CREATE USER IF NOT EXISTS 'bakery_local'@'localhost' IDENTIFIED BY 'your_local_password';
+GRANT ALL PRIVILEGES ON bakerysf_local.* TO 'bakery_local'@'127.0.0.1';
 GRANT ALL PRIVILEGES ON bakerysf_local.* TO 'bakery_local'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-Do **not** reuse production passwords in chat, commits, or screenshots.
+Do **not** reuse production passwords. Do **not** register MariaDB as a Windows service unless you have admin rights and intentionally want a service.
+
+### Other install options (may require admin)
+
+1. `winget install --id MariaDB.Server -e` (often needs elevation)
+2. `winget install --id Oracle.MySQL -e`
+3. XAMPP via winget
+
+After any install, point `bakery/.env` at `127.0.0.1` / `bakerysf_local` only.
 
 ## Configuration method (no Composer)
 

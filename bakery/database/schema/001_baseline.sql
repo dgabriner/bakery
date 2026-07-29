@@ -139,7 +139,7 @@ CREATE TABLE standing_orders (
   id INT NOT NULL AUTO_INCREMENT,
   customer_id INT NOT NULL,
   product_id INT NOT NULL,
-  day_of_week TINYINT NOT NULL COMMENT 'App currently mixed; fixtures use 1=Mon..7=Sun',
+  day_of_week TINYINT NOT NULL COMMENT 'Fixtures use 1=Mon through 7=Sun',
   quantity INT NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   UNIQUE KEY unique_order (customer_id, product_id, day_of_week),
@@ -150,7 +150,7 @@ CREATE TABLE standing_orders (
 
 CREATE TABLE standing_routes (
   id INT NOT NULL AUTO_INCREMENT,
-  day_of_week TINYINT NOT NULL COMMENT 'Fixtures use 1=Mon..7=Sun',
+  day_of_week TINYINT NOT NULL COMMENT 'Fixtures use 1=Mon through 7=Sun',
   driver_id INT NOT NULL,
   customer_id INT NOT NULL,
   PRIMARY KEY (id),

@@ -96,13 +96,13 @@ try {
 
 /**
  * Execute a multi-statement SQL file.
+ * Splits on semicolons outside single-quoted strings so COMMENT '...;...' is safe.
  */
 function run_sql_file(PDO $db, $path) {
     if (!is_readable($path)) {
         throw new RuntimeException("SQL file not readable: {$path}");
     }
     $sql = file_get_contents($path);
-    // Remove line comments starting with --
     $lines = preg_split("/\r\n|\n|\r/", $sql);
     $buf = '';
     foreach ($lines as $line) {
@@ -112,11 +112,34 @@ function run_sql_file(PDO $db, $path) {
         }
         $buf .= $line . "\n";
     }
-    $statements = array_filter(array_map('trim', explode(';', $buf)));
-    foreach ($statements as $statement) {
-        if ($statement === '') {
+
+    $statements = [];
+    $current = '';
+    $inString = false;
+    $len = strlen($buf);
+    for ($i = 0; $i < $len; $i++) {
+        $ch = $buf[$i];
+        if ($ch === "'" && ($i === 0 || $buf[$i - 1] !== '\\')) {
+            $inString = !$inString;
+            $current .= $ch;
             continue;
         }
+        if ($ch === ';' && !$inString) {
+            $statement = trim($current);
+            if ($statement !== '') {
+                $statements[] = $statement;
+            }
+            $current = '';
+            continue;
+        }
+        $current .= $ch;
+    }
+    $tail = trim($current);
+    if ($tail !== '') {
+        $statements[] = $tail;
+    }
+
+    foreach ($statements as $statement) {
         $db->exec($statement);
     }
 }
