@@ -27,7 +27,7 @@ if (!$columnExists) {
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $perPage = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 20; // Reduced from loading all customers
 $zoneFilter = isset($_GET['zone']) && $_GET['zone'] !== '' ? trim((string)$_GET['zone']) : null;
-$dayFilter = isset($_GET['day']) ? (int)$_GET['day'] : null;
+$dayFilter = isset($_GET['day']) ? bakery_normalize_standing_day($_GET['day']) : null;
 $zoneQueryParam = $zoneFilter !== null ? '&zone=' . urlencode($zoneFilter) : '';
 
 // Calculate offset
@@ -165,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 // Map day number to column name
                 $day_columns = [
-                    '0' => 'default_quantity_sunday',
+                    '7' => 'default_quantity_sunday',
                     '1' => 'default_quantity_monday',
                     '2' => 'default_quantity_tuesday',
                     '3' => 'default_quantity_wednesday',
@@ -197,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         foreach ($updates as $update) {
                             $customerId = (int)$update['customer_id'];
                             $productId = (int)$update['product_id'];
-                            $dayOfWeek = (int)$update['day_of_week'];
+                            $dayOfWeek = bakery_normalize_standing_day((int)$update['day_of_week']);
                             $quantity = (int)$update['quantity'];
                             
                             if ($quantity > 0) {
@@ -841,12 +841,6 @@ window.availableDrivers = <?php echo json_encode($drivers); ?>;
         <div class="notification error"><?php echo $errorMessage; ?></div>
     <?php endif; ?>
 
-    <div class="notification" style="background-color: #fff3cd; color: #856404; border: 1px solid #ffc107;">
-        <strong>Weekday note:</strong> This page uses Sunday as day <code>0</code> in inputs and filters.
-        Standing orders, production, and local fixtures store Sunday as day <code>7</code>.
-        Orders saved here for Sunday use day 0 — they will not appear on production (day 7) or pack list (day 0 from fixtures).
-    </div>
-    
     <!-- Filters -->
     <div class="filters">
         <div class="filter-group">
@@ -871,7 +865,7 @@ window.availableDrivers = <?php echo json_encode($drivers); ?>;
                 <option value="4" <?php echo $dayFilter == 4 ? 'selected' : ''; ?>>Thursday</option>
                 <option value="5" <?php echo $dayFilter == 5 ? 'selected' : ''; ?>>Friday</option>
                 <option value="6" <?php echo $dayFilter == 6 ? 'selected' : ''; ?>>Saturday</option>
-                <option value="0" <?php echo $dayFilter == 0 ? 'selected' : ''; ?>>Sunday</option>
+                <option value="7" <?php echo $dayFilter == 7 ? 'selected' : ''; ?>>Sunday</option>
             </select>
         </div>
         
@@ -899,7 +893,7 @@ window.availableDrivers = <?php echo json_encode($drivers); ?>;
                 <button class="day-filter-btn" data-day="4">Thursday</button>
                 <button class="day-filter-btn" data-day="5">Friday</button>
                 <button class="day-filter-btn" data-day="6">Saturday</button>
-                <button class="day-filter-btn" data-day="0">Sunday</button>
+                <button class="day-filter-btn" data-day="7">Sunday</button>
             </div>
             
             <div class="product-filter">
@@ -920,7 +914,7 @@ window.availableDrivers = <?php echo json_encode($drivers); ?>;
             <div class="default-quantities-grid">
                 <div class="grid-header">
                     <div class="product-name-header">Product</div>
-                    <div class="day-header" data-day="0">Sunday</div>
+                    <div class="day-header" data-day="7">Sunday</div>
                     <div class="day-header" data-day="1">Monday</div>
                     <div class="day-header" data-day="2">Tuesday</div>
                     <div class="day-header" data-day="3">Wednesday</div>
@@ -941,18 +935,19 @@ window.availableDrivers = <?php echo json_encode($drivers); ?>;
                     <?php foreach ($productLineProducts as $product): ?>
                         <div class="grid-row">
                             <div class="product-name" data-product-id="<?php echo $product['id']; ?>"><?php echo htmlspecialchars($product['name']); ?></div>
-                            <div class="quantity-input-container" data-day="0">
+                            <div class="quantity-input-container" data-day="7">
                                 <input type="number" 
-                                       id="default_<?php echo $product['id']; ?>_0" 
+                                       id="default_<?php echo $product['id']; ?>_7" 
                                        value="<?php echo $product['default_quantity_sunday']; ?>" 
                                        min="0" 
                                        data-product-id="<?php echo $product['id']; ?>"
-                                       data-day="0"
+                                       data-day="7"
                                        class="default-quantity-field">
                                 <div class="product-total" style="font-size: 0.8rem; color: #6c757d; margin-top: 2px;">
                                     Total: <?php 
-                                        $stmt = $db->prepare("SELECT SUM(quantity) as total FROM standing_orders WHERE product_id = ? AND day_of_week = 0");
-                                        $stmt->execute([$product['id']]);
+                                        $sunClause = bakery_standing_day_in_clause(7);
+                                        $stmt = $db->prepare("SELECT SUM(quantity) as total FROM standing_orders WHERE product_id = ? AND day_of_week {$sunClause['sql']}");
+                                        $stmt->execute(array_merge([$product['id']], $sunClause['values']));
                                         $total = $stmt->fetchColumn() ?: 0;
                                         echo number_format($total);
                                     ?>
@@ -1256,7 +1251,7 @@ function generateCustomerContent(customerId) {
         const dayText = badge.textContent;
         const dayMap = {
             'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4,
-            'Friday': 5, 'Saturday': 6, 'Sunday': 0
+            'Friday': 5, 'Saturday': 6, 'Sunday': 7
         };
         if (dayMap[dayText] !== undefined) {
             deliveryDays.push(dayMap[dayText]);
@@ -1309,7 +1304,7 @@ function generateCustomerContent(customerId) {
                 
                 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                 days.forEach((shortDay, index) => {
-                    const dayNumber = index === 6 ? 0 : index + 1; // Sunday is 0, not 7
+                    const dayNumber = index === 6 ? 7 : index + 1; // Sunday is 7
                     const isDeliveryDay = deliveryDays.includes(dayNumber);
                     const quantity = window.existingOrders[customerId]?.[product.id]?.[dayNumber] || 0;
                     
@@ -1479,6 +1474,7 @@ document.addEventListener('DOMContentLoaded', function() {
             'default_quantity_friday',
             'default_quantity_saturday'
         ];
+        const dayNumbers = [7, 1, 2, 3, 4, 5, 6];
         
         // Recalculate totals for each day
         dayColumns.forEach((column, index) => {
@@ -1486,7 +1482,7 @@ document.addEventListener('DOMContentLoaded', function() {
             let productCount = 0;
             
             // Get all inputs for this day
-            const inputs = document.querySelectorAll(`input[data-day="${index === 0 ? '0' : index}"]`);
+            const inputs = document.querySelectorAll(`input[data-day="${dayNumbers[index]}"]`);
             inputs.forEach(input => {
                 const quantity = parseInt(input.value) || 0;
                 if (quantity > 0) {

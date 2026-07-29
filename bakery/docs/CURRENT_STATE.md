@@ -84,13 +84,12 @@ Last verified: **55/55 characterization**, **45/45 auth** (2026-07-28).
 
 ## Known behavior contracts (not fixed)
 
-From 0C characterization — treat as current bugs/contracts until explicitly changed with tests:
+From characterization — remaining documented contracts:
 
-1. Sunday `day_of_week` **0** vs **7** mismatch across generate/pack/standing surfaces
+1. `production.php` aggregates `standing_orders`, not `daily_orders`
 2. Delivery updates assignment status only (`daily_orders.status` unchanged)
-3. `production.php` aggregates `standing_orders`, not `daily_orders`
 
-**Fixed in 0E:** zone join in `bread_distribution.php` (now uses `c.zone = z.name`); `get_driver_orders.php` implemented.
+**Fixed post-0E:** zone join (name-based); `get_driver_orders.php`; Sunday weekday encoding (canonical 7, legacy 0 read-compatible).
 
 Full detail: [CHECKPOINT_0C_CHARACTERIZATION_FINDINGS.md](CHECKPOINT_0C_CHARACTERIZATION_FINDINGS.md)
 

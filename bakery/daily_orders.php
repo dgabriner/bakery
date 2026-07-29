@@ -14,10 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         switch ($_POST['action']) {
             case 'generate_from_standing':
                 $date = $_POST['date'];
-                $phpDayOfWeek = date('N', strtotime($date)); // 1 = Monday, 7 = Sunday (PHP format)
-                
-                // Convert PHP day numbering (1=Monday, 7=Sunday) to database format (0=Sunday, 1=Monday, etc.)
-                $dbDayOfWeek = ($phpDayOfWeek == 7) ? 0 : $phpDayOfWeek;
+                $dbDayOfWeek = bakery_standing_day_from_date($date);
+                $dayClause = bakery_standing_day_in_clause($dbDayOfWeek);
                 
                 // Start transaction for better performance
                 $db->beginTransaction();
@@ -34,10 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         JOIN products p ON so.product_id = p.id
                         JOIN dough_types dt ON p.dough_type_id = dt.id
                         JOIN product_lines pl ON dt.product_line_id = pl.id
-                        WHERE so.day_of_week = ?
+                        WHERE so.day_of_week {$dayClause['sql']}
                         ORDER BY so.customer_id, so.product_id
                     ");
-                    $stmt->execute([$dbDayOfWeek]);
+                    $stmt->execute($dayClause['values']);
                     $standingOrders = $stmt->fetchAll();
                     
                     $ordersCreated = 0;

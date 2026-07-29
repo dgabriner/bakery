@@ -50,11 +50,10 @@ function finding($severity, $detail) {
 }
 
 /**
- * Convert PHP date('N') to the day number daily_orders.php uses for standing_orders.
- * Documented CURRENT behavior — do not "fix" here.
+ * Canonical standing day from PHP date('N'): 1=Mon .. 7=Sun.
  */
 function daily_orders_php_n_to_db_day($phpN) {
-    return ($phpN == 7) ? 0 : (int)$phpN;
+    return (int)$phpN;
 }
 
 function standing_save(PDO $db, $customerId, $productId, $dayOfWeek, $quantity) {
@@ -88,6 +87,7 @@ function standing_qty(PDO $db, $customerId, $productId, $dayOfWeek) {
 function generate_from_standing(PDO $db, $date) {
     $phpDayOfWeek = (int)date('N', strtotime($date));
     $dbDayOfWeek = daily_orders_php_n_to_db_day($phpDayOfWeek);
+    $dayClause = bakery_standing_day_in_clause($dbDayOfWeek);
 
     $stmt = $db->prepare("
         SELECT so.customer_id, so.product_id, so.quantity,
@@ -99,10 +99,10 @@ function generate_from_standing(PDO $db, $date) {
         JOIN products p ON so.product_id = p.id
         JOIN dough_types dt ON p.dough_type_id = dt.id
         JOIN product_lines pl ON dt.product_line_id = pl.id
-        WHERE so.day_of_week = ?
+        WHERE so.day_of_week {$dayClause['sql']}
         ORDER BY so.customer_id, so.product_id
     ");
-    $stmt->execute([$dbDayOfWeek]);
+    $stmt->execute($dayClause['values']);
     $standingOrders = $stmt->fetchAll();
 
     $ordersCreated = 0;

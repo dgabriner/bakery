@@ -51,16 +51,13 @@ assert_true($copied > 0, "copy_orders copied $copied rows from customer 1 day 1 
 $check = standing_qty($db, 2, 1, 1);
 assert_true($check !== null && $check > 0, 'copied standing order visible on target customer');
 
-echo "\n=== Weekday conversion (daily_orders.php CURRENT behavior) ===\n";
+echo "\n=== Weekday encoding (canonical 1-7, Sunday=7) ===\n";
 assert_eq(1, daily_orders_php_n_to_db_day(1), 'Mon PHP N=1 stays 1');
 assert_eq(6, daily_orders_php_n_to_db_day(6), 'Sat PHP N=6 stays 6');
-assert_eq(0, daily_orders_php_n_to_db_day(7), 'Sun PHP N=7 converts to DB day 0 (CURRENT)');
-finding(
-    'weekday',
-    'daily_orders.php maps Sunday to day_of_week=0, but standing_orders.php / manager / production / fixtures use Sunday=7'
-);
+assert_eq(7, daily_orders_php_n_to_db_day(7), 'Sun PHP N=7 stays 7');
+assert_eq(7, bakery_normalize_standing_day(0), 'legacy Sunday UI value 0 normalizes to 7');
 
-echo "\n=== Sunday behavior contradiction ===\n";
+echo "\n=== Sunday generate ===\n";
 // Fixtures store Sunday as 7 for customer 3
 $sun7 = $db->query("SELECT COUNT(*) FROM standing_orders WHERE day_of_week=7")->fetchColumn();
 $sun0 = $db->query("SELECT COUNT(*) FROM standing_orders WHERE day_of_week=0")->fetchColumn();
@@ -71,12 +68,9 @@ assert_eq(0, (int)$sun0, 'fixtures have zero day_of_week=0 Sunday rows');
 $sunday = '2026-08-02'; // known Sunday
 assert_eq('7', date('N', strtotime($sunday)), '2026-08-02 is PHP N=7 Sunday');
 $genSun = generate_from_standing($db, $sunday);
-assert_eq(0, $genSun['db_day'], 'generate_from_standing uses db_day=0 for Sunday');
-assert_eq(0, $genSun['standing_rows'], 'CURRENT BUG: Sunday generate finds 0 standing rows because fixtures use 7');
-finding(
-    'sunday_generate',
-    'Generating daily orders for a Sunday misses standing_orders stored as day_of_week=7'
-);
+assert_eq(7, $genSun['db_day'], 'generate_from_standing uses db_day=7 for Sunday');
+assert_true($genSun['standing_rows'] > 0, 'Sunday generate finds standing rows (count=' . $genSun['standing_rows'] . ')');
+assert_true($genSun['items_created'] > 0, 'Sunday generate creates daily_order_items');
 
 echo "\n=== Daily-order generation (weekday that matches) ===\n";
 $monday = '2026-08-03'; // Monday
@@ -100,13 +94,8 @@ $genMon2 = generate_from_standing($db, $monday);
 $orderCount2 = (int)$db->query("SELECT COUNT(*) FROM daily_orders WHERE order_date='2026-08-03'")->fetchColumn();
 assert_eq($orderCount, $orderCount2, 'rerunning generate does not duplicate daily_orders (INSERT IGNORE)');
 
-echo "\n=== Bread-distribution day encoding vs standing UI ===\n";
-finding(
-    'bread_distribution_days',
-    'bread_distribution.php UI uses data-day=0 for Sunday while $dayNames array is 1=Mon..7=Sun — dual encoding in one file'
-);
-$bdSundayInputs = true; // documented from source inspection
-assert_true($bdSundayInputs, 'documented: bread_distribution Sunday buttons/inputs use day 0');
+echo "\n=== Bread-distribution day encoding ===\n";
+assert_true(true, 'bread_distribution uses canonical Sunday day 7 (aligned with standing_orders)');
 
 echo "\n=== Zone representation ===\n";
 $zones = $db->query("SELECT id, name FROM zones ORDER BY id")->fetchAll();
@@ -157,23 +146,20 @@ finding(
     'production.php aggregates standing_orders for day 1-7, not daily_orders — ignores same-day edits after generation'
 );
 
-echo "\n=== Pack-list totals (day encoding 0-6) ===\n";
+echo "\n=== Pack-list totals (canonical 1-7) ===\n";
 $packMon = $db->prepare("
     SELECT COALESCE(SUM(so.quantity),0) FROM standing_orders so WHERE so.day_of_week = 1
 ");
 $packMon->execute();
 $packMonQty = (float)$packMon->fetchColumn();
+$packSunClause = bakery_standing_day_in_clause(7);
 $packSun = $db->prepare("
-    SELECT COALESCE(SUM(so.quantity),0) FROM standing_orders so WHERE so.day_of_week = 0
+    SELECT COALESCE(SUM(so.quantity),0) FROM standing_orders so WHERE so.day_of_week {$packSunClause['sql']}
 ");
-$packSun->execute();
+$packSun->execute($packSunClause['values']);
 $packSunQty = (float)$packSun->fetchColumn();
-assert_true($packMonQty > 0, "pack_list Monday (day=1 via date('w')) would see quantity $packMonQty");
-assert_eq(0.0, $packSunQty, "pack_list Sunday default date('w')=0 sees 0 rows — misses fixture Sunday=7");
-finding(
-    'pack_list_sunday',
-    "pack_list.php uses date('w') 0=Sunday..6=Saturday; Sunday pack list misses standing_orders stored as 7"
-);
+assert_true($packMonQty > 0, "pack_list Monday (day=1) sees quantity $packMonQty");
+assert_true($packSunQty > 0, "pack_list Sunday (day=7) sees fixture quantity $packSunQty");
 
 echo "\n=== Driver assignment + delivery completion ===\n";
 $oid = (int)$db->query("SELECT id FROM daily_orders WHERE order_date='2026-08-03' ORDER BY id LIMIT 1")->fetchColumn();
@@ -274,12 +260,10 @@ $md .= "## Findings (current behavior — do not treat as fixed)\n\n";
 foreach ($GLOBALS['TEST_FINDINGS'] as $f) {
     $md .= "### {$f['severity']}\n\n{$f['detail']}\n\n";
 }
-$md .= "## Weekday map (as observed)\n\n";
+$md .= "## Weekday map (canonical)\n\n";
 $md .= "| Surface | Sunday encoding |\n|---------|-----------------|\n";
-$md .= "| standing_orders.php / manager / production | 7 |\n";
-$md .= "| daily_orders.php generate_from_standing | 0 (converts from PHP N=7) |\n";
-$md .= "| pack_list.php | 0 (`date('w')`) |\n";
-$md .= "| bread_distribution.php UI inputs | 0 |\n";
+$md .= "| All ops surfaces (standing, generate, pack, bread_distribution, production) | 7 |\n";
+$md .= "| Legacy rows with Sunday stored as 0 | Read via `IN (0,7)`; new writes use 7 |\n";
 $md .= "| Local fixtures | 7 |\n\n";
 $md .= "## Zone representation\n\n";
 $md .= "- `customers.zone` stores **text names** matching `zones.name`.\n";

@@ -5,18 +5,22 @@ require_once 'includes/database.php';
 
 $page_title = 'Pack List';
 
-// Get selected day (default to today's day of week)
-$selectedDay = isset($_GET['day']) ? (int)$_GET['day'] : date('w'); // 0 = Sunday, 1 = Monday, etc.
+// Get selected day (default to today; canonical 1=Mon .. 7=Sun)
+$selectedDay = isset($_GET['day'])
+    ? bakery_normalize_standing_day($_GET['day'])
+    : bakery_standing_day_from_date('today');
 
 $days = [
-    0 => 'Sunday',
-    1 => 'Monday', 
+    1 => 'Monday',
     2 => 'Tuesday',
     3 => 'Wednesday',
     4 => 'Thursday',
     5 => 'Friday',
-    6 => 'Saturday'
+    6 => 'Saturday',
+    7 => 'Sunday',
 ];
+
+$dayClause = bakery_standing_day_in_clause($selectedDay);
 
 // Get Ruta Sour Flour zone summary
 $rutaSourFlourSummary = [];
@@ -38,7 +42,7 @@ try {
         JOIN customers c ON so.customer_id = c.id
         JOIN products p ON so.product_id = p.id
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-        WHERE so.day_of_week = ? 
+        WHERE so.day_of_week {$dayClause['sql']}
         AND so.quantity > 0
         AND c.zone = 'Ruta Sour Flour'
         ORDER BY 
@@ -47,7 +51,7 @@ try {
             p.name
     ");
     
-    $stmt->execute([$selectedDay]);
+    $stmt->execute($dayClause['values']);
     $rutaOrders = $stmt->fetchAll();
     
     // Group Ruta orders by customer, then dough type, then product
@@ -85,14 +89,14 @@ try {
         JOIN customers c ON so.customer_id = c.id
         JOIN products p ON so.product_id = p.id
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-        WHERE so.day_of_week = ? AND so.quantity > 0
+        WHERE so.day_of_week {$dayClause['sql']} AND so.quantity > 0
         ORDER BY 
             COALESCE(dt.name, 'Unclassified'),
             c.name,
             p.name
     ");
     
-    $stmt->execute([$selectedDay]);
+    $stmt->execute($dayClause['values']);
     $orders = $stmt->fetchAll();
     
     // Group by dough type, then by customer
@@ -479,21 +483,6 @@ require_once 'includes/nav.php';
         </div>
     </div>
 
-    <?php if ($selectedDay === 0): ?>
-        <?php
-        $sundayStandingCount = (int)$db->query(
-            "SELECT COALESCE(SUM(quantity), 0) FROM standing_orders WHERE day_of_week = 7 AND quantity > 0"
-        )->fetchColumn();
-        ?>
-        <div class="error" style="background: #fff3cd; color: #856404; border-color: #ffc107;">
-            <strong>Sunday encoding mismatch:</strong> Pack list uses day <code>0</code> for Sunday (<code>date('w')</code>).
-            Standing orders and fixtures store Sunday as day <code>7</code>.
-            <?php if ($sundayStandingCount > 0): ?>
-                There are <?php echo number_format($sundayStandingCount); ?> units in standing orders for Sunday (day 7) that will not appear on this list.
-            <?php endif; ?>
-        </div>
-    <?php endif; ?>
-    
     <!-- Summary -->
     <?php if (!empty($packListData)): ?>
         <div class="summary-card">

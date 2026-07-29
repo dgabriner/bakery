@@ -283,13 +283,6 @@ $page_title = 'Production Schedule';
         </form>
     </div>
     
-    <?php if ($selectedDay === 7): ?>
-        <div class="alert alert-warning">
-            <strong>Sunday encoding:</strong> Production uses day <code>7</code> for Sunday.
-            Daily order generation and bread distribution use day <code>0</code> for Sunday — those orders will not appear here unless stored as day 7.
-        </div>
-    <?php endif; ?>
-
     <?php if (!empty($integrityWarnings)): ?>
         <div class="alert alert-warning">
             <strong>Data integrity warnings (<?php echo count($integrityWarnings); ?>):</strong>

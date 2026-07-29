@@ -100,7 +100,7 @@ css/
 |----------|--------|------|-------|
 | Close Checkpoint 0E | Approved | 2026-07-28 | Tests green; commits landed |
 | Track canonical app pages | Approved | 2026-07-28 | Phase A+B landed — see commit after 0E close |
-| Weekday migration | Pending | — | Blocked |
+| Weekday migration | Partial | 2026-07-28 | Code aligned on Sunday=7; legacy 0 rows read-compatible; no DB rewrite |
 | Zone schema migration | Pending | — | Blocked |
 | Production deploy | Pending | — | Blocked |
 | Quarantine deletion pass | Pending | — | Human review only |

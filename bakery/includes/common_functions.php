@@ -350,4 +350,43 @@ function cache_operation($key, $callback, $ttl = 300) {
     file_put_contents($cacheFile, serialize($result));
     
     return $result;
-} 
+}
+
+/**
+ * Canonical standing-order weekday: 1 = Monday through 7 = Sunday.
+ * Matches standing_orders, production, and local fixtures.
+ */
+function bakery_standing_day_from_date($date) {
+    return (int)date('N', strtotime($date));
+}
+
+/**
+ * Normalize UI/API day input to canonical 1-7 (legacy Sunday = 0 maps to 7).
+ */
+function bakery_normalize_standing_day($day) {
+    $day = (int)$day;
+    return $day === 0 ? 7 : $day;
+}
+
+/**
+ * Values to match in standing_orders for a canonical day (Sunday includes legacy 0).
+ *
+ * @return int[]
+ */
+function bakery_standing_day_match_values($canonicalDay) {
+    $canonicalDay = bakery_normalize_standing_day($canonicalDay);
+    return $canonicalDay === 7 ? [0, 7] : [$canonicalDay];
+}
+
+/**
+ * Build an IN (...) SQL fragment and bound values for standing_orders day filters.
+ *
+ * @return array{sql: string, values: int[]}
+ */
+function bakery_standing_day_in_clause($canonicalDay) {
+    $values = bakery_standing_day_match_values($canonicalDay);
+    return [
+        'sql' => 'IN (' . implode(',', array_fill(0, count($values), '?')) . ')',
+        'values' => $values,
+    ];
+}
