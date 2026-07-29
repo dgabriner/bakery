@@ -163,9 +163,50 @@ After fixtures load:
 - Drivers: Demo Driver Ava, Demo Driver Ben
 - Products: Demo Country Loaf, Demo Batard, Demo Concha, Demo Sandwich Loaf
 
+## Pull production data (optional)
+
+One-way copy of DreamHost `bakerysf` into local `bakerysf_local`. **Destroys** current local data. App `.env` stays on `127.0.0.1` / `bakerysf_local` — do not point runtime at production.
+
+1. Whitelist your public IP for MySQL user `bakerysf` in [DreamHost MySQL Databases](https://panel.dreamhost.com/index.cgi?tree=mysql.databases) → Allowable Hosts (keep `%.dreamhost.com`).
+2. Ensure local MariaDB is running (`scripts/start_local_mariadb.ps1`).
+3. Copy credentials file (gitignored):
+
+```powershell
+cd C:\Users\918825809\CascadeProjects\windsurf-project\bakery
+copy .env.production.pull.example .env.production.pull
+# Edit .env.production.pull: set PROD_DB_PASS (and host/user if needed)
+```
+
+4. Run the pull (recreates `danny@sourflour.org` as administrator unless `--skip-admin`):
+
+```powershell
+$env:Path = "$env:USERPROFILE\scoop\shims;" + $env:Path
+C:\php\php.exe scripts\pull_prod_to_local.php --admin-password="YourLocalLoginPassword"
+```
+
+Or set `LOCAL_ADMIN_PASSWORD` inside `.env` / `.env.production.pull` and omit the flag.
+
+After any `setup_local_db.php --reset` or `seed_local_users.php`, run (or rely on automatic call):
+
+```powershell
+C:\php\php.exe scripts\ensure_local_admin.php
+```
+
+`LOCAL_ADMIN_*` in `.env` is the durable source so login survives fixture resets. Avoid `--reset` unless you intend to wipe a production pull.
+
+5. Verify:
+
+```powershell
+C:\php\php.exe scripts\verify_local_env.php
+# Login: http://localhost:8080/bakery/login.php
+```
+
+Dumps are written under `storage/dumps/` (gitignored, contains PII). Do not commit them.
+
 ## Proof production cannot be reached accidentally
 
 1. `scripts/verify_local_env.php` fails if host/name look like production.
 2. `includes/config.php` `bakery_assert_safe_database_target()` aborts the request.
 3. `scripts/setup_local_db.php` refuses non-loopback hosts and `bakerysf` name.
 4. `.env` is gitignored; `.env.example` contains only placeholders.
+5. Production pull uses a separate `.env.production.pull` (gitignored) and never changes app `.env`.

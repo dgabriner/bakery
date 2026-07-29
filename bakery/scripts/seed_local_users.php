@@ -97,4 +97,13 @@ foreach ($seeds as $seed) {
     echo "Seeded {$seed['email']} ({$seed['role']})\n";
 }
 
+// Durable operator login (danny@sourflour.org by default) from LOCAL_ADMIN_* env
+$ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
+if (is_readable($ensure)) {
+    passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure), $ensureCode);
+    if ($ensureCode !== 0) {
+        echo "Skipped durable admin (set LOCAL_ADMIN_PASSWORD in .env or .env.production.pull).\n";
+    }
+}
+
 echo "Done.\n";

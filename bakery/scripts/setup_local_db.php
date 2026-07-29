@@ -57,6 +57,7 @@ try {
     );
 
     if ($reset) {
+        echo "WARNING: --reset will DROP bakerysf_local and destroy any production pull data.\n";
         $server->exec('DROP DATABASE IF EXISTS `' . str_replace('`', '``', $name) . '`');
         echo "Dropped database {$name}\n";
     }
@@ -92,7 +93,21 @@ try {
     $customers = (int)$db->query('SELECT COUNT(*) FROM customers')->fetchColumn();
     $products = (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn();
     echo "Fixture counts: customers={$customers}, products={$products}\n";
-    echo "Local database ready. Run scripts/seed_local_users.php for login accounts.\n";
+
+    // Restore durable local admin if LOCAL_ADMIN_PASSWORD is configured
+    $ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
+    if (is_readable($ensure)) {
+        $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure);
+        passthru($cmd, $ensureCode);
+        if ($ensureCode !== 0) {
+            echo "Note: local admin not ensured (set LOCAL_ADMIN_PASSWORD in .env). Seed fixtures: scripts/seed_local_users.php\n";
+        }
+    } else {
+        echo "Local database ready. Run scripts/seed_local_users.php for login accounts.\n";
+    }
+    if ($reset) {
+        echo "WARNING: --reset replaced the DB with demo fixtures. Re-run scripts/pull_prod_to_local.php to restore production data.\n";
+    }
     exit(0);
 } catch (Throwable $e) {
     fwrite(STDERR, "Setup failed: " . $e->getMessage() . "\n");

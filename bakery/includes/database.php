@@ -69,10 +69,10 @@ function safe_table_count($db, $table, $where = '') {
  */
 function table_exists($db, $table) {
     try {
-        $query = "SHOW TABLES LIKE ?";
-        $stmt = $db->prepare($query);
-        $stmt->execute([$table]);
-        return $stmt->fetchColumn() !== false;
+        // MariaDB/MySQL reject placeholders in SHOW TABLES LIKE
+        $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string)$table);
+        $query = "SHOW TABLES LIKE " . $db->quote($safe);
+        return $db->query($query)->fetchColumn() !== false;
     } catch (Exception $e) {
         error_log("Table exists check error for $table: " . $e->getMessage());
         return false;
