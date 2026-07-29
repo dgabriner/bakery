@@ -398,6 +398,15 @@ foreach (['v_daily_routes', 'v_dough_types_with_product_lines'] as $view) {
     echo $exists ? "View OK: {$view}\n" : "View MISSING: {$view}\n";
 }
 
+$migrate = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'run_migrations.php';
+if (is_readable($migrate)) {
+    echo "Applying post-import migrations...\n";
+    passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($migrate), $migrateCode);
+    if ($migrateCode !== 0) {
+        fwrite(STDERR, "Warning: run_migrations.php exited with code {$migrateCode}\n");
+    }
+}
+
 if (!$skipAdmin) {
     $ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
     $ensureCmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure);

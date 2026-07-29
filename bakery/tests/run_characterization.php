@@ -110,24 +110,36 @@ foreach ($customers as $c) {
     }
     assert_true($match, "customer zone text matches zones.name for '{$c['zone']}'");
 }
-// bread_distribution.php uses name-based filter and JOIN (0E fix)
+// Zone filter/join (name + zone_id after migration 004)
 $stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
 $stmt->execute([$zones[0]['name']]);
 $goodCount = (int)$stmt->fetchColumn();
 assert_true($goodCount > 0, "filtering c.zone by zones.name returns rows ($goodCount)");
+$joinSql = bakery_customer_zone_join_sql();
 $stmt = $db->prepare("
     SELECT COUNT(*) FROM customers c
-    LEFT JOIN zones z ON c.zone = z.name
+    {$joinSql}
     WHERE c.zone = ?
 ");
 $stmt->execute([$zones[0]['name']]);
 $joinCount = (int)$stmt->fetchColumn();
-assert_true($joinCount > 0, "name-based zone JOIN (c.zone = z.name) returns rows ($joinCount)");
+assert_true($joinCount > 0, "zone JOIN (zone_id or name) returns rows ($joinCount)");
 $zoneId = (int)$zones[0]['id'];
 $stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
 $stmt->execute([(string)$zoneId]);
 $badCount = (int)$stmt->fetchColumn();
-assert_eq(0, $badCount, 'filtering c.zone by zones.id still returns 0 — customers store text names not ids');
+assert_eq(0, $badCount, 'filtering c.zone by zones.id text still returns 0');
+$colCheck = $db->prepare(
+    "SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'zone_id'"
+);
+$colCheck->execute();
+if ((int)$colCheck->fetchColumn() > 0) {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM customers WHERE zone IS NOT NULL AND zone_id = ?");
+    $stmt->execute([$zoneId]);
+    $idCount = (int)$stmt->fetchColumn();
+    assert_true($idCount > 0, "customers.zone_id backfilled for zone '{$zones[0]['name']}' ($idCount rows)");
+}
 
 echo "\n=== Production totals (day 1 / Monday, encoding 1-7) ===\n";
 $prod = $db->prepare("
@@ -267,7 +279,7 @@ $md .= "| Legacy rows with Sunday stored as 0 | Read via `IN (0,7)`; new writes 
 $md .= "| Local fixtures | 7 |\n\n";
 $md .= "## Zone representation\n\n";
 $md .= "- `customers.zone` stores **text names** matching `zones.name`.\n";
-$md .= "- `bread_distribution.php` filters/joins by zone **name** (`c.zone = z.name`) as of Checkpoint 0E.\n\n";
+$md .= "- `customers.zone_id` FK to `zones.id` (migration 004); bread_distribution joins via zone_id with name fallback.\n\n";
 $md .= "## get_driver_orders.php contract\n\n";
 $md .= "```\nPOST application/x-www-form-urlencoded\ndriver_id={int}&date={YYYY-MM-DD}\n\nResponse JSON:\n{\n  \"success\": true,\n  \"orders\": [\n    {\n      \"daily_order_id\": int,\n      \"customer_name\": string,\n      \"customer_address\": string,\n      \"zone\": string,\n      \"route_order\": int,\n      \"scheduled_delivery_time\": string|null,\n      \"total_amount\": number\n    }\n  ]\n}\n```\n\nCanonical SQL source: `driver_list.php` server query joining `daily_orders`, `customers`, `daily_order_assignments`, `drivers` filtered by `doa.driver_id` and `do.order_date`.\n";
 file_put_contents($findingsPath, $md);

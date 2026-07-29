@@ -105,7 +105,7 @@ $customerQuery = "
         z.name as zone_name,
         GROUP_CONCAT(DISTINCT sr.day_of_week ORDER BY sr.day_of_week) as delivery_days
     FROM customers c
-    LEFT JOIN zones z ON c.zone = z.name
+    " . bakery_customer_zone_join_sql() . "
     LEFT JOIN standing_routes sr ON c.id = sr.customer_id
 ";
 

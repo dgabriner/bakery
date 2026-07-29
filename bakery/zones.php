@@ -54,8 +54,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $id = $_POST['id'];
                 
                 // Check if zone is being used by customers
-                $stmt = $db->prepare("SELECT COUNT(*) as count FROM customers WHERE zone = (SELECT name FROM zones WHERE id = ?)");
-                $stmt->execute([$id]);
+                $stmt = $db->prepare(
+                    "SELECT COUNT(*) as count FROM customers
+                     WHERE zone_id = ? OR zone = (SELECT name FROM zones WHERE id = ? LIMIT 1)"
+                );
+                $stmt->execute([$id, $id]);
                 $result = $stmt->fetch();
                 
                 if ($result['count'] > 0) {

@@ -15,13 +15,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($_POST['action']) {
             case 'create':
                 try {
-                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, deliver_by, deliver_after, default_pan_dulce_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                    $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
+                    $zoneId = bakery_zone_id_for_name($db, $zoneName);
+                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt->execute([
                         $_POST['name'],
                         empty($_POST['email']) ? null : $_POST['email'],
                         $_POST['phone'],
                         $_POST['address'],
-                        empty($_POST['zone']) ? null : $_POST['zone'],
+                        $zoneName,
+                        $zoneId,
                         empty($_POST['deliver_by']) ? null : $_POST['deliver_by'],
                         empty($_POST['deliver_after']) ? null : $_POST['deliver_after'],
                         empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price']
@@ -35,13 +38,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'update':
                 try {
-                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ? WHERE id = ?");
+                    $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
+                    $zoneId = bakery_zone_id_for_name($db, $zoneName);
+                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ? WHERE id = ?");
                     $stmt->execute([
                         $_POST['name'],
                         $_POST['email'],
                         $_POST['phone'],
                         $_POST['address'],
-                        empty($_POST['zone']) ? null : $_POST['zone'],
+                        $zoneName,
+                        $zoneId,
                         empty($_POST['deliver_by']) ? null : $_POST['deliver_by'],
                         empty($_POST['deliver_after']) ? null : $_POST['deliver_after'],
                         empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price'],
@@ -96,8 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception("Invalid field");
                     }
                     
-                    $stmt = $db->prepare("UPDATE customers SET $field = ? WHERE id = ?");
-                    $stmt->execute([empty($value) ? null : $value, $id]);
+                    if ($field === 'zone') {
+                        $zoneName = empty($value) ? null : $value;
+                        $zoneId = bakery_zone_id_for_name($db, $zoneName);
+                        $stmt = $db->prepare("UPDATE customers SET zone = ?, zone_id = ? WHERE id = ?");
+                        $stmt->execute([$zoneName, $zoneId, $id]);
+                    } else {
+                        $stmt = $db->prepare("UPDATE customers SET $field = ? WHERE id = ?");
+                        $stmt->execute([empty($value) ? null : $value, $id]);
+                    }
                     
                     echo json_encode(['success' => true]);
                     exit;
@@ -135,15 +148,25 @@ if (isset($_GET['success'])) {
     }
 }
 
-// Define zones for dropdown
-$zones = [
-    'Centro',
-    'Mission',
-    'Ruta Sour Flour',
-    'Daly City/San Mateo',
-    'North Bay',
-    'East Bay'
-];
+// Load zones from DB (fallback to legacy hardcoded list if empty)
+$zones = [];
+try {
+    if (table_exists($db, 'zones')) {
+        $zones = $db->query("SELECT name FROM zones ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+    }
+} catch (Exception $e) {
+    error_log("Zones load error: " . $e->getMessage());
+}
+if (empty($zones)) {
+    $zones = [
+        'Centro',
+        'Mission',
+        'Ruta Sour Flour',
+        'Daly City/San Mateo',
+        'North Bay',
+        'East Bay'
+    ];
+}
 ?>
 
 <div class="container">

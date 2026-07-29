@@ -26,9 +26,9 @@ $filterCount = (int)$stmt->fetchColumn();
 assert_true($filterCount > 0, "WHERE c.zone = zones.name returns rows for '$zoneName' ($filterCount)");
 
 $stmt = $db->prepare("
-    SELECT c.id, c.name, c.zone, z.name AS zone_name
+    SELECT c.id, c.name, c.zone, c.zone_id, z.name AS zone_name
     FROM customers c
-    LEFT JOIN zones z ON c.zone = z.name
+    " . bakery_customer_zone_join_sql() . "
     WHERE c.zone = ?
 ");
 $stmt->execute([$zoneName]);
@@ -42,7 +42,19 @@ foreach ($rows as $row) {
 $stmt = $db->prepare("SELECT COUNT(*) FROM customers c WHERE c.zone = ?");
 $stmt->execute([(string)$zones[0]['id']]);
 $idFilterCount = (int)$stmt->fetchColumn();
-assert_eq(0, $idFilterCount, 'filtering by zones.id still returns 0 (customers store names)');
+assert_eq(0, $idFilterCount, 'filtering by zones.id as text still returns 0');
+
+$colCheck = $db->prepare(
+    "SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'zone_id'"
+);
+$colCheck->execute();
+if ((int)$colCheck->fetchColumn() > 0) {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM customers WHERE zone_id = ?");
+    $stmt->execute([(int)$zones[0]['id']]);
+    $zoneIdCount = (int)$stmt->fetchColumn();
+    assert_true($zoneIdCount > 0, "zone_id backfill populated for '$zoneName' ($zoneIdCount rows)");
+}
 
 echo "\n=== Production missing-weight detection ===\n";
 $db->beginTransaction();

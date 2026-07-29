@@ -105,6 +105,14 @@ try {
     } else {
         echo "Local database ready. Run scripts/seed_local_users.php for login accounts.\n";
     }
+    $migrate = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'run_migrations.php';
+    if (is_readable($migrate)) {
+        passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($migrate), $migrateCode);
+        if ($migrateCode !== 0) {
+            fwrite(STDERR, "Warning: run_migrations.php exited with code {$migrateCode}\n");
+        }
+    }
+
     if ($reset) {
         echo "WARNING: --reset replaced the DB with demo fixtures. Re-run scripts/pull_prod_to_local.php to restore production data.\n";
     }

@@ -390,3 +390,26 @@ function bakery_standing_day_in_clause($canonicalDay) {
         'values' => $values,
     ];
 }
+
+/**
+ * Resolve zones.id from a text zone name (null if unknown or empty).
+ */
+function bakery_zone_id_for_name(PDO $db, $zoneName) {
+    if ($zoneName === null || $zoneName === '') {
+        return null;
+    }
+    if (!table_exists($db, 'zones')) {
+        return null;
+    }
+    $stmt = $db->prepare('SELECT id FROM zones WHERE name = ? LIMIT 1');
+    $stmt->execute([(string)$zoneName]);
+    $id = $stmt->fetchColumn();
+    return $id !== false ? (int)$id : null;
+}
+
+/**
+ * SQL fragment: join customers to zones via zone_id with name fallback.
+ */
+function bakery_customer_zone_join_sql() {
+    return 'LEFT JOIN zones z ON (c.zone_id IS NOT NULL AND c.zone_id = z.id) OR (c.zone_id IS NULL AND c.zone = z.name)';
+}

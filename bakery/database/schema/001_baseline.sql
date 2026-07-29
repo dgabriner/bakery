@@ -51,10 +51,13 @@ CREATE TABLE customers (
   deliver_after TIME DEFAULT NULL,
   delivery_time INT DEFAULT 20,
   zone VARCHAR(50) DEFAULT NULL,
+  zone_id INT DEFAULT NULL,
   default_pan_dulce_price DECIMAL(10,2) DEFAULT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY name (name),
-  KEY idx_customers_coordinates (latitude, longitude)
+  KEY idx_customers_coordinates (latitude, longitude),
+  KEY idx_customers_zone_id (zone_id),
+  CONSTRAINT fk_customers_zone_id FOREIGN KEY (zone_id) REFERENCES zones(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE product_lines (
