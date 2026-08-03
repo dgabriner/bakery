@@ -1,0 +1,140 @@
+# Deploy DreamHost
+
+# Deploy bakery app files to DreamHost over SFTP after merge (or on demand).
+#
+# Phone / Cloud flow:
+#   Cloud agent opens PR → you merge to main or live → this workflow uploads.
+#   Or: Actions → Deploy DreamHost → Run workflow (no PC needed).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   SFTP_HOST, SFTP_USER, SFTP_PASSWORD, SFTP_REMOTE_ROOT
+# See bakery/docs/GITHUB_DEPLOY.md
+
+name: Deploy DreamHost
+
+on:
+  push:
+    branches: [main, live]
+    paths:
+      - "bakery/**"
+      - ".github/workflows/deploy-dreamhost.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Upload only bakery files changed in this commit range, or every deployable file"
+        type: choice
+        options:
+          - changed
+          - all
+        default: changed
+
+concurrency:
+  group: deploy-dreamhost
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: SFTP upload to DreamHost
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install paramiko
+        run: pip install --quiet paramiko
+
+      - name: Resolve upload file list
+        id: files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          MODE="${INPUT_MODE:-changed}"
+          if [ "$EVENT_NAME" = "push" ]; then
+            MODE="changed"
+          fi
+
+          LIST_FILE="${RUNNER_TEMP}/bakery_deploy_files.txt"
+          BAKERY_ROOT="${GITHUB_WORKSPACE}/bakery"
+          : > "$LIST_FILE"
+
+          if [ "$MODE" = "all" ]; then
+            echo "Mode: all deployable files"
+            python bakery/scripts/list_deploy_files.py \
+              --bakery-root "$BAKERY_ROOT" \
+              --repo-root "$GITHUB_WORKSPACE" \
+              --all > "$LIST_FILE"
+          else
+            FROM_REF=""
+            if [ "$EVENT_NAME" = "push" ] && [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              FROM_REF="$BEFORE_SHA"
+            elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              FROM_REF="$(git rev-parse HEAD^)"
+            fi
+
+            if [ -z "$FROM_REF" ]; then
+              echo "No previous commit to diff against; uploading full deploy set."
+              python bakery/scripts/list_deploy_files.py \
+                --bakery-root "$BAKERY_ROOT" \
+                --repo-root "$GITHUB_WORKSPACE" \
+                --all > "$LIST_FILE"
+            else
+              echo "Mode: changed (${FROM_REF}..${HEAD_SHA})"
+              python bakery/scripts/list_deploy_files.py \
+                --bakery-root "$BAKERY_ROOT" \
+                --repo-root "$GITHUB_WORKSPACE" \
+                --git-from "$FROM_REF" \
+                --git-to "$HEAD_SHA" > "$LIST_FILE"
+            fi
+          fi
+
+          # Drop blank lines only
+          grep -v '^[[:space:]]*$' "$LIST_FILE" > "${LIST_FILE}.clean" || true
+          mv "${LIST_FILE}.clean" "$LIST_FILE"
+
+          COUNT="$(wc -l < "$LIST_FILE" | tr -d ' ')"
+          echo "files=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "list_file=${LIST_FILE}" >> "$GITHUB_OUTPUT"
+          echo "Upload candidates (${COUNT}):"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "(none)"
+          else
+            sed 's/^/  - /' "$LIST_FILE"
+          fi
+
+      - name: Upload via SFTP
+        if: steps.files.outputs.files != '0'
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_REMOTE_ROOT: ${{ secrets.SFTP_REMOTE_ROOT }}
+        run: |
+          set -euo pipefail
+          for required in SFTP_HOST SFTP_USER SFTP_PASSWORD SFTP_REMOTE_ROOT; do
+            if [ -z "${!required}" ]; then
+              echo "Missing GitHub Actions secret: ${required}"
+              echo "Add it under Settings → Secrets and variables → Actions."
+              echo "See bakery/docs/GITHUB_DEPLOY.md"
+              exit 1
+            fi
+          done
+          python bakery/scripts/sftp_upload.py \
+            --local-root "${GITHUB_WORKSPACE}/bakery" \
+            --list "${{ steps.files.outputs.list_file }}"
+
+      - name: Skip notice
+        if: steps.files.outputs.files == '0'
+        run: echo "No deployable bakery files changed; nothing uploaded."
