@@ -2,6 +2,8 @@
 
 Keeps `bakery.sourflour.org/bake/` nearly mirrored with local deployable files.
 
+**Phone / Cloud (no PC):** use merge-triggered GitHub Actions instead — see [GITHUB_DEPLOY.md](GITHUB_DEPLOY.md). Local auto-push below only runs on your Windows machine.
+
 ## What you need
 
 1. **`.env.sftp`** in the bakery folder (already set up locally)

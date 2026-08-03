@@ -91,6 +91,10 @@ Excludes: debug/test/backup variants, local `.env`, SQL dumps, quarantine files.
 2. Set `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD`, `SFTP_REMOTE_ROOT` (`bakery.sourflour.org/bake`)
 3. Install Python + `paramiko` once: `py -m pip install paramiko`
 
+### Phone / Cloud deploy (no Windows PC)
+
+Merge to `main` or `live` (or run **Actions → Deploy DreamHost**) so GitHub SFTPs changed files. Setup: [GITHUB_DEPLOY.md](GITHUB_DEPLOY.md). Keep `push.bat` for desk work.
+
 ### See what changed since last deploy
 
 ```
@@ -184,4 +188,5 @@ Updates `LAST_DEPLOY.json` so option 9 / SFTP push only shows new changes next t
 
 - [LOCAL_SETUP.md](LOCAL_SETUP.md) — MariaDB, local login, first-time setup
 - [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md) — production env vars, auth, verification
+- [GITHUB_DEPLOY.md](GITHUB_DEPLOY.md) — merge-triggered DreamHost SFTP from GitHub (phone / Cloud)
 - [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md) — files that must never be deployed
