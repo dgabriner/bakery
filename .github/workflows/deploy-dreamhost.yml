@@ -1,13 +1,9 @@
-# Deploy DreamHost
-
 # Deploy bakery app files to DreamHost over SFTP after merge (or on demand).
 #
-# Phone / Cloud flow:
-#   Cloud agent opens PR → you merge to main or live → this workflow uploads.
-#   Or: Actions → Deploy DreamHost → Run workflow (no PC needed).
-#
-# Required repo secrets (Settings → Secrets and variables → Actions):
-#   SFTP_HOST, SFTP_USER, SFTP_PASSWORD, SFTP_REMOTE_ROOT
+# Config (Settings → Secrets and variables → Actions):
+#   Variables (visible): SFTP_HOST, SFTP_USER, SFTP_REMOTE_ROOT
+#   Secret (hidden):     SFTP_PASSWORD
+# Secrets also work for all four if preferred.
 # See bakery/docs/GITHUB_DEPLOY.md
 
 name: Deploy DreamHost
@@ -117,20 +113,38 @@ jobs:
       - name: Upload via SFTP
         if: steps.files.outputs.files != '0'
         env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
+          # Prefer Variables for non-password fields (you can see them in the UI).
+          # Fall back to Secrets for all four if Variables are unset.
+          SFTP_HOST: ${{ vars.SFTP_HOST || secrets.SFTP_HOST }}
+          SFTP_USER: ${{ vars.SFTP_USER || secrets.SFTP_USER }}
           SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
-          SFTP_REMOTE_ROOT: ${{ secrets.SFTP_REMOTE_ROOT }}
+          SFTP_REMOTE_ROOT: ${{ vars.SFTP_REMOTE_ROOT || secrets.SFTP_REMOTE_ROOT }}
         run: |
           set -euo pipefail
+          echo "Config check (values hidden; length only):"
           for required in SFTP_HOST SFTP_USER SFTP_PASSWORD SFTP_REMOTE_ROOT; do
-            if [ -z "${!required}" ]; then
-              echo "Missing GitHub Actions secret: ${required}"
-              echo "Add it under Settings → Secrets and variables → Actions."
-              echo "See bakery/docs/GITHUB_DEPLOY.md"
-              exit 1
+            val="${!required}"
+            if [ -z "$val" ]; then
+              echo "  $required: MISSING"
+            else
+              echo "  $required: set (${#val} chars)"
             fi
           done
+          missing=0
+          for required in SFTP_HOST SFTP_USER SFTP_PASSWORD SFTP_REMOTE_ROOT; do
+            if [ -z "${!required}" ]; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "Add under Settings → Secrets and variables → Actions:"
+            echo "  Variables tab: SFTP_HOST, SFTP_USER, SFTP_REMOTE_ROOT"
+            echo "  Secrets tab:   SFTP_PASSWORD"
+            echo "Names must match exactly. After Update, the secret box looks empty — that is normal."
+            echo "See bakery/docs/GITHUB_DEPLOY.md"
+            exit 1
+          fi
           python bakery/scripts/sftp_upload.py \
             --local-root "${GITHUB_WORKSPACE}/bakery" \
             --list "${{ steps.files.outputs.list_file }}"
