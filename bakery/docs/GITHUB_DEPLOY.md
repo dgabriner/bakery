@@ -6,18 +6,29 @@ Local `push.bat` / Cursor hooks / `.env.sftp` stay useful at the desk. This path
 
 ## One-time setup
 
-### 1. Add GitHub Actions secrets
+### 1. Add GitHub Actions config
 
-Repo → **Settings → Secrets and variables → Actions → New repository secret**.
+Repo → **Settings → Secrets and variables → Actions**.
 
-| Secret | Same as local `.env.sftp` |
-|--------|---------------------------|
-| `SFTP_HOST` | e.g. `iad1-shared-b7-08.dreamhost.com` |
-| `SFTP_USER` | DreamHost SFTP user |
-| `SFTP_PASSWORD` | DreamHost SFTP password |
-| `SFTP_REMOTE_ROOT` | e.g. `bakery.sourflour.org/bake` |
+Use **Variables** for the three non-password fields (you can see and confirm the values). Use a **Secret** only for the password (the edit box always looks empty after save — that is normal).
 
-Never commit these values. Copy from your local `bakery/.env.sftp` (gitignored).
+**Variables** tab → **New repository variable**:
+
+| Name | Value |
+|------|--------|
+| `SFTP_HOST` | `iad1-shared-b7-08.dreamhost.com` |
+| `SFTP_USER` | `dh_dp755h` |
+| `SFTP_REMOTE_ROOT` | `bakery.sourflour.org/bake` |
+
+**Secrets** tab → **New repository secret**:
+
+| Name | Value |
+|------|--------|
+| `SFTP_PASSWORD` | from your local `bakery/.env.sftp` (or DreamHost panel) |
+
+Never commit the password. Names must match exactly (no spaces).
+
+If you previously saved blank secret values by clicking Update without pasting, delete those secrets and recreate them, or put host/user/root on the **Variables** tab instead.
 
 ### 2. Choose a deploy branch
 
