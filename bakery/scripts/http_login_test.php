@@ -1,17 +1,16 @@
 <?php
 /**
- * HTTP login smoke test (CLI). Args: base_url email password
- * Does not print the password.
+ * HTTP login smoke test (CLI). Args: base_url code
+ * Does not print the code.
  */
 if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
 $base = rtrim($argv[1] ?? 'http://localhost:8080/bakery', '/');
-$email = $argv[2] ?? '';
-$password = $argv[3] ?? '';
-if ($email === '' || $password === '') {
-    fwrite(STDERR, "Usage: php http_login_test.php base_url email password\n");
+$code = $argv[2] ?? '';
+if ($code === '') {
+    fwrite(STDERR, "Usage: php http_login_test.php base_url code\n");
     exit(1);
 }
 
@@ -44,9 +43,9 @@ function http_req($url, $cookieFile, $post = null) {
     return [$code, $headers, $body, ''];
 }
 
-[$code, $headers, $body, $err] = http_req($base . '/login.php', $cookieFile);
-if ($code !== 200) {
-    echo "GET_LOGIN_FAIL code={$code} err={$err}\n";
+[$httpCode, $headers, $body, $err] = http_req($base . '/login.php', $cookieFile);
+if ($httpCode !== 200) {
+    echo "GET_LOGIN_FAIL code={$httpCode} err={$err}\n";
     echo substr($body, 0, 400) . "\n";
     exit(1);
 }
@@ -59,10 +58,9 @@ if (!preg_match('/name="csrf_token"\s+value="([^"]+)"/', $body, $m)) {
 $csrf = $m[1];
 echo "GET_LOGIN_OK csrf_len=" . strlen($csrf) . "\n";
 
-[$code, $headers, $body, $err] = http_req($base . '/login.php', $cookieFile, [
+[$httpCode, $headers, $body, $err] = http_req($base . '/login.php', $cookieFile, [
     'csrf_token' => $csrf,
-    'email' => $email,
-    'password' => $password,
+    'code' => $code,
     'next' => '/bakery/index.php',
 ]);
 
@@ -71,17 +69,14 @@ if (preg_match('/^Location:\s*(.+)$/mi', $headers, $lm)) {
     $location = trim($lm[1]);
 }
 
-echo "POST_CODE={$code}\n";
+echo "POST_CODE={$httpCode}\n";
 echo "LOCATION={$location}\n";
 
-if ($code >= 300 && $code < 400 && strpos($location, 'index.php') !== false) {
+if ($httpCode >= 300 && $httpCode < 400 && (strpos($location, 'index.php') !== false || strpos($location, 'driver_list.php') !== false)) {
     echo "HTTP_LOGIN_OK\n";
     exit(0);
 }
 
-if (preg_match('/class="error">([^<]+)/', $body, $em)) {
-    echo "ERROR={$em[1]}\n";
-}
 echo "HTTP_LOGIN_FAIL\n";
-echo substr($body, 0, 500) . "\n";
+echo substr($body, 0, 400) . "\n";
 exit(1);

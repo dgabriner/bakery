@@ -21,3 +21,5 @@ define('SMTP_FROM_EMAIL', $_ENV['SMTP_FROM_EMAIL'] ?? getenv('SMTP_FROM_EMAIL') 
 define('SMTP_FROM_NAME', $_ENV['SMTP_FROM_NAME'] ?? getenv('SMTP_FROM_NAME') ?: 'Sour Flour Bakery');
 define('REPLY_TO_EMAIL', $_ENV['REPLY_TO_EMAIL'] ?? getenv('REPLY_TO_EMAIL') ?: SMTP_FROM_EMAIL);
 define('REPLY_TO_NAME', $_ENV['REPLY_TO_NAME'] ?? getenv('REPLY_TO_NAME') ?: SMTP_FROM_NAME);
+// Temporary invoice test recipient. Replace with customer delivery routing when the payment module is ready.
+define('INVOICE_TEST_RECIPIENT', 'danny@sourflour.org');

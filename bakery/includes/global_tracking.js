@@ -24,6 +24,10 @@
     }
 
     function getBasePath() {
+        var meta = document.querySelector('meta[name="app-base-url"]');
+        if (meta) {
+            return meta.getAttribute('content') || '/';
+        }
         var path = window.location.pathname || '';
         if (path.indexOf('/bakery/') !== -1) {
             return '/bakery/';

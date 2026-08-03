@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/product_inventory.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
@@ -19,17 +20,48 @@ $days = [
     7 => 'Sunday'
 ];
 
-// Date picker (default: today)
-$selectedDate = isset($_GET['date']) ? trim((string)$_GET['date']) : date('Y-m-d');
+// Date picker (default: tomorrow — bake for the next day)
+$defaultProductionDate = date('Y-m-d', strtotime('+1 day'));
+$selectedDate = isset($_GET['date']) ? trim((string)$_GET['date']) : $defaultProductionDate;
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || strtotime($selectedDate) === false) {
-    $selectedDate = date('Y-m-d');
+    $selectedDate = $defaultProductionDate;
 }
 $selectedDay = bakery_standing_day_from_date($selectedDate);
-$productionSource = 'daily';
-$usingStandingFallback = false;
+$bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
+$bakerProductClause = '';
+if (is_array($bakerProductIds)) {
+    $bakerProductClause = empty($bakerProductIds)
+        ? ' AND 1 = 0'
+        : ' AND p.id IN (' . implode(',', array_fill(0, count($bakerProductIds), '?')) . ')';
+}
+$inventoryNotice = '';
+$inventoryError = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confirm_production') {
+    try {
+        if (!bakery_inventory_ready($db)) {
+            throw new RuntimeException('Finished-goods inventory is not installed. Run the database migrations first.');
+        }
+        $productionDate = bakery_inventory_validate_date((string)($_POST['production_date'] ?? ''));
+        $quantities = $_POST['produced'] ?? [];
+        $saved = 0;
+        $db->beginTransaction();
+        foreach ($quantities as $productId => $quantity) {
+            $quantity = filter_var($quantity, FILTER_VALIDATE_INT);
+            if ($quantity === false || $quantity <= 0) continue;
+            bakery_inventory_record_production($db, $productionDate, (int)$productId, (int)$quantity, 'Production confirmed');
+            $saved += (int)$quantity;
+        }
+        if ($saved === 0) throw new InvalidArgumentException('Enter at least one produced quantity.');
+        $db->commit();
+        $inventoryNotice = $saved . ' unit' . ($saved === 1 ? '' : 's') . ' added to available inventory for ' . date('M j', strtotime($productionDate)) . '.';
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        $inventoryError = $e->getMessage();
+    }
+}
 
 // Fetch production data for the selected date
-$integrityWarnings = [];
 try {
     $dailyCheck = $db->prepare("
         SELECT COUNT(*)
@@ -55,15 +87,13 @@ try {
             JOIN daily_orders do ON doi.daily_order_id = do.id
             JOIN products p ON doi.product_id = p.id
             LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-            WHERE do.order_date = ?
+            WHERE do.order_date = ? {$bakerProductClause}
             GROUP BY p.id, p.name, p.weight_grams, p.dough_type_id, dt.name, dt.id
             HAVING total_quantity > 0
             ORDER BY dt.name, p.name
         ");
-        $orders->execute([$selectedDate]);
+        $orders->execute(array_merge([$selectedDate], $bakerProductIds ?? []));
     } else {
-        $productionSource = 'standing';
-        $usingStandingFallback = true;
         $dayClause = bakery_standing_day_in_clause($selectedDay);
         $orders = $db->prepare("
             SELECT 
@@ -78,28 +108,22 @@ try {
             FROM standing_orders so
             JOIN products p ON so.product_id = p.id
             LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-            WHERE so.day_of_week {$dayClause['sql']}
+            WHERE so.day_of_week {$dayClause['sql']} {$bakerProductClause}
             GROUP BY p.id, p.name, p.weight_grams, p.dough_type_id, dt.name, dt.id
             HAVING total_quantity > 0
             ORDER BY dt.name, p.name
         ");
-        $orders->execute($dayClause['values']);
+        $orders->execute(array_merge($dayClause['values'], $bakerProductIds ?? []));
     }
     $productionData = $orders->fetchAll();
 
-    $integrityWarnings = [];
-    foreach ($productionData as $item) {
-        $qty = (int)$item['total_quantity'];
-        $weight = $item['weight_grams'];
-        if ($qty > 0 && ($weight === null || (int)$weight <= 0)) {
-            $integrityWarnings[] = sprintf(
-                'Product "%s" has %d units scheduled but no weight (weight_grams missing or zero) — dough totals will be understated.',
-                $item['product_name'],
-                $qty
-            );
-        }
+    $producedByProduct = [];
+    if (bakery_inventory_ready($db)) {
+        $producedStmt = $db->prepare('SELECT product_id, produced_quantity FROM product_inventory_days WHERE delivery_date = ?');
+        $producedStmt->execute([$selectedDate]);
+        $producedByProduct = $producedStmt->fetchAll(PDO::FETCH_KEY_PAIR);
     }
-    
+
     // Get formulas for dough types with total percentage
     $doughTypeFormulas = [];
     if (!empty($productionData)) {
@@ -178,24 +202,6 @@ try {
         $groupedData[$doughType]['products'][] = $item;
     }
 
-    foreach ($groupedData as $doughType => $data) {
-        if ((int)$data['total_items'] <= 0) {
-            continue;
-        }
-        if (empty($data['formula'])) {
-            $integrityWarnings[] = sprintf(
-                'Dough type "%s" has %d units scheduled but no formula — ingredient amounts cannot be calculated.',
-                $doughType,
-                (int)$data['total_items']
-            );
-        } elseif ((float)($data['formula']['total_percentage'] ?? 0) <= 0) {
-            $integrityWarnings[] = sprintf(
-                'Dough type "%s" has a formula with 0%% total — ingredient amounts cannot be calculated.',
-                $doughType
-            );
-        }
-    }
-    
     // Sort grouped data to show dough types with formulas first
     uasort($groupedData, function($a, $b) {
         // If one has a formula and the other doesn't, prioritize the one with formula
@@ -306,6 +312,9 @@ $page_title = 'Production Schedule';
 
 <div class="container">
     <h1>Production Schedule</h1>
+
+    <?php if ($inventoryNotice): ?><div class="success-message"><?php echo htmlspecialchars($inventoryNotice); ?></div><?php endif; ?>
+    <?php if ($inventoryError): ?><div class="error-message"><?php echo htmlspecialchars($inventoryError); ?></div><?php endif; ?>
     
     <!-- Date Selector -->
     <div class="day-selector">
@@ -319,30 +328,6 @@ $page_title = 'Production Schedule';
         </form>
     </div>
 
-    <?php if ($usingStandingFallback): ?>
-        <div class="alert alert-info">
-            <strong>No daily orders for <?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>
-                (<?php echo $days[$selectedDay]; ?>).</strong>
-            Showing standing-order totals for this weekday instead. Generate daily orders to reflect same-day edits.
-        </div>
-    <?php elseif ($productionSource === 'daily'): ?>
-        <div class="alert alert-info production-source-banner">
-            Totals from <strong>daily orders</strong> for <?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>
-            (<?php echo $days[$selectedDay]; ?>).
-        </div>
-    <?php endif; ?>
-    
-    <?php if (!empty($integrityWarnings)): ?>
-        <div class="alert alert-warning">
-            <strong>Data integrity warnings (<?php echo count($integrityWarnings); ?>):</strong>
-            <ul class="integrity-warning-list">
-                <?php foreach ($integrityWarnings as $warning): ?>
-                    <li><?php echo htmlspecialchars($warning); ?></li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-    <?php endif; ?>
-    
     <!-- Starter Feeding Section -->
     <?php if (!empty($starterFeedings)): ?>
         <div class="starter-feeding-section">
@@ -436,7 +421,32 @@ $page_title = 'Production Schedule';
         <div class="production-summary">
             <h2>Production for <?php echo $days[$selectedDay]; ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></h2>
             
-            <?php if (empty($groupedData)): ?>
+    <?php if (!empty($productionData)): ?>
+        <section class="production-confirmation production-confirmation-legacy">
+            <div>
+                <h2>Confirm finished product</h2>
+                <p>Enter the units actually produced. They are immediately available for this delivery day.</p>
+            </div>
+            <form method="post" class="production-confirm-form">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="confirm_production">
+                <input type="hidden" name="production_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                <div class="confirmation-grid">
+                    <?php foreach ($productionData as $product): ?>
+                        <label>
+                            <span><?php echo htmlspecialchars($product['product_name']); ?></span>
+                            <small>Planned <?php echo number_format($product['total_quantity']); ?> · confirmed <?php echo number_format((int)($producedByProduct[$product['product_id']] ?? 0)); ?></small>
+                            <input type="number" min="0" step="1" name="produced[<?php echo (int)$product['product_id']; ?>]" placeholder="Produced now">
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+                <button class="btn btn-success" type="submit">Add confirmed production to inventory</button>
+                <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($selectedDate); ?>">View inventory</a>
+            </form>
+        </section>
+    <?php endif; ?>
+
+    <?php if (empty($groupedData)): ?>
                 <p>No production scheduled for this day.</p>
             <?php else: ?>
                 <?php foreach ($groupedData as $doughType => $data): 
@@ -514,6 +524,37 @@ $page_title = 'Production Schedule';
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>
+
+            <?php if (!empty($productionData)): ?>
+                <section class="production-confirmation production-confirmation-after">
+                    <div>
+                        <h2>Confirm finished product</h2>
+                        <p>Planned quantities are ready to submit. Tap the number, use − / +, or focus it and roll the wheel to adjust.</p>
+                    </div>
+                    <form method="post" class="production-confirm-form">
+                        <?php echo bakery_csrf_field(); ?>
+                        <input type="hidden" name="action" value="confirm_production">
+                        <input type="hidden" name="production_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                        <div class="confirmation-grid">
+                            <?php foreach ($productionData as $product): ?>
+                                <label class="confirmation-item">
+                                    <span class="confirmation-product-name"><?php echo htmlspecialchars($product['product_name']); ?></span>
+                                    <small>Planned <?php echo number_format($product['total_quantity']); ?> · confirmed <?php echo number_format((int)($producedByProduct[$product['product_id']] ?? 0)); ?></small>
+                                    <span class="quantity-stepper">
+                                        <button type="button" class="quantity-step" data-step="-1" aria-label="Decrease <?php echo htmlspecialchars($product['product_name']); ?>">−</button>
+                                        <input type="number" min="0" step="1" inputmode="numeric" name="produced[<?php echo (int)$product['product_id']; ?>]" value="<?php echo (int)$product['total_quantity']; ?>" aria-label="Produced units for <?php echo htmlspecialchars($product['product_name']); ?>">
+                                        <button type="button" class="quantity-step" data-step="1" aria-label="Increase <?php echo htmlspecialchars($product['product_name']); ?>">+</button>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="confirmation-actions">
+                            <button class="btn btn-success" type="submit">Add confirmed production to inventory</button>
+                            <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($selectedDate); ?>">View inventory</a>
+                        </div>
+                    </form>
+                </section>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 </div>
@@ -555,6 +596,29 @@ $page_title = 'Production Schedule';
     
     .production-summary {
         margin-top: 20px;
+    }
+    .production-confirmation { margin: 20px 0; padding: 20px; border: 1px solid #b8d9c2; border-radius: 10px; background: #f3fbf5; }
+    .production-confirmation-legacy { display: none; }
+    .production-confirmation-after { margin-top: 28px; scroll-margin-top: 20px; }
+    .production-confirmation h2 { margin: 0 0 5px; color: #1f6b35; }
+    .production-confirmation p { margin: 0 0 16px; color: #4b6351; }
+    .confirmation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .confirmation-item { display: flex; flex-direction: column; gap: 5px; font-weight: 600; min-width: 0; }
+    .confirmation-product-name { overflow-wrap: anywhere; }
+    .confirmation-grid small { color: #607068; font-weight: 400; }
+    .quantity-stepper { display: grid; grid-template-columns: 48px minmax(70px, 1fr) 48px; gap: 7px; align-items: stretch; }
+    .quantity-stepper input { width: 100%; min-width: 0; padding: 8px; border: 1px solid #aab9af; border-radius: 5px; text-align: center; font-size: 1.2rem; font-weight: 700; }
+    .quantity-step { min-height: 48px; border: 1px solid #8db59a; border-radius: 7px; background: #fff; color: #1f6637; font-size: 1.6rem; line-height: 1; cursor: pointer; touch-action: manipulation; }
+    .quantity-step:active { background: #dff1e4; transform: translateY(1px); }
+    .confirmation-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .confirmation-actions .btn { min-height: 46px; }
+    @media (max-width: 560px) {
+        .production-confirmation-after { margin-left: -2px; margin-right: -2px; padding: 16px 14px; }
+        .confirmation-grid { grid-template-columns: 1fr; gap: 14px; }
+        .confirmation-item { padding: 10px; border: 1px solid #d6e6da; border-radius: 8px; background: #fff; }
+        .quantity-stepper { grid-template-columns: 52px minmax(78px, 1fr) 52px; }
+        .confirmation-actions { flex-direction: column; }
+        .confirmation-actions .btn { width: 100%; text-align: center; }
     }
     
     .production-summary h2 {
@@ -690,31 +754,6 @@ $page_title = 'Production Schedule';
         border-color: #f5c6cb;
     }
 
-    .alert-warning {
-        color: #856404;
-        background-color: #fff3cd;
-        border-color: #ffc107;
-    }
-
-    .alert-info {
-        color: #0c5460;
-        background-color: #d1ecf1;
-        border-color: #bee5eb;
-    }
-
-    .production-source-banner {
-        margin-bottom: 12px;
-    }
-
-    .integrity-warning-list {
-        margin: 8px 0 0 0;
-        padding-left: 20px;
-    }
-
-    .integrity-warning-list li {
-        margin-bottom: 4px;
-    }
-    
     /* Starter Feeding Styles */
     .starter-feeding-section {
         margin: 15px 0 20px 0;
@@ -937,5 +976,34 @@ $page_title = 'Production Schedule';
         }
     }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.quantity-stepper').forEach(function (stepper) {
+        var input = stepper.querySelector('input[type="number"]');
+        if (!input) return;
+
+        function changeBy(amount) {
+            var current = parseInt(input.value, 10);
+            if (isNaN(current)) current = 0;
+            input.value = Math.max(0, current + amount);
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        stepper.querySelectorAll('.quantity-step').forEach(function (button) {
+            button.addEventListener('click', function () {
+                changeBy(parseInt(button.getAttribute('data-step'), 10) || 0);
+                input.focus({ preventScroll: true });
+            });
+        });
+
+        input.addEventListener('wheel', function (event) {
+            if (document.activeElement !== input || event.deltaY === 0) return;
+            event.preventDefault();
+            changeBy(event.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
+    });
+});
+</script>
 
 <?php require_once 'includes/footer.php'; ?>

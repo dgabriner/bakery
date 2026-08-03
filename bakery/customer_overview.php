@@ -14,13 +14,14 @@ $page_title = 'Customer Overview by Zone';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_driver') {
     try {
         $customerId = $_POST['customer_id'];
-        $dayOfWeek = $_POST['day_of_week'];
+        $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
         $driverId = empty($_POST['driver_id']) ? null : $_POST['driver_id'];
         
         if ($driverId === null) {
             // Remove the standing route entry
-            $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
-            $stmt->execute([$customerId, $dayOfWeek]);
+            $dayClause = $dayOfWeek === 7 ? 'IN (0, 7)' : '= ?';
+            $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week $dayClause");
+            $stmt->execute($dayOfWeek === 7 ? [$customerId] : [$customerId, $dayOfWeek]);
         } else {
             // Check if route already exists
             $stmt = $db->prepare("SELECT id FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
@@ -82,10 +83,7 @@ try {
     ];
     
     $drivers = [];
-    $driverStmt = $db->query("SELECT id, name FROM drivers ORDER BY name");
-    $driversData = $driverStmt->fetchAll();
-    
-    foreach ($driversData as $index => $driver) {
+    foreach (bakery_get_drivers($db) as $index => $driver) {
         $drivers[$driver['id']] = [
             'name' => $driver['name'],
             'color' => $driverColors[$index % count($driverColors)]

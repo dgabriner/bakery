@@ -1,0 +1,21 @@
+# Copy this to the DreamHost bakery folder as `.env` (next to login.php).
+# Do NOT upload your local development .env.
+# After creating, set real secrets in the DreamHost panel or edit this file on the server only.
+
+APP_ENV=production
+USE_PROD_DB=false
+APP_NAME=Sour Flour OS
+
+DB_HOST=mysql.sourflour.org
+DB_PORT=3306
+DB_NAME=bakerysf
+DB_USER=bakerysf
+DB_PASS=REPLACE_WITH_DREAMHOST_MYSQL_PASSWORD
+
+BASE_URL=/bakery/
+
+MAIL_DRIVER=log
+MAPS_ENABLED=false
+
+# Temporary debug only — set to true, reproduce error, then set false and delete health_prod.php
+BAKERY_SHOW_ERRORS=false

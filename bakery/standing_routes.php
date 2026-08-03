@@ -13,11 +13,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     try {
         $driverId = (int)$_POST['driver_id'];
         $customerId = (int)$_POST['customer_id'];
-        $dayOfWeek = (int)$_POST['day_of_week'];
+        $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
         
         // First, remove any existing route for this customer on this day
-        $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
-        $stmt->execute([$customerId, $dayOfWeek]);
+        $dayClause = $dayOfWeek === 7 ? 'IN (0, 7)' : '= ?';
+        $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week $dayClause");
+        $stmt->execute($dayOfWeek === 7 ? [$customerId] : [$customerId, $dayOfWeek]);
         
         // If a driver is selected (not empty), add the new route
         if ($driverId > 0) {
@@ -56,7 +57,7 @@ try {
         '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8'
     ];
     
-    $driversData = $db->query("SELECT id, name FROM drivers ORDER BY name")->fetchAll();
+    $driversData = bakery_get_drivers($db);
     $drivers = [];
     
     foreach ($driversData as $index => $driver) {
@@ -98,7 +99,11 @@ try {
     
     // Organize routes by day and customer for easy lookup
     foreach ($routesResult as $route) {
-        $routes[$route['day_of_week']][$route['customer_id']] = [
+        $dayOfWeek = (int)$route['day_of_week'];
+        if ($dayOfWeek === 0) {
+            $dayOfWeek = 7;
+        }
+        $routes[$dayOfWeek][$route['customer_id']] = [
             'driver_id' => $route['driver_id'],
             'customer_name' => $route['customer_name'],
             'customer_zone' => $route['customer_zone']

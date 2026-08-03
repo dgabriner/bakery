@@ -5,10 +5,10 @@ require_once 'includes/database.php';
 
 $page_title = 'Pack List';
 
-// Get selected day (default to today; canonical 1=Mon .. 7=Sun)
+// Get selected day (default to tomorrow; canonical 1=Mon .. 7=Sun)
 $selectedDay = isset($_GET['day'])
     ? bakery_normalize_standing_day($_GET['day'])
-    : bakery_standing_day_from_date('today');
+    : bakery_standing_day_from_date(date('Y-m-d', strtotime('+1 day')));
 
 $days = [
     1 => 'Monday',
@@ -21,6 +21,13 @@ $days = [
 ];
 
 $dayClause = bakery_standing_day_in_clause($selectedDay);
+$bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
+$bakerProductClause = '';
+if (is_array($bakerProductIds)) {
+    $bakerProductClause = empty($bakerProductIds)
+        ? ' AND 1 = 0'
+        : ' AND p.id IN (' . implode(',', array_fill(0, count($bakerProductIds), '?')) . ')';
+}
 
 // Get Ruta Sour Flour zone summary
 $rutaSourFlourSummary = [];
@@ -42,7 +49,7 @@ try {
         JOIN customers c ON so.customer_id = c.id
         JOIN products p ON so.product_id = p.id
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-        WHERE so.day_of_week {$dayClause['sql']}
+        WHERE so.day_of_week {$dayClause['sql']} {$bakerProductClause}
         AND so.quantity > 0
         AND c.zone = 'Ruta Sour Flour'
         ORDER BY 
@@ -51,7 +58,7 @@ try {
             p.name
     ");
     
-    $stmt->execute($dayClause['values']);
+    $stmt->execute(array_merge($dayClause['values'], $bakerProductIds ?? []));
     $rutaOrders = $stmt->fetchAll();
     
     // Group Ruta orders by customer, then dough type, then product
@@ -89,14 +96,14 @@ try {
         JOIN customers c ON so.customer_id = c.id
         JOIN products p ON so.product_id = p.id
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-        WHERE so.day_of_week {$dayClause['sql']} AND so.quantity > 0
+        WHERE so.day_of_week {$dayClause['sql']} AND so.quantity > 0 {$bakerProductClause}
         ORDER BY 
             COALESCE(dt.name, 'Unclassified'),
             c.name,
             p.name
     ");
     
-    $stmt->execute($dayClause['values']);
+    $stmt->execute(array_merge($dayClause['values'], $bakerProductIds ?? []));
     $orders = $stmt->fetchAll();
     
     // Group by dough type, then by customer

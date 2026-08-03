@@ -1,14 +1,13 @@
-﻿<?php
+<?php
 define('ACCESS_ALLOWED', true);
+define('BAKERY_PAGE_BUILD', 'driver-assignment-append-20260801');
 
-
-// Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
 
-// Set page title
 $page_title = 'Driver Assignment';
+bakery_ensure_standing_routes_order_column($db);
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -20,48 +19,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $driverId = (int)$_POST['driver_id'];
                 $deliveryDate = $_POST['delivery_date'];
                 $assignments = json_decode($_POST['assignments'], true);
+                // replace = full route rewrite (edit/optimize/reorder)
+                // append = add selected orders without clearing existing ones
+                $mode = strtolower(trim((string)($_POST['mode'] ?? 'replace')));
+                if (!in_array($mode, ['replace', 'append'], true)) {
+                    $mode = 'replace';
+                }
                 
-                // Debug logging
-                error_log("Driver Assignment Debug - Driver ID: $driverId, Date: $deliveryDate");
-                error_log("Assignments: " . print_r($assignments, true));
-                
-                if (!$assignments) {
+                if (!$assignments || !is_array($assignments)) {
                     throw new Exception('No assignments provided');
                 }
                 
-                // Validate driver exists
-                $stmt = $db->prepare("SELECT id FROM drivers WHERE id = ?");
-                $stmt->execute([$driverId]);
-                if (!$stmt->fetch()) {
+                // Validate driver exists and is active
+                $driverRow = bakery_get_driver_by_id($db, $driverId);
+                if (!$driverRow) {
                     throw new Exception("Driver ID $driverId does not exist in the drivers table");
+                }
+                if ((int)($driverRow['archived'] ?? 0) === 1) {
+                    throw new Exception('Cannot assign orders to an archived driver. Restore the driver first.');
                 }
               
                 $db->beginTransaction();
-                
-                // Clear existing assignments for this driver and date
-                $stmt = $db->prepare("DELETE FROM daily_order_assignments WHERE driver_id = ? AND delivery_date = ?");
-                $stmt->execute([$driverId, $deliveryDate]);
-                
-                // Insert new assignments
-                $stmt = $db->prepare("
+
+                $insertStmt = $db->prepare("
                     INSERT INTO daily_order_assignments (
                         daily_order_id, driver_id, delivery_date, route_order, 
                         scheduled_delivery_time, delivery_status
                     ) VALUES (?, ?, ?, ?, ?, 'pending')
                 ");
-                
-                foreach ($assignments as $assignment) {
-                    $stmt->execute([
-                        $assignment['daily_order_id'],
-                        $driverId,
-                        $deliveryDate,
-                        $assignment['route_order'],
-                        $assignment['scheduled_delivery_time']
-                    ]);
+
+                if ($mode === 'append') {
+                    // Keep existing route; only add the selected orders at the end
+                    $maxStmt = $db->prepare("
+                        SELECT COALESCE(MAX(route_order), 0)
+                        FROM daily_order_assignments
+                        WHERE driver_id = ? AND delivery_date = ?
+                    ");
+                    $maxStmt->execute([$driverId, $deliveryDate]);
+                    $nextRouteOrder = (int)$maxStmt->fetchColumn() + 1;
+
+                    $clearOrderStmt = $db->prepare("
+                        DELETE FROM daily_order_assignments
+                        WHERE daily_order_id = ? AND delivery_date = ?
+                    ");
+
+                    $added = 0;
+                    foreach ($assignments as $assignment) {
+                        $dailyOrderId = (int)($assignment['daily_order_id'] ?? 0);
+                        if ($dailyOrderId <= 0) {
+                            continue;
+                        }
+                        // Drop any prior assignment for this order/date (other driver or duplicate)
+                        $clearOrderStmt->execute([$dailyOrderId, $deliveryDate]);
+                        $insertStmt->execute([
+                            $dailyOrderId,
+                            $driverId,
+                            $deliveryDate,
+                            $nextRouteOrder,
+                            $assignment['scheduled_delivery_time'] ?? null
+                        ]);
+                        $nextRouteOrder++;
+                        $added++;
+                    }
+
+                    if ($added === 0) {
+                        throw new Exception('No valid orders to assign');
+                    }
+                } else {
+                    // Clear existing assignments for this driver and date, then rewrite
+                    $stmt = $db->prepare("DELETE FROM daily_order_assignments WHERE driver_id = ? AND delivery_date = ?");
+                    $stmt->execute([$driverId, $deliveryDate]);
+
+                    foreach ($assignments as $assignment) {
+                        $insertStmt->execute([
+                            $assignment['daily_order_id'],
+                            $driverId,
+                            $deliveryDate,
+                            $assignment['route_order'],
+                            $assignment['scheduled_delivery_time']
+                        ]);
+                    }
                 }
                 
                 $db->commit();
-                echo json_encode(['success' => true, 'message' => 'Orders assigned successfully']);
+                echo json_encode([
+                    'success' => true,
+                    'message' => $mode === 'append'
+                        ? 'Orders added to driver without replacing existing assignments'
+                        : 'Orders assigned successfully',
+                    'mode' => $mode
+                ]);
                 break;
                 
             case 'get_optimized_route':
@@ -118,6 +165,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $success = $stmt->execute([$dailyOrderId, $driverId, $deliveryDate]);
                 echo json_encode(['success' => $success]);
                 break;
+
+            case 'save_as_standing_route':
+                $deliveryDate = $_POST['delivery_date'];
+                $dayOfWeek = date('N', strtotime($deliveryDate));
+                $stmt = $db->prepare(" 
+                    SELECT doa.driver_id, do.customer_id, doa.route_order
+                    FROM daily_order_assignments doa
+                    JOIN daily_orders do ON do.id = doa.daily_order_id
+                    WHERE doa.delivery_date = ? AND do.order_date = ?
+                    ORDER BY doa.driver_id, doa.route_order, do.customer_id
+                ");
+                $stmt->execute([$deliveryDate, $deliveryDate]);
+                $currentRoute = $stmt->fetchAll();
+                if (empty($currentRoute)) {
+                    throw new Exception('There are no dated route assignments to save for this day.');
+                }
+
+                $db->beginTransaction();
+                try {
+                    if ($dayOfWeek === 7) {
+                        $db->prepare('DELETE FROM standing_routes WHERE day_of_week IN (0, 7)')->execute();
+                    } else {
+                        $db->prepare('DELETE FROM standing_routes WHERE day_of_week = ?')->execute([$dayOfWeek]);
+                    }
+
+                    $insertRoute = $db->prepare(" 
+                        INSERT INTO standing_routes (day_of_week, driver_id, customer_id, route_order)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    $nextOrderByDriver = [];
+                    foreach ($currentRoute as $stop) {
+                        $driverId = (int)$stop['driver_id'];
+                        $nextOrderByDriver[$driverId] = ($nextOrderByDriver[$driverId] ?? 0) + 1;
+                        $insertRoute->execute([
+                            $dayOfWeek,
+                            $driverId,
+                            (int)$stop['customer_id'],
+                            $nextOrderByDriver[$driverId]
+                        ]);
+                    }
+
+                    $db->commit();
+                    echo json_encode([
+                        'success' => true,
+                        'message' => 'Saved ' . count($currentRoute) . ' stops as the recurring ' . date('l', strtotime($deliveryDate)) . ' route.'
+                    ]);
+                } catch (Exception $e) {
+                    $db->rollBack();
+                    throw $e;
+                }
+                break;
+
+            case 'sync_driver_route':
+                $driverId = (int)$_POST['driver_id'];
+                $deliveryDate = $_POST['delivery_date'];
+                $driverRow = bakery_get_driver_by_id($db, $driverId);
+                if (!$driverRow) {
+                    throw new Exception("Driver ID $driverId does not exist in the drivers table");
+                }
+                if ((int)($driverRow['archived'] ?? 0) === 1) {
+                    throw new Exception('Cannot modify routes for an archived driver. Restore the driver first.');
+                }
+
+                $dayOfWeek = date('N', strtotime($deliveryDate));
+                $stmt = $db->prepare(" 
+                    SELECT sr.customer_id, c.name AS customer_name, sr.route_order
+                    FROM standing_routes sr
+                    JOIN customers c ON c.id = sr.customer_id
+                    WHERE sr.driver_id = ?
+                      AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
+                    ORDER BY COALESCE(sr.route_order, 2147483647), c.name
+                ");
+                $stmt->execute([$driverId, $dayOfWeek]);
+                $routeStops = $stmt->fetchAll();
+                if (empty($routeStops)) {
+                    throw new Exception('This driver has no standing-route stops for ' . date('l', strtotime($deliveryDate)) . '.');
+                }
+
+                $db->beginTransaction();
+                try {
+                    $findOrder = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?');
+                    $createOrder = $db->prepare("INSERT INTO daily_orders (customer_id, order_date, total_amount) VALUES (?, ?, 0)");
+                    $removeAssignment = $db->prepare('DELETE FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ?');
+                    $insertAssignment = $db->prepare(" 
+                        INSERT INTO daily_order_assignments (
+                            daily_order_id, driver_id, delivery_date, route_order,
+                            scheduled_delivery_time, delivery_status
+                        ) VALUES (?, ?, ?, ?, NULL, 'pending')
+                    ");
+
+                    $routeOrder = 0;
+                    foreach ($routeStops as $stop) {
+                        $findOrder->execute([$stop['customer_id'], $deliveryDate]);
+                        $dailyOrderId = $findOrder->fetchColumn();
+                        if (!$dailyOrderId) {
+                            $createOrder->execute([$stop['customer_id'], $deliveryDate]);
+                            $dailyOrderId = $db->lastInsertId();
+                        }
+
+                        $routeOrder++;
+                        $removeAssignment->execute([$dailyOrderId, $deliveryDate]);
+                        $insertAssignment->execute([$dailyOrderId, $driverId, $deliveryDate, $routeOrder]);
+                    }
+
+                    $db->commit();
+                    echo json_encode([
+                        'success' => true,
+                        'message' => 'Synced ' . count($routeStops) . ' standing-route stops for ' . $driverRow['name'] . '.'
+                    ]);
+                } catch (Exception $e) {
+                    $db->rollBack();
+                    throw $e;
+                }
+                break;
                 
             case 'create_orders_and_assign':
                 $deliveryDate = $_POST['delivery_date'];
@@ -125,65 +286,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $db->beginTransaction();
                 
                 try {
-                    // Get all customers
-                    $customers = $db->query("SELECT id, name FROM customers ORDER BY name")->fetchAll();
-                    
-                    // Get standing routes for this day
+                    // The route is the source of truth for this action. Only standing-route
+                    // customers become route stops; unrelated daily orders are not invented.
                     $dayOfWeek = date('N', strtotime($deliveryDate));
-                    $stmt = $db->prepare("
-                        SELECT customer_id, driver_id 
-                        FROM standing_routes 
-                        WHERE day_of_week = ?
+                    $stmt = $db->prepare(" 
+                        SELECT sr.customer_id, sr.driver_id, c.name AS customer_name, sr.route_order
+                        FROM standing_routes sr
+                        JOIN customers c ON c.id = sr.customer_id
+                        WHERE CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
+                        ORDER BY sr.driver_id, COALESCE(sr.route_order, 2147483647), c.name
                     ");
                     $stmt->execute([$dayOfWeek]);
                     $standingRoutes = $stmt->fetchAll();
-                    
-                    // Create lookup for standing routes
-                    $routeLookup = [];
-                    foreach ($standingRoutes as $route) {
-                        $routeLookup[$route['customer_id']] = $route['driver_id'];
+
+                    if (empty($standingRoutes)) {
+                        throw new Exception('No standing-route stops are configured for ' . date('l', strtotime($deliveryDate)) . '.');
                     }
-                    
-                    // Create orders for all customers and assign based on standing routes
+
+                    // Ensure each route stop has a dated order record, then assign it.
                     $assignments = [];
-                    
-                    foreach ($customers as $customer) {
-                        // Check if order already exists for this customer and date
-                        $stmt = $db->prepare("
+                    $routeOrderByDriver = [];
+
+                    foreach ($standingRoutes as $route) {
+                        $stmt = $db->prepare(" 
                             SELECT id FROM daily_orders 
                             WHERE customer_id = ? AND order_date = ?
                         ");
-                        $stmt->execute([$customer['id'], $deliveryDate]);
+                        $stmt->execute([$route['customer_id'], $deliveryDate]);
                         $existingOrder = $stmt->fetch();
-                        
+
                         if ($existingOrder) {
                             $dailyOrderId = $existingOrder['id'];
                         } else {
-                            // Create new order
-                            $stmt = $db->prepare("
+                            $stmt = $db->prepare(" 
                                 INSERT INTO daily_orders (customer_id, order_date, total_amount) 
                                 VALUES (?, ?, 0)
                             ");
-                            $stmt->execute([$customer['id'], $deliveryDate]);
+                            $stmt->execute([$route['customer_id'], $deliveryDate]);
                             $dailyOrderId = $db->lastInsertId();
                         }
-                        
-                        // If customer has a standing route, assign them
-                        if (isset($routeLookup[$customer['id']])) {
-                            $assignments[] = [
-                                'daily_order_id' => $dailyOrderId,
-                                'driver_id' => $routeLookup[$customer['id']],
-                                'route_order' => 0,
-                                'scheduled_delivery_time' => null
-                            ];
-                        }
+
+                        $assignedDriverId = (int)$route['driver_id'];
+                        $routeOrderByDriver[$assignedDriverId] = ($routeOrderByDriver[$assignedDriverId] ?? 0) + 1;
+                        $assignments[] = [
+                            'daily_order_id' => $dailyOrderId,
+                            'driver_id' => $assignedDriverId,
+                            'route_order' => $routeOrderByDriver[$assignedDriverId],
+                            'scheduled_delivery_time' => null
+                        ];
+                    }
+
+                    // This action is a full synchronization for the selected date.
+                    // Do not leave stale assignments from an earlier weekday/template.
+                    $db->prepare("DELETE FROM daily_order_assignments WHERE delivery_date = ?")
+                        ->execute([$deliveryDate]);
+
+                    $insertAssignment = $db->prepare("
+                        INSERT INTO daily_order_assignments (
+                            daily_order_id, driver_id, delivery_date, route_order,
+                            scheduled_delivery_time, delivery_status
+                        ) VALUES (?, ?, ?, ?, ?, 'pending')
+                    ");
+                    foreach ($assignments as $assignment) {
+                        $insertAssignment->execute([
+                            $assignment['daily_order_id'],
+                            $assignment['driver_id'],
+                            $deliveryDate,
+                            $assignment['route_order'],
+                            $assignment['scheduled_delivery_time']
+                        ]);
                     }
                     
                     $db->commit();
                     
                     echo json_encode([
                         'success' => true, 
-                        'message' => 'Created orders for ' . count($customers) . ' customers and assigned ' . count($assignments) . ' based on standing routes',
+                        'message' => 'Built ' . count($assignments) . ' route stops from the standing route and assigned them for ' . date('l, F j, Y', strtotime($deliveryDate)),
                         'assignments' => $assignments
                     ]);
                     
@@ -210,96 +388,143 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $selectedDate = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
 $dayName = date('l', strtotime($selectedDate));
 $dayOfWeek = date('N', strtotime($selectedDate)); // 1=Monday, 7=Sunday
-
-// Get all drivers
-$drivers = $db->query("SELECT id, name FROM drivers ORDER BY name")->fetchAll();
-
-// Get daily orders for selected date
-$stmt = $db->prepare("
-    SELECT 
-        do.*,
-        c.name as customer_name,
-        c.address,
-        c.phone,
-        c.deliver_by,
-        c.deliver_after,
-        COALESCE(c.delivery_time, 20) as delivery_time,
-        c.latitude,
-        c.longitude,
-        doa.driver_id as assigned_driver_id,
-        doa.route_order,
-        doa.scheduled_delivery_time,
-        doa.delivery_status,
-        d.name as assigned_driver_name
-    FROM daily_orders do
-    JOIN customers c ON do.customer_id = c.id
-    LEFT JOIN daily_order_assignments doa ON do.id = doa.daily_order_id AND doa.delivery_date = do.order_date
-    LEFT JOIN drivers d ON doa.driver_id = d.id
-    WHERE do.order_date = ?
-    ORDER BY doa.route_order, c.name
-");
-$stmt->execute([$selectedDate]);
-$dailyOrders = $stmt->fetchAll();
-
-// Get standing routes for this day
-$stmt = $db->prepare("
-    SELECT 
-        sr.customer_id,
-        sr.driver_id,
-        c.name as customer_name,
-        d.name as driver_name
-    FROM standing_routes sr
-    JOIN customers c ON sr.customer_id = c.id
-    JOIN drivers d ON sr.driver_id = d.id
-    WHERE sr.day_of_week = ?
-    ORDER BY d.name, c.name
-");
-$stmt->execute([$dayOfWeek]);
-$standingRoutes = $stmt->fetchAll();
-
-// Group orders by assigned driver
+$pageLoadError = null;
+$drivers = [];
+$dailyOrders = [];
+$standingRoutes = [];
 $ordersByDriver = [];
 $unassignedOrders = [];
-
-foreach ($dailyOrders as $order) {
-    if ($order['assigned_driver_id']) {
-        $driverId = $order['assigned_driver_id'];
-        if (!isset($ordersByDriver[$driverId])) {
-            $ordersByDriver[$driverId] = [
-                'driver_name' => $order['assigned_driver_name'],
-                'orders' => []
-            ];
-        }
-        $ordersByDriver[$driverId]['orders'][] = $order;
-    } else {
-        $unassignedOrders[] = $order;
-    }
-}
-
-// Group standing routes by driver
+$otherUnassignedOrders = [];
+$standingCustomerIds = [];
+$routeSyncCountByDriver = [];
 $standingRoutesByDriver = [];
-foreach ($standingRoutes as $route) {
-    $driverId = $route['driver_id'];
-    if (!isset($standingRoutesByDriver[$driverId])) {
-        $standingRoutesByDriver[$driverId] = [];
+
+try {
+    $drivers = bakery_get_drivers($db);
+
+    $stmt = $db->prepare("
+        SELECT 
+            do.*,
+            c.name as customer_name,
+            c.address,
+            c.phone,
+            c.deliver_by,
+            c.deliver_after,
+            COALESCE(c.delivery_time, 20) as delivery_time,
+            c.latitude,
+            c.longitude,
+            doa.driver_id as assigned_driver_id,
+            doa.route_order,
+            doa.scheduled_delivery_time,
+            doa.delivery_status,
+            d.name as assigned_driver_name
+        FROM daily_orders do
+        JOIN customers c ON do.customer_id = c.id
+        LEFT JOIN daily_order_assignments doa ON do.id = doa.daily_order_id AND doa.delivery_date = do.order_date
+        LEFT JOIN drivers d ON doa.driver_id = d.id
+        WHERE do.order_date = ?
+        ORDER BY doa.route_order, c.name
+    ");
+    $stmt->execute([$selectedDate]);
+    $dailyOrders = $stmt->fetchAll();
+
+    $stmt = $db->prepare("
+        SELECT 
+            sr.customer_id,
+            sr.driver_id,
+            sr.route_order,
+            c.name as customer_name,
+            d.name as driver_name
+        FROM standing_routes sr
+        JOIN customers c ON sr.customer_id = c.id
+        JOIN drivers d ON sr.driver_id = d.id
+                        WHERE CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
+        ORDER BY d.name, COALESCE(sr.route_order, 2147483647), c.name
+    ");
+    $stmt->execute([$dayOfWeek]);
+    $standingRoutes = $stmt->fetchAll();
+
+    foreach ($dailyOrders as $order) {
+        if ($order['assigned_driver_id']) {
+            $driverId = $order['assigned_driver_id'];
+            if (!isset($ordersByDriver[$driverId])) {
+                $ordersByDriver[$driverId] = [
+                    'driver_name' => $order['assigned_driver_name'],
+                    'orders' => []
+                ];
+            }
+            $ordersByDriver[$driverId]['orders'][] = $order;
+        } else {
+            $unassignedOrders[] = $order;
+        }
     }
-    $standingRoutesByDriver[$driverId][] = $route;
+
+    foreach ($standingRoutes as $route) {
+        $standingCustomerIds[(int)$route['customer_id']] = true;
+        $driverId = $route['driver_id'];
+        if (!isset($standingRoutesByDriver[$driverId])) {
+            $standingRoutesByDriver[$driverId] = [];
+        }
+        $standingRoutesByDriver[$driverId][] = $route;
+    }
+
+    foreach ($unassignedOrders as $order) {
+        if (!isset($standingCustomerIds[(int)$order['customer_id']])) {
+            $otherUnassignedOrders[] = $order;
+        }
+    }
+
+    $assignedDriverByCustomer = [];
+    foreach ($dailyOrders as $order) {
+        if (!empty($order['assigned_driver_id'])) {
+            $assignedDriverByCustomer[(int)$order['customer_id']] = (int)$order['assigned_driver_id'];
+        }
+    }
+    foreach ($standingRoutes as $route) {
+        $customerId = (int)$route['customer_id'];
+        $driverId = (int)$route['driver_id'];
+        if (($assignedDriverByCustomer[$customerId] ?? 0) !== $driverId) {
+            $routeSyncCountByDriver[$driverId] = ($routeSyncCountByDriver[$driverId] ?? 0) + 1;
+        }
+    }
+} catch (Throwable $e) {
+    $pageLoadError = $e->getMessage();
+    error_log('driver_assignment.php load failed: ' . $e->getMessage());
 }
+if (!empty($pageLoadError)) {
+    }
 
-// Include header
 require_once 'includes/header.php';
-
-// Include navigation
 require_once 'includes/nav.php';
 ?>
+
+<!-- BUILD: driver-assignment-append-20260801 -->
+
+<?php if ($pageLoadError): ?>
+<div class="container" style="padding:1.5rem;">
+  <div class="alert alert-danger" style="background:#f8d7da;color:#721c24;padding:1rem;border-radius:6px;">
+    <strong>Driver assignment failed to load:</strong>
+    <?php echo htmlspecialchars($pageLoadError); ?>
+  </div>
+</div>
+<?php require_once 'includes/footer.php'; exit; endif; ?>
 
 <div class="container">
     <div class="page-header">
         <h1>🚚 Driver Assignment</h1>
         <div class="button-group">
             <button type="button" class="btn btn-primary" onclick="autoAssignFromStandingRoutes()">
-                Create Orders & Auto-Assign from Standing Routes
+                Build Today's Routes
             </button>
+            <?php if (!empty($ordersByDriver)): ?>
+                <button type="button" class="btn btn-success" onclick="saveAsStandingRoute()">
+                    Save This Route for <?= htmlspecialchars($dayName) ?>
+                </button>
+            <?php else: ?>
+                <button type="button" class="btn btn-success" disabled title="Build the dated route first">
+                    Save Route After Building
+                </button>
+            <?php endif; ?>
             <button type="button" class="btn btn-secondary" onclick="showDatePicker()">
                 Change Date
             </button>
@@ -310,7 +535,10 @@ require_once 'includes/nav.php';
     <div class="date-navigation">
         <div class="date-info">
             <h2>Assignments for <?= date('l, F j, Y', strtotime($selectedDate)) ?></h2>
-            <span class="order-count">Total Orders: <?= count($dailyOrders) ?></span>
+            <div class="route-summary">
+                <span class="route-count">Standing-route stops: <?= count($standingRoutes) ?></span>
+                <span class="order-count">Daily order records: <?= count($dailyOrders) ?></span>
+            </div>
         </div>
         <div class="date-controls">
             <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' -1 day')) ?>" class="btn btn-outline">← Previous Day</a>
@@ -318,23 +546,43 @@ require_once 'includes/nav.php';
             <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' +1 day')) ?>" class="btn btn-outline">Next Day →</a>
         </div>
     </div>
+
+    <div class="route-first-guide">
+        <strong>Route-first workflow</strong>
+        <span>Build the date from the standing route, then drag stops to reorder or move them between drivers. Products and order totals are supporting details for each stop.</span>
+        <span class="guide-save">When the route is right, save it back to the weekday template for next week.</span>
+        <?php if (!empty($standingRoutes)): ?>
+            <span class="guide-status">Configured for this day: <?= count($standingRoutes) ?> stops across <?= count($standingRoutesByDriver) ?> drivers</span>
+        <?php else: ?>
+            <span class="guide-status warning">No standing-route stops are configured for this weekday.</span>
+        <?php endif; ?>
+    </div>
     
-    <?php if (empty($dailyOrders)): ?>
+    <?php if (empty($dailyOrders) && empty($standingRoutes)): ?>
         <div class="empty-state">
-            <h3>No orders for this date</h3>
-            <p>Generate orders from standing orders first, then assign them to drivers.</p>
-            <a href="daily_orders.php?date=<?= $selectedDate ?>" class="btn btn-primary">
-                Go to Daily Orders
-            </a>
+            <h3>No route stops for this date</h3>
+            <p>Set up a standing route for <?= htmlspecialchars($dayName) ?> first.</p>
         </div>
     <?php else: ?>
-        <!-- Driver Assignments -->
+        <div class="route-plan-heading">
+            <h2>Today's Route Plan</h2>
+            <p>Each driver section is a delivery route. Reorder stops here; use Daily Orders separately to manage products and quantities.</p>
+        </div>
         <div class="driver-assignments">
             <?php foreach ($drivers as $driver): ?>
+                <?php
+                $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
+                $missingRouteCount = $routeSyncCountByDriver[$driver['id']] ?? 0;
+                ?>
                 <div class="driver-section" data-driver-id="<?= $driver['id'] ?>">
                     <div class="driver-header">
                         <h3><?= htmlspecialchars($driver['name']) ?></h3>
                         <div class="driver-controls">
+                            <?php if ($missingRouteCount > 0): ?>
+                                <button class="btn btn-sm btn-warning" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
+                                    Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?>
+                                </button>
+                            <?php endif; ?>
                             <button class="btn btn-sm btn-primary" onclick="optimizeRoute(<?= $driver['id'] ?>)">
                                 🚀 Optimize Route
                             </button>
@@ -347,17 +595,26 @@ require_once 'includes/nav.php';
                     <div class="driver-orders">
                         <?php 
                         $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
-                        $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
                         ?>
+                        <div class="driver-stop-summary">
+                            <?= count($driverOrders['orders']) ?> assigned stop<?= count($driverOrders['orders']) === 1 ? '' : 's' ?>
+                            <?php if (!empty($standingDriverRoutes)): ?>
+                                · <?= count($standingDriverRoutes) ?> standing-route stop<?= count($standingDriverRoutes) === 1 ? '' : 's' ?>
+                            <?php endif; ?>
+                        </div>
                         
                         <div class="orders-list">
                             <?php if (empty($driverOrders['orders'])): ?>
                                 <div class="no-orders">
-                                    <p>No orders assigned</p>
                                     <?php if (!empty($standingDriverRoutes)): ?>
-                                        <button class="btn btn-sm btn-outline-primary" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
-                                            Assign from Standing Routes (<?= count($standingDriverRoutes) ?>)
-                                        </button>
+                                        <p class="route-stop-count"><?= count($standingDriverRoutes) ?> standing-route stop<?= count($standingDriverRoutes) === 1 ? '' : 's' ?> configured</p>
+                                        <?php if (empty($dailyOrders)): ?>
+                                            <p>Click <strong>Build Today's Routes</strong> above to create the dated route.</p>
+                                        <?php elseif ($missingRouteCount > 0): ?>
+                                            <p>Use <strong>Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?></strong> above to sync this route.</p>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <p>No standing-route stops for this driver on <?= htmlspecialchars($dayName) ?>.</p>
                                     <?php endif; ?>
                                 </div>
                             <?php else: ?>
@@ -389,26 +646,43 @@ require_once 'includes/nav.php';
             <?php endforeach; ?>
             
             <!-- Unassigned Orders -->
-            <?php if (!empty($unassignedOrders)): ?>
+            <?php if (!empty($otherUnassignedOrders)): ?>
                 <div class="unassigned-section">
-                    <h3>Unassigned Orders (<?= count($unassignedOrders) ?>)</h3>
+                    <div class="unassigned-header">
+                        <h3>Other Daily Orders (<?= count($otherUnassignedOrders) ?>)</h3>
+                        <p class="unassigned-hint">These orders do not have a standing route for <?= htmlspecialchars($dayName) ?>. Add them only if they are a one-off stop for this date.</p>
+                    </div>
+                    <div class="bulk-assign-bar">
+                        <label class="bulk-select-all">
+                            <input type="checkbox" id="select-all-unassigned" onchange="toggleSelectAllUnassigned(this.checked)">
+                            Select all
+                        </label>
+                        <span class="bulk-selected-count" id="bulk-selected-count">0 selected</span>
+                        <select id="bulk-driver-select" class="driver-select">
+                            <option value="">Assign selected to…</option>
+                            <?php foreach ($drivers as $driver): ?>
+                                <option value="<?= $driver['id'] ?>"><?= htmlspecialchars($driver['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="button" class="btn btn-primary" onclick="assignSelectedToDriver()">
+                            Assign selected
+                        </button>
+                    </div>
                     <div class="unassigned-orders">
-                        <?php foreach ($unassignedOrders as $order): ?>
-                            <div class="order-item" data-order-id="<?= $order['id'] ?>">
+                        <?php foreach ($otherUnassignedOrders as $order): ?>
+                            <div class="order-item unassigned-item" data-order-id="<?= $order['id'] ?>">
+                                <label class="order-check">
+                                    <input type="checkbox"
+                                           class="unassigned-checkbox"
+                                           value="<?= (int)$order['id'] ?>"
+                                           onchange="updateBulkSelectedCount()">
+                                </label>
                                 <div class="order-info">
                                     <div class="customer-name"><?= htmlspecialchars($order['customer_name']) ?></div>
                                     <div class="customer-address"><?= htmlspecialchars($order['address']) ?></div>
                                     <div class="order-details">
                                         <span class="order-amount">$<?= number_format($order['total_amount'], 2) ?></span>
                                     </div>
-                                </div>
-                                <div class="order-actions">
-                                    <select class="driver-select" onchange="assignToDriver(<?= $order['id'] ?>, this.value)">
-                                        <option value="">Assign to...</option>
-                                        <?php foreach ($drivers as $driver): ?>
-                                            <option value="<?= $driver['id'] ?>"><?= htmlspecialchars($driver['name']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -456,6 +730,14 @@ require_once 'includes/nav.php';
 </div>
 
 <script>
+const driverAssignmentConfig = {
+    date: <?php echo bakery_json_for_html($selectedDate, '""'); ?>,
+    mapsKey: <?php echo bakery_json_for_html(GOOGLE_MAPS_API_KEY, '""'); ?>,
+    standingRoutes: <?php echo bakery_json_for_html($standingRoutes, '[]'); ?>,
+    dailyOrders: <?php echo bakery_json_for_html($dailyOrders, '[]'); ?>,
+    ordersByDriver: <?php echo bakery_json_for_html($ordersByDriver, '{}'); ?>
+};
+
 // Global variables
 let currentDriverId = null;
 let currentAssignments = [];
@@ -490,7 +772,7 @@ function initMap() {
 
 // Auto-assign from standing routes
 function autoAssignFromStandingRoutes() {
-    if (!confirm('This will create orders for ALL customers and assign them based on standing routes. Continue?')) {
+    if (!confirm('Build this date from the standing route? This will replace the dated route assignments for this date.')) {
         return;
     }
     
@@ -499,7 +781,7 @@ function autoAssignFromStandingRoutes() {
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=create_orders_and_assign&delivery_date=<?= $selectedDate ?>`
+        body: 'action=create_orders_and_assign&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
     })
     .then(response => response.json())
     .then(data => {
@@ -516,30 +798,56 @@ function autoAssignFromStandingRoutes() {
     });
 }
 
+function saveAsStandingRoute() {
+    if (!confirm('Save the current dated routes as the recurring <?= addslashes($dayName) ?> route? This replaces the existing recurring route for this weekday and will affect future weeks.')) {
+        return;
+    }
+
+    fetch('driver_assignment.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=save_as_standing_route&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Could not save recurring route'));
+        }
+    })
+    .catch(error => {
+        console.error('Error saving recurring route:', error);
+        alert('Error saving recurring route');
+    });
+}
+
 // Assign specific driver from standing routes
 function assignFromStandingRoutes(driverId) {
-    const standingRoutes = <?= json_encode($standingRoutes) ?>;
-    const dailyOrders = <?= json_encode($dailyOrders) ?>;
-    
-    const driverRoutes = standingRoutes.filter(route => route.driver_id == driverId);
-    const ordersByCustomer = {};
-    dailyOrders.forEach(order => {
-        ordersByCustomer[order.customer_id] = order;
-    });
-    
-    const assignments = [];
-    driverRoutes.forEach(route => {
-        if (ordersByCustomer[route.customer_id]) {
-            assignments.push({
-                daily_order_id: ordersByCustomer[route.customer_id].id,
-                driver_id: driverId,
-                route_order: 0,
-                scheduled_delivery_time: null
-            });
+    if (!confirm('Restore this driver\'s dated route from the standing route?')) {
+        return;
+    }
+
+    fetch('driver_assignment.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=sync_driver_route&driver_id=' + encodeURIComponent(driverId)
+            + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Could not restore route'));
         }
+    })
+    .catch(error => {
+        console.error('Error restoring route:', error);
+        alert('Error restoring route');
     });
-    
-    saveAssignments(assignments);
 }
 
 // Optimize route for a driver (Constraint-aware, Route Tester logic)
@@ -550,7 +858,7 @@ function optimizeRoute(driverId) {
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=get_optimized_route&driver_id=${driverId}&delivery_date=<?= $selectedDate ?>`
+        body: 'action=get_optimized_route&driver_id=' + driverId + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
     })
     .then(response => response.json())
     .then(data => {
@@ -991,8 +1299,8 @@ function editAssignments(driverId) {
     currentDriverId = driverId;
     
     // Get current assignments for this driver
-    const driverOrders = <?= json_encode($ordersByDriver) ?>[driverId] || { orders: [] };
-    const allOrders = <?= json_encode($dailyOrders) ?>;
+    const driverOrders = driverAssignmentConfig.ordersByDriver[driverId] || { orders: [] };
+    const allOrders = driverAssignmentConfig.dailyOrders;
     
     let content = `
         <div class="edit-assignments">
@@ -1046,7 +1354,7 @@ function editAssignments(driverId) {
 function addAssignment(orderId) {
     if (!orderId) return;
     
-    const allOrders = <?= json_encode($dailyOrders) ?>;
+    const allOrders = driverAssignmentConfig.dailyOrders;
     const order = allOrders.find(o => o.id == orderId);
     if (!order) return;
     
@@ -1092,7 +1400,7 @@ function removeAssignmentFromDatabase(orderId) {
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=remove_assignment&daily_order_id=${orderId}&driver_id=${driverId}&delivery_date=<?= $selectedDate ?>`
+        body: 'action=remove_assignment&daily_order_id=' + orderId + '&driver_id=' + driverId + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
     })
     .then(response => response.json())
     .then(data => {
@@ -1117,7 +1425,8 @@ function removeAssignment(orderId) {
 }
 
 // Save assignments
-function saveAssignments(assignments = null) {
+// mode: 'replace' rewrites the driver's route; 'append' adds without clearing existing stops
+function saveAssignments(assignments = null, mode = 'replace') {
     if (!assignments) {
         // Collect assignments from edit modal
         const assignmentItems = document.querySelectorAll('.assignment-item');
@@ -1137,6 +1446,7 @@ function saveAssignments(assignments = null) {
                 });
             }
         });
+        mode = 'replace';
     }
     
     if (assignments.length === 0) {
@@ -1146,26 +1456,24 @@ function saveAssignments(assignments = null) {
     
     // Use the driver_id from the first assignment if currentDriverId is not set
     const driverId = currentDriverId || assignments[0].driver_id;
-    
-    // Debug logging
-    console.log('Saving assignments:', {
-        currentDriverId: currentDriverId,
-        driverId: driverId,
-        assignments: assignments
-    });
+    const saveMode = mode === 'append' ? 'append' : 'replace';
     
     fetch('driver_assignment.php', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=assign_orders&driver_id=${driverId}&delivery_date=<?= $selectedDate ?>&assignments=${JSON.stringify(assignments)}`
+        body: 'action=assign_orders'
+            + '&mode=' + encodeURIComponent(saveMode)
+            + '&driver_id=' + driverId
+            + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
+            + '&assignments=' + encodeURIComponent(JSON.stringify(assignments))
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Assignments saved successfully');
-            location.reload(); // Refresh page to show updated assignments
+            alert(data.message || 'Assignments saved successfully');
+            location.reload();
         } else {
             alert('Error saving assignments: ' + data.error);
         }
@@ -1182,31 +1490,81 @@ function closeEditModal() {
     currentDriverId = null;
 }
 
-// Assign order to driver
+function getSelectedUnassignedOrderIds() {
+    return Array.from(document.querySelectorAll('.unassigned-checkbox:checked'))
+        .map(cb => parseInt(cb.value, 10))
+        .filter(id => id > 0);
+}
+
+function updateBulkSelectedCount() {
+    const countEl = document.getElementById('bulk-selected-count');
+    if (!countEl) return;
+    const n = getSelectedUnassignedOrderIds().length;
+    countEl.textContent = n + ' selected';
+    const selectAll = document.getElementById('select-all-unassigned');
+    if (selectAll) {
+        const all = document.querySelectorAll('.unassigned-checkbox');
+        selectAll.checked = all.length > 0 && n === all.length;
+        selectAll.indeterminate = n > 0 && n < all.length;
+    }
+}
+
+function toggleSelectAllUnassigned(checked) {
+    document.querySelectorAll('.unassigned-checkbox').forEach(cb => {
+        cb.checked = !!checked;
+    });
+    updateBulkSelectedCount();
+}
+
+// Append checked unassigned orders to a driver (does not replace existing route)
+function assignSelectedToDriver() {
+    const driverSelect = document.getElementById('bulk-driver-select');
+    const driverId = parseInt(driverSelect && driverSelect.value, 10);
+    if (!driverId || driverId <= 0) {
+        alert('Choose a driver first');
+        return;
+    }
+
+    const orderIds = getSelectedUnassignedOrderIds();
+    if (orderIds.length === 0) {
+        alert('Check one or more unassigned customers first');
+        return;
+    }
+
+    currentDriverId = driverId;
+    const assignments = orderIds.map(orderId => ({
+        daily_order_id: orderId,
+        driver_id: driverId,
+        route_order: 0,
+        scheduled_delivery_time: null
+    }));
+
+    saveAssignments(assignments, 'append');
+}
+
+// Assign a single order to a driver without wiping that driver's existing stops
 function assignToDriver(orderId, driverId) {
-    // Convert to integer and validate
-    driverId = parseInt(driverId);
+    driverId = parseInt(driverId, 10);
     
     if (!driverId || driverId <= 0) {
-        console.log('Invalid driver ID:', driverId);
         return;
     }
     
-    currentDriverId = driverId; // Set the current driver ID
+    currentDriverId = driverId;
     
     const assignments = [{
         daily_order_id: orderId,
         driver_id: driverId,
-        route_order: 1, // Default to first position
+        route_order: 0,
         scheduled_delivery_time: null
     }];
     
-    saveAssignments(assignments);
+    saveAssignments(assignments, 'append');
 }
 
 // Show date picker
 function showDatePicker() {
-    const date = prompt('Enter date (YYYY-MM-DD):', '<?= $selectedDate ?>');
+    const date = prompt('Enter date (YYYY-MM-DD):', driverAssignmentConfig.date);
     if (date) {
         window.location.href = `?date=${date}`;
     }
@@ -1216,7 +1574,7 @@ function showDatePicker() {
 document.addEventListener('DOMContentLoaded', function() {
     // Load Google Maps API with async, defer, and onload (no callback in URL)
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=<?= GOOGLE_MAPS_API_KEY ?>&libraries=geometry`;
+    script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(driverAssignmentConfig.mapsKey) + '&libraries=geometry';
     script.async = true;
     script.defer = true;
     script.onload = function() {
@@ -1226,6 +1584,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Setup drag and drop for main view
     setupMainViewDragAndDrop();
+    updateBulkSelectedCount();
 });
 
 // Setup drag and drop functionality for main driver assignment view
@@ -1341,7 +1700,7 @@ function saveMainViewOrder(driverId, routeList) {
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=assign_orders&driver_id=${driverId}&delivery_date=<?= $selectedDate ?>&assignments=${JSON.stringify(assignments)}`
+        body: 'action=assign_orders&driver_id=' + driverId + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date) + '&assignments=' + encodeURIComponent(JSON.stringify(assignments))
     })
     .then(response => response.json())
     .then(data => {
@@ -1382,6 +1741,79 @@ function saveMainViewOrder(driverId, routeList) {
     margin-top: 20px;
 }
 
+.route-plan-heading {
+    margin-top: 24px;
+}
+
+.route-plan-heading h2 {
+    margin: 0 0 4px;
+    color: #343a40;
+}
+
+.route-plan-heading p {
+    margin: 0;
+    color: #6c757d;
+}
+
+.route-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.route-summary span {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.route-count {
+    color: #155724;
+    background: #d4edda;
+}
+
+.order-count {
+    color: #495057;
+    background: #e9ecef;
+}
+
+.route-first-guide {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 14px 16px;
+    margin-top: 18px;
+    color: #495057;
+    background: #eef6ff;
+    border: 1px solid #b8daff;
+    border-radius: 8px;
+}
+
+.route-first-guide strong {
+    color: #004085;
+}
+
+.route-first-guide .guide-status {
+    flex-basis: 100%;
+    color: #155724;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.route-first-guide .guide-status.warning {
+    color: #856404;
+}
+
+.route-first-guide .guide-save {
+    flex-basis: 100%;
+    color: #155724;
+    font-size: 0.9rem;
+}
+
 .driver-section {
     background: white;
     border: 1px solid #dee2e6;
@@ -1414,10 +1846,22 @@ function saveMainViewOrder(driverId, routeList) {
     padding: 20px;
 }
 
+.driver-stop-summary {
+    margin-bottom: 12px;
+    color: #6c757d;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
 .no-orders {
     text-align: center;
     padding: 40px;
     color: #6c757d;
+}
+
+.route-stop-count {
+    color: #155724;
+    font-weight: 600;
 }
 
 .route-order-list {
@@ -1547,15 +1991,87 @@ function saveMainViewOrder(driverId, routeList) {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.unassigned-section h3 {
-    margin-top: 0;
+.unassigned-header h3 {
+    margin: 0 0 6px 0;
     color: #dc3545;
+}
+
+.unassigned-hint {
+    margin: 0 0 14px 0;
+    color: #6c757d;
+    font-size: 0.95em;
+}
+
+.bulk-assign-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: #fff8f8;
+    border: 1px solid #f1c0c0;
+    border-radius: 6px;
+}
+
+.bulk-select-all {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #495057;
+    cursor: pointer;
+    margin: 0;
+}
+
+.bulk-selected-count {
+    color: #6c757d;
+    font-size: 0.9em;
+    min-width: 5.5rem;
+}
+
+.bulk-assign-bar .driver-select {
+    min-width: 180px;
 }
 
 .unassigned-orders {
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.order-item.unassigned-item {
+    cursor: default;
+}
+
+.order-item.unassigned-item:hover {
+    transform: none;
+}
+
+.order-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12px;
+    cursor: pointer;
+}
+
+.order-check input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+@media (max-width: 640px) {
+    .bulk-assign-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .bulk-assign-bar .driver-select,
+    .bulk-assign-bar .btn {
+        width: 100%;
+    }
 }
 
 /* Modal Styles */
@@ -1937,3 +2453,5 @@ function saveMainViewOrder(driverId, routeList) {
     100% { opacity: 1; transform: translateY(0); }
 }
 </style>
+
+<?php require_once 'includes/footer.php'; ?>

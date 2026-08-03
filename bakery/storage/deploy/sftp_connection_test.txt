@@ -1,0 +1,3 @@
+﻿SFTP connection test from local bakery project.
+Uploaded at: 2026-08-01 15:43:29 -07:00
+If you can read this via https://bakery.sourflour.org/bake/test/sftp_connection_test.txt the path works.

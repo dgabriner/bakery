@@ -9,7 +9,7 @@
 $root = dirname(__DIR__);
 
 // Fresh fixtures before suite
-passthru('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset', $setupCode);
+passthru('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset', $setupCode);
 if ($setupCode !== 0) {
     fwrite(STDERR, "Fixture reset failed\n");
     exit(1);

@@ -2,6 +2,8 @@
 
 This guide configures a **local-only** Bakery Manager environment that cannot fall back to production credentials.
 
+For day-to-day local ↔ production sync and deploy ZIP workflow, see **[DEV_WORKFLOW.md](DEV_WORKFLOW.md)** (`dev_workflow.bat`).
+
 ## Agent wave pointer (0D/0E)
 
 For branch, checkpoint status, parallel agent ownership, and quarantine policy, see:
@@ -124,6 +126,23 @@ There is **no** permanent `AUTH_ENABLED=false` bypass.
 C:\php\php.exe tests\run_auth_tests.php
 ```
 
+## Switch between local and production DB
+
+Keep `DB_*` in `.env` on `127.0.0.1` / `bakerysf_local`. Put DreamHost credentials in `.env.production.pull` (`PROD_DB_*`). Flip with:
+
+```powershell
+C:\php\php.exe scripts\switch_db.php          # show current mode
+C:\php\php.exe scripts\switch_db.php local    # bakerysf_local
+C:\php\php.exe scripts\switch_db.php prod     # LIVE production (writes affect the live site)
+```
+
+- `USE_PROD_DB=false` (default): amber banner, local MariaDB
+- `USE_PROD_DB=true`: red banner **LOCAL APP → LIVE PRODUCTION DB**; login uses production users
+- Mail stays `MAIL_DRIVER=log` in both modes so local does not send real email
+- Destructive scripts (`setup_local_db.php`, etc.) still read local `DB_*` from `.env`, not the live target
+
+Whitelist your public IP in DreamHost MySQL Allowable Hosts before using `prod`.
+
 ## Run the app locally
 
 From the `bakery` directory (or parent with router):
@@ -197,16 +216,50 @@ After any `setup_local_db.php --reset` or `seed_local_users.php`, run (or rely o
 C:\php\php.exe scripts\ensure_local_admin.php
 ```
 
-`LOCAL_ADMIN_*` in `.env` is the durable source so login survives fixture resets. Avoid `--reset` unless you intend to wipe a production pull.
+`LOCAL_ADMIN_*` in `.env` is the durable source for `danny@sourflour.org` login. After a prod pull, `ensure_local_admin.php` runs automatically.
 
-5. Verify:
+**Protecting production pull data:** After `pull_prod_to_local.php`, a marker file `storage/.prod_data_active` is created. `setup_local_db.php --reset` **refuses** to run without `--force-reset` while that marker exists. Automated tests pass `--force-reset` intentionally — **do not run test suites while you need real data**.
+
+5. Verify data and login:
 
 ```powershell
 C:\php\php.exe scripts\verify_local_env.php
-# Login: http://localhost:8080/bakery/login.php
+C:\php\php.exe scripts/verify_local_login.php
+# Login: http://localhost:8080/bakery/login.php  (LOCAL_ADMIN_EMAIL / LOCAL_ADMIN_PASSWORD from .env)
 ```
 
 Dumps are written under `storage/dumps/` (gitignored, contains PII). Do not commit them.
+
+## Backup production (read-only)
+
+Snapshot live DreamHost data to a single SQL file:
+
+```powershell
+C:\php\php.exe scripts\backup_production.php
+C:\php\php.exe scripts\backup_production.php --label=before_my_change
+```
+
+Output: `storage/dumps/bakerysf_prod_backup_YYYYMMDD_HHMMSS[_label].sql`
+
+## Push local → production (destructive)
+
+**Overwrites production table data** with your local `bakerysf_local`. Always creates a production backup first.
+
+```powershell
+# Preview counts — no changes
+C:\php\php.exe scripts/push_local_to_prod.php --dry-run
+
+# Execute push (excludes local auth tables by default)
+C:\php\php.exe scripts/push_local_to_prod.php --confirm-push-to-production
+
+# Include users/roles if you intentionally want auth on prod too
+C:\php\php.exe scripts/push_local_to_prod.php --confirm-push-to-production --include-auth
+```
+
+Rollback: use the auto-created `bakerysf_prod_pre_push_*.sql` in `storage/dumps/`.
+
+**Warning:** This replaces live production data. Coordinate with anyone using the live site. Test with `--dry-run` first.
+
 
 ## Proof production cannot be reached accidentally
 

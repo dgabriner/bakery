@@ -16,7 +16,45 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/env_loader.php';
 
 // Load bakery/.env when present (local development). Never commit .env.
-bakery_load_env_file(dirname(__DIR__) . DIRECTORY_SEPARATOR . '.env');
+$bakeryRoot = dirname(__DIR__);
+bakery_load_env_file($bakeryRoot . DIRECTORY_SEPARATOR . '.env');
+
+/**
+ * Truthy env flag helper (1/true/yes/on).
+ */
+if (!function_exists('bakery_env_flag')) {
+    function bakery_env_flag($name, $default = false) {
+        $raw = $_ENV[$name] ?? getenv($name);
+        if ($raw === false || $raw === null || $raw === '') {
+            return (bool) $default;
+        }
+        return in_array(strtolower((string) $raw), ['1', 'true', 'yes', 'on'], true);
+    }
+}
+
+// Opt-in: local APP_ENV may use DreamHost credentials from .env.production.pull
+// when USE_PROD_DB=true. Keeps local DB_* in .env untouched for easy switching.
+$useProdDbRequested = bakery_env_flag('USE_PROD_DB', false);
+if ($useProdDbRequested) {
+    $pullEnv = $bakeryRoot . DIRECTORY_SEPARATOR . '.env.production.pull';
+    if (!is_readable($pullEnv)) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "USE_PROD_DB=true but bakery/.env.production.pull is missing.\n";
+        echo "Copy .env.production.pull.example and set PROD_DB_*, or run:\n";
+        echo "  php scripts/switch_db.php local\n";
+        exit(1);
+    }
+    bakery_load_env_file($pullEnv);
+}
+
+$prodErr = __DIR__ . '/production_errors.php';
+if (is_readable($prodErr)) {
+    require_once $prodErr;
+    if (function_exists('bakery_register_production_error_probe')) {
+        bakery_register_production_error_probe();
+    }
+}
 
 /**
  * Enhanced HTTPS detection for various hosting environments
@@ -84,24 +122,49 @@ if (PHP_SAPI !== 'cli') {
     header('Referrer-Policy: strict-origin-when-cross-origin');
 
     if (!IS_LOCAL && !isDevelopment()) {
-        header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: maps.gstatic.com; connect-src 'self' maps.googleapis.com");
+        // Allow Google Maps JS API tiles/fonts (map tiles load from maps.googleapis.com, not only maps.gstatic.com).
+        header(
+            "Content-Security-Policy: " .
+            "default-src 'self'; " .
+            "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com; " .
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
+            "img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com https://*.google.com https://*.googleusercontent.com; " .
+            "font-src 'self' https://fonts.gstatic.com; " .
+            "connect-src 'self' https://maps.googleapis.com; " .
+            "worker-src 'self' blob:"
+        );
     }
 }
 
 /**
  * Database configuration — required env vars; no production password fallbacks.
+ * When USE_PROD_DB=true (local only), runtime DB_* come from PROD_DB_* in .env.production.pull.
  */
+define('USE_PROD_DB', $useProdDbRequested && (IS_LOCAL || isDevelopment()));
+
 try {
-    define('DB_HOST', bakery_env('DB_HOST'));
-    define('DB_PORT', bakery_env('DB_PORT', '3306'));
-    define('DB_NAME', bakery_env('DB_NAME'));
-    define('DB_USER', bakery_env('DB_USER'));
-    define('DB_PASS', bakery_env('DB_PASS'));
+    if ($useProdDbRequested && !IS_LOCAL && !isDevelopment()) {
+        throw new RuntimeException('USE_PROD_DB=true is only allowed when APP_ENV is local/development.');
+    }
+    if (USE_PROD_DB) {
+        define('DB_HOST', bakery_env('PROD_DB_HOST'));
+        define('DB_PORT', bakery_env('PROD_DB_PORT', '3306'));
+        define('DB_NAME', bakery_env('PROD_DB_NAME'));
+        define('DB_USER', bakery_env('PROD_DB_USER'));
+        define('DB_PASS', bakery_env('PROD_DB_PASS'));
+    } else {
+        define('DB_HOST', bakery_env('DB_HOST'));
+        define('DB_PORT', bakery_env('DB_PORT', '3306'));
+        define('DB_NAME', bakery_env('DB_NAME'));
+        define('DB_USER', bakery_env('DB_USER'));
+        define('DB_PASS', bakery_env('DB_PASS'));
+    }
 } catch (RuntimeException $e) {
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
     echo "Configuration error: required database environment variables are not set.\n";
     echo "For local development: copy bakery/.env.example to bakery/.env and configure bakerysf_local.\n";
+    echo "To use production from local: set USE_PROD_DB=true and configure .env.production.pull (PROD_DB_*).\n";
     echo "For production: set DB_HOST, DB_NAME, DB_USER, DB_PASS via Apache/panel env or external config.\n";
     if (IS_LOCAL || isDevelopment()) {
         echo "\nDetail: " . $e->getMessage() . "\n";
@@ -113,27 +176,49 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', 'utf8mb4_unicode_ci');
 
 /**
- * Safety rails: local mode must never target production database hosts/names.
+ * Safety rails:
+ * - Default local mode must never target production hosts/names.
+ * - USE_PROD_DB=true explicitly allows production, but requires PROD-looking credentials.
  */
 function bakery_assert_safe_database_target() {
     $host = strtolower(DB_HOST);
     $name = strtolower(DB_NAME);
 
-    $blockedHostFragments = ['sourflour.org', 'dreamhost'];
-    foreach ($blockedHostFragments as $fragment) {
-        if (strpos($host, $fragment) !== false) {
+    if (USE_PROD_DB) {
+        $looksProd = (
+            strpos($host, 'sourflour') !== false ||
+            strpos($host, 'dreamhost') !== false ||
+            $name === 'bakerysf'
+        );
+        if (!$looksProd) {
             throw new RuntimeException(
-                'Refusing to connect: DB_HOST looks like a production host (' . $fragment . '). ' .
-                'Local development must use 127.0.0.1 / localhost and database bakerysf_local.'
+                'USE_PROD_DB=true but PROD_DB_HOST/NAME do not look like production ' .
+                '(expected sourflour/dreamhost host or bakerysf).'
             );
         }
+        if (strpos($name, '_local') !== false || strpos($name, 'test') !== false) {
+            throw new RuntimeException(
+                'USE_PROD_DB=true but database name looks nonproduction: ' . DB_NAME
+            );
+        }
+        return;
     }
 
     if (IS_LOCAL || isDevelopment()) {
+        $blockedHostFragments = ['sourflour.org', 'dreamhost'];
+        foreach ($blockedHostFragments as $fragment) {
+            if (strpos($host, $fragment) !== false) {
+                throw new RuntimeException(
+                    'Refusing to connect: DB_HOST looks like a production host (' . $fragment . '). ' .
+                    'Use bakerysf_local, or set USE_PROD_DB=true (php scripts/switch_db.php prod).'
+                );
+            }
+        }
+
         if ($name === 'bakerysf') {
             throw new RuntimeException(
                 'Refusing to connect: local APP_ENV cannot use production database name bakerysf. ' .
-                'Use bakerysf_local.'
+                'Use bakerysf_local, or set USE_PROD_DB=true (php scripts/switch_db.php prod).'
             );
         }
         if (strpos($name, '_local') === false && strpos($name, 'test') === false && strpos($name, 'dev') === false) {
@@ -153,17 +238,42 @@ try {
     exit(1);
 }
 
+/**
+ * True when the PHP built-in server (or vhost) uses the bakery folder as docroot
+ * (e.g. /login.php instead of /bakery/login.php).
+ */
+function bakery_served_at_app_root() {
+    if (PHP_SAPI === 'cli') {
+        return false;
+    }
+    $script = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+    return strpos($script, '/bakery/') === false;
+}
+
+/**
+ * Resolve BASE_URL for web requests; honors .env but adapts for local docroot layouts.
+ */
+function bakery_resolve_base_url() {
+    $configuredBase = $_ENV['BASE_URL'] ?? getenv('BASE_URL');
+    if ($configuredBase !== false && $configuredBase !== null && $configuredBase !== '') {
+        $base = rtrim((string)$configuredBase, '/') . '/';
+    } elseif (IS_LOCAL || isDevelopment()) {
+        $base = '/bakery/';
+    } else {
+        $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
+        $base = ($scriptDir === '/' || $scriptDir === '.') ? '/' : rtrim($scriptDir, '/') . '/';
+    }
+
+    if ((IS_LOCAL || isDevelopment()) && bakery_served_at_app_root()) {
+        return '/';
+    }
+
+    return $base;
+}
+
 // Application URL
 if (isset($_SERVER['HTTP_HOST'])) {
-    $configuredBase = $_ENV['BASE_URL'] ?? getenv('BASE_URL');
-    if ($configuredBase) {
-        define('BASE_URL', rtrim($configuredBase, '/') . '/');
-    } elseif (IS_LOCAL || isDevelopment()) {
-        define('BASE_URL', '/bakery/');
-    } else {
-        $scriptDir = dirname($_SERVER['SCRIPT_NAME']);
-        define('BASE_URL', ($scriptDir === '/') ? '/' : $scriptDir . '/');
-    }
+    define('BASE_URL', bakery_resolve_base_url());
 } else {
     $configuredBase = $_ENV['BASE_URL'] ?? getenv('BASE_URL') ?: '/bakery/';
     define('BASE_URL', rtrim($configuredBase, '/') . '/');
@@ -188,14 +298,24 @@ if (DEBUG_MODE) {
 
 // Session security (web only)
 if (PHP_SAPI !== 'cli') {
+    $cookiePath = (defined('BASE_URL') && BASE_URL !== '') ? BASE_URL : '/';
     if (isHTTPS()) {
         ini_set('session.cookie_secure', '1');
     }
     ini_set('session.cookie_httponly', '1');
     ini_set('session.cookie_samesite', 'Strict');
     ini_set('session.use_strict_mode', 1);
+    // Scope session cookie to this deploy path (e.g. /6/ or /bakery/)
+    ini_set('session.cookie_path', $cookiePath);
 
     if (session_status() === PHP_SESSION_NONE) {
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => $cookiePath,
+            'secure' => isHTTPS(),
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
         session_start();
     }
 

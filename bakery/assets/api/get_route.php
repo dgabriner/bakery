@@ -10,13 +10,14 @@ try {
     }
 
     $day = (int)$_GET['day'];
+    $day = bakery_normalize_standing_day($day);
     $driver_id = (int)$_GET['driver_id'];
 
     $stmt = $db->prepare("
         SELECT customer_id 
         FROM standing_routes 
-        WHERE day_of_week = ? AND driver_id = ?
-        ORDER BY stop_number
+        WHERE CASE WHEN day_of_week = 0 THEN 7 ELSE day_of_week END = ? AND driver_id = ?
+        ORDER BY COALESCE(route_order, 2147483647), customer_id
     ");
     $stmt->execute([$day, $driver_id]);
     

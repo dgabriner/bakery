@@ -203,10 +203,14 @@ class PhotoHandler {
      */
     private function generateFilename($originalName, $driverId, $customerId, $photoType) {
         $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+        if ($extension === '' || !preg_match('/^[a-z0-9]+$/', $extension)) {
+            $extension = 'jpg';
+        }
         $timestamp = date('Ymd_His');
         $unique = substr(md5(uniqid(rand(), true)), 0, 8);
+        $safeType = preg_replace('/[^A-Za-z0-9_-]/', '', (string)$photoType) ?: 'Photo';
         
-        return "driver{$driverId}_customer{$customerId}_{$photoType}_{$timestamp}_{$unique}.{$extension}";
+        return "driver{$driverId}_customer{$customerId}_{$safeType}_{$timestamp}_{$unique}.{$extension}";
     }
     
     /**
@@ -361,16 +365,22 @@ class PhotoHandler {
      */
     public function saveToDatabase($db, $driverId, $customerId, $photoData) {
         try {
+            $deliveryDate = $photoData['delivery_date'] ?? date('Y-m-d');
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$deliveryDate)) {
+                $deliveryDate = date('Y-m-d');
+            }
+
             $stmt = $db->prepare("
                 INSERT INTO driver_photos 
                 (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path, 
                  file_size, mime_type, photo_type, latitude, longitude, notes) 
-                VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             
             $result = $stmt->execute([
                 $driverId,
                 $customerId,
+                $deliveryDate,
                 $photoData['filename'],
                 $photoData['original_filename'],
                 $photoData['file_path'],
@@ -484,6 +494,68 @@ class PhotoHandler {
         } catch (Exception $e) {
             error_log("Get photos error: " . $e->getMessage());
             return [];
+        }
+    }
+
+    /**
+     * Format photos for JSON clients (with display URLs).
+     */
+    public function formatPhotosForClient(array $rows) {
+        $photos = [];
+        foreach ($rows as $row) {
+            $urls = $this->getPhotoUrlWithFallback($row['file_path']);
+            $photos[] = [
+                'id' => (int)$row['id'],
+                'photo_type' => $row['photo_type'] ?? 'Photo',
+                'notes' => $row['notes'] ?? '',
+                'created_at' => $row['created_at'] ?? '',
+                'url' => $urls['primary'],
+                'fallback_url' => $urls['fallback'],
+                'customer_name' => $row['customer_name'] ?? '',
+            ];
+        }
+        return $photos;
+    }
+
+    /**
+     * Delete a photo owned by a driver (DB row + file on disk).
+     *
+     * @return array{success:bool,error?:string}
+     */
+    public function deletePhoto(PDO $db, $photoId, $driverId) {
+        try {
+            $photoId = (int)$photoId;
+            $driverId = (int)$driverId;
+            if ($photoId <= 0 || $driverId <= 0) {
+                return ['success' => false, 'error' => 'Invalid photo or driver'];
+            }
+
+            $stmt = $db->prepare(
+                'SELECT id, file_path, thumbnail_path FROM driver_photos WHERE id = ? AND driver_id = ? LIMIT 1'
+            );
+            $stmt->execute([$photoId, $driverId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return ['success' => false, 'error' => 'Photo not found'];
+            }
+
+            $del = $db->prepare('DELETE FROM driver_photos WHERE id = ? AND driver_id = ?');
+            $del->execute([$photoId, $driverId]);
+
+            $paths = array_filter([
+                $this->uploadDir . ($row['file_path'] ?? ''),
+                !empty($row['thumbnail_path']) ? $this->uploadDir . $row['thumbnail_path'] : null,
+            ]);
+            foreach ($paths as $path) {
+                if (is_string($path) && $path !== $this->uploadDir && is_file($path)) {
+                    @unlink($path);
+                }
+            }
+
+            return ['success' => true];
+        } catch (Exception $e) {
+            error_log('Delete photo error: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Failed to delete photo'];
         }
     }
     

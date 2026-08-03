@@ -35,7 +35,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
             case 'bulk_save':
                 $updates = json_decode($_POST['updates'], true);
+                if (!is_array($updates)) {
+                    throw new InvalidArgumentException('Invalid standing order updates');
+                }
                 $db->beginTransaction();
+
+                // Prepare each statement once instead of once per changed cell.
+                $upsert = $db->prepare("\n                    INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)\n                    VALUES (?, ?, ?, ?)\n                    ON DUPLICATE KEY UPDATE quantity = ?\n                ");
+                $delete = $db->prepare("DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?");
                 
                 foreach ($updates as $update) {
                     $customerId = (int)$update['customer_id'];
@@ -44,15 +51,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $quantity = (int)$update['quantity'];
                     
                     if ($quantity > 0) {
-                        $stmt = $db->prepare("
-                            INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                            VALUES (?, ?, ?, ?)
-                            ON DUPLICATE KEY UPDATE quantity = ?
-                        ");
-                        $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
+                        $upsert->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
                     } else {
-                        $stmt = $db->prepare("DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?");
-                        $stmt->execute([$customerId, $productId, $dayOfWeek]);
+                        $delete->execute([$customerId, $productId, $dayOfWeek]);
                     }
                 }
                 
@@ -67,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $orders = $db->prepare("
                     SELECT 
                         so.product_id, 
-                        so.day_of_week, 
+                        CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END AS day_of_week,
                         so.quantity,
                         p.name as product_name,
                         p.price
@@ -223,6 +224,7 @@ require_once 'includes/nav.php';
 try {
     // PERFORMANCE OPTIMIZATION: Single optimized query to get all data efficiently
     $startTime = microtime(true);
+    $drivers = bakery_get_drivers($db, true);
     
     // Get all customers with route and order counts in one optimized query
     $customers = $db->query("
@@ -233,7 +235,8 @@ try {
             c.zone,
             COUNT(DISTINCT so.id) as order_count,
             COUNT(DISTINCT sr.id) as route_count,
-            GROUP_CONCAT(DISTINCT sr.day_of_week ORDER BY sr.day_of_week) as route_days
+            GROUP_CONCAT(DISTINCT sr.day_of_week ORDER BY sr.day_of_week) as route_days,
+            GROUP_CONCAT(DISTINCT sr.driver_id ORDER BY sr.driver_id) as route_driver_ids
         FROM customers c
         LEFT JOIN standing_orders so ON c.id = so.customer_id
         LEFT JOIN standing_routes sr ON c.id = sr.customer_id
@@ -243,6 +246,16 @@ try {
             c.name
     ")->fetchAll();
     
+    // Pan Dulce standard quantities are optional so this page remains compatible
+    // with production databases that have not yet run migration 012.
+    $panDulceStandardsAvailable = table_exists($db, 'pan_dulce_product_quantity_standards');
+    $standardQuantityJoin = $panDulceStandardsAvailable
+        ? 'LEFT JOIN pan_dulce_product_quantity_standards pdqs ON pdqs.product_id = p.id'
+        : '';
+    $standardQuantitySelect = $panDulceStandardsAvailable
+        ? "COALESCE(pdqs.standard_quantity, CASE WHEN pl.name = 'Pan Dulce' THEN 12 ELSE 0 END) AS standard_quantity"
+        : "CASE WHEN pl.name = 'Pan Dulce' THEN 12 ELSE 0 END AS standard_quantity";
+
     // PERFORMANCE OPTIMIZATION: Single query for all products with full hierarchy
     $products = $db->query("
         SELECT 
@@ -258,10 +271,12 @@ try {
             pl.name as product_line_name,
             pl.description as product_line_description,
             pl.color_code as product_line_color,
-            pl.sort_order as product_line_sort
+            pl.sort_order as product_line_sort,
+            {$standardQuantitySelect}
         FROM products p
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
         LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
+        {$standardQuantityJoin}
         ORDER BY 
             CASE WHEN pl.sort_order IS NULL THEN 999 ELSE pl.sort_order END,
             CASE WHEN pl.name IS NULL THEN 'ZZZ_Unclassified' ELSE pl.name END,
@@ -271,13 +286,20 @@ try {
     
     // PERFORMANCE OPTIMIZATION: Process customer routes from the main query
     $customerRoutes = [];
+    $customerDrivers = [];
     foreach ($customers as $customer) {
         if ($customer['route_days']) {
-            $customerRoutes[$customer['id']] = array_map('intval', explode(',', $customer['route_days']));
+            $customerRoutes[$customer['id']] = array_map(function($day) {
+                $day = (int)$day;
+                return $day === 0 ? 7 : $day;
+            }, explode(',', $customer['route_days']));
             sort($customerRoutes[$customer['id']]);
         } else {
             $customerRoutes[$customer['id']] = [];
         }
+        $customerDrivers[$customer['id']] = $customer['route_driver_ids']
+            ? array_map('intval', explode(',', $customer['route_driver_ids']))
+            : [];
     }
     
     // DEBUG: Log route processing results
@@ -333,7 +355,7 @@ try {
             SELECT 
                 so.customer_id, 
                 so.product_id, 
-                so.day_of_week, 
+                        CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END AS day_of_week,
                 so.quantity,
                 p.name as product_name,
                 p.price
@@ -360,6 +382,34 @@ try {
         }
     }
     
+    // Load a compact day-level order summary for the route/order coverage view.
+    // This stays lightweight and works even when the detailed order grid is lazy-loaded.
+    $orderDaySummary = [];
+    $orderDayRows = $db->query("
+        SELECT customer_id, day_of_week,
+               COUNT(DISTINCT product_id) AS product_count,
+               SUM(quantity) AS quantity_total
+        FROM standing_orders
+        GROUP BY customer_id, day_of_week
+    ")->fetchAll();
+    foreach ($orderDayRows as $orderDayRow) {
+        $day = (int)$orderDayRow['day_of_week'];
+        $day = $day === 0 ? 7 : $day;
+        $orderDaySummary[(int)$orderDayRow['customer_id']][$day] = [
+            'product_count' => (int)$orderDayRow['product_count'],
+            'quantity_total' => (int)$orderDayRow['quantity_total']
+        ];
+    }
+
+    $customerDaySummary = [];
+    foreach ($customers as $customer) {
+        $customerId = (int)$customer['id'];
+        $customerDaySummary[$customerId] = [
+            'route_days' => $customerRoutes[$customerId] ?? [],
+            'order_days' => $orderDaySummary[$customerId] ?? []
+        ];
+    }
+
     $loadTime = number_format((microtime(true) - $startTime) * 1000, 2);
     
     // PERFORMANCE LOG: Add performance monitoring
@@ -433,6 +483,16 @@ $days = [
                 </optgroup>
             </select>
         </div>
+
+        <div class="filter-section">
+            <label for="driver-filter">Driver:</label>
+            <select id="driver-filter" multiple size="4" title="Hold Ctrl or Command to select multiple drivers">
+                <?php foreach ($drivers as $driver): ?>
+                    <option value="<?php echo (int)$driver['id']; ?>"><?php echo htmlspecialchars($driver['name']); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <small class="filter-help">Select one or more drivers.</small>
+        </div>
         
         <div class="filter-section">
             <label>Product Line:</label>
@@ -458,6 +518,112 @@ $days = [
         </div>
         
         <button id="clear-filters" class="btn btn-sm btn-outline">Clear All</button>
+    </div>
+
+    <section class="quick-standing-order" aria-labelledby="quick-standing-order-title">
+        <div>
+            <h2 id="quick-standing-order-title">Add a product for one day</h2>
+            <p>Choose a customer, day, product, and quantity. This saves immediately.</p>
+        </div>
+        <form id="quick-standing-order-form" class="quick-standing-order-form">
+            <label>Customer
+                <select name="customer_id" required>
+                    <option value="">Choose customer</option>
+                    <?php foreach ($customers as $customer): ?><option value="<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></option><?php endforeach; ?>
+                </select>
+            </label>
+            <label>Day
+                <select name="day_of_week" required>
+                    <?php foreach ($days as $num => $name): ?><option value="<?php echo $num; ?>"><?php echo htmlspecialchars($name); ?></option><?php endforeach; ?>
+                </select>
+            </label>
+            <label>Product
+                <select name="product_id" required>
+                    <option value="">Choose product</option>
+                    <?php foreach ($productsByProductLine as $productLine => $lineData): ?>
+                        <optgroup label="<?php echo htmlspecialchars($productLine); ?>">
+                            <?php foreach ($lineData['products'] as $product): ?><option value="<?php echo (int)$product['id']; ?>"><?php echo htmlspecialchars($product['name']); ?></option><?php endforeach; ?>
+                        </optgroup>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>Quantity
+                <input type="number" name="quantity" min="1" step="1" value="1" required>
+            </label>
+            <button class="btn btn-primary" type="submit">Add standing order</button>
+        </form>
+        <div id="quick-standing-order-status" class="quick-standing-order-status" aria-live="polite"></div>
+    </section>
+
+    <!-- Day-specific route/order coverage -->
+    <div id="day-coverage-panel" class="day-coverage-panel">
+        <div class="coverage-header">
+            <div>
+                <h2>Route &amp; Order Coverage</h2>
+                <p>Use the Day filter to find customers who need products added or changed, plus customers ordering without a standing route.</p>
+            </div>
+            <span id="coverage-day-label" class="coverage-day-label">All days</span>
+            <label class="coverage-sort-control">Sort by
+                <select id="coverage-status-sort">
+                    <option value="default">Status (default)</option>
+                    <option value="attention">Needs attention first</option>
+                    <option value="route">Route (earliest day)</option>
+                    <option value="route-orders">Route + orders</option>
+                    <option value="route-empty">Route, no orders</option>
+                    <option value="no-route-orders">Orders, no route</option>
+                    <option value="no-route-empty">No route / no orders</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="coverage-summary" aria-live="polite">
+            <div class="coverage-stat coverage-stat-route-orders"><strong id="coverage-route-orders">0</strong><span>Route + orders</span></div>
+            <div class="coverage-stat coverage-stat-route-empty"><strong id="coverage-route-empty">0</strong><span>Route, no orders</span></div>
+            <div class="coverage-stat coverage-stat-no-route-orders"><strong id="coverage-no-route-orders">0</strong><span>Orders, no route</span></div>
+            <div class="coverage-stat coverage-stat-no-route-empty"><strong id="coverage-no-route-empty">0</strong><span>No route / no orders</span></div>
+        </div>
+
+        <div class="coverage-table-wrap">
+            <table id="day-coverage-table" class="day-coverage-table">
+                <thead>
+                    <tr>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Standing route</th>
+                        <th>Orders</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($customers as $customer):
+                        $customerId = (int)$customer['id'];
+                        $summary = $customerDaySummary[$customerId] ?? ['route_days' => [], 'order_days' => []];
+                        $routeDayNumbers = $summary['route_days'];
+                        $orderDayNumbers = array_map('intval', array_keys($summary['order_days']));
+                        sort($orderDayNumbers);
+                        $orderDetails = [];
+                        foreach ($summary['order_days'] as $dayNumber => $orderDetail) {
+                            $orderDetails[(int)$dayNumber] = $orderDetail;
+                        }
+                    ?>
+                        <tr class="coverage-row"
+                            data-customer-id="<?php echo $customerId; ?>"
+                            data-customer-name="<?php echo htmlspecialchars($customer['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                            data-route-days="<?php echo htmlspecialchars(implode(',', $routeDayNumbers), ENT_QUOTES, 'UTF-8'); ?>"
+                            data-driver-ids="<?php echo htmlspecialchars(implode(',', $customerDrivers[$customerId] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                            data-order-days="<?php echo htmlspecialchars(implode(',', $orderDayNumbers), ENT_QUOTES, 'UTF-8'); ?>"
+                            data-order-details="<?php echo htmlspecialchars(json_encode($orderDetails), ENT_QUOTES, 'UTF-8'); ?>">
+                            <td class="coverage-customer">
+                                <strong><?php echo htmlspecialchars($customer['name']); ?></strong>
+                                <?php if (!empty($customer['zone'])): ?><small><?php echo htmlspecialchars($customer['zone']); ?></small><?php endif; ?>
+                            </td>
+                            <td class="coverage-status-cell"><span class="coverage-status">—</span></td>
+                            <td class="coverage-route-cell">—</td>
+                            <td class="coverage-orders-cell">—</td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
     
     <!-- Summary Stats -->
@@ -543,7 +709,11 @@ $days = [
                             foreach ($zoneCustomers as $customer):
                                 $customerActiveDays = $customerRoutes[$customer['id']] ?? [];
                         ?>
-                            <div class="customer-summary-card" data-customer-id="<?php echo $customer['id']; ?>">
+                            <div class="customer-summary-card" data-customer-id="<?php echo $customer['id']; ?>"
+                                 data-customer-name="<?php echo htmlspecialchars($customer['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                 data-route-days="<?php echo htmlspecialchars(implode(',', $customerRoutes[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                                 data-driver-ids="<?php echo htmlspecialchars(implode(',', $customerDrivers[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                                 data-order-days="<?php echo htmlspecialchars(implode(',', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? [])), ENT_QUOTES, 'UTF-8'); ?>">
                                 <div class="customer-summary-header" onclick="toggleCustomerDetails(this)">
                                     <div class="customer-summary-info">
                                         <h4><?php echo htmlspecialchars($customer['name']); ?></h4>
@@ -636,7 +806,7 @@ $days = [
                                                             <?php foreach ($typeData['products'] as $product): 
                                                     $hasOrders = isset($existingOrders[$customer['id']][$product['id']]);
                                                 ?>
-                                                    <div class="product-row <?php echo $hasOrders ? 'has-orders' : 'no-orders'; ?>" data-product-id="<?php echo $product['id']; ?>">
+                                                    <div class="product-row <?php echo $hasOrders ? 'has-orders' : 'no-orders'; ?>" data-product-id="<?php echo $product['id']; ?>" data-standard-quantity="<?php echo (int)$product['standard_quantity']; ?>" data-standard-enabled="<?php echo (int)$product['standard_quantity'] > 0 ? '1' : '0'; ?>">
                                                         <div class="product-info">
                                                             <div class="product-main">
                                                                 <span class="product-name"><?php echo htmlspecialchars($product['name']); ?></span>
@@ -661,7 +831,7 @@ $days = [
                                                                 $customerTotal += $quantity;
                                                             }
                                                         ?>
-                                                            <div class="quantity-cell">
+                                                            <div class="quantity-cell" data-day="<?php echo $dayNum; ?>">
                                                                 <input type="number" 
                                                                        class="quantity-input" 
                                                                        value="<?php echo $quantity; ?>"
@@ -758,7 +928,10 @@ $days = [
                     <div class="customer-section" 
                          data-customer-id="<?php echo $customer['id']; ?>"
                          data-customer-name="<?php echo htmlspecialchars($customer['name']); ?>"
-                         data-zone="<?php echo htmlspecialchars($zone); ?>">
+                         data-zone="<?php echo htmlspecialchars($zone); ?>"
+                         data-route-days="<?php echo htmlspecialchars(implode(',', $customerRoutes[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                         data-driver-ids="<?php echo htmlspecialchars(implode(',', $customerDrivers[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                         data-order-days="<?php echo htmlspecialchars(implode(',', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? [])), ENT_QUOTES, 'UTF-8'); ?>">
                         
                         <div class="customer-header">
                             <div class="customer-info">
@@ -770,6 +943,12 @@ $days = [
                                     | 📦 <?php echo $customer['order_count']; ?> orders
                                     | 📅 <?php echo implode(', ', array_map(function($d) use ($days) { return $days[$d]; }, $customerActiveDays)); ?>
                                 </span>
+                            </div>
+                            <div class="standard-quantity-actions" onclick="event.stopPropagation()" title="Apply Pan Dulce standard quantities for this customer">
+                                <span>Pan Dulce:</span>
+                                <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="1">1×</button>
+                                <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="1.5">1.5×</button>
+                                <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="2">2×</button>
                             </div>
                             <button class="customer-toggle" data-customer-id="<?php echo $customer['id']; ?>">
                                 <span class="toggle-icon">▼</span>
@@ -836,7 +1015,7 @@ $days = [
                                                     <?php foreach ($typeData['products'] as $product): 
                                                         $hasOrders = isset($existingOrders[$customer['id']][$product['id']]);
                                                     ?>
-                                                        <div class="product-row <?php echo $hasOrders ? 'has-orders' : 'no-orders'; ?>" data-product-id="<?php echo $product['id']; ?>">
+                                                        <div class="product-row <?php echo $hasOrders ? 'has-orders' : 'no-orders'; ?>" data-product-id="<?php echo $product['id']; ?>" data-standard-quantity="<?php echo (int)$product['standard_quantity']; ?>" data-standard-enabled="<?php echo (int)$product['standard_quantity'] > 0 ? '1' : '0'; ?>">
                                                             <div class="product-info">
                                                                 <div class="product-main">
                                                                     <span class="product-name"><?php echo htmlspecialchars($product['name']); ?></span>
@@ -863,7 +1042,7 @@ $days = [
                                                                     $customerTotal += $quantity;
                                                                 }
                                                             ?>
-                                                                <div class="quantity-cell">
+                                                                <div class="quantity-cell" data-day="<?php echo $dayNum; ?>">
                                                                     <input type="number" 
                                                                            class="quantity-input" 
                                                                            value="<?php echo $quantity; ?>"
@@ -1073,6 +1252,141 @@ $days = [
     min-width: 150px;
 }
 
+.quick-standing-order{display:grid;grid-template-columns:minmax(220px,1fr);gap:12px;margin:0 0 22px;padding:16px 18px;border:1px solid #cfe2d4;border-radius:10px;background:#f4fbf5}.quick-standing-order h2{margin:0 0 4px;color:#285b39;font-size:1.15rem}.quick-standing-order p{margin:0;color:#617067;font-size:.9rem}.quick-standing-order-form{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr)) auto;gap:10px;align-items:end}.quick-standing-order-form label{display:flex;flex-direction:column;gap:5px;font-weight:600;color:#45544b;font-size:.85rem}.quick-standing-order-form select,.quick-standing-order-form input{width:100%;min-height:40px;padding:7px;border:1px solid #b8c9bd;border-radius:5px;background:#fff;font-size:16px}.quick-standing-order-form .btn{min-height:40px;white-space:nowrap}.quick-standing-order-status{min-height:1.2em;color:#2d6b40;font-size:.9rem}.coverage-sort-control{display:flex;align-items:center;gap:7px;font-size:.82rem;font-weight:600;color:#506057;white-space:nowrap}.coverage-sort-control select{padding:6px 8px;border:1px solid #c5d0c9;border-radius:5px;background:#fff;font-size:14px}
+.day-coverage-panel {
+    background: #fff;
+    border: 1px solid #dfe5ec;
+    border-radius: 10px;
+    margin-bottom: 25px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    overflow: hidden;
+}
+
+.coverage-header {
+    padding: 18px 20px;
+    background: linear-gradient(135deg, #f7f9fc 0%, #eef3f8 100%);
+    border-bottom: 1px solid #e5eaf0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 15px;
+}
+
+.coverage-header h2 {
+    margin: 0 0 5px;
+    color: #2c3e50;
+    font-size: 1.35rem;
+}
+
+.coverage-header p {
+    margin: 0;
+    color: #6c757d;
+    font-size: .9rem;
+}
+
+.coverage-day-label {
+    background: #007bff;
+    color: #fff;
+    border-radius: 15px;
+    padding: 6px 12px;
+    font-size: .85rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.coverage-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 10px;
+    padding: 15px 20px;
+}
+
+.coverage-stat {
+    border-radius: 7px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    color: #34495e;
+    background: #f8f9fa;
+    border-left: 4px solid #6c757d;
+}
+
+.coverage-stat strong { font-size: 1.35rem; }
+.coverage-stat span { font-size: .78rem; text-align: right; }
+.coverage-stat-route-orders { border-left-color: #28a745; background: #f1fbf4; }
+.coverage-stat-route-empty { border-left-color: #f39c12; background: #fff9ef; }
+.coverage-stat-no-route-orders { border-left-color: #dc3545; background: #fff4f4; }
+.coverage-stat-no-route-empty { border-left-color: #6c757d; }
+
+.coverage-table-wrap {
+    max-height: 420px;
+    overflow: auto;
+    border-top: 1px solid #edf0f3;
+}
+
+.day-coverage-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .9rem;
+}
+
+.day-coverage-table th,
+.day-coverage-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #edf0f3;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.day-coverage-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.coverage-customer small {
+    display: block;
+    color: #6c757d;
+    font-size: .75rem;
+    margin-top: 2px;
+}
+
+.coverage-status {
+    display: inline-block;
+    border-radius: 12px;
+    padding: 4px 9px;
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.coverage-status.route-orders { color: #176b2c; background: #d9f3df; }
+.coverage-status.route-empty { color: #8a5700; background: #fff0c9; }
+.coverage-status.no-route-orders { color: #9c1c28; background: #f9d7da; }
+.coverage-status.no-route-empty { color: #59636d; background: #e9ecef; }
+.coverage-row.coverage-highlight { background: #fffaf0; }
+
+@media (max-width: 800px) {
+    .quick-standing-order-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .quick-standing-order-form .btn { width: 100%; }
+    .coverage-summary { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+    .coverage-header { flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+    .quick-standing-order { padding: 14px; }
+    .quick-standing-order-form { grid-template-columns: 1fr; }
+    .coverage-sort-control { width: 100%; justify-content: space-between; }
+    .coverage-sort-control select { flex: 1; }
+}
+
 .som-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1153,6 +1467,28 @@ $days = [
 .customer-details {
     font-size: 0.9rem;
     opacity: 0.9;
+}
+
+.standard-quantity-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    margin-right: 12px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.standard-quantity-actions .btn {
+    padding: 4px 8px;
+    border-color: rgba(255,255,255,0.65);
+    color: white;
+    background: rgba(255,255,255,0.14);
+    font-size: 0.78rem;
+}
+
+.standard-quantity-actions .btn:hover {
+    background: rgba(255,255,255,0.3);
 }
 
 .customer-toggle {
@@ -2069,6 +2405,17 @@ $days = [
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
+    .customer-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .standard-quantity-actions {
+        order: 3;
+        width: 100%;
+        margin: 0;
+    }
+
     .no-orders-customers {
         grid-template-columns: 1fr;
     }
@@ -2165,6 +2512,8 @@ $days = [
     let changedInputs = new Set();
     let isCompactView = false;
     let autoSaveTimeout = null;
+    let saveInFlight = false;
+    let saveQueued = false;
     let customerOrderCache = new Map(); // Cache for loaded customer orders
     const AUTO_SAVE_DELAY = 1500; // Auto-save after 1.5 seconds of inactivity
     
@@ -2358,7 +2707,7 @@ $days = [
     
     function updateCustomerOrdersUI(customerId, orders) {
         // Update quantity inputs with loaded order data
-        const customerSection = document.querySelector(`[data-customer-id="${customerId}"]`);
+        const customerSection = document.querySelector(`.customer-section[data-customer-id="${customerId}"]`);
         const inputs = customerSection.querySelectorAll('.quantity-input');
         
         inputs.forEach(input => {
@@ -2374,48 +2723,32 @@ $days = [
         });
     }
     
-    // PERFORMANCE: Debounced input handling
-    let inputTimeout = null;
-    function debounceInput(callback, delay = 300) {
-        return function(...args) {
-            clearTimeout(inputTimeout);
-            inputTimeout = setTimeout(() => callback.apply(this, args), delay);
-        };
-    }
-    
-    // Track changes (optimized)
-    document.querySelectorAll('.quantity-input').forEach(input => {
-        const debouncedHandler = debounceInput(function() {
-            const original = parseInt(this.dataset.original) || 0;
-            const current = parseInt(this.value) || 0;
-            const productRow = this.closest('.product-row');
-            
-            if (current !== original) {
-                this.classList.add('changed');
-                productRow.classList.add('changed');
-                changedInputs.add(this);
-            } else {
-                this.classList.remove('changed');
-                productRow.classList.remove('changed');
-                changedInputs.delete(this);
-            }
-            
-            updateProductTotals(this);
-            updateBulkSaveButton();
-            updateChangesPanel();
-            
-            // Update auto-save status
-            if (changedInputs.size > 0) {
-                updateAutoSaveStatus('pending');
-            } else {
-                updateAutoSaveStatus('idle');
-            }
-            
-            // Schedule auto-save
-            scheduleAutoSave();
-        });
-        
-        input.addEventListener('input', debouncedHandler);
+    // One delegated handler covers the initial grid and any lazily loaded inputs.
+    // The 1.5s auto-save delay already debounces typing, so a second input
+    // handler only added duplicate work and timing races.
+    document.addEventListener('input', function(event) {
+        const input = event.target.closest('.quantity-input');
+        if (!input) return;
+
+        const original = parseInt(input.dataset.original) || 0;
+        const current = parseInt(input.value) || 0;
+        const productRow = input.closest('.product-row');
+
+        if (current !== original) {
+            input.classList.add('changed');
+            productRow.classList.add('changed');
+            changedInputs.add(input);
+        } else {
+            input.classList.remove('changed');
+            productRow.classList.remove('changed');
+            changedInputs.delete(input);
+        }
+
+        updateProductTotals(input);
+        updateBulkSaveButton();
+        updateChangesPanel();
+        updateAutoSaveStatus(changedInputs.size > 0 ? 'pending' : 'idle');
+        scheduleAutoSave();
     });
     
     // PERFORMANCE: Virtual scrolling for large datasets (basic implementation)
@@ -2511,39 +2844,6 @@ $days = [
             console.log(`Collapse All: Processed ${totalSections} sections`);
         });
     }
-    
-    // Track changes
-    document.querySelectorAll('.quantity-input').forEach(input => {
-        input.addEventListener('input', function() {
-            const original = parseInt(this.dataset.original) || 0;
-            const current = parseInt(this.value) || 0;
-            const productRow = this.closest('.product-row');
-            
-            if (current !== original) {
-                this.classList.add('changed');
-                productRow.classList.add('changed');
-                changedInputs.add(this);
-            } else {
-                this.classList.remove('changed');
-                productRow.classList.remove('changed');
-                changedInputs.delete(this);
-            }
-            
-            updateProductTotals(this);
-            updateBulkSaveButton();
-            updateChangesPanel();
-            
-            // Update auto-save status
-            if (changedInputs.size > 0) {
-                updateAutoSaveStatus('pending');
-            } else {
-                updateAutoSaveStatus('idle');
-            }
-            
-            // Schedule auto-save
-            scheduleAutoSave();
-        });
-    });
     
     // Update product totals
     function updateProductTotals(changedInput) {
@@ -2649,15 +2949,28 @@ $days = [
     // Unified save function
     function performSave(isAutoSave = false) {
         if (changedInputs.size === 0) return;
-        
-        const updates = Array.from(changedInputs).map(input => ({
+
+        // Keep saves single-flight. A slow request must not overlap with the
+        // next debounce window and produce competing writes/network errors.
+        if (saveInFlight) {
+            saveQueued = true;
+            return;
+        }
+        saveInFlight = true;
+
+        // Snapshot the inputs for this request. Inputs changed while the request
+        // is in flight must remain pending instead of being cleared by an older
+        // successful response.
+        const inputsToSave = Array.from(changedInputs);
+        const updates = inputsToSave.map(input => ({
             customer_id: input.dataset.customerId,
             product_id: input.dataset.productId,
             day_of_week: input.dataset.day,
             quantity: parseInt(input.value) || 0
         }));
-        
+
         const bulkSaveBtn = document.getElementById('bulk-save');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         
         // Update UI
         bulkSaveBtn.disabled = true;
@@ -2670,22 +2983,42 @@ $days = [
         
         fetch(window.location.href, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
             body: new URLSearchParams({
                 action: 'bulk_save',
                 updates: JSON.stringify(updates)
             })
         })
-        .then(response => response.json())
+        .then(async response => {
+            const responseText = await response.text();
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseError) {
+                throw new Error(responseText.trim() || `Save failed (HTTP ${response.status})`);
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `Save failed (HTTP ${response.status})`);
+            }
+            return data;
+        })
         .then(data => {
             if (data.success) {
                 // Update original values and clear changes
-                changedInputs.forEach(input => {
-                    input.dataset.original = input.value;
-                    input.classList.remove('changed');
-                    input.closest('.product-row').classList.remove('changed');
+                inputsToSave.forEach((input, index) => {
+                    // Only clear an input if it still has the value that was sent.
+                    // A newer edit should stay in changedInputs for the next save.
+                    if (String(parseInt(input.value) || 0) === String(updates[index].quantity)) {
+                        input.dataset.original = input.value;
+                        input.classList.remove('changed');
+                        input.closest('.product-row').classList.remove('changed');
+                        changedInputs.delete(input);
+                    }
                 });
-                changedInputs.clear();
                 updateBulkSaveButton();
                 updateChangesPanel();
                 
@@ -2709,7 +3042,14 @@ $days = [
             showNotification(`❌ Network error: ${error.message}`, 'error');
         })
         .finally(() => {
+            saveInFlight = false;
             updateBulkSaveButton();
+
+            // Send the latest values once the current request has completed.
+            if (saveQueued) {
+                saveQueued = false;
+                scheduleAutoSave();
+            }
         });
     }
     
@@ -2742,30 +3082,240 @@ $days = [
     
     // Filters functionality
     const customerFilter = document.getElementById('customer-filter');
+    const driverFilter = document.getElementById('driver-filter');
     const productLineFilter = document.getElementById('product-line-filter');
     const dayFilter = document.getElementById('day-filter');
+    const coverageStatusSort = document.getElementById('coverage-status-sort');
+
+    const quickStandingOrderForm = document.getElementById('quick-standing-order-form');
+    const quickStandingOrderStatus = document.getElementById('quick-standing-order-status');
+    if (quickStandingOrderForm) {
+        quickStandingOrderForm.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const submitButton = quickStandingOrderForm.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            quickStandingOrderStatus.textContent = 'Saving…';
+            try {
+                const body = new URLSearchParams(new FormData(quickStandingOrderForm));
+                body.append('action', 'save_order');
+                const response = await fetch('standing_orders_manager.php', { method: 'POST', body: body.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || 'Could not save standing order');
+                quickStandingOrderStatus.textContent = 'Saved. Refreshing order coverage…';
+                setTimeout(function () { window.location.reload(); }, 250);
+            } catch (error) {
+                quickStandingOrderStatus.textContent = error.message;
+                submitButton.disabled = false;
+            }
+        });
+    }
     
-    [customerFilter, productLineFilter, dayFilter].forEach(filter => {
+    [customerFilter, driverFilter, productLineFilter, dayFilter].forEach(filter => {
         filter.addEventListener('change', applyFilters);
     });
+    if (dayFilter && quickStandingOrderForm) {
+        dayFilter.addEventListener('change', function () {
+            const quickDay = quickStandingOrderForm.querySelector('[name="day_of_week"]');
+            if (dayFilter.value && quickDay) quickDay.value = dayFilter.value;
+        });
+    }
     
     document.getElementById('clear-filters').addEventListener('click', function() {
         customerFilter.value = '';
+        Array.from(driverFilter.options).forEach(option => { option.selected = false; });
         productLineFilter.value = '';
         dayFilter.value = '';
         applyFilters();
     });
+
+    const dayLabels = {1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'};
+
+    function parseDayList(value) {
+        return (value || '').split(',').map(Number).filter(day => day >= 1 && day <= 7);
+    }
+
+    function parseNumberList(value) {
+        return (value || '').split(',').map(Number).filter(number => number > 0);
+    }
+
+    // Apply the configured Pan Dulce standard to every active route day for one customer.
+    // Values are dispatched through the normal input handler so autosave and the pending
+    // changes panel treat this exactly like manually edited quantities.
+    document.querySelectorAll('.apply-standard-btn').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const customerSection = button.closest('.customer-section');
+            if (!customerSection) return;
+
+            const multiplier = Number(button.dataset.multiplier || 1);
+            const rows = customerSection.querySelectorAll('.product-row[data-standard-enabled="1"]');
+            let updated = 0;
+            rows.forEach(function (row) {
+                const standard = Number(row.dataset.standardQuantity || 0);
+                const quantity = Math.round(standard * multiplier);
+                row.querySelectorAll('.quantity-input').forEach(function (input) {
+                    input.value = quantity;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    updated++;
+                });
+            });
+
+            if (updated > 0) {
+                // Save immediately instead of waiting for debounce or requiring
+                // the user to find the separate Save Changes button.
+                if (autoSaveTimeout) {
+                    clearTimeout(autoSaveTimeout);
+                    autoSaveTimeout = null;
+                }
+                performSave(true);
+            } else {
+                showNotification('No Pan Dulce standard quantities are configured for this customer.', 'warning');
+            }
+        });
+    });
+
+    function sortCoverageRows() {
+        const tbody = document.querySelector('#day-coverage-table tbody');
+        if (!tbody) return;
+        const mode = coverageStatusSort ? coverageStatusSort.value : 'default';
+        const rank = mode === 'attention'
+            ? {'route-empty': 1, 'no-route-orders': 2, 'route-orders': 3, 'no-route-empty': 4}
+            : {[mode]: 1};
+        Array.from(tbody.querySelectorAll('.coverage-row'))
+            .sort(function (a, b) {
+                if (mode === 'default') return Number(a.dataset.originalIndex) - Number(b.dataset.originalIndex);
+                if (mode === 'route') {
+                    const aRoute = parseDayList(a.dataset.routeDays);
+                    const bRoute = parseDayList(b.dataset.routeDays);
+                    return (aRoute[0] || 99) - (bRoute[0] || 99)
+                        || a.dataset.customerName.localeCompare(b.dataset.customerName);
+                }
+                const aRank = rank[a.dataset.coverageStatus] || 99;
+                const bRank = rank[b.dataset.coverageStatus] || 99;
+                return aRank - bRank || a.dataset.customerName.localeCompare(b.dataset.customerName);
+            })
+            .forEach(function (row) { tbody.appendChild(row); });
+    }
+
+    function updateCoverage(dayValue, customerValue, driverValues) {
+        const selectedDay = dayValue ? Number(dayValue) : null;
+        const coverageLabel = document.getElementById('coverage-day-label');
+        coverageLabel.textContent = selectedDay ? dayLabels[selectedDay] : 'All days';
+
+        const counts = {
+            routeOrders: 0,
+            routeEmpty: 0,
+            noRouteOrders: 0,
+            noRouteEmpty: 0
+        };
+
+        document.querySelectorAll('.coverage-row').forEach(row => {
+            const routeDays = parseDayList(row.dataset.routeDays);
+            const orderDays = parseDayList(row.dataset.orderDays);
+            const driverIds = parseNumberList(row.dataset.driverIds);
+            const customerMatches = !customerValue || row.dataset.customerId === customerValue;
+            const driverMatches = !driverValues.length || driverValues.some(driverId => driverIds.includes(Number(driverId)));
+            const hasRoute = selectedDay ? routeDays.includes(selectedDay) : routeDays.length > 0;
+            const hasOrders = selectedDay ? orderDays.includes(selectedDay) : orderDays.length > 0;
+            const visible = customerMatches && driverMatches;
+            row.style.display = visible ? '' : 'none';
+            if (!visible) return;
+
+            const status = row.querySelector('.coverage-status');
+            const routeCell = row.querySelector('.coverage-route-cell');
+            const ordersCell = row.querySelector('.coverage-orders-cell');
+            status.className = 'coverage-status';
+            row.classList.remove('coverage-highlight');
+
+            if (hasRoute && hasOrders) {
+                counts.routeOrders++;
+                row.dataset.coverageStatus = 'route-orders';
+                status.classList.add('route-orders');
+                status.textContent = 'Route + orders';
+            } else if (hasRoute) {
+                counts.routeEmpty++;
+                row.dataset.coverageStatus = 'route-empty';
+                status.classList.add('route-empty');
+                status.textContent = 'Route — add products';
+                row.classList.add('coverage-highlight');
+            } else if (hasOrders) {
+                counts.noRouteOrders++;
+                row.dataset.coverageStatus = 'no-route-orders';
+                status.classList.add('no-route-orders');
+                status.textContent = 'Orders — no route';
+                row.classList.add('coverage-highlight');
+            } else {
+                counts.noRouteEmpty++;
+                row.dataset.coverageStatus = 'no-route-empty';
+                status.classList.add('no-route-empty');
+                status.textContent = 'No route / no orders';
+            }
+
+            routeCell.textContent = selectedDay
+                ? (hasRoute ? `Yes — ${dayLabels[selectedDay]}` : 'No route')
+                : (routeDays.length ? routeDays.map(day => dayLabels[day]).join(', ') : 'No route');
+
+            let orderDetails = {};
+            try { orderDetails = JSON.parse(row.dataset.orderDetails || '{}'); } catch (error) { orderDetails = {}; }
+            if (selectedDay) {
+                const detail = orderDetails[selectedDay];
+                ordersCell.textContent = detail
+                    ? `${detail.product_count} product${detail.product_count == 1 ? '' : 's'} / ${detail.quantity_total} qty`
+                    : 'No orders';
+            } else {
+                const orderSummary = Object.values(orderDetails);
+                const productCount = orderSummary.reduce((total, detail) => total + Number(detail.product_count || 0), 0);
+                const quantityTotal = orderSummary.reduce((total, detail) => total + Number(detail.quantity_total || 0), 0);
+                ordersCell.textContent = orderSummary.length
+                    ? `${orderSummary.length} day${orderSummary.length == 1 ? '' : 's'} / ${productCount} products / ${quantityTotal} qty`
+                    : 'No orders';
+            }
+        });
+
+        document.getElementById('coverage-route-orders').textContent = counts.routeOrders;
+        document.getElementById('coverage-route-empty').textContent = counts.routeEmpty;
+        document.getElementById('coverage-no-route-orders').textContent = counts.noRouteOrders;
+        document.getElementById('coverage-no-route-empty').textContent = counts.noRouteEmpty;
+        sortCoverageRows();
+    }
     
     function applyFilters() {
         const customerValue = customerFilter.value;
+        const driverValues = Array.from(driverFilter.selectedOptions).map(option => option.value);
         const productLineValue = productLineFilter.value;
         const dayValue = dayFilter.value;
         
         // Filter customer sections
         document.querySelectorAll('.customer-section, .customer-summary-card').forEach(section => {
             const customerId = section.dataset.customerId;
-            const showCustomer = !customerValue || customerId === customerValue;
+            const routeDays = parseDayList(section.dataset.routeDays);
+            const driverIds = parseNumberList(section.dataset.driverIds);
+            const orderDays = parseDayList(section.dataset.orderDays);
+            const driverMatches = !driverValues.length || driverValues.some(driverId => driverIds.includes(Number(driverId)));
+            let showCustomer = (!customerValue || customerId === customerValue) && driverMatches;
+            if (showCustomer && dayValue) {
+                const selectedDay = Number(dayValue);
+                // Route customers need the selected route day; no-route cards remain
+                // visible when they have an order on that day so the mismatch is actionable.
+                showCustomer = section.classList.contains('customer-section')
+                    ? routeDays.includes(selectedDay)
+                    : (routeDays.includes(selectedDay) || orderDays.includes(selectedDay));
+            }
             section.style.display = showCustomer ? 'block' : 'none';
+        });
+
+        // Keep empty zones/sections from taking up space after a day filter is applied.
+        document.querySelectorAll('.zone-section').forEach(zone => {
+            const hasVisibleCustomer = Array.from(zone.querySelectorAll('.customer-section, .customer-summary-card'))
+                .some(section => section.style.display !== 'none');
+            zone.style.display = hasVisibleCustomer ? '' : 'none';
+        });
+        document.querySelectorAll('.no-orders-section, .with-orders-section').forEach(section => {
+            const hasVisibleZone = Array.from(section.querySelectorAll('.zone-section'))
+                .some(zone => zone.style.display !== 'none');
+            section.style.display = hasVisibleZone ? '' : 'none';
         });
         
         // Filter product line sections
@@ -2776,19 +3326,21 @@ $days = [
         });
         
         // Filter day columns
-        if (dayValue) {
-            // Hide all day columns except the selected one
-            document.querySelectorAll('.day-column').forEach((col, index) => {
-                const dayNum = index + 1; // Assuming columns are in order
-                col.style.display = dayNum.toString() === dayValue ? 'block' : 'none';
-            });
-        } else {
-            // Show all day columns
-            document.querySelectorAll('.day-column').forEach(col => {
-                col.style.display = 'block';
-            });
-        }
+        // Hide both headers and quantity cells by their explicit day metadata.
+        document.querySelectorAll('.day-column[data-day], .quantity-cell[data-day]').forEach(cell => {
+            cell.style.display = !dayValue || cell.dataset.day === dayValue ? '' : 'none';
+        });
+
+        updateCoverage(dayValue, customerValue, driverValues);
     }
+
+    document.querySelectorAll('.coverage-row').forEach(function (row, index) {
+        row.dataset.originalIndex = index;
+    });
+    if (coverageStatusSort) coverageStatusSort.addEventListener('change', sortCoverageRows);
+
+    // Render the coverage table in its useful default state on first load.
+    applyFilters();
     
     // Notification system
     function showNotification(message, type = 'info') {
@@ -3223,4 +3775,4 @@ $days = [
 });
 </script>
 
-<?php require_once 'includes/footer.php'; ?> 
+<?php require_once 'includes/footer.php'; ?>

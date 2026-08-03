@@ -1,5 +1,9 @@
 # Bakery Management System
 
+## Current workspace and role access
+
+The application uses a role-aware operational workspace. The current module map and access rules are documented in [docs/MODULE_ACCESS_GUIDE.md](docs/MODULE_ACCESS_GUIDE.md), and managers/administrators can open the same information in the in-app **Module Guide**. The pre-workspace menu is retained for administrators under **Administration → Historical Navigation**.
+
 A modern, responsive bakery management system built with PHP and MySQL, featuring a clean MVC architecture and a user-friendly interface for managing products, customers, orders, and production schedules.
 
 ## Features

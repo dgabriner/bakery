@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Security check
 define('ACCESS_ALLOWED', true);
 
@@ -69,7 +69,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         d.name as driver_name
                     FROM customers c
                     JOIN standing_orders so ON c.id = so.customer_id
-                    LEFT JOIN standing_routes sr ON c.id = sr.customer_id AND sr.day_of_week = so.day_of_week
+                    LEFT JOIN standing_routes sr
+                        ON c.id = sr.customer_id
+                       AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END
+                           = CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END
                     LEFT JOIN drivers d ON sr.driver_id = d.id
                     WHERE so.product_id = ? $dayFilter
                     ORDER BY c.zone, c.name, so.day_of_week
@@ -78,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $customersWithOrders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 
                 // Get customers with standing routes but no orders for this product
-                $dayFilter2 = $selectedDay !== null ? "AND sr.day_of_week = $selectedDay" : "";
+                $dayFilter2 = $selectedDay !== null ? "AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = $selectedDay" : "";
                 $dayFilterSubquery = $selectedDay !== null ? "AND day_of_week = $selectedDay" : "";
                 
                 $stmt2 = $db->prepare("

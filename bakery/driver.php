@@ -5,44 +5,109 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/product_inventory.php';
 
-// Get selected driver and date
-$selectedDriverId = isset($_GET['driver_id']) ? intval($_GET['driver_id']) : 0;
+$changeDriver = isset($_GET['change_driver']) && (string)$_GET['change_driver'] === '1';
+$routeUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
+$isAuthenticatedDriver = $routeUser && ($routeUser['role_slug'] ?? '') === 'driver';
+$linkedDriverId = $isAuthenticatedDriver ? (int)($routeUser['driver_id'] ?? 0) : 0;
 $selectedDate = $_GET['date'] ?? date('Y-m-d');
+$selectedDateObject = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$selectedDate);
+if (!$selectedDateObject || $selectedDateObject->format('Y-m-d') !== (string)$selectedDate) {
+    $selectedDate = date('Y-m-d');
+    $selectedDateObject = new DateTimeImmutable($selectedDate);
+}
+$todayDate = date('Y-m-d');
+$previousDate = $selectedDateObject->modify('-1 day')->format('Y-m-d');
+$nextDate = $selectedDateObject->modify('+1 day')->format('Y-m-d');
+$routeDayChoices = [];
+for ($dayOffset = -3; $dayOffset <= 3; $dayOffset++) {
+    $choiceDate = $selectedDateObject->modify(($dayOffset >= 0 ? '+' : '') . $dayOffset . ' days');
+    $routeDayChoices[] = [
+        'date' => $choiceDate->format('Y-m-d'),
+        'weekday' => $choiceDate->format('D'),
+        'day' => $choiceDate->format('j'),
+        'month' => $choiceDate->format('M'),
+    ];
+}
+
+if ($isAuthenticatedDriver && $linkedDriverId > 0) {
+    $selectedDriverId = $linkedDriverId;
+    $changeDriver = false;
+} elseif (isset($_GET['driver_id'])) {
+    $selectedDriverId = (int)$_GET['driver_id'];
+    if ($selectedDriverId <= 0 && function_exists('bakery_set_selected_driver')) {
+        bakery_set_selected_driver(0);
+    }
+} elseif (!$changeDriver && function_exists('bakery_get_selected_driver_id')) {
+    $selectedDriverId = bakery_get_selected_driver_id();
+} else {
+    $selectedDriverId = 0;
+}
 
 // Get driver information
 $driver = null;
 if ($selectedDriverId > 0) {
-    $stmt = $db->prepare("SELECT id, name FROM drivers WHERE id = ?");
+    $stmt = $db->prepare('SELECT id, name FROM drivers WHERE id = ?');
     $stmt->execute([$selectedDriverId]);
     $driver = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
-// Get all drivers for the dropdown
+// Get all active drivers for the dropdown
 $drivers = [];
-$driverStmt = $db->query("SELECT id, name FROM drivers ORDER BY name");
-$driversData = $driverStmt->fetchAll();
-foreach ($driversData as $driverData) {
+foreach (bakery_get_drivers($db) as $driverData) {
     $drivers[$driverData['id']] = $driverData['name'];
 }
 
-// Get zone colors for consistent display
+// Allow viewing an archived driver when accessed directly by ID
+if ($selectedDriverId > 0 && !isset($drivers[$selectedDriverId])) {
+    $archivedDriver = bakery_get_driver_by_id($db, $selectedDriverId);
+    if ($archivedDriver) {
+        $driver = $archivedDriver;
+        $drivers[$archivedDriver['id']] = $archivedDriver['name'];
+    }
+}
+
+// Persist selection once we know the driver name
+if ($driver && $selectedDriverId > 0 && function_exists('bakery_set_selected_driver') && !$changeDriver) {
+    bakery_set_selected_driver($selectedDriverId, $driver['name']);
+}
+
 $zoneColors = [
-    '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1', 
+    '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
     '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
-    '#6610f2', '#fd7e14', '#e83e8c', '#6f42c1', '#20c997'
+    '#6610f2', '#fd7e14', '#e83e8c', '#6f42c1', '#20c997',
 ];
 
 $zoneColorMap = [];
 $zoneIndex = 0;
-$driverDeliveries = [];
+$orderedStops = [];
 $error = null;
+$totalStops = 0;
+$totalAmount = 0;
+$driverCompletedStops = 0;
+$driverLoadItems = [];
+
+/**
+ * Build a directions URL for the current client (Apple Maps / Google Maps).
+ */
+function bakery_driver_maps_url($address) {
+    $address = trim((string)$address);
+    if ($address === '') {
+        return '';
+    }
+    $q = rawurlencode($address);
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    if (preg_match('/iPhone|iPad|iPod/i', $ua)) {
+        return 'https://maps.apple.com/?daddr=' . $q . '&dirflg=d';
+    }
+    return 'https://www.google.com/maps/dir/?api=1&destination=' . $q . '&travelmode=driving';
+}
 
 if ($selectedDriverId > 0 && $driver) {
     try {
-        // Get all daily orders assigned to this driver for the selected date
         $stmt = $db->prepare("
-            SELECT 
+            SELECT
                 c.id as customer_id,
                 c.name as customer_name,
                 c.address as customer_address,
@@ -62,26 +127,23 @@ if ($selectedDriverId > 0 && $driver) {
             WHERE doa.driver_id = ? AND do.order_date = ?
             ORDER BY doa.route_order, c.zone, c.name
         ");
-        
+
         $stmt->execute([$selectedDriverId, $selectedDate]);
         $results = $stmt->fetchAll();
-        
-        // Process the data to create a zone-grouped structure
+
         foreach ($results as $row) {
             $zone = $row['zone'] ?: 'No Zone';
-            
-            // Assign color to zone if not already assigned
             if (!isset($zoneColorMap[$zone])) {
                 $zoneColorMap[$zone] = $zoneColors[$zoneIndex % count($zoneColors)];
                 $zoneIndex++;
             }
-            
-            // Group by zone
-            if (!isset($driverDeliveries[$zone])) {
-                $driverDeliveries[$zone] = [];
+
+            $status = $row['delivery_status'] ?? 'pending';
+            if ($status === 'delivered') {
+                $driverCompletedStops++;
             }
-            
-            $driverDeliveries[$zone][] = [
+
+            $orderedStops[] = [
                 'customer_id' => $row['customer_id'],
                 'customer_name' => $row['customer_name'],
                 'customer_address' => $row['customer_address'],
@@ -93,785 +155,859 @@ if ($selectedDriverId > 0 && $driver) {
                 'driver_name' => $row['driver_name'],
                 'route_order' => $row['route_order'],
                 'scheduled_delivery_time' => $row['scheduled_delivery_time'],
-                'delivery_status' => $row['delivery_status'],
-                'driver_initial' => $row['driver_name'] ? strtoupper(substr($row['driver_name'], 0, 1)) : 'X',
-                'zone_color' => $zoneColorMap[$zone]
+                'delivery_status' => $status,
+                'zone_color' => $zoneColorMap[$zone],
             ];
         }
-        
-        // Calculate statistics
+
         $totalStops = count($results);
         $totalAmount = array_sum(array_column($results, 'total_amount'));
-        $totalZones = count($driverDeliveries);
-        
     } catch (Exception $e) {
         $error = 'Error loading driver data: ' . htmlspecialchars($e->getMessage());
     }
+
+    if (bakery_inventory_ready($db)) {
+        $loadStmt = $db->prepare(
+            'SELECT p.name, li.loaded_quantity
+             FROM driver_loads dl
+             JOIN driver_load_items li ON li.driver_load_id = dl.id
+             JOIN products p ON p.id = li.product_id
+             WHERE dl.driver_id = ? AND dl.delivery_date = ? AND li.loaded_quantity > 0
+             ORDER BY p.name'
+        );
+        $loadStmt->execute([$selectedDriverId, $selectedDate]);
+        $driverLoadItems = $loadStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }
+
+$nextStop = null;
+$upcomingStops = [];
+$pastStops = [];
+foreach ($orderedStops as $stop) {
+    $status = $stop['delivery_status'] ?? 'pending';
+    $isDone = in_array($status, ['delivered', 'cancelled'], true);
+    if ($isDone) {
+        $pastStops[] = $stop;
+    } elseif ($nextStop === null) {
+        $nextStop = $stop;
+    } else {
+        $upcomingStops[] = $stop;
+    }
+}
+
+$showSelector = !$isAuthenticatedDriver && ($changeDriver || $selectedDriverId <= 0 || !$driver);
+$remainingStops = count($upcomingStops) + ($nextStop ? 1 : 0);
+$pastStopCount = count($pastStops);
+$page_title = $driver ? ('Route - ' . $driver['name']) : 'Driver Route';
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
-$driverCompletedStops = 0;
-foreach ($driverDeliveries as $zoneStops) {
-    foreach ($zoneStops as $stop) {
-        if (($stop['delivery_status'] ?? '') === 'delivered') {
-            $driverCompletedStops++;
-        }
-    }
-}
+$progressPct = $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 100) : 0;
 ?>
 
-<link rel="stylesheet" href="/bakery/css/driver.css">
-<script src="/bakery/includes/global_tracking.js"></script>
-
+<link rel="stylesheet" href="<?php echo htmlspecialchars(BASE_URL); ?>assets/photo_styles.css">
+<link rel="stylesheet" href="<?php echo htmlspecialchars(BASE_URL); ?>css/driver.css">
+<script src="<?php echo htmlspecialchars(BASE_URL); ?>includes/driver_delivery.js" defer></script>
+<script>document.body.classList.add('driver-workflow-page');</script>
 <style>
-.driver-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
-}
-
-.page-header {
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-    color: white;
-    padding: 30px;
-    border-radius: 15px;
-    margin-bottom: 30px;
-    text-align: center;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-}
-
-.page-header h1 {
-    margin: 0 0 10px 0;
-    font-size: 2.2rem;
-    font-weight: 600;
-}
-
-.page-header p {
-    margin: 0;
-    font-size: 1.1rem;
-    opacity: 0.9;
-}
-
-.driver-selector {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    margin-bottom: 30px;
-    text-align: center;
-}
-
-.driver-selector select {
-    padding: 10px 15px;
-    border: 2px solid #dee2e6;
-    border-radius: 8px;
-    font-size: 1rem;
-    min-width: 200px;
-    margin-right: 10px;
-}
-
-.driver-selector button {
-    padding: 10px 20px;
-    background: #007bff;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.driver-selector button:hover {
-    background: #0056b3;
-}
-
-.date-navigation {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    margin-bottom: 30px;
-    text-align: center;
-}
-
-.date-info {
-    margin-bottom: 15px;
-}
-
-.date-info h2 {
-    margin: 0 0 5px 0;
-    color: #2c3e50;
-    font-size: 1.5rem;
-}
-
-.date-controls {
-    display: flex;
-    justify-content: center;
-    gap: 15px;
-    flex-wrap: wrap;
-}
-
-.date-controls a {
-    padding: 10px 20px;
-    text-decoration: none;
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-}
-
-.date-controls .btn-outline {
-    background: #f8f9fa;
-    color: #6c757d;
-    border: 2px solid #dee2e6;
-}
-
-.date-controls .btn-outline:hover {
-    background: #e9ecef;
-    border-color: #adb5bd;
-}
-
-.date-controls .btn-primary {
-    background: #007bff;
-    color: white;
-    border: 2px solid #007bff;
-}
-
-.date-controls .btn-primary:hover {
-    background: #0056b3;
-    border-color: #0056b3;
-}
-
-.stats-overview {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.stat-card {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    border-left: 4px solid #007bff;
-    transition: transform 0.2s ease;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-}
-
-.stat-card h3 {
-    margin: 0 0 15px 0;
-    color: #2c3e50;
-    font-size: 1.1rem;
-    font-weight: 600;
-}
-
-.stat-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-}
-
-.stat-item {
-    text-align: center;
-    padding: 8px;
-    background: #f8f9fa;
-    border-radius: 8px;
-}
-
-.stat-number {
-    display: block;
-    font-size: 1.8rem;
-    font-weight: bold;
-    color: #007bff;
-    line-height: 1;
-}
-
-.stat-label {
-    font-size: 0.9rem;
-    color: #6c757d;
-    margin-top: 5px;
-}
-
-.zones-container {
-    display: flex;
-    flex-direction: column;
-    gap: 30px;
-}
-
-.zone-section {
-    background: white;
-    border-radius: 15px;
-    box-shadow: 0 6px 30px rgba(0,0,0,0.08);
-    overflow: hidden;
-}
-
-.zone-header {
-    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-    color: white;
-    padding: 20px 30px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.zone-title {
-    font-size: 1.4rem;
-    font-weight: 600;
-    margin: 0;
-}
-
-.zone-stats {
-    display: flex;
-    gap: 20px;
-    font-size: 0.9rem;
-}
-
-.zone-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-}
-
-.zone-stat-number {
-    font-size: 1.2rem;
-    font-weight: bold;
-    line-height: 1;
-}
-
-.zone-stat-label {
-    font-size: 0.8rem;
-    opacity: 0.9;
-    margin-top: 2px;
-}
-
-.stops-list {
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.stop-item {
-    background: linear-gradient(135deg, var(--zone-color) 0%, var(--zone-color-dark) 100%);
-    color: white;
-    padding: 15px 20px;
-    border-radius: 10px;
-    border-left: 4px solid var(--zone-color);
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    position: relative;
-}
-
-.stop-item:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-}
-
-.stop-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}
-
-.customer-name {
-    font-weight: 600;
-    font-size: 1rem;
-}
-
-.driver-initial {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 0.9rem;
-}
-
-.stop-details {
-    display: flex;
-    gap: 15px;
-    font-size: 0.85rem;
-    margin: 5px 0;
-}
-
-.route-order {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-weight: 600;
-}
-
-.delivery-time {
-    color: white;
-    font-weight: 500;
-}
-
-.order-amount {
-    color: white;
-    font-weight: 600;
-}
-
-.empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #6c757d;
-}
-
-.empty-state h3 {
-    margin: 0 0 15px 0;
-    color: #495057;
-    font-size: 1.3rem;
-}
-
-.empty-state p {
-    margin: 0;
-    font-size: 1rem;
-}
-
-/* Inline Order Details Styles */
-.order-details-container {
-    margin-top: 6px;
-    padding: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.order-details-loading {
-    text-align: center;
-    color: rgba(255, 255, 255, 0.8);
-    font-style: italic;
-    font-size: 0.8rem;
-}
-
-.order-details-content {
-    color: white;
-}
-
-.product-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.product-item {
-    padding: 4px 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 3px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.75rem;
-}
-
-.product-details {
-    flex: 1;
-    min-width: 0;
-}
-
-.product-name {
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 0.8rem;
-    margin-bottom: 1px;
-}
-
-.product-meta {
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 0.7rem;
-}
-
-.product-info {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    font-size: 0.7rem;
-    white-space: nowrap;
-}
-
-.unit-price {
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.quantity {
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: 500;
-}
-
-.total-price {
-    color: rgba(255, 255, 255, 0.9);
-    font-weight: 600;
-    min-width: 45px;
-    text-align: right;
-}
-
-.no-products {
-    text-align: center;
-    padding: 12px;
-    opacity: 0.7;
-    font-style: italic;
-    font-size: 0.8rem;
-}
-
-/* Expandable animation */
-.order-details-container.expanded {
-    animation: expandDetails 0.3s ease-out;
-}
-
-@keyframes expandDetails {
-    from {
-        opacity: 0;
-        max-height: 0;
-    }
-    to {
-        opacity: 1;
-        max-height: 500px;
-    }
-}
-
-/* Zone Color Legend */
-.zone-legend-section {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-    margin-bottom: 30px;
-}
-
-.zone-legend-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-top: 15px;
-}
-
-.zone-legend-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    font-size: 0.9rem;
-}
-
-.zone-color-badge {
-    width: 20px;
-    height: 20px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.7rem;
-}
+.driver-pickup-manifest{margin:16px 0;padding:16px 18px;border:1px solid #b8d8c2;border-radius:14px;background:#f2fbf4}.driver-pickup-manifest h2{margin:2px 0 8px;font-size:1.1rem;color:#1f6637}.driver-pickup-manifest p{margin:0;color:#536258}.driver-pickup-manifest ul{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;padding:0;list-style:none}.driver-pickup-manifest li{padding:7px 10px;background:#fff;border-radius:8px;color:#34483a}.driver-pickup-manifest li strong{color:#1f6637}
 </style>
 
-<div class="driver-container driver-page-container">
-    <div class="page-header">
-        <h1>Driver Route</h1>
-        <p>Daily stops with tap-to-call and navigation</p>
-    </div>
+<div class="driver-route" id="driverRouteRoot"
+    data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+    data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+    data-total="<?php echo (int)$totalStops; ?>"
+    data-completed="<?php echo (int)$driverCompletedStops; ?>">
 
-    <!-- Driver Selector -->
-    <div class="driver-selector">
-        <form method="GET" action="">
-            <select name="driver_id" onchange="this.form.submit()">
-                <option value="">Select a Driver</option>
-                <?php foreach ($drivers as $driverId => $driverName): ?>
-                <option value="<?php echo $driverId; ?>" <?php echo $selectedDriverId == $driverId ? 'selected' : ''; ?>>
-                    <?php echo htmlspecialchars($driverName); ?>
-                </option>
-                <?php endforeach; ?>
-            </select>
+    <?php if ($showSelector): ?>
+    <section class="driver-whoami">
+        <h1>Who is driving?</h1>
+        <p>Choose your name once — we’ll remember it until you change it in the menu.</p>
+        <form method="GET" action="" class="driver-whoami-form">
             <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+            <div class="driver-whoami-list">
+                <?php foreach ($drivers as $driverId => $driverName): ?>
+                <button type="submit" name="driver_id" value="<?php echo (int)$driverId; ?>" class="driver-whoami-btn">
+                    <?php echo htmlspecialchars($driverName); ?>
+                </button>
+                <?php endforeach; ?>
+            </div>
         </form>
-    </div>
-
-    <?php if ($selectedDriverId > 0 && $driver): ?>
-    
-    <!-- Date Navigation -->
-    <div class="date-navigation">
-        <div class="date-info">
-            <h2>Orders for <?php echo htmlspecialchars($driver['name']); ?> on <?php echo date('l, F j, Y', strtotime($selectedDate)); ?></h2>
-            <span class="order-count"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops ?? 0; ?> stops complete</span>
-        </div>
-        <div class="date-controls">
-            <a href="?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo date('Y-m-d', strtotime($selectedDate . ' -1 day')); ?>" class="btn btn-outline">← Previous Day</a>
-            <a href="?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo date('Y-m-d'); ?>" class="btn btn-primary">Today</a>
-            <a href="?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo date('Y-m-d', strtotime($selectedDate . ' +1 day')); ?>" class="btn btn-outline">Next Day →</a>
-        </div>
-    </div>
-
-    <?php if (($totalStops ?? 0) > 0): ?>
-    <div class="driver-sticky-bar" aria-live="polite">
-        <p class="sticky-title">Route progress</p>
-        <div class="route-progress-text"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops; ?> stops complete</div>
-        <div class="route-progress-track"><div class="route-progress-fill" style="width: <?php echo $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 100) : 0; ?>%;"></div></div>
-    </div>
-    <?php endif; ?>
-
-    <!-- Statistics -->
-    <div class="stats-overview">
-        <div class="stat-card">
-            <h3>📊 Driver Statistics</h3>
-            <div class="stat-grid">
-                <div class="stat-item">
-                    <span class="stat-number"><?php echo $totalStops ?? 0; ?></span>
-                    <span class="stat-label">Total Stops</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number"><?php echo $totalZones ?? 0; ?></span>
-                    <span class="stat-label">Active Zones</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number">$<?php echo number_format($totalAmount ?? 0, 2); ?></span>
-                    <span class="stat-label">Total Amount</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number"><?php echo $driver['name'] ? strtoupper(substr($driver['name'], 0, 1)) : 'X'; ?></span>
-                    <span class="stat-label">Driver</span>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Zone Color Legend -->
-    <?php if (!empty($zoneColorMap)): ?>
-    <div class="zone-legend-section">
-        <h3>🗺️ Zone Color Legend</h3>
-        <div class="zone-legend-grid">
-            <?php foreach ($zoneColorMap as $zoneName => $zoneColor): ?>
-            <div class="zone-legend-item">
-                <div class="zone-color-badge" style="background-color: <?php echo $zoneColor; ?>">
-                    🗺️
-                </div>
-                <span><?php echo htmlspecialchars($zoneName); ?></span>
-            </div>
-            <?php endforeach; ?>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- Zones and Stops -->
-    <div class="zones-container">
-        <?php if (!empty($driverDeliveries)): ?>
-            <?php foreach ($driverDeliveries as $zoneName => $zoneStops): ?>
-            <div class="zone-section">
-                <div class="zone-header">
-                    <h2 class="zone-title">🗺️ <?php echo htmlspecialchars($zoneName); ?> (<?php echo count($zoneStops); ?> stops)</h2>
-                    <div class="zone-stats">
-                        <div class="zone-stat">
-                            <span class="zone-stat-number"><?php echo count($zoneStops); ?></span>
-                            <span class="zone-stat-label">Stops</span>
-                        </div>
-                        <div class="zone-stat">
-                            <span class="zone-stat-number">$<?php echo number_format(array_sum(array_column($zoneStops, 'total_amount')), 2); ?></span>
-                            <span class="zone-stat-label">Total Amount</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="stops-list">
-                    <?php foreach ($zoneStops as $stop):
-                        $phoneHref = preg_replace('/\D+/', '', (string)($stop['customer_phone'] ?? ''));
-                        $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
-                        $mapsHref = $stop['customer_address'] ? 'https://maps.google.com/?q=' . rawurlencode($stop['customer_address']) : '';
-                        $stopStatus = $stop['delivery_status'] ?? 'pending';
-                        $statusClass = in_array($stopStatus, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $stopStatus : 'pending';
-                    ?>
-                    <div class="stop-item" 
-                        style="--zone-color: <?php echo $stop['zone_color']; ?>; --zone-color-dark: <?php echo $stop['zone_color']; ?>"
-                        data-customer-id="<?php echo $stop['customer_id']; ?>"
-                        data-daily-order-id="<?php echo $stop['daily_order_id']; ?>">
-                        <div class="stop-header">
-                            <div class="customer-name"><?php echo htmlspecialchars($stop['customer_name']); ?></div>
-                            <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $statusClass))); ?></span>
-                        </div>
-                        <div class="contact-actions">
-                            <?php if ($phoneHref): ?><a class="contact-link contact-link--phone" href="<?php echo htmlspecialchars($phoneHref); ?>">📞 Call</a><?php endif; ?>
-                            <?php if ($mapsHref): ?><a class="contact-link contact-link--address" href="<?php echo htmlspecialchars($mapsHref); ?>" target="_blank" rel="noopener">🗺 Navigate</a><?php endif; ?>
-                            <a class="contact-link" href="driver_list.php?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo urlencode($selectedDate); ?>&view=delivery">📷 Photos / Complete</a>
-                        </div>
-                        <div class="stop-details">
-                            <div class="route-order">#<?php echo $stop['route_order'] ?: 'TBD'; ?></div>
-                            <?php if ($stop['scheduled_delivery_time']): ?>
-                            <div class="delivery-time"><?php echo date('g:i A', strtotime($stop['scheduled_delivery_time'])); ?></div>
-                            <?php endif; ?>
-                            <div class="order-amount">$<?php echo number_format($stop['total_amount'], 2); ?></div>
-                        </div>
-                        
-                        <!-- Inline Order Details -->
-                        <div class="order-details-container" style="display: none;">
-                            <div class="order-details-loading">Loading order details...</div>
-                            <div class="order-details-content" style="display: none;"></div>
-                        </div>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-            <?php endforeach; ?>
-        <?php else: ?>
-            <div class="empty-state">
-                <h3>No orders assigned</h3>
-                <p>No orders have been assigned to <?php echo htmlspecialchars($driver['name']); ?> for <?php echo date('l, F j, Y', strtotime($selectedDate)); ?></p>
-            </div>
+        <?php if (empty($drivers)): ?>
+        <p class="empty-state">No active drivers found.</p>
         <?php endif; ?>
+    </section>
+
+    <?php elseif ($selectedDriverId > 0 && $driver): ?>
+
+    <header class="route-topbar">
+        <div class="route-topbar-main">
+            <div class="route-identity">
+                <span class="route-live-dot" aria-hidden="true"></span>
+                <div>
+                <div class="route-driver-label"><?php echo htmlspecialchars($driver['name']); ?></div>
+                <div class="route-date-label">
+                    <?php echo $selectedDate === $todayDate ? 'Today &middot; ' : ''; ?><?php echo $selectedDateObject->format('l, F j'); ?>
+                </div>
+                </div>
+            </div>
+            <?php if (!$isAuthenticatedDriver): ?>
+            <a class="route-change-link" href="?change_driver=1&amp;date=<?php echo urlencode($selectedDate); ?>">Change driver</a>
+            <?php endif; ?>
+        </div>
+        <div class="route-day-picker" id="routeDayPicker">
+            <a class="route-day-arrow js-day-link" href="?driver_id=<?php echo $selectedDriverId; ?>&amp;date=<?php echo $previousDate; ?>" aria-label="Previous day">&lsaquo;</a>
+            <div class="route-day-strip" aria-label="Choose route day">
+                <?php foreach ($routeDayChoices as $routeDay):
+                    $isSelectedRouteDay = $routeDay['date'] === $selectedDate;
+                    $isTodayRouteDay = $routeDay['date'] === $todayDate;
+                ?>
+                <a class="route-day-chip js-day-link<?php echo $isSelectedRouteDay ? ' is-selected' : ''; ?><?php echo $isTodayRouteDay ? ' is-today' : ''; ?>"
+                   href="?driver_id=<?php echo $selectedDriverId; ?>&amp;date=<?php echo $routeDay['date']; ?>"
+                   <?php echo $isSelectedRouteDay ? 'aria-current="date"' : ''; ?>>
+                    <span class="route-day-weekday"><?php echo htmlspecialchars($routeDay['weekday']); ?></span>
+                    <strong><?php echo htmlspecialchars($routeDay['day']); ?></strong>
+                    <span class="route-day-month"><?php echo htmlspecialchars($routeDay['month']); ?></span>
+                </a>
+                <?php endforeach; ?>
+            </div>
+            <a class="route-day-arrow js-day-link" href="?driver_id=<?php echo $selectedDriverId; ?>&amp;date=<?php echo $nextDate; ?>" aria-label="Next day">&rsaquo;</a>
+        </div>
+        <div class="route-date-tools">
+            <?php if ($selectedDate !== $todayDate): ?>
+            <a class="route-today-link js-day-link" href="?driver_id=<?php echo $selectedDriverId; ?>&amp;date=<?php echo $todayDate; ?>">Jump to today</a>
+            <?php endif; ?>
+            <label class="route-calendar-label" for="routeDateInput">
+                Pick a date
+                <input type="date" id="routeDateInput" value="<?php echo htmlspecialchars($selectedDate); ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>">
+            </label>
+        </div>
+        <?php if ($totalStops > 0): ?>
+        <div class="route-progress" aria-live="polite">
+            <div class="route-progress-text" id="routeProgressText"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops; ?> done</div>
+            <div class="route-progress-track"><div class="route-progress-fill" id="routeProgressFill" style="width: <?php echo $progressPct; ?>%;"></div></div>
+        </div>
+        <?php endif; ?>
+    </header>
+
+    <?php if ($error): ?>
+    <div class="empty-state"><p><?php echo $error; ?></p></div>
+    <?php elseif ($totalStops === 0): ?>
+    <div class="empty-state">
+        <h3>No stops today</h3>
+        <p>Nothing assigned to <?php echo htmlspecialchars($driver['name']); ?> for <?php echo date('l, F j', strtotime($selectedDate)); ?>.</p>
     </div>
-    
-    <?php elseif ($selectedDriverId > 0): ?>
-        <div class="empty-state">
-            <h3>Driver not found</h3>
-            <p>The selected driver could not be found.</p>
-        </div>
     <?php else: ?>
-        <div class="empty-state">
-            <h3>Select a Driver</h3>
-            <p>Please select a driver from the dropdown above to view their daily orders.</p>
+
+    <div class="route-dashboard">
+        <div class="route-primary-column">
+            <section class="route-overview" aria-label="Route summary">
+                <div class="route-overview-heading">
+                    <div>
+                        <p class="route-section-kicker"><?php echo $selectedDate === $todayDate ? 'Today at a glance' : 'Route at a glance'; ?></p>
+                        <h1><?php echo $selectedDate === $todayDate ? 'Your route is ready' : 'Route overview'; ?></h1>
+                        <p class="route-overview-copy"><strong id="routeRemainingCount"><?php echo (int)$remainingStops; ?></strong> <?php echo $remainingStops === 1 ? 'stop' : 'stops'; ?> left to visit</p>
+                    </div>
+                    <span class="route-progress-ring" style="--route-progress: <?php echo (int)$progressPct; ?>%;" aria-hidden="true"><strong id="routeProgressPercent"><?php echo (int)$progressPct; ?>%</strong><span>done</span></span>
+                </div>
+                <div class="route-stat-grid" role="list" aria-label="Route totals">
+                    <button type="button" class="route-stat route-stat--done" id="routeCompletedButton" role="listitem" aria-controls="pastStopsDetails" <?php echo $pastStopCount === 0 ? 'disabled' : ''; ?> title="View completed stops for this day">
+                        <strong id="routeCompletedCount"><?php echo (int)$driverCompletedStops; ?></strong>
+                        <span>Completed · view history</span>
+                    </button>
+                    <div class="route-stat route-stat--next" role="listitem">
+                        <strong id="routeTotalCount"><?php echo (int)$totalStops; ?></strong>
+                        <span>Total stops</span>
+                    </div>
+                    <button type="button" class="route-stat route-stat--past" id="routePastStopsButton" role="listitem" aria-controls="pastStopsDetails" <?php echo $pastStopCount === 0 ? 'disabled' : ''; ?> title="View completed stops for this day">
+                        <strong id="routePastCount"><?php echo (int)$pastStopCount; ?></strong>
+                        <span>Past stops</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="driver-pickup-manifest" aria-label="Pickup manifest">
+                <div><p class="route-section-kicker">Before you leave</p><h2>Pickup manifest</h2></div>
+                <?php if ($driverLoadItems): ?>
+                    <ul><?php foreach ($driverLoadItems as $item): ?><li><strong><?php echo number_format($item['loaded_quantity']); ?></strong> <?php echo htmlspecialchars($item['name']); ?></li><?php endforeach; ?></ul>
+                <?php else: ?>
+                    <p>No pickup has been assigned yet. Confirm your load with the route manager before starting deliveries.</p>
+                <?php endif; ?>
+            </section>
+
+    <!-- Next stop (primary on-route view) -->
+    <section class="next-stop" id="nextStopCard" <?php echo $nextStop ? '' : 'hidden'; ?> aria-live="polite">
+        <?php if ($nextStop):
+            $phoneHref = preg_replace('/\D+/', '', (string)($nextStop['customer_phone'] ?? ''));
+            $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
+            $mapsHref = bakery_driver_maps_url($nextStop['customer_address'] ?? '');
+        ?>
+        <p class="next-stop-eyebrow">Next stop<?php if ($nextStop['route_order']): ?> &middot; #<?php echo (int)$nextStop['route_order']; ?><?php endif; ?></p>
+        <h2 class="next-stop-store" id="nextStopStore"><?php echo htmlspecialchars($nextStop['customer_name']); ?></h2>
+        <p class="next-stop-address" id="nextStopAddress"><?php echo htmlspecialchars($nextStop['customer_address'] ?: 'No address on file'); ?></p>
+        <?php if (!empty($nextStop['zone'])): ?>
+        <p class="next-stop-zone"><?php echo htmlspecialchars($nextStop['zone']); ?></p>
+        <?php endif; ?>
+
+        <div class="next-stop-actions">
+            <?php if ($mapsHref): ?>
+            <a class="route-btn route-btn--navigate js-navigate-link"
+                href="<?php echo htmlspecialchars($mapsHref); ?>"
+                data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                target="_blank" rel="noopener">Navigate</a>
+            <?php endif; ?>
+            <button type="button"
+                class="route-btn route-btn--photo photo-complete-btn"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">Photo &amp; finish</button>
+            <?php if ($phoneHref): ?>
+            <a class="route-btn route-btn--call" href="<?php echo htmlspecialchars($phoneHref); ?>">Call</a>
+            <?php endif; ?>
         </div>
+
+        <button type="button" class="next-stop-details-toggle" id="nextStopDetailsToggle"
+            data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
+            data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>">Order details</button>
+        <div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:none;">
+            <div class="order-details-loading">Loading...</div>
+            <div class="order-details-content" style="display:none;"></div>
+        </div>
+        <?php endif; ?>
+    </section>
+
+    <section class="route-done-banner" id="routeDoneBanner" <?php echo $nextStop ? 'hidden' : ''; ?>>
+        <h2>Route complete</h2>
+        <p>All stops for <?php echo htmlspecialchars($driver['name']); ?> are done.</p>
+    </section>
+
+        </div>
+
+        <div class="route-secondary-column">
+
+    <!-- Full stop list: upcoming first, past collapsed -->
+    <section class="stop-list-section">
+        <div class="stop-list-heading-row">
+            <div>
+                <p class="route-section-kicker">Your queue</p>
+                <h3 class="stop-list-heading">Upcoming stops</h3>
+            </div>
+            <span class="stop-list-count"><strong id="queueCount"><?php echo (int)$remainingStops; ?></strong> remaining</span>
+        </div>
+        <p class="stop-list-helper">Tap a stop for order details. Use the buttons for directions, photos, or a call.</p>
+        <div class="stop-list" id="stopList">
+            <?php foreach ($orderedStops as $stop):
+                $status = $stop['delivery_status'] ?? 'pending';
+                $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $status : 'pending';
+                $isDone = in_array($status, ['delivered', 'cancelled'], true);
+                $isNext = $nextStop && (int)$nextStop['daily_order_id'] === (int)$stop['daily_order_id'];
+                $phoneHref = preg_replace('/\D+/', '', (string)($stop['customer_phone'] ?? ''));
+                $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
+                $mapsHref = bakery_driver_maps_url($stop['customer_address'] ?? '');
+                $itemClass = 'stop-item';
+                if ($isDone) {
+                    $itemClass .= ' stop-item--past';
+                } elseif ($isNext) {
+                    $itemClass .= ' stop-item--next';
+                } else {
+                    $itemClass .= ' stop-item--upcoming';
+                }
+            ?>
+            <article class="<?php echo $itemClass; ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-phone="<?php echo htmlspecialchars($stop['customer_phone'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-zone="<?php echo htmlspecialchars($stop['zone'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="stop-item-main">
+                    <span class="stop-item-order">#<?php echo $stop['route_order'] ?: '&mdash;'; ?></span>
+                    <div class="stop-item-body">
+                        <div class="stop-item-heading">
+                            <div class="stop-item-name"><?php echo htmlspecialchars($stop['customer_name']); ?></div>
+                            <?php if ($isNext): ?><span class="stop-item-next-label">Next</span><?php endif; ?>
+                        </div>
+                        <div class="stop-item-address"><?php echo htmlspecialchars($stop['customer_address'] ?: 'No address'); ?></div>
+                        <div class="stop-item-meta">
+                            <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
+                            <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+                        </div>
+                    </div>
+                    <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $statusClass))); ?></span>
+                </div>
+                <div class="contact-actions">
+                    <?php if (!$isDone && $mapsHref): ?>
+                    <a class="contact-link contact-link--address js-navigate-link"
+                        href="<?php echo htmlspecialchars($mapsHref); ?>"
+                        data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                        target="_blank" rel="noopener">Navigate</a>
+                    <?php endif; ?>
+                    <button type="button"
+                        class="contact-link photo-complete-btn"
+                        data-photo-mode="<?php echo $isDone ? 'review' : 'capture'; ?>"
+                        data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                        data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                        data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                        data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                        data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                        data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isDone ? 'View invoice &amp; photos' : 'Photo'; ?></button>
+                    <?php if (!$isDone && $phoneHref): ?>
+                    <a class="contact-link contact-link--phone" href="<?php echo htmlspecialchars($phoneHref); ?>">Call</a>
+                    <?php endif; ?>
+                </div>
+                <div class="order-details-container" style="display: none;">
+                    <div class="order-details-loading">Loading order details...</div>
+                    <div class="order-details-content" style="display: none;"></div>
+                </div>
+            </article>
+            <?php endforeach; ?>
+        </div>
+
+        <?php if (!empty($pastStops)): ?>
+        <details class="past-stops-details" id="pastStopsDetails">
+            <summary><span>Past stops &amp; photos</span><span class="past-stops-summary-count"><?php echo count($pastStops); ?></span></summary>
+            <p class="past-stops-hint">Open a stop to review its delivery photos or order details.</p>
+        </details>
+        <?php endif; ?>
+    </section>
+
+        </div>
+    </div>
+
+    <?php endif; ?>
+
+    <?php else: ?>
+    <div class="empty-state">
+        <h3>Driver not found</h3>
+        <p>The selected driver could not be found.</p>
+        <a class="route-change-link" href="?change_driver=1">Choose another driver</a>
+    </div>
     <?php endif; ?>
 </div>
 
+<!-- Photos / Complete modal -->
+<div id="deliveryPhotoModal" class="photo-modal" style="display:none;" aria-hidden="true" aria-modal="true" role="dialog" aria-labelledby="deliveryPhotoModalTitle">
+    <div class="photo-modal-content delivery-photo-modal-content">
+        <div class="photo-modal-header">
+            <button type="button" class="photo-modal-close" id="deliveryPhotoModalClose" aria-label="Back to route">‹</button>
+            <div>
+                <span class="photo-modal-eyebrow">Delivery proof</span>
+                <h3 id="deliveryPhotoModalTitle">Photo &amp; finish</h3>
+            </div>
+        </div>
+        <div class="photo-modal-body">
+            <div class="photo-assignment-confirm" id="deliveryPhotoAssignment"></div>
+
+            <div class="photo-upload-section delivery-camera-section" id="deliveryCameraSection">
+                <div class="delivery-camera-title-row">
+                    <h4 id="deliveryCameraHeading">Take delivery photo</h4>
+                    <select id="deliveryPhotoType" class="photo-type-select" aria-label="Photo type">
+                        <option value="Before">Before</option>
+                        <option value="After" selected>After</option>
+                        <option value="Receipt">Receipt</option>
+                    </select>
+                </div>
+                <div class="delivery-camera-frame" id="deliveryCameraFrame">
+                    <video id="deliveryCameraVideo" autoplay playsinline muted></video>
+                    <canvas id="deliveryCameraCanvas" class="hidden"></canvas>
+                    <img id="deliveryPhotoPreview" alt="Captured photo preview" style="display:none;">
+                </div>
+                <div class="photo-upload-controls delivery-camera-controls">
+                    <button type="button" class="btn btn-primary delivery-shutter-btn" id="deliveryCaptureBtn">Take photo</button>
+                    <button type="button" class="btn btn-outline hidden" id="deliveryRetakeBtn">Retake</button>
+                    <button type="button" class="btn btn-success hidden" id="deliveryUploadBtn">Use this photo</button>
+                    <button type="button" class="btn btn-outline delivery-picker-btn" id="deliveryFilePickerBtn">Phone camera / library</button>
+                    <input type="file" id="deliveryFileInput" accept="image/*" hidden>
+                </div>
+                <textarea id="deliveryPhotoNotes" rows="2" placeholder="Add a note (optional)" aria-label="Photo notes"></textarea>
+                <div class="photo-upload-progress" id="deliveryPhotoProgress">
+                    <div class="photo-upload-progress-bar"><div class="photo-upload-progress-fill" id="deliveryPhotoProgressFill"></div></div>
+                </div>
+                <div class="photo-upload-status" id="deliveryPhotoStatus" aria-live="polite"></div>
+            </div>
+
+            <details class="existing-photos-section delivery-photos-gallery" id="deliveryPhotosGallerySection">
+                <summary>Saved photos <span id="deliveryPhotoCount" class="delivery-photo-count"></span></summary>
+                <div class="existing-photos-grid" id="deliveryPhotosGrid">
+                    <div class="loading-photos">Loading photos…</div>
+                </div>
+            </details>
+            <div class="delivery-review-actions" id="deliveryReviewActions" hidden>
+                <button type="button" class="btn btn-primary" id="deliveryReviewActivateCameraBtn">Activate camera to add a photo</button>
+            </div>
+        </div>
+        <div class="photo-modal-footer">
+            <div class="photo-finish-hint" id="deliveryFinishHint">Photo saved? Finish this stop and move to the next one.</div>
+            <section class="delivery-confirmation" id="deliveryConfirmation" aria-label="Confirm delivery quantities">
+                <div class="delivery-confirmation-heading">
+                    <div><strong>Confirm delivery</strong><span>Enter the pieces delivered and any credits taken back.</span></div>
+                    <span class="delivery-confirmation-total" id="deliveryConfirmationTotal">$0.00</span>
+                </div>
+                <div class="delivery-confirmation-fields">
+                    <label>Pieces delivered<div class="quantity-stepper"><button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="-1" aria-label="Decrease pieces delivered">−</button><input type="number" id="deliveryPiecesInput" min="0" step="1" inputmode="numeric"><button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="Increase pieces delivered">+</button></div></label>
+                    <label>Credits taken back<div class="quantity-stepper"><button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="Decrease credits taken back">−</button><input type="number" id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric"><button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="1" aria-label="Increase credits taken back">+</button></div></label>
+                </div>
+                <p class="delivery-confirmation-breakdown" id="deliveryConfirmationBreakdown" aria-live="polite"></p>
+            </section>
+            <section class="delivery-invoice-preview" id="deliveryInvoicePreview" hidden aria-label="Invoice preview">
+                <div class="delivery-invoice-brand"><span>Delivery invoice</span><strong>Sour Flour Bakery</strong></div>
+                <div class="delivery-invoice-meta"><div><span>Date</span><strong id="deliveryInvoiceDate"></strong></div><div><span>Customer</span><strong id="deliveryInvoiceCustomer"></strong></div><div><span>Address</span><strong id="deliveryInvoiceAddress"></strong></div></div>
+                <div class="delivery-invoice-items" id="deliveryInvoiceItems"></div>
+                <div class="delivery-invoice-lines"><div><span>Ordered pieces</span><strong id="deliveryInvoiceOrderedPieces"></strong></div><div><span>Pieces delivered</span><strong id="deliveryInvoicePieces"></strong></div><div><span>Credits taken back</span><strong id="deliveryInvoiceCredits"></strong></div><div><span>Price per piece</span><strong id="deliveryInvoicePrice"></strong></div></div>
+                <div class="delivery-invoice-total"><span>Total</span><strong id="deliveryInvoiceTotal"></strong></div>
+                <p class="delivery-invoice-note" id="deliveryInvoicePricingNote"></p>
+                <button type="button" class="btn btn-outline delivery-invoice-edit-saved" id="deliveryInvoiceEditSavedBtn" hidden>Edit saved delivery</button>
+                <div class="delivery-invoice-actions" id="deliveryInvoiceActions"><button type="button" class="btn btn-outline" id="deliveryInvoiceBackBtn">Back to edit</button><button type="button" class="complete-delivery-btn" id="deliveryInvoiceConfirmBtn">Confirm &amp; save</button></div>
+            </section>
+            <button type="button" class="complete-delivery-btn" id="deliveryCompleteBtn">Review invoice</button>
+        </div>
+    </div>
+</div>
+
+<!-- Full-size photo viewer -->
+<div id="deliveryPhotoViewer" class="photo-viewer-modal" style="display:none;" aria-hidden="true" role="dialog">
+    <div class="photo-viewer-content">
+        <span class="photo-viewer-close" id="deliveryPhotoViewerClose" role="button" tabindex="0" aria-label="Close">&times;</span>
+        <img id="deliveryViewerImage" alt="Delivery photo">
+        <div class="photo-viewer-info">
+            <h4 id="deliveryViewerTitle"></h4>
+            <p id="deliveryViewerMeta"></p>
+            <div class="delivery-viewer-actions">
+                <button type="button" class="btn btn-outline" id="deliveryViewerRetakeBtn">Retake</button>
+                <button type="button" class="btn btn-danger" id="deliveryViewerRemoveBtn">Remove</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Inline Order Details functionality
-    function addCustomerClickHandlers() {
-        // Stop items
-        document.querySelectorAll('.stop-item').forEach(item => {
-            item.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const customerId = this.dataset.customerId;
-                const customerName = this.querySelector('.customer-name').textContent;
-                console.log('Stop item clicked:', { customerId, customerName });
-                toggleOrderDetails(this, customerId, customerName);
-            });
+(function () {
+    function mapsDirectionsUrl(address) {
+        if (!address) return '';
+        var q = encodeURIComponent(address);
+        var ua = navigator.userAgent || '';
+        if (/iPhone|iPad|iPod/i.test(ua)) {
+            return 'https://maps.apple.com/?daddr=' + q + '&dirflg=d';
+        }
+        if (/Android/i.test(ua)) {
+            return 'https://www.google.com/maps/dir/?api=1&destination=' + q + '&travelmode=driving';
+        }
+        return 'https://www.google.com/maps/dir/?api=1&destination=' + q + '&travelmode=driving';
+    }
+
+    function applyNavigateLinks(root) {
+        (root || document).querySelectorAll('.js-navigate-link[data-address]').forEach(function (link) {
+            var url = mapsDirectionsUrl(link.getAttribute('data-address') || '');
+            if (url) link.setAttribute('href', url);
         });
     }
-    
-    function toggleOrderDetails(stopItem, customerId, customerName) {
-        const detailsContainer = stopItem.querySelector('.order-details-container');
-        const loadingDiv = stopItem.querySelector('.order-details-loading');
-        const contentDiv = stopItem.querySelector('.order-details-content');
-        
-        // If already expanded, collapse
-        if (detailsContainer.style.display === 'block') {
-            detailsContainer.style.display = 'none';
-            detailsContainer.classList.remove('expanded');
+
+    function phoneHref(phone) {
+        var digits = String(phone || '').replace(/\D+/g, '');
+        return digits ? 'tel:' + digits : '';
+    }
+
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function loadOrderDetails(container, dailyOrderId) {
+        var loadingDiv = container.querySelector('.order-details-loading');
+        var contentDiv = container.querySelector('.order-details-content');
+        if (container.style.display === 'block') {
+            container.style.display = 'none';
             return;
         }
-        
-        // Show container and loading
-        detailsContainer.style.display = 'block';
-        loadingDiv.style.display = 'block';
-        contentDiv.style.display = 'none';
-        detailsContainer.classList.add('expanded');
-        
-        // Load order details via AJAX
-        const requestData = `customer_id=${customerId}&date=${encodeURIComponent('<?php echo $selectedDate; ?>')}`;
-        console.log('Sending request data:', requestData);
-        
+        container.style.display = 'block';
+        if (loadingDiv) loadingDiv.style.display = 'block';
+        if (contentDiv) {
+            contentDiv.style.display = 'none';
+            contentDiv.innerHTML = '';
+        }
+
         fetch('get_customer_order_details.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: requestData
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'daily_order_id=' + encodeURIComponent(String(dailyOrderId || 0))
         })
-        .then(response => {
-            console.log('Response status:', response.status);
-            return response.json();
-        })
-        .then(data => {
-            console.log('Response data:', data);
-            loadingDiv.style.display = 'none';
-            contentDiv.style.display = 'block';
-            
-            if (data.success) {
-                displayInlineOrderDetails(contentDiv, data.order, data.products);
-            } else {
-                contentDiv.innerHTML = '<div class="no-products">Error loading order details: ' + data.message + '</div>';
-            }
-        })
-        .catch(error => {
-            console.error('Fetch error:', error);
-            loadingDiv.style.display = 'none';
-            contentDiv.style.display = 'block';
-            contentDiv.innerHTML = '<div class="no-products">Error loading order details. Please try again.</div>';
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (loadingDiv) loadingDiv.style.display = 'none';
+                if (!contentDiv) return;
+                contentDiv.style.display = 'block';
+                if (!data || !data.success) {
+                    var err = (data && (data.error || data.message)) || 'Could not load order details';
+                    contentDiv.innerHTML = '<div class="no-products">Error: ' + escapeHtml(err) + '</div>';
+                    return;
+                }
+                if (data.html) {
+                    contentDiv.innerHTML = data.html;
+                    return;
+                }
+                displayInlineOrderDetails(contentDiv, data.products || []);
+            })
+            .catch(function () {
+                if (loadingDiv) loadingDiv.style.display = 'none';
+                if (contentDiv) {
+                    contentDiv.style.display = 'block';
+                    contentDiv.innerHTML = '<div class="no-products">Error loading order details.</div>';
+                }
+            });
+    }
+
+    function displayInlineOrderDetails(container, products) {
+        if (!products || !products.length) {
+            container.innerHTML = '<div class="no-products">No products found for this order.</div>';
+            return;
+        }
+        var html = '<div class="product-groups">';
+        products.forEach(function (product) {
+            var totalPrice = product.line_total
+                ? parseFloat(product.line_total).toFixed(2)
+                : (product.quantity * product.unit_price).toFixed(2);
+            html +=
+                '<div class="product-item">' +
+                '<div class="product-details">' +
+                '<div class="product-name">' + escapeHtml(product.product_name || 'Unknown Product') + '</div>' +
+                '<div class="product-meta">' +
+                escapeHtml(product.product_line || product.product_line_name || 'Other') +
+                ' · ' +
+                escapeHtml(product.dough_type || product.dough_type_name || 'Standard') +
+                '</div></div>' +
+                '<div class="product-info">' +
+                '<span class="quantity">×' + escapeHtml(String(product.quantity || 0)) + '</span>' +
+                '<span class="total-price">$' + totalPrice + '</span>' +
+                '</div></div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function getActiveStops() {
+        return Array.prototype.slice.call(document.querySelectorAll('#stopList .stop-item')).filter(function (el) {
+            var status = el.getAttribute('data-status') || '';
+            return status !== 'delivered' && status !== 'cancelled';
         });
     }
-    
-    function displayInlineOrderDetails(container, order, products) {
-        console.log('Displaying inline order details:', { order, products });
-        
-        // Group products by product line and dough type
-        const groupedProducts = {};
-        
-        if (products && products.length > 0) {
-            products.forEach(product => {
-                const productLine = product.product_line || 'Other';
-                const doughType = product.dough_type || 'Standard';
-                
-                if (!groupedProducts[productLine]) {
-                    groupedProducts[productLine] = {};
-                }
-                if (!groupedProducts[productLine][doughType]) {
-                    groupedProducts[productLine][doughType] = [];
-                }
-                
-                groupedProducts[productLine][doughType].push(product);
-            });
+
+    function renderNextStop(stopEl) {
+        var card = document.getElementById('nextStopCard');
+        var done = document.getElementById('routeDoneBanner');
+        if (!card) return;
+
+        if (!stopEl) {
+            card.hidden = true;
+            card.innerHTML = '';
+            if (done) done.hidden = false;
+            return;
         }
-        
-        // Build HTML for grouped products
-        let productsHtml = '';
-        
-        if (Object.keys(groupedProducts).length === 0) {
-            productsHtml = '<div class="no-products">No products found for this order.</div>';
-        } else {
-            productsHtml = '<div class="product-groups">';
-            Object.keys(groupedProducts).forEach(productLine => {
-                Object.keys(groupedProducts[productLine]).forEach(doughType => {
-                    const productsInGroup = groupedProducts[productLine][doughType];
-                    
-                    productsInGroup.forEach(product => {
-                        const totalPrice = product.line_total ? parseFloat(product.line_total).toFixed(2) : 
-                                         (product.quantity * product.unit_price).toFixed(2);
-                        productsHtml += `
-                            <div class="product-item">
-                                <div class="product-details">
-                                    <div class="product-name">${product.product_name || 'Unknown Product'}</div>
-                                    <div class="product-meta">${productLine} • ${doughType}</div>
-                                </div>
-                                <div class="product-info">
-                                    <span class="unit-price">$${parseFloat(product.unit_price || 0).toFixed(2)}</span>
-                                    <span class="quantity">×${product.quantity || 0}</span>
-                                    <span class="total-price">$${totalPrice}</span>
-                                </div>
-                            </div>
-                        `;
-                    });
-                });
-            });
-            productsHtml += '</div>';
+        if (done) done.hidden = true;
+        card.hidden = false;
+
+        var name = stopEl.getAttribute('data-customer-name') || '';
+        var address = stopEl.getAttribute('data-address') || '';
+        var phone = stopEl.getAttribute('data-phone') || '';
+        var zone = stopEl.getAttribute('data-zone') || '';
+        var routeOrder = stopEl.getAttribute('data-route-order') || '';
+        var customerId = stopEl.getAttribute('data-customer-id') || '0';
+        var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
+        var root = document.getElementById('driverRouteRoot');
+        var driverId = root ? root.getAttribute('data-driver-id') : '0';
+        var date = root ? root.getAttribute('data-date') : '';
+        var maps = mapsDirectionsUrl(address);
+        var tel = phoneHref(phone);
+
+        var actions =
+            (maps
+                ? '<a class="route-btn route-btn--navigate js-navigate-link" href="' +
+                  maps +
+                  '" data-address="' +
+                  escapeHtml(address) +
+                  '" target="_blank" rel="noopener">Navigate</a>'
+                : '') +
+            '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' +
+            ' data-driver-id="' +
+            escapeHtml(driverId) +
+            '" data-customer-id="' +
+            escapeHtml(customerId) +
+            '" data-daily-order-id="' +
+            escapeHtml(dailyOrderId) +
+            '" data-customer-name="' +
+            escapeHtml(name) +
+            '" data-address="' +
+            escapeHtml(address) +
+            '" data-date="' +
+            escapeHtml(date) +
+            '">Photo &amp; finish</button>' +
+            (tel ? '<a class="route-btn route-btn--call" href="' + tel + '">Call</a>' : '');
+
+        card.innerHTML =
+            '<p class="next-stop-eyebrow">Next stop' +
+            (routeOrder ? ' · #' + escapeHtml(routeOrder) : '') +
+            '</p>' +
+            '<h2 class="next-stop-store">' +
+            escapeHtml(name) +
+            '</h2>' +
+            '<p class="next-stop-address">' +
+            escapeHtml(address || 'No address on file') +
+            '</p>' +
+            (zone ? '<p class="next-stop-zone">' + escapeHtml(zone) + '</p>' : '') +
+            '<div class="next-stop-actions">' +
+            actions +
+            '</div>' +
+            '<button type="button" class="next-stop-details-toggle" data-daily-order-id="' +
+            escapeHtml(dailyOrderId) +
+            '" data-customer-id="' +
+            escapeHtml(customerId) +
+            '">Order details</button>' +
+            '<div class="order-details-container next-stop-order-details" style="display:none;">' +
+            '<div class="order-details-loading">Loading…</div>' +
+            '<div class="order-details-content" style="display:none;"></div></div>';
+
+        applyNavigateLinks(card);
+        if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
+            window.DriverDelivery.bindPhotoButtons(card);
         }
-        
-        container.innerHTML = productsHtml;
     }
-    
-    // Initialize click handlers
-    addCustomerClickHandlers();
-});
+
+    function refreshRouteUi() {
+        var list = document.getElementById('stopList');
+        if (!list) return;
+
+        var items = Array.prototype.slice.call(list.querySelectorAll('.stop-item'));
+        var nextAssigned = false;
+        items.forEach(function (el) {
+            var status = el.getAttribute('data-status') || '';
+            var isDone = status === 'delivered' || status === 'cancelled';
+            el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
+            if (isDone) {
+                el.classList.add('stop-item--past');
+            } else if (!nextAssigned) {
+                el.classList.add('stop-item--next');
+                nextAssigned = true;
+            } else {
+                el.classList.add('stop-item--upcoming');
+            }
+        });
+
+        // Move past stops after active ones
+        var past = items.filter(function (el) {
+            var s = el.getAttribute('data-status') || '';
+            return s === 'delivered' || s === 'cancelled';
+        });
+        past.forEach(function (el) {
+            list.appendChild(el);
+        });
+
+        var active = getActiveStops();
+        renderNextStop(active[0] || null);
+
+        var root = document.getElementById('driverRouteRoot');
+        var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
+        var completed = items.filter(function (el) {
+            return el.getAttribute('data-status') === 'delivered';
+        }).length;
+        if (root) root.setAttribute('data-completed', String(completed));
+        var text = document.getElementById('routeProgressText');
+        var fill = document.getElementById('routeProgressFill');
+        if (text) text.textContent = completed + ' of ' + total + ' done';
+        if (fill && total > 0) fill.style.width = Math.round((completed / total) * 100) + '%';
+        var progressPercent = document.getElementById('routeProgressPercent');
+        var progressRing = document.querySelector('.route-progress-ring');
+        var completedCount = document.getElementById('routeCompletedCount');
+        var remainingCount = document.getElementById('routeRemainingCount');
+        var totalCount = document.getElementById('routeTotalCount');
+        var pastCount = document.getElementById('routePastCount');
+        var queueCount = document.getElementById('queueCount');
+        var percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        if (progressPercent) progressPercent.textContent = percent + '%';
+        if (progressRing) progressRing.style.setProperty('--route-progress', percent + '%');
+        if (completedCount) completedCount.textContent = completed;
+        if (remainingCount) remainingCount.textContent = active.length;
+        if (totalCount) totalCount.textContent = total;
+        if (pastCount) pastCount.textContent = past.length;
+        if (queueCount) queueCount.textContent = active.length;
+
+        var pastDetails = document.getElementById('pastStopsDetails');
+        var completedButton = document.getElementById('routeCompletedButton');
+        if (pastDetails) {
+            var summary = pastDetails.querySelector('summary');
+            if (summary) summary.innerHTML = '<span>Past stops & photos</span><span class="past-stops-summary-count">' + past.length + '</span>';
+            pastDetails.hidden = past.length === 0;
+        }
+        if (completedButton) completedButton.disabled = past.length === 0;
+        var pastButton = document.getElementById('routePastStopsButton');
+        if (pastButton) pastButton.disabled = past.length === 0;
+    }
+
+    window.DriverRoute = {
+        mapsDirectionsUrl: mapsDirectionsUrl,
+        afterDeliveryComplete: function (dailyOrderId) {
+            var stop = document.querySelector(
+                '.stop-item[data-daily-order-id="' + String(dailyOrderId) + '"]'
+            );
+            if (stop) {
+                stop.setAttribute('data-status', 'delivered');
+                var badge = stop.querySelector('.status-badge');
+                if (badge) {
+                    badge.textContent = 'Delivered';
+                    badge.className = 'status-badge status-badge--delivered';
+                }
+                var actions = stop.querySelector('.contact-actions');
+                    if (actions) {
+                        actions.querySelectorAll('.contact-link--address, .contact-link--phone').forEach(function (el) {
+                            el.remove();
+                        });
+                        var photoLink = actions.querySelector('.photo-complete-btn');
+                        if (photoLink) {
+                            photoLink.textContent = 'View invoice & photos';
+                            photoLink.setAttribute('data-photo-mode', 'review');
+                        }
+                    }
+            }
+            refreshRouteUi();
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        applyNavigateLinks(document);
+        refreshRouteUi();
+
+        var dayStrip = document.querySelector('.route-day-strip');
+        var selectedDay = dayStrip && dayStrip.querySelector('.route-day-chip.is-selected');
+        if (selectedDay && selectedDay.scrollIntoView) {
+            selectedDay.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
+        }
+
+        var dateInput = document.getElementById('routeDateInput');
+        if (dateInput) {
+            dateInput.addEventListener('change', function () {
+                if (!dateInput.value) return;
+                document.body.classList.add('route-day-loading');
+                window.location.assign(
+                    '?driver_id=' + encodeURIComponent(dateInput.getAttribute('data-driver-id') || '0') +
+                    '&date=' + encodeURIComponent(dateInput.value)
+                );
+            });
+        }
+
+        document.querySelectorAll('.js-day-link').forEach(function (link) {
+            link.addEventListener('click', function (event) {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                var href = link.href;
+                document.body.classList.add('route-day-loading');
+                var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                setTimeout(function () { window.location.assign(href); }, reduceMotion ? 0 : 110);
+            });
+        });
+
+        var touchStart = null;
+        var routeSurface = document.getElementById('driverRouteRoot');
+        if (routeSurface) {
+            routeSurface.addEventListener('touchstart', function (event) {
+                if (document.body.classList.contains('photo-mode-open')) return;
+                if (event.target.closest('a, button, input, select, textarea, .route-day-strip, .order-details-container')) return;
+                var touch = event.changedTouches && event.changedTouches[0];
+                if (touch) touchStart = { x: touch.clientX, y: touch.clientY };
+            }, { passive: true });
+            routeSurface.addEventListener('touchend', function (event) {
+                if (!touchStart) return;
+                var touch = event.changedTouches && event.changedTouches[0];
+                if (!touch) return;
+                var dx = touch.clientX - touchStart.x;
+                var dy = touch.clientY - touchStart.y;
+                touchStart = null;
+                if (Math.abs(dx) < 90 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+                document.body.classList.add('route-day-loading');
+                var targetDate = dx < 0 ? <?php echo json_encode($nextDate); ?> : <?php echo json_encode($previousDate); ?>;
+                window.location.assign('?driver_id=<?php echo (int)$selectedDriverId; ?>&date=' + encodeURIComponent(targetDate));
+            }, { passive: true });
+        }
+
+        var root = document.getElementById('driverRouteRoot');
+        var selectedId = root && root.getAttribute('data-driver-id');
+        if (selectedId && parseInt(selectedId, 10) > 0) {
+            try {
+                localStorage.setItem('tracking_driver_id', String(selectedId));
+                localStorage.setItem('gps_tracking_active', 'true');
+            } catch (err) { /* ignore */ }
+        }
+
+        var pastDetails = document.getElementById('pastStopsDetails');
+        var section = document.querySelector('.stop-list-section');
+        if (section) section.classList.add('past-collapsed');
+        if (pastDetails) {
+            pastDetails.addEventListener('toggle', function () {
+                if (!section) return;
+                if (pastDetails.open) {
+                    section.classList.remove('past-collapsed');
+                } else {
+                    section.classList.add('past-collapsed');
+                }
+            });
+        }
+        function openPastHistory(button) {
+            if (!pastDetails || button.disabled) return;
+                pastDetails.open = true;
+                if (section) section.classList.remove('past-collapsed');
+                setTimeout(function () {
+                    pastDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 0);
+        }
+        var completedButton = document.getElementById('routeCompletedButton');
+        var pastButton = document.getElementById('routePastStopsButton');
+        if (completedButton) completedButton.addEventListener('click', function () { openPastHistory(completedButton); });
+        if (pastButton) pastButton.addEventListener('click', function () { openPastHistory(pastButton); });
+
+        document.addEventListener('click', function (e) {
+            var detailsBtn = e.target.closest('.next-stop-details-toggle');
+            if (detailsBtn) {
+                e.preventDefault();
+                var wrap = detailsBtn.parentElement.querySelector('.order-details-container');
+                var nextCard = document.getElementById('nextStopCard');
+                var orderId =
+                    (detailsBtn.getAttribute('data-daily-order-id') ||
+                        (nextCard &&
+                            nextCard.querySelector('.photo-complete-btn') &&
+                            nextCard.querySelector('.photo-complete-btn').getAttribute('data-daily-order-id')) ||
+                        '0');
+                if (wrap) loadOrderDetails(wrap, orderId);
+                return;
+            }
+
+            var stop = e.target.closest('.stop-item');
+            if (!stop) return;
+            if (e.target.closest('.contact-actions, a, button, input, select, textarea, label')) {
+                return;
+            }
+
+            // Delivered stops: open photos (common need when reviewing the route)
+            if ((stop.getAttribute('data-status') || '') === 'delivered') {
+                var photoBtn = stop.querySelector('.photo-complete-btn');
+                if (photoBtn) {
+                    photoBtn.click();
+                    return;
+                }
+            }
+
+            var container = stop.querySelector('.order-details-container');
+            if (container) {
+                loadOrderDetails(container, stop.getAttribute('data-daily-order-id'));
+            }
+        });
+    });
+})();
 </script>
 
-<?php require_once 'includes/footer.php'; ?> 
+<?php require_once 'includes/footer.php'; ?>

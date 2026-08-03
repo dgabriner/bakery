@@ -94,7 +94,7 @@ foreach ($products as $product) {
 $zones = $db->query("SELECT * FROM zones ORDER BY name")->fetchAll();
 
 // Get drivers for delivery day assignment
-$drivers = $db->query("SELECT id, name FROM drivers ORDER BY name")->fetchAll();
+$drivers = bakery_get_drivers($db);
 
 // Build customer query with pagination and filters
 $customerQuery = "

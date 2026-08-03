@@ -6,8 +6,29 @@
  * Usage:
  *   C:\php\php.exe bakery/scripts/setup_local_db.php
  *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset
+ *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset --force-reset
+ *
+ * --reset without --force-reset is REFUSED while production pull data is active
+ * (storage/.prod_data_active). Tests use --force-reset intentionally.
  */
 define('ACCESS_ALLOWED', true);
+
+function bakery_prod_data_marker_path($root) {
+    return $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . '.prod_data_active';
+}
+
+function bakery_refuse_reset_without_force($root, $argv) {
+    if (!in_array('--reset', $argv, true) || in_array('--force-reset', $argv, true)) {
+        return;
+    }
+    $marker = bakery_prod_data_marker_path($root);
+    if (is_readable($marker)) {
+        fwrite(STDERR, "Refusing --reset: production pull data is active (see storage/.prod_data_active).\n");
+        fwrite(STDERR, "Restore real data: scripts/pull_prod_to_local.php\n");
+        fwrite(STDERR, "Run tests (demo fixtures): add --force-reset to this command.\n");
+        exit(1);
+    }
+}
 
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "CLI only.\n");
@@ -47,6 +68,9 @@ if ($nameLower === 'bakerysf' || (strpos($nameLower, '_local') === false && strp
 }
 
 $reset = in_array('--reset', $argv, true);
+$forceReset = in_array('--force-reset', $argv, true);
+
+bakery_refuse_reset_without_force($root, $argv);
 
 try {
     $server = new PDO(
@@ -57,9 +81,18 @@ try {
     );
 
     if ($reset) {
-        echo "WARNING: --reset will DROP bakerysf_local and destroy any production pull data.\n";
+        if ($forceReset) {
+            echo "WARNING: --force-reset will DROP bakerysf_local and replace with demo fixtures.\n";
+        } else {
+            echo "WARNING: --reset will DROP bakerysf_local and destroy any production pull data.\n";
+        }
         $server->exec('DROP DATABASE IF EXISTS `' . str_replace('`', '``', $name) . '`');
         echo "Dropped database {$name}\n";
+        $marker = bakery_prod_data_marker_path($root);
+        if (is_file($marker)) {
+            unlink($marker);
+            echo "Cleared production pull marker (demo fixtures mode).\n";
+        }
     }
 
     $server->exec(
@@ -94,13 +127,20 @@ try {
     $products = (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn();
     echo "Fixture counts: customers={$customers}, products={$products}\n";
 
-    // Restore durable local admin if LOCAL_ADMIN_PASSWORD is configured
+    // Restore durable local admin / staff codes
     $ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
     if (is_readable($ensure)) {
         $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure);
         passthru($cmd, $ensureCode);
         if ($ensureCode !== 0) {
-            echo "Note: local admin not ensured (set LOCAL_ADMIN_PASSWORD in .env). Seed fixtures: scripts/seed_local_users.php\n";
+            echo "Note: local admin not ensured (defaults to code 9741 via ensure_local_admin). Seed: scripts/seed_local_users.php\n";
+        }
+    }
+    $staff = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_staff_codes.php';
+    if (is_readable($staff)) {
+        passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($staff), $staffCode);
+        if ($staffCode !== 0) {
+            echo "Note: staff codes not ensured. Run scripts/ensure_staff_codes.php\n";
         }
     } else {
         echo "Local database ready. Run scripts/seed_local_users.php for login accounts.\n";

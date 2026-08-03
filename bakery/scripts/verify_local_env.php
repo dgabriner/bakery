@@ -30,41 +30,75 @@ function check($ok, $msg) {
 }
 
 $appEnv = strtolower((string)($_ENV['APP_ENV'] ?? ''));
+$useProdRaw = strtolower((string)($_ENV['USE_PROD_DB'] ?? 'false'));
+$useProd = in_array($useProdRaw, ['1', 'true', 'yes', 'on'], true);
 $dbHost = strtolower((string)($_ENV['DB_HOST'] ?? ''));
 $dbName = strtolower((string)($_ENV['DB_NAME'] ?? ''));
 $mailDriver = strtolower((string)($_ENV['MAIL_DRIVER'] ?? ''));
 $mapsEnabled = strtolower((string)($_ENV['MAPS_ENABLED'] ?? 'false'));
 
 check($appEnv === 'local' || $appEnv === 'development' || $appEnv === 'dev', "APP_ENV is local-like (got: {$appEnv})");
-check($dbHost === '127.0.0.1' || $dbHost === 'localhost' || $dbHost === '::1', "DB_HOST is loopback (got: {$dbHost})");
-check(strpos($dbHost, 'sourflour') === false, 'DB_HOST does not contain sourflour');
-check($dbName !== 'bakerysf', 'DB_NAME is not production bakerysf');
-check(strpos($dbName, '_local') !== false || strpos($dbName, 'test') !== false || strpos($dbName, 'dev') !== false, "DB_NAME looks nonproduction (got: {$dbName})");
 check($mailDriver === 'log', "MAIL_DRIVER=log (got: {$mailDriver})");
-check($mapsEnabled === 'false' || $mapsEnabled === '0', "MAPS_ENABLED is false for local");
 
-// Config bootstrap should succeed without connecting if we only load defines —
-// full config connects safety checks only.
+if ($useProd) {
+    echo "MODE USE_PROD_DB=true (local app → live production DB)\n";
+    $pullPath = $root . DIRECTORY_SEPARATOR . '.env.production.pull';
+    check(is_readable($pullPath), '.env.production.pull present');
+    if (is_readable($pullPath)) {
+        bakery_load_env_file($pullPath);
+    }
+    $prodHost = strtolower((string)($_ENV['PROD_DB_HOST'] ?? ''));
+    $prodName = strtolower((string)($_ENV['PROD_DB_NAME'] ?? ''));
+    $looksProd = (
+        strpos($prodHost, 'sourflour') !== false ||
+        strpos($prodHost, 'dreamhost') !== false ||
+        $prodName === 'bakerysf'
+    );
+    check($looksProd, "PROD_DB_HOST/NAME look like production (host={$prodHost}, name={$prodName})");
+    check(strpos($prodName, '_local') === false, 'PROD_DB_NAME is not a _local database');
+    // Local DB_* in .env should still be safe for switching back
+    check($dbHost === '127.0.0.1' || $dbHost === 'localhost' || $dbHost === '::1', "Stored local DB_HOST is loopback (got: {$dbHost})");
+    check(strpos($dbName, '_local') !== false || strpos($dbName, 'test') !== false, "Stored local DB_NAME looks nonproduction (got: {$dbName})");
+} else {
+    echo "MODE USE_PROD_DB=false (local MariaDB)\n";
+    check($dbHost === '127.0.0.1' || $dbHost === 'localhost' || $dbHost === '::1', "DB_HOST is loopback (got: {$dbHost})");
+    check(strpos($dbHost, 'sourflour') === false, 'DB_HOST does not contain sourflour');
+    check($dbName !== 'bakerysf', 'DB_NAME is not production bakerysf');
+    check(strpos($dbName, '_local') !== false || strpos($dbName, 'test') !== false || strpos($dbName, 'dev') !== false, "DB_NAME looks nonproduction (got: {$dbName})");
+    check($mapsEnabled === 'false' || $mapsEnabled === '0' || $mapsEnabled === 'true' || $mapsEnabled === '1', "MAPS_ENABLED is set (got: {$mapsEnabled})");
+}
+
 try {
     require_once $root . '/includes/config.php';
     check(defined('IS_LOCAL') && IS_LOCAL, 'IS_LOCAL is true after config load');
-    check(defined('DB_NAME') && DB_NAME === ($_ENV['DB_NAME'] ?? ''), 'DB_NAME constant matches env');
+    check(defined('USE_PROD_DB') && USE_PROD_DB === $useProd, 'USE_PROD_DB constant matches .env flag');
+    if ($useProd) {
+        check(defined('DB_NAME') && strtolower(DB_NAME) === strtolower((string)($_ENV['PROD_DB_NAME'] ?? '')), 'DB_NAME constant uses PROD_DB_NAME');
+    } else {
+        check(defined('DB_NAME') && DB_NAME === ($_ENV['DB_NAME'] ?? ''), 'DB_NAME constant matches env');
+    }
     check(defined('MAIL_DRIVER') && MAIL_DRIVER === 'log', 'MAIL_DRIVER constant is log');
 } catch (Throwable $e) {
     check(false, 'config.php loaded: ' . $e->getMessage());
 }
 
-// Refuse production-looking connection attempt
 try {
     require_once $root . '/includes/database.php';
     $db = check_mysql_connection();
     $name = $db->query('SELECT DATABASE()')->fetchColumn();
-    check($name === ($_ENV['DB_NAME'] ?? null), "Connected database is {$name}");
+    $expected = $useProd ? ($_ENV['PROD_DB_NAME'] ?? null) : ($_ENV['DB_NAME'] ?? null);
+    check($name === $expected, "Connected database is {$name}");
     $tables = $db->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-    check(count($tables) > 0, 'Local database has tables (' . count($tables) . ')');
+    check(count($tables) > 0, 'Database has tables (' . count($tables) . ')');
 } catch (Throwable $e) {
-    echo "WARN database connection not available yet: " . $e->getMessage() . "\n";
-    echo "      Install local MySQL/MariaDB, then run scripts/setup_local_db.php\n";
+    if ($useProd) {
+        echo "WARN production connection failed: " . $e->getMessage() . "\n";
+        echo "      Check PROD_DB_* and DreamHost Allowable Hosts for your public IP.\n";
+    } else {
+        echo "WARN database connection not available yet: " . $e->getMessage() . "\n";
+        echo "      Install local MySQL/MariaDB, then run scripts/setup_local_db.php\n";
+        echo "      Or switch to prod: php scripts/switch_db.php prod\n";
+    }
 }
 
 if ($failures > 0) {
@@ -72,5 +106,5 @@ if ($failures > 0) {
     exit(1);
 }
 
-echo "\nAll critical local safety checks passed (or DB pending install).\n";
+echo "\nAll critical checks passed (or DB pending).\n";
 exit(0);

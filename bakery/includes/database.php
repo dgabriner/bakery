@@ -177,13 +177,49 @@ function safe_execute($db, $query, $params = []) {
 // CLI scripts should call check_mysql_connection() explicitly.
 if (PHP_SAPI !== 'cli') {
     try {
+        if (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: connecting ' . DB_NAME . '@' . DB_HOST);
+        }
         $db = check_mysql_connection();
+        if (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: connected');
+        }
         require_once __DIR__ . '/common_functions.php';
+        if (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: common_functions loaded');
+        }
         require_once __DIR__ . '/auth.php';
-        bakery_enforce_request_security($db);
+        if (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: auth.php loaded');
+        }
+        if (!defined('BAKERY_SKIP_REQUEST_SECURITY') || BAKERY_SKIP_REQUEST_SECURITY !== true) {
+            if (function_exists('bakery_page_probe_step')) {
+                bakery_page_probe_step('db: running auth gate');
+            }
+            bakery_enforce_request_security($db);
+            if (function_exists('bakery_page_probe_step')) {
+                bakery_page_probe_step('db: auth gate passed');
+            }
+        } elseif (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: auth gate skipped (probe/diagnostic)');
+        }
     } catch (Exception $e) {
+        if (function_exists('bakery_page_probe_step')) {
+            bakery_page_probe_step('db: CONNECTION FAILED — ' . $e->getMessage());
+            bakery_page_probe_finish('STOPPED — database error');
+            exit;
+        }
         error_log("Database connection failed: " . $e->getMessage());
-        die('<div class="error"><strong>Connection Error:</strong> Unable to connect to database. Please try again later.</div>');
+        $detail = '';
+        if (defined('IS_LOCAL') && IS_LOCAL) {
+            $mode = (defined('USE_PROD_DB') && USE_PROD_DB) ? 'USE_PROD_DB=true (production)' : 'local MariaDB';
+            $detail = '<br><small style="font-weight:normal">'
+                . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')
+                . '<br>Mode: ' . htmlspecialchars($mode, ENT_QUOTES, 'UTF-8')
+                . ' — target ' . htmlspecialchars((defined('DB_NAME') ? DB_NAME : '?') . '@' . (defined('DB_HOST') ? DB_HOST : '?'), ENT_QUOTES, 'UTF-8')
+                . '<br>CLI: php scripts/diag_db_connect.php</small>';
+        }
+        die('<div class="error"><strong>Connection Error:</strong> Unable to connect to database. Please try again later.' . $detail . '</div>');
     }
 } elseif (file_exists(__DIR__ . '/common_functions.php')) {
     require_once __DIR__ . '/common_functions.php';

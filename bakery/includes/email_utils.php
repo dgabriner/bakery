@@ -15,7 +15,9 @@ class EmailUtils {
      * Send invoice email with HTML content and/or PDF attachment
      */
     public static function sendInvoiceEmail($customer, $invoiceNumber, $startDate, $endDate, $totalAmount, $htmlContent = null, $pdfFile = null, $pdfFilename = null) {
-        // Local / test: never send real email
+        $recipient = defined('INVOICE_TEST_RECIPIENT') ? INVOICE_TEST_RECIPIENT : 'danny@sourflour.org';
+
+        // Local / test: fail clearly instead of reporting a successful send.
         if (defined('MAIL_DRIVER') && MAIL_DRIVER === 'log') {
             $logDir = dirname(__DIR__) . '/logs';
             if (!is_dir($logDir)) {
@@ -31,31 +33,43 @@ class EmailUtils {
                 $endDate
             );
             @file_put_contents($logDir . '/mail.log', $line, FILE_APPEND | LOCK_EX);
-            return true;
+            throw new Exception('Invoice email is disabled because MAIL_DRIVER=log. Configure SMTP or Gmail OAuth to send the test invoice to ' . $recipient . '.');
         }
 
-        // Try OAuth first, fallback to SMTP
-        require_once __DIR__ . '/gmail_oauth.php';
-        
-        if (GmailOAuth::isAuthorized()) {
-            try {
-                $subject = 'Invoice ' . $invoiceNumber . ' - ' . $customer['name'];
-                $emailBody = self::generateEmailHTML($customer, $invoiceNumber, $startDate, $endDate, $totalAmount, $htmlContent);
-                
-                $attachments = [];
-                if ($pdfFile && file_exists($pdfFile)) {
-                    $attachments[] = ['path' => $pdfFile, 'name' => $pdfFilename];
+        // OAuth only when explicitly selected (or tokens already exist). Never load OAuth
+        // for plain SMTP — missing OAuthTokenProvider.php must not fatal the SMTP path.
+        $mailDriver = defined('MAIL_DRIVER') ? strtolower((string)MAIL_DRIVER) : 'smtp';
+        $tryOauth = ($mailDriver === 'oauth');
+
+        if ($tryOauth || $mailDriver !== 'smtp') {
+            $oauthBootstrap = __DIR__ . '/gmail_oauth.php';
+            $oauthInterface = __DIR__ . '/../vendor/phpmailer/src/OAuthTokenProvider.php';
+            if (is_readable($oauthBootstrap) && is_readable($oauthInterface)) {
+                try {
+                    require_once $oauthBootstrap;
+                    if (class_exists('GmailOAuth', false) && GmailOAuth::isAuthorized()) {
+                        $subject = 'Invoice ' . $invoiceNumber . ' - ' . $customer['name'];
+                        $emailBody = self::generateEmailHTML($customer, $invoiceNumber, $startDate, $endDate, $totalAmount, $htmlContent);
+
+                        $attachments = [];
+                        if ($pdfFile && file_exists($pdfFile)) {
+                            $attachments[] = ['path' => $pdfFile, 'name' => $pdfFilename];
+                        }
+
+                        return GmailOAuth::sendEmail($recipient, $subject, $emailBody, 'Sour Flour Bakery', $attachments);
+                    }
+                } catch (Throwable $e) {
+                    error_log('OAuth email failed, trying SMTP fallback: ' . $e->getMessage());
+                    if ($mailDriver === 'oauth') {
+                        // Fall through to SMTP if credentials exist
+                    }
                 }
-                
-                return GmailOAuth::sendEmail('danny@sourflour.org', $subject, $emailBody, 'Sour Flour Bakery', $attachments);
-                
-            } catch (Exception $e) {
-                error_log("OAuth email failed, trying SMTP fallback: " . $e->getMessage());
-                // Fall through to SMTP method below
+            } elseif ($mailDriver === 'oauth') {
+                error_log('MAIL_DRIVER=oauth but OAuth PHPMailer files are missing; falling back to SMTP');
             }
         }
-        
-        // SMTP fallback method
+
+        // SMTP send path
         $mail = new PHPMailer(true);
         
         try {
@@ -65,12 +79,18 @@ class EmailUtils {
             $mail->SMTPAuth   = true;
             $mail->Username   = SMTP_USERNAME;
             $mail->Password   = SMTP_PASSWORD;
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            if (strtolower((string)SMTP_ENCRYPTION) === 'ssl') {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+            } elseif (strtolower((string)SMTP_ENCRYPTION) === 'tls') {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            } else {
+                $mail->SMTPSecure = false;
+            }
             $mail->Port       = SMTP_PORT;
             
             // Recipients
             $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
-            $mail->addAddress(SMTP_USERNAME); // Send to your own email
+            $mail->addAddress($recipient);
             $mail->addReplyTo(REPLY_TO_EMAIL, REPLY_TO_NAME);
             
             // Content
@@ -90,8 +110,8 @@ class EmailUtils {
             return true;
             
         } catch (Exception $e) {
-            error_log("Email sending failed: " . $mail->ErrorInfo);
-            return false;
+            error_log("Email sending failed to {$recipient}: " . $mail->ErrorInfo);
+            throw new Exception('Invoice email could not be sent to ' . $recipient . ': ' . $mail->ErrorInfo);
         }
     }
     
@@ -230,7 +250,7 @@ class EmailUtils {
             
             // Recipients
             $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
-            $mail->addAddress(SMTP_USERNAME);
+            $mail->addAddress(defined('INVOICE_TEST_RECIPIENT') ? INVOICE_TEST_RECIPIENT : 'danny@sourflour.org');
             
             // Content
             $mail->isHTML(true);

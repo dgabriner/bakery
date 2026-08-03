@@ -1,0 +1,160 @@
+<?php
+/**
+ * Driver delivery photo API: upload, list, delete.
+ * Auth + CSRF enforced via includes/database.php.
+ */
+define('ACCESS_ALLOWED', true);
+
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/database.php';
+require_once __DIR__ . '/includes/photo_handler.php';
+
+header('Content-Type: application/json');
+error_reporting(0);
+ini_set('display_errors', 0);
+
+try {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception('POST required');
+    }
+
+    $action = isset($_POST['action']) ? trim((string)$_POST['action']) : 'upload';
+    if ($action === '' && isset($_FILES['photo'])) {
+        $action = 'upload';
+    }
+
+    $db = check_mysql_connection();
+    $photoHandler = new PhotoHandler();
+
+    switch ($action) {
+        case 'list':
+            echo json_encode(bakery_list_driver_photos($db, $photoHandler), JSON_INVALID_UTF8_SUBSTITUTE);
+            break;
+
+        case 'delete':
+            echo json_encode(bakery_delete_driver_photo($db, $photoHandler), JSON_INVALID_UTF8_SUBSTITUTE);
+            break;
+
+        case 'upload':
+            echo json_encode(bakery_upload_driver_photo($db, $photoHandler), JSON_INVALID_UTF8_SUBSTITUTE);
+            break;
+
+        default:
+            throw new Exception('Unknown action');
+    }
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'error' => $e->getMessage(),
+    ], JSON_INVALID_UTF8_SUBSTITUTE);
+}
+
+function bakery_require_photo_ids() {
+    $driverId = isset($_POST['driver_id']) ? (int)$_POST['driver_id'] : 0;
+    $customerId = isset($_POST['customer_id']) ? (int)$_POST['customer_id'] : 0;
+    $date = isset($_POST['date']) ? trim((string)$_POST['date']) : date('Y-m-d');
+
+    if ($driverId <= 0 || $customerId <= 0) {
+        throw new Exception('driver_id and customer_id are required');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        throw new Exception('Invalid date format');
+    }
+
+    return [$driverId, $customerId, $date];
+}
+
+function bakery_list_driver_photos(PDO $db, PhotoHandler $photoHandler) {
+    list($driverId, $customerId, $date) = bakery_require_photo_ids();
+    $rows = $photoHandler->getPhotos($db, $driverId, $date, $customerId);
+    $photos = $photoHandler->formatPhotosForClient($rows);
+    return [
+        'success' => true,
+        'photos' => $photos,
+        'count' => count($photos),
+    ];
+}
+
+function bakery_delete_driver_photo(PDO $db, PhotoHandler $photoHandler) {
+    $driverId = isset($_POST['driver_id']) ? (int)$_POST['driver_id'] : 0;
+    $photoId = isset($_POST['photo_id']) ? (int)$_POST['photo_id'] : 0;
+    if ($driverId <= 0 || $photoId <= 0) {
+        throw new Exception('driver_id and photo_id are required');
+    }
+
+    $result = $photoHandler->deletePhoto($db, $photoId, $driverId);
+    if (empty($result['success'])) {
+        throw new Exception($result['error'] ?? 'Delete failed');
+    }
+
+    return [
+        'success' => true,
+        'message' => 'Photo removed',
+        'photo_id' => $photoId,
+    ];
+}
+
+function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
+    $driverId = isset($_POST['driver_id']) ? (int)$_POST['driver_id'] : 0;
+    $customerId = isset($_POST['customer_id']) ? (int)$_POST['customer_id'] : 0;
+    $dailyOrderId = isset($_POST['daily_order_id']) ? (int)$_POST['daily_order_id'] : 0;
+    $date = isset($_POST['date']) ? trim((string)$_POST['date']) : date('Y-m-d');
+    $photoType = isset($_POST['photo_type']) ? trim((string)$_POST['photo_type']) : 'After';
+    $notes = isset($_POST['notes']) ? trim((string)$_POST['notes']) : '';
+    $latitude = isset($_POST['latitude']) && $_POST['latitude'] !== '' ? (float)$_POST['latitude'] : null;
+    $longitude = isset($_POST['longitude']) && $_POST['longitude'] !== '' ? (float)$_POST['longitude'] : null;
+
+    if ($driverId <= 0 || $customerId <= 0 || $dailyOrderId <= 0) {
+        throw new Exception('driver_id, customer_id, and daily_order_id are required');
+    }
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        throw new Exception('Invalid date format');
+    }
+
+    $allowedTypes = ['Before', 'After', 'Receipt'];
+    if (!in_array($photoType, $allowedTypes, true)) {
+        $photoType = 'After';
+    }
+
+    if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
+        throw new Exception('Photo file is required');
+    }
+
+    $assignment = $photoHandler->verifyDeliveryAssignment($db, $driverId, $customerId, $dailyOrderId, $date);
+    if (!$assignment) {
+        throw new Exception('No delivery assignment found for this stop on the selected date');
+    }
+
+    $uploadResult = $photoHandler->processUpload(
+        $_FILES['photo'],
+        $driverId,
+        $customerId,
+        $photoType,
+        $notes,
+        $latitude,
+        $longitude
+    );
+
+    if (empty($uploadResult['success'])) {
+        throw new Exception($uploadResult['error'] ?? 'Photo upload failed');
+    }
+
+    $photoData = $uploadResult['data'];
+    $photoData['delivery_date'] = $date;
+    $photoData['daily_order_id'] = $dailyOrderId;
+
+    $saveResult = $photoHandler->saveToDatabase($db, $driverId, $customerId, $photoData);
+    if (empty($saveResult['success'])) {
+        throw new Exception($saveResult['error'] ?? 'Failed to save photo metadata');
+    }
+
+    $response = $photoHandler->buildUploadSuccessResponse($assignment, $photoData, $saveResult['photo_id']);
+    $urls = $photoHandler->getPhotoUrlWithFallback($photoData['file_path']);
+    $response['photo']['id'] = (int)$saveResult['photo_id'];
+    $response['photo']['url'] = $urls['primary'];
+    $response['photo']['fallback_url'] = $urls['fallback'];
+    $response['photo']['notes'] = $notes;
+    $response['photo']['created_at'] = date('Y-m-d H:i:s');
+    return $response;
+}

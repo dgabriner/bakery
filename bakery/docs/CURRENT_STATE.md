@@ -56,6 +56,7 @@ Stage explicit paths only. **Never** `git add bakery/` as a broad add.
 - **Prod pull:** `.env.production.pull` + `scripts/pull_prod_to_local.php`
 - **Migrations:** `scripts/run_migrations.php` (auto after setup/pull)
 - **Deploy:** [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md)
+- **Dev workflow (menu, DB sync, deploy ZIP):** [DEV_WORKFLOW.md](DEV_WORKFLOW.md) — run `dev_workflow.bat`
 - **Decisions:** [POST_0E_DECISIONS.md](POST_0E_DECISIONS.md)
 
 ```powershell

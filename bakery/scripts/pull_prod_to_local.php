@@ -7,7 +7,7 @@
  *
  * Usage:
  *   C:\php\php.exe scripts/pull_prod_to_local.php
- *   C:\php\php.exe scripts/pull_prod_to_local.php --admin-password=YourLocalPass
+ *   C:\php\php.exe scripts/pull_prod_to_local.php --admin-code=9741
  *   C:\php\php.exe scripts/pull_prod_to_local.php --skip-admin
  *
  * Requires:
@@ -26,14 +26,18 @@ $root = dirname(__DIR__);
 require_once $root . '/includes/env_loader.php';
 
 $skipAdmin = in_array('--skip-admin', $argv, true);
-$adminPassword = getenv('LOCAL_ADMIN_PASSWORD') ?: '';
+$adminCode = getenv('LOCAL_ADMIN_CODE') ?: '';
 $adminEmail = getenv('LOCAL_ADMIN_EMAIL') ?: 'danny@sourflour.org';
 $adminName = getenv('LOCAL_ADMIN_NAME') ?: 'Danny';
 $adminRole = getenv('LOCAL_ADMIN_ROLE') ?: 'administrator';
 
 foreach ($argv as $arg) {
+    if (strpos($arg, '--admin-code=') === 0) {
+        $adminCode = substr($arg, strlen('--admin-code='));
+    }
     if (strpos($arg, '--admin-password=') === 0) {
-        $adminPassword = substr($arg, strlen('--admin-password='));
+        // Backward-compatible alias for 4-digit codes.
+        $adminCode = substr($arg, strlen('--admin-password='));
     }
     if (strpos($arg, '--admin-email=') === 0) {
         $adminEmail = substr($arg, strlen('--admin-email='));
@@ -57,8 +61,11 @@ bakery_load_env_file($prodEnv);
 bakery_load_env_file($localEnv);
 
 // Re-load LOCAL_ADMIN_* from prod pull file after local .env (optional overrides)
-if ($adminPassword === '' && !empty($_ENV['LOCAL_ADMIN_PASSWORD'])) {
-    $adminPassword = (string)$_ENV['LOCAL_ADMIN_PASSWORD'];
+if ($adminCode === '' && !empty($_ENV['LOCAL_ADMIN_CODE'])) {
+    $adminCode = (string)$_ENV['LOCAL_ADMIN_CODE'];
+}
+if ($adminCode === '' && !empty($_ENV['LOCAL_ADMIN_PASSWORD'])) {
+    $adminCode = (string)$_ENV['LOCAL_ADMIN_PASSWORD'];
 }
 if (!empty($_ENV['LOCAL_ADMIN_EMAIL'])) {
     $adminEmail = (string)$_ENV['LOCAL_ADMIN_EMAIL'];
@@ -410,8 +417,8 @@ if (is_readable($migrate)) {
 if (!$skipAdmin) {
     $ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
     $ensureCmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure);
-    if ($adminPassword !== '') {
-        $ensureCmd .= ' --password=' . escapeshellarg($adminPassword);
+    if ($adminCode !== '') {
+        $ensureCmd .= ' --code=' . escapeshellarg($adminCode);
     }
     if ($adminEmail !== '') {
         $ensureCmd .= ' --email=' . escapeshellarg($adminEmail);
@@ -424,8 +431,16 @@ if (!$skipAdmin) {
     }
     passthru($ensureCmd, $ensureCode);
     if ($ensureCode !== 0) {
-        fwrite(STDERR, "Failed to ensure local admin. Set LOCAL_ADMIN_PASSWORD or pass --admin-password=...\n");
+        fwrite(STDERR, "Failed to ensure local admin. Set LOCAL_ADMIN_CODE or pass --admin-code=...\n");
         exit(1);
+    }
+
+    $staff = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_staff_codes.php';
+    if (is_readable($staff)) {
+        passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($staff), $staffCode);
+        if ($staffCode !== 0) {
+            fwrite(STDERR, "Warning: ensure_staff_codes.php exited with code {$staffCode}\n");
+        }
     }
 } else {
     echo "Skipped local admin upsert (--skip-admin)\n";
@@ -449,6 +464,18 @@ foreach ($spotTables as $t) {
         $note = ' OK';
     }
     echo "  {$t}: {$pLabel} → {$lLabel}{$note}\n";
+}
+
+$markerDir = $root . DIRECTORY_SEPARATOR . 'storage';
+if (!is_dir($markerDir) && !mkdir($markerDir, 0775, true) && !is_dir($markerDir)) {
+    fwrite(STDERR, "Warning: could not create storage/ for prod marker\n");
+} else {
+    $markerFile = $markerDir . DIRECTORY_SEPARATOR . '.prod_data_active';
+    $markerBody = 'Production data pulled at ' . date('c') . "\n"
+        . 'Dump: ' . basename($dumpFile) . "\n"
+        . "Do not run setup_local_db.php --reset without --force-reset.\n";
+    file_put_contents($markerFile, $markerBody);
+    echo "Marked production pull active: storage/.prod_data_active\n";
 }
 
 echo "\nDone. App .env unchanged (still local-only).\n";

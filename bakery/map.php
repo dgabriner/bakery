@@ -215,7 +215,7 @@ foreach ($customers as $customer) {
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
 <!-- Google Maps API for Geocoding -->
-<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=geocoding" async defer></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>" async defer></script>
 <script>
 const customers = <?php echo json_encode($customers); ?>;
 const zoneColors = <?php echo json_encode($zoneColors); ?>;

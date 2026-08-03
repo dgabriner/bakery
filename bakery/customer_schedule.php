@@ -26,14 +26,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_driver') {
     try {
         $customerId = $_POST['customer_id'];
-        $dayOfWeek = $_POST['day_of_week'];
+        // Use the application's canonical weekday numbering: 1=Mon ... 7=Sun.
+        // Accept legacy Sunday=0 submissions while they are still in circulation.
+        $dayOfWeek = (int)$_POST['day_of_week'];
+        if ($dayOfWeek === 0) {
+            $dayOfWeek = 7;
+        }
+        if ($dayOfWeek < 1 || $dayOfWeek > 7) {
+            throw new Exception('Invalid day of week');
+        }
         $driverId = empty($_POST['driver_id']) ? null : $_POST['driver_id'];
         
         if ($driverId === null) {
             // Remove the standing route entry
-            $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
-            $stmt->execute([$customerId, $dayOfWeek]);
+            if ($dayOfWeek === 7) {
+                // Remove both canonical Sunday=7 and legacy Sunday=0 rows.
+                $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week IN (0, 7)");
+                $stmt->execute([$customerId]);
+            } else {
+                $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
+                $stmt->execute([$customerId, $dayOfWeek]);
+            }
         } else {
+            // Clean up a possible legacy Sunday row before saving canonical Sunday=7.
+            if ($dayOfWeek === 7) {
+                $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = 0");
+                $stmt->execute([$customerId]);
+            }
             // Check if route already exists
             $stmt = $db->prepare("SELECT id FROM standing_routes WHERE customer_id = ? AND day_of_week = ?");
             $stmt->execute([$customerId, $dayOfWeek]);
@@ -108,10 +127,7 @@ $driverColors = [
 ];
 
 try {
-    $stmt = $db->query("SELECT id, name FROM drivers ORDER BY name");
-    $driversData = $stmt->fetchAll();
-    
-    foreach ($driversData as $index => $driver) {
+    foreach (bakery_get_drivers($db) as $index => $driver) {
         $drivers[$driver['id']] = [
             'name' => $driver['name'],
             'color' => $driverColors[$index % count($driverColors)]
@@ -163,8 +179,13 @@ try {
         }
         
         if ($row['day_of_week'] !== null) {
+            // Legacy data may contain Sunday as 0; display it as canonical Sunday=7.
+            $dayOfWeek = (int)$row['day_of_week'];
+            if ($dayOfWeek === 0) {
+                $dayOfWeek = 7;
+            }
             $driverColor = isset($drivers[$row['driver_id']]) ? $drivers[$row['driver_id']]['color'] : '#6c757d';
-            $customerData[$customerId]['delivery_days'][(int)$row['day_of_week']] = [
+            $customerData[$customerId]['delivery_days'][$dayOfWeek] = [
                 'driver_id' => $row['driver_id'],
                 'driver_name' => $row['driver_name'],
                 'driver_initial' => $row['driver_name'] ? strtoupper(substr($row['driver_name'], 0, 1)) : 'X',
@@ -189,23 +210,23 @@ try {
 }
 
 $days = [
-    0 => 'Sun',
-    1 => 'Mon', 
+    1 => 'Mon',
     2 => 'Tue',
     3 => 'Wed',
     4 => 'Thu',
     5 => 'Fri',
-    6 => 'Sat'
+    6 => 'Sat',
+    7 => 'Sun'
 ];
 
 $daysFull = [
-    0 => 'Sunday',
-    1 => 'Monday', 
+    1 => 'Monday',
     2 => 'Tuesday',
     3 => 'Wednesday',
     4 => 'Thursday',
     5 => 'Friday',
-    6 => 'Saturday'
+    6 => 'Saturday',
+    7 => 'Sunday'
 ];
 
 require_once 'includes/header.php';
@@ -1350,7 +1371,7 @@ require_once 'includes/nav.php';
                                 <div class="zone-edit-hint">Click to change zone</div>
                             </div>
                             <?php foreach ($days as $dayNum => $dayName): ?>
-                                <div class="day-cell">
+                                <div class="day-cell" data-day="<?php echo $dayNum; ?>">
                                     <?php 
                                     $hasDelivery = isset($customer['delivery_days'][$dayNum]);
                                     if ($hasDelivery) {
@@ -1921,13 +1942,13 @@ window.onclick = function(event) {
 // Day Filtering Functionality
 let currentDayFilter = null;
 const dayNames = {
-    '0': 'Sunday',
-    '1': 'Monday', 
+    '1': 'Monday',
     '2': 'Tuesday',
     '3': 'Wednesday',
     '4': 'Thursday',
     '5': 'Friday',
-    '6': 'Saturday'
+    '6': 'Saturday',
+    '7': 'Sunday'
 };
 
 function toggleDayFilter(day, clickedBtn) {
@@ -1956,8 +1977,8 @@ function applyDayFilter(day, clickedBtn) {
     document.querySelectorAll('.table-header .header-cell').forEach((cell, index) => {
         if (index === 0) return; // Skip "Customer" header
         
-        const cellDayIndex = index - 1; // Adjust for customer column
-        if (cellDayIndex === dayIndex) {
+        const cellDay = cell.dataset.day;
+        if (cellDay === String(dayIndex)) {
             cell.style.display = 'block';
             cell.classList.add('highlight-day');
         } else {
@@ -1968,8 +1989,8 @@ function applyDayFilter(day, clickedBtn) {
     // Hide day cells in customer rows
     document.querySelectorAll('.customer-row').forEach(row => {
         const dayCells = row.querySelectorAll('.day-cell');
-        dayCells.forEach((cell, index) => {
-            if (index === dayIndex) {
+        dayCells.forEach(cell => {
+            if (cell.dataset.day === String(dayIndex)) {
                 cell.style.display = 'flex';
                 // Highlight the day indicator if it has delivery
                 const dayIndicator = cell.querySelector('.day-indicator');
@@ -1999,7 +2020,7 @@ function applyDayFilter(day, clickedBtn) {
     
     document.querySelectorAll('.customer-row').forEach(row => {
         totalCustomers++;
-        const dayCell = row.querySelector(`.day-cell:nth-child(${dayIndex + 2})`); // +2 for customer column and 0-based index
+        const dayCell = row.querySelector(`.day-cell[data-day="${dayIndex}"]`);
         const hasDelivery = dayCell && dayCell.querySelector('.has-delivery');
         if (hasDelivery) {
             customersWithDelivery++;

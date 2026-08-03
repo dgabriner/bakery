@@ -234,6 +234,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 echo json_encode(['success' => true]);
                 break;
+
+            case 'clear_day':
+                $date = $_POST['date'] ?? '';
+                $confirmed = ($_POST['confirm_delivered'] ?? '0') === '1';
+                $dateObject = DateTime::createFromFormat('!Y-m-d', $date);
+                if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
+                    throw new Exception('Invalid order date');
+                }
+
+                $stmt = $db->prepare("SELECT COUNT(*) FROM daily_orders WHERE order_date = ? AND status IN ('delivered', 'invoiced')");
+                $stmt->execute([$date]);
+                $deliveredCount = (int)$stmt->fetchColumn();
+
+                // Require an explicit second confirmation whenever delivered history is involved.
+                if ($deliveredCount > 0 && !$confirmed) {
+                    echo json_encode([
+                        'success' => false,
+                        'requires_delivered_confirmation' => true,
+                        'delivered_count' => $deliveredCount,
+                    ]);
+                    break;
+                }
+
+                $db->beginTransaction();
+                try {
+                    // Photos are keyed by customer/date rather than daily_order_id.
+                    if (table_exists($db, 'driver_photos')) {
+                        $stmt = $db->prepare("DELETE FROM driver_photos WHERE delivery_date = ? AND customer_id IN (SELECT customer_id FROM daily_orders WHERE order_date = ?)");
+                        $stmt->execute([$date, $date]);
+                    }
+                    // daily_order_items and daily_order_assignments have ON DELETE CASCADE.
+                    $stmt = $db->prepare('DELETE FROM daily_orders WHERE order_date = ?');
+                    $stmt->execute([$date]);
+                    $deletedCount = $stmt->rowCount();
+                    $db->commit();
+
+                    echo json_encode(['success' => true, 'deleted_count' => $deletedCount]);
+                } catch (Exception $e) {
+                    if ($db->inTransaction()) $db->rollBack();
+                    throw $e;
+                }
+                break;
         }
     } catch (Exception $e) {
         http_response_code(500);
@@ -262,20 +304,67 @@ require_once 'includes/nav.php';
 // Get selected date (default to tomorrow)
 $selectedDate = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
 $dayName = date('l', strtotime($selectedDate));
+$selectedDriverId = isset($_GET['driver_id']) ? (int)$_GET['driver_id'] : 0;
+$selectedZone = isset($_GET['zone']) ? trim((string)$_GET['zone']) : '';
+$groupBy = ($_GET['group_by'] ?? 'driver') === 'zone' ? 'zone' : 'driver';
+
+function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver') {
+    $params = ['date' => $date, 'group_by' => $groupBy];
+    if ($driverId > 0) {
+        $params['driver_id'] = $driverId;
+    }
+    if ($zone !== '') {
+        $params['zone'] = $zone;
+    }
+    return '?' . http_build_query($params);
+}
 
 // Set page title
 $page_title = 'Daily Orders - ' . date('M j, Y', strtotime($selectedDate));
 
 // Get daily orders for selected date
 try {
-    $stmt = $db->prepare("
-        SELECT do.*, c.name as customer_name, c.address, c.phone
+    $orderSql = "
+        SELECT do.*, c.name as customer_name, c.address, c.phone, c.zone,
+               COALESCE(
+                   (SELECT d.name FROM daily_order_assignments doa JOIN drivers d ON d.id = doa.driver_id
+                    WHERE doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
+                    ORDER BY doa.route_order, doa.id LIMIT 1),
+                   (SELECT d.name FROM drivers d WHERE d.id = do.driver_id LIMIT 1)
+               ) AS route_driver_name
         FROM daily_orders do
         JOIN customers c ON do.customer_id = c.id
-        WHERE do.order_date = ?
-        ORDER BY c.name
-    ");
-    $stmt->execute([$selectedDate]);
+        WHERE do.order_date = ?";
+    $orderParams = [$selectedDate];
+
+    // Daily assignments are the canonical source for a driver's route. The
+    // daily_orders.driver_id check keeps legacy, directly-assigned orders visible.
+    if ($selectedDriverId > 0) {
+        $orderSql .= "
+            AND (
+                do.driver_id = ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM daily_order_assignments doa
+                    WHERE doa.daily_order_id = do.id
+                      AND doa.delivery_date = do.order_date
+                      AND doa.driver_id = ?
+                )
+            )";
+        $orderParams[] = $selectedDriverId;
+        $orderParams[] = $selectedDriverId;
+    }
+
+    if ($selectedZone !== '') {
+        $orderSql .= ' AND c.zone = ?';
+        $orderParams[] = $selectedZone;
+    }
+
+    $orderSql .= $groupBy === 'zone'
+        ? " ORDER BY COALESCE(NULLIF(c.zone, ''), 'No Zone'), c.name"
+        : " ORDER BY COALESCE(route_driver_name, 'Unassigned route'), c.name";
+    $stmt = $db->prepare($orderSql);
+    $stmt->execute($orderParams);
     $dailyOrders = $stmt->fetchAll();
     
     // Get all order items
@@ -299,11 +388,30 @@ try {
         }
     }
     
-    // Get all products for adding new items
-    $products = $db->query("SELECT id, name, price FROM products ORDER BY name")->fetchAll();
+    // Product-level Pan Dulce standards are introduced by migration 012.
+    // Fall back to the older dough-type table (or 12) during an upgrade.
+    $panDulceProductStandardsAvailable = table_exists($db, 'pan_dulce_product_quantity_standards');
+    $panDulceTypeStandardsAvailable = table_exists($db, 'pan_dulce_quantity_standards');
+    $standardQuantityJoin = $panDulceProductStandardsAvailable
+        ? 'LEFT JOIN pan_dulce_product_quantity_standards pdqs ON pdqs.product_id = p.id'
+        : ($panDulceTypeStandardsAvailable ? 'LEFT JOIN pan_dulce_quantity_standards pdqs ON pdqs.dough_type_id = dt.id' : '');
+    $standardQuantitySelect = ($panDulceProductStandardsAvailable || $panDulceTypeStandardsAvailable)
+        ? 'COALESCE(pdqs.standard_quantity, 12) AS pan_dulce_standard_quantity'
+        : '12 AS pan_dulce_standard_quantity';
+    $products = $db->query("
+        SELECT p.id, p.name, p.price, dt.name AS dough_type_name, pl.name AS product_line_name,
+               {$standardQuantitySelect}
+        FROM products p
+        LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+        LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+        {$standardQuantityJoin}
+        ORDER BY p.name
+    ")->fetchAll();
     
     // Get customers for creating new orders
     $customers = $db->query("SELECT id, name FROM customers ORDER BY name")->fetchAll();
+    $drivers = $db->query("SELECT id, name FROM drivers ORDER BY name")->fetchAll();
+    $zones = $db->query("SELECT DISTINCT zone FROM customers WHERE zone IS NOT NULL AND zone <> '' ORDER BY zone")->fetchAll(PDO::FETCH_COLUMN);
     
 } catch (Exception $e) {
     echo '<div class="alert alert-danger">Error loading daily orders: ' . htmlspecialchars($e->getMessage()) . '</div>';
@@ -321,6 +429,10 @@ try {
             <button type="button" class="btn btn-secondary" onclick="showDatePicker()">
                 Change Date
             </button>
+            <button type="button" class="btn btn-danger" onclick="clearSelectedDay()">
+                Clear This Day
+            </button>
+            <a class="btn btn-outline" href="pan_dulce_quantities.php">Pan Dulce Standards</a>
         </div>
     </div>
     
@@ -331,12 +443,43 @@ try {
             <span class="order-count">Total Orders: <?= count($dailyOrders) ?></span>
         </div>
         <div class="date-controls">
-            <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' -1 day')) ?>" class="btn btn-outline">← Previous Day</a>
-            <a href="?date=<?= date('Y-m-d') ?>" class="btn btn-primary">Today</a>
-            <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' +1 day')) ?>" class="btn btn-outline">Next Day →</a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' -1 day')), $selectedDriverId, $selectedZone, $groupBy)) ?>" class="btn btn-outline">← Previous Day</a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d'), $selectedDriverId, $selectedZone, $groupBy)) ?>" class="btn btn-primary">Today</a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' +1 day')), $selectedDriverId, $selectedZone, $groupBy)) ?>" class="btn btn-outline">Next Day →</a>
         </div>
     </div>
     
+    <form class="order-filters" method="get">
+        <input type="hidden" name="date" value="<?= htmlspecialchars($selectedDate) ?>">
+        <fieldset class="filter-group group-by-options">
+            <legend>Group orders by</legend>
+            <label><input type="radio" name="group_by" value="driver" <?= $groupBy === 'driver' ? 'checked' : '' ?>> Driver route</label>
+            <label><input type="radio" name="group_by" value="zone" <?= $groupBy === 'zone' ? 'checked' : '' ?>> Zone</label>
+        </fieldset>
+        <div class="filter-group">
+            <label for="driver_id">Driver route</label>
+            <select id="driver_id" name="driver_id">
+                <option value="">All driver routes</option>
+                <?php foreach ($drivers as $driver): ?>
+                    <option value="<?= (int)$driver['id'] ?>" <?= $selectedDriverId === (int)$driver['id'] ? 'selected' : '' ?>><?= htmlspecialchars($driver['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="zone">Zone</label>
+            <select id="zone" name="zone">
+                <option value="">All zones</option>
+                <?php foreach ($zones as $zone): ?>
+                    <option value="<?= htmlspecialchars($zone) ?>" <?= $selectedZone === $zone ? 'selected' : '' ?>><?= htmlspecialchars($zone) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Apply Filters</button>
+        <?php if ($selectedDriverId > 0 || $selectedZone !== ''): ?>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, 0, '', $groupBy)) ?>" class="btn btn-outline">Clear Filters</a>
+        <?php endif; ?>
+    </form>
+
     <!-- Orders List -->
     <?php if (empty($dailyOrders)): ?>
         <div class="empty-state">
@@ -347,8 +490,20 @@ try {
             </button>
         </div>
     <?php else: ?>
+        <?php
+        $ordersByGroup = [];
+        foreach ($dailyOrders as $order) {
+            $groupName = $groupBy === 'zone'
+                ? ($order['zone'] ?: 'No Zone')
+                : ($order['route_driver_name'] ?: 'Unassigned route');
+            $ordersByGroup[$groupName][] = $order;
+        }
+        ?>
         <div class="orders-list">
-            <?php foreach ($dailyOrders as $order): ?>
+            <?php foreach ($ordersByGroup as $groupName => $groupOrders): ?>
+                <section class="order-group">
+                    <h2><?= $groupBy === 'zone' ? 'Zone: ' : 'Driver route: ' ?><?= htmlspecialchars($groupName) ?> <span>(<?= count($groupOrders) ?>)</span></h2>
+                    <?php foreach ($groupOrders as $order): ?>
                 <div class="order-card">
                     <div class="order-header">
                         <div class="customer-info">
@@ -373,7 +528,8 @@ try {
                                     <thead>
                                         <tr>
                                             <th>Product</th>
-                                            <th>Quantity</th>
+                                            <th>Ordered</th>
+                                            <th>Delivered</th>
                                             <th>Unit Price</th>
                                             <th>Total</th>
                                             <th>Actions</th>
@@ -389,6 +545,13 @@ try {
                                                            min="0" 
                                                            class="quantity-input" 
                                                            onchange="updateQuantity(<?= $item['id'] ?>, this.value)">
+                                                </td>
+                                                <td>
+                                                    <?php if ($item['delivered_quantity'] === null): ?>
+                                                        <span class="delivery-quantity-pending">&mdash;</span>
+                                                    <?php else: ?>
+                                                        <strong><?= (int)$item['delivered_quantity'] ?></strong>
+                                                    <?php endif; ?>
                                                 </td>
                                                 <td>$<?= number_format($item['unit_price'], 2) ?></td>
                                                 <td>$<?= number_format($item['line_total'], 2) ?></td>
@@ -422,19 +585,30 @@ try {
                             <div class="control-group">
                                 <label>Add Product:</label>
                                 <div class="add-product-controls">
-                                    <select class="product-select" id="newProduct_<?= $order['id'] ?>">
+                                    <select class="product-select" id="newProduct_<?= $order['id'] ?>" onchange="setPanDulceQuantity(<?= $order['id'] ?>)">
                                         <option value="">Select Product</option>
                                         <?php foreach ($products as $product): ?>
-                                            <option value="<?= $product['id'] ?>"><?= htmlspecialchars($product['name']) ?> ($<?= $product['price'] ?>)</option>
+                                            <option value="<?= $product['id'] ?>"
+                                                data-pan-dulce="<?= $product['product_line_name'] === 'Pan Dulce' ? '1' : '0' ?>"
+                                                data-standard-quantity="<?= (int)$product['pan_dulce_standard_quantity'] ?>">
+                                                <?= htmlspecialchars($product['name']) ?> ($<?= $product['price'] ?>)</option>
                                         <?php endforeach; ?>
+                                    </select>
+                                    <select class="pan-dulce-multiplier" id="panMultiplier_<?= $order['id'] ?>" onchange="setPanDulceQuantity(<?= $order['id'] ?>)" title="Pan Dulce amount">
+                                        <option value="1">Standard</option>
+                                        <option value="1.5">1.5×</option>
+                                        <option value="2">2×</option>
                                     </select>
                                     <input type="number" class="quantity-input" placeholder="Qty" id="newQty_<?= $order['id'] ?>">
                                     <button class="btn btn-primary" onclick="addItem(<?= $order['id'] ?>)">Add</button>
                                 </div>
+                                <small class="pan-dulce-note">Select a Pan Dulce product to use its type’s standard quantity.</small>
                             </div>
                         </div>
                     </div>
                 </div>
+                    <?php endforeach; ?>
+                </section>
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
@@ -564,6 +738,36 @@ try {
     gap: 10px;
 }
 
+.order-filters {
+    display: flex;
+    align-items: end;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin: 0 0 30px;
+    padding: 15px 20px;
+    background-color: #f8f9fa;
+    border-radius: 10px;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.filter-group label {
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.filter-group select {
+    min-width: 190px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
 .empty-state {
     text-align: center;
     padding: 60px 20px;
@@ -585,6 +789,18 @@ try {
     display: flex;
     flex-direction: column;
     gap: 20px;
+}
+
+.order-group h2 {
+    margin: 10px 0;
+    color: #2c3e50;
+    font-size: 20px;
+}
+
+.order-group h2 span {
+    color: #6c757d;
+    font-size: 14px;
+    font-weight: normal;
 }
 
 .order-card {
@@ -709,6 +925,18 @@ try {
     width: 80px;
 }
 
+.pan-dulce-multiplier {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+.pan-dulce-note {
+    display: block;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
 /* Modal Styles */
 .modal-overlay {
     position: fixed;
@@ -792,6 +1020,15 @@ try {
         gap: 20px;
         text-align: center;
     }
+
+    .order-filters {
+        align-items: stretch;
+    }
+
+    .filter-group select {
+        min-width: 0;
+        width: 100%;
+    }
     
     .order-header {
         flex-direction: column;
@@ -828,10 +1065,22 @@ function hideGenerateModal() {
     document.getElementById('generateModal').style.display = 'none';
 }
 
+function setPanDulceQuantity(orderId) {
+    const product = document.getElementById(`newProduct_${orderId}`);
+    const quantity = document.getElementById(`newQty_${orderId}`);
+    const multiplier = document.getElementById(`panMultiplier_${orderId}`);
+    const selected = product.options[product.selectedIndex];
+    if (selected && selected.dataset.panDulce === '1') {
+        quantity.value = Math.round(Number(selected.dataset.standardQuantity) * Number(multiplier.value));
+    }
+}
+
 function showDatePicker() {
     const date = prompt('Enter date (YYYY-MM-DD):', '<?= $selectedDate ?>');
     if (date) {
-        window.location.href = `?date=${date}`;
+        const params = new URLSearchParams(window.location.search);
+        params.set('date', date);
+        window.location.href = `?${params.toString()}`;
     }
 }
 
@@ -857,6 +1106,37 @@ function generateFromStanding() {
     });
     
     hideGenerateModal();
+}
+
+function clearSelectedDay() {
+    const date = '<?= htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8') ?>';
+    if (!confirm('Clear all daily orders for ' + date + '? This cannot be undone.')) return;
+
+    clearSelectedDayRequest(date, false);
+}
+
+function clearSelectedDayRequest(date, confirmDelivered) {
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=clear_day&date=' + encodeURIComponent(date) + '&confirm_delivered=' + (confirmDelivered ? '1' : '0')
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.requires_delivered_confirmation) {
+            const message = 'This day includes ' + data.delivered_count + ' delivered/invoiced order(s).\n\n' +
+                'Confirm again to permanently delete those orders and all associated delivery history and photos.';
+            if (confirm(message)) clearSelectedDayRequest(date, true);
+            return;
+        }
+        if (data.success) {
+            alert('Cleared ' + data.deleted_count + ' daily order(s).');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unable to clear orders'));
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
 }
 
 function updateQuantity(itemId, quantity) {

@@ -14,7 +14,19 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 /**
- * Process POST form submission with CSRF protection and validation
+ * JSON safe to embed inside <script> tags (prevents </script> breakage from customer data).
+ */
+function bakery_json_for_html($data, $default = 'null')
+{
+    $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE;
+    if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+        $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+    }
+    $json = json_encode($data, $flags);
+    return $json === false ? $default : $json;
+}
+
+/**
  * 
  * @param PDO $db Database connection
  * @param array $config Configuration array with handlers
@@ -653,4 +665,117 @@ function bakery_dashboard_driver_view(PDO $db, $driverId, $date) {
     }
 
     return $view;
+}
+
+/**
+ * Ensure drivers.archived column exists (runtime migration for existing DBs).
+ */
+function bakery_ensure_drivers_archived_column(PDO $db): void
+{
+    static $checked = false;
+    if ($checked || !table_exists($db, 'drivers')) {
+        return;
+    }
+
+    try {
+        $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], 'archived');
+        $col = $db->query('SHOW COLUMNS FROM drivers LIKE ' . $db->quote($safe))->fetch();
+        if (!$col) {
+            $db->exec('ALTER TABLE drivers ADD COLUMN archived TINYINT(1) NOT NULL DEFAULT 0 AFTER name');
+            $db->exec('ALTER TABLE drivers ADD COLUMN archived_at TIMESTAMP NULL DEFAULT NULL AFTER archived');
+        }
+    } catch (Exception $e) {
+        error_log('Driver archive column migration: ' . $e->getMessage());
+    }
+
+    $checked = true;
+}
+
+/**
+ * Whether drivers.archived is present (shared hosts may block ALTER at runtime).
+ */
+function bakery_drivers_support_archive_column(PDO $db): bool
+{
+    static $supported = null;
+    if ($supported !== null) {
+        return $supported;
+    }
+    if (!table_exists($db, 'drivers')) {
+        $supported = false;
+        return false;
+    }
+
+    bakery_ensure_drivers_archived_column($db);
+    $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], 'archived');
+    $col = $db->query('SHOW COLUMNS FROM drivers LIKE ' . $db->quote($safe))->fetch();
+    $supported = (bool)$col;
+    return $supported;
+}
+
+/**
+ * Fetch drivers for dropdowns and management UI.
+ *
+ * @return array<int, array{id:int, name:string, archived?:int, archived_at?:string|null}>
+ */
+function bakery_get_drivers(PDO $db, bool $includeArchived = false): array
+{
+    if (!table_exists($db, 'drivers')) {
+        return [];
+    }
+
+    if (bakery_drivers_support_archive_column($db)) {
+        $sql = 'SELECT id, name, archived, archived_at FROM drivers';
+        if (!$includeArchived) {
+            $sql .= ' WHERE archived = 0 ORDER BY name ASC';
+        } else {
+            $sql .= ' ORDER BY archived ASC, name ASC';
+        }
+        return $db->query($sql)->fetchAll();
+    }
+
+    return $db->query('SELECT id, name FROM drivers ORDER BY name ASC')->fetchAll();
+}
+
+/**
+ * Fetch a single driver row, including archived drivers.
+ */
+function bakery_get_driver_by_id(PDO $db, int $driverId): ?array
+{
+    if ($driverId <= 0 || !table_exists($db, 'drivers')) {
+        return null;
+    }
+
+    if (bakery_drivers_support_archive_column($db)) {
+        $stmt = $db->prepare('SELECT id, name, archived, archived_at FROM drivers WHERE id = ?');
+    } else {
+        $stmt = $db->prepare('SELECT id, name FROM drivers WHERE id = ?');
+    }
+    $stmt->execute([$driverId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Ensure standing routes can remember the preferred stop order.
+ * Existing route rows remain valid with a NULL order and continue to use
+ * the normal customer-name fallback until a route is saved from a day.
+ */
+function bakery_ensure_standing_routes_order_column(PDO $db): void
+{
+    static $checked = false;
+    if ($checked || !table_exists($db, 'standing_routes')) {
+        return;
+    }
+
+    try {
+        $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], 'route_order');
+        $col = $db->query('SHOW COLUMNS FROM standing_routes LIKE ' . $db->quote($safe))->fetch();
+        if (!$col) {
+            $db->exec('ALTER TABLE standing_routes ADD COLUMN route_order INT NULL DEFAULT NULL AFTER customer_id');
+        }
+    } catch (Exception $e) {
+        error_log('Standing route order column migration: ' . $e->getMessage());
+    }
+
+    $checked = true;
 }

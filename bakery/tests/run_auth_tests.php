@@ -12,7 +12,7 @@ ob_start();
 
 $root = dirname(__DIR__);
 
-exec('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset', $setupOut, $setupCode);
+exec('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset', $setupOut, $setupCode);
 if ($setupCode !== 0) {
     fwrite(STDERR, "setup_local_db failed\n" . implode("\n", $setupOut) . "\n");
     exit(1);
@@ -59,7 +59,7 @@ function auth_test_reset_session() {
 
 auth_test_reset_session();
 echo "=== Login success / failure ===\n";
-t_assert(bakery_login($db, 'admin@local.test', 'LocalAdmin!234') === true, 'admin login succeeds');
+t_assert(bakery_login($db, '9001') === true, 'admin login succeeds');
 $user = bakery_current_user();
 t_assert($user && $user['role_slug'] === 'administrator', 'session has administrator role');
 t_assert(!empty($_SESSION['csrf_token']), 'csrf token set after login');
@@ -68,11 +68,11 @@ bakery_logout();
 auth_test_reset_session();
 t_assert(bakery_current_user() === null, 'logout clears user');
 
-t_assert(bakery_login($db, 'admin@local.test', 'wrong-password') === false, 'bad password fails');
+t_assert(bakery_login($db, '0000') === false, 'bad code fails');
 t_assert(bakery_current_user() === null, 'no session user after failed login');
 
 echo "=== Role permissions ===\n";
-bakery_login($db, 'driver@local.test', 'LocalDriver!234');
+bakery_login($db, '9003');
 t_assert(bakery_user_has_role(['driver']), 'driver has driver role');
 t_assert(!bakery_user_has_role(['administrator', 'manager']), 'driver is not manager/admin');
 t_assert(bakery_user_has_permission($db, 'delivery.execute'), 'driver has delivery.execute');
@@ -80,7 +80,7 @@ t_assert(!bakery_user_has_permission($db, 'admin.access'), 'driver lacks admin.a
 
 bakery_logout();
 auth_test_reset_session();
-bakery_login($db, 'manager@local.test', 'LocalManager!234');
+bakery_login($db, '9002');
 t_assert(bakery_user_has_permission($db, 'ops.manage'), 'manager has ops.manage');
 t_assert(!bakery_user_has_permission($db, 'admin.access'), 'manager lacks admin.access');
 
@@ -99,16 +99,33 @@ t_assert(bakery_verify_csrf() === false, 'missing csrf fails');
 echo "=== Session expiry (idle) ===\n";
 bakery_logout();
 auth_test_reset_session();
-bakery_login($db, 'admin@local.test', 'LocalAdmin!234');
+bakery_login($db, '9001');
 $_SESSION['auth_last_activity'] = time() - BAKERY_SESSION_IDLE_SECONDS - 10;
 bakery_touch_session();
 t_assert(empty($_SESSION['user_id']), 'idle timeout clears auth session');
 
 echo "=== Public / protected script lists ===\n";
 t_assert(in_array('login.php', bakery_public_scripts(), true), 'login is public');
+t_assert(in_array('baker.php', bakery_public_scripts(), true), 'baker.php is public');
 t_assert(in_array('test.php', bakery_diagnostic_scripts(), true), 'test.php is diagnostic');
 t_assert(in_array('complete_delivery.php', bakery_driver_scripts(), true), 'complete_delivery is driver-accessible');
+t_assert(in_array('upload_driver_photo.php', bakery_driver_scripts(), true), 'upload_driver_photo is driver-accessible');
 t_assert(in_array('get_driver_orders.php', bakery_driver_scripts(), true), 'get_driver_orders is driver-accessible');
+t_assert(in_array('production.php', bakery_baker_scripts(), true), 'production is baker-accessible');
+t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');
+t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not baker-accessible');
+t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'production center is not baker-accessible');
+
+echo "=== Baker role ===\n";
+bakery_logout();
+auth_test_reset_session();
+t_assert(bakery_ensure_baker_user($db) === true, 'ensure baker user succeeds');
+t_assert(bakery_login($db, BAKERY_BAKER_CODE) === true, 'baker login succeeds');
+$bakerUser = bakery_current_user();
+t_assert($bakerUser && $bakerUser['role_slug'] === 'baker', 'session has baker role');
+t_assert($bakerUser && $bakerUser['display_name'] === BAKERY_BAKER_DISPLAY_NAME, 'baker display name is Juan Carlos Hernandez');
+t_assert(bakery_user_has_permission($db, 'ops.manage'), 'baker has ops.manage');
+t_assert(!bakery_user_has_permission($db, 'admin.access'), 'baker lacks admin.access');
 
 function auth_test_http_request($method, $url, $options = []) {
     $headers = $options['headers'] ?? [];
@@ -249,8 +266,7 @@ try {
                 'cookie' => $cookieJar,
                 'body' => http_build_query([
                     'csrf_token' => $loginCsrf,
-                    'email' => 'driver@local.test',
-                    'password' => 'LocalDriver!234',
+                    'code' => '9003',
                     'next' => '/bakery/driver_list.php',
                 ]),
             ]

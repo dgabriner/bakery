@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/auto-push.cmd",
+        "timeout": 20
+      }
+    ],
+    "afterTabFileEdit": [
+      {
+        "command": ".cursor/hooks/auto-push.cmd",
+        "timeout": 20
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/auto-push.cmd",
+        "timeout": 20
+      }
+    ]
+  }
+}

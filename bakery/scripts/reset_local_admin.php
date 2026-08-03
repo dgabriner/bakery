@@ -1,7 +1,7 @@
 <?php
 /**
- * Emergency local admin password reset (APP_ENV=local only).
- * Usage: C:\php\php.exe bakery/scripts/reset_local_admin.php [new-password]
+ * Emergency local admin code reset (APP_ENV=local only).
+ * Usage: C:\php\php.exe bakery/scripts/reset_local_admin.php [4-digit-code]
  */
 define('ACCESS_ALLOWED', true);
 
@@ -13,15 +13,16 @@ if (PHP_SAPI !== 'cli') {
 $root = dirname(__DIR__);
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
+require_once $root . '/includes/auth.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: admin reset only when APP_ENV=local\n");
     exit(1);
 }
 
-$newPassword = $argv[1] ?? 'LocalAdmin!234';
-if (strlen($newPassword) < 10) {
-    fwrite(STDERR, "Password must be at least 10 characters\n");
+$newCode = bakery_normalize_login_code($argv[1] ?? BAKERY_ADMIN_CODE);
+if ($newCode === '') {
+    fwrite(STDERR, "Code must be exactly 4 digits\n");
     exit(1);
 }
 
@@ -31,18 +32,17 @@ if (!table_exists($db, 'users')) {
     exit(1);
 }
 
-$role = $db->query("SELECT id FROM roles WHERE slug='administrator'")->fetchColumn();
-if (!$role) {
-    fwrite(STDERR, "administrator role missing\n");
+bakery_ensure_login_code_column($db);
+
+if (!bakery_upsert_code_user($db, [
+    'email' => BAKERY_ADMIN_EMAIL,
+    'display_name' => BAKERY_ADMIN_DISPLAY_NAME,
+    'role' => 'administrator',
+    'code' => $newCode,
+    'driver_id' => null,
+])) {
+    fwrite(STDERR, "Failed to reset admin code (collision?)\n");
     exit(1);
 }
 
-$hash = password_hash($newPassword, PASSWORD_DEFAULT);
-$stmt = $db->prepare(
-    "INSERT INTO users (email, password_hash, display_name, role_id, is_active)
-     VALUES ('admin@local.test', ?, 'Local Admin', ?, 1)
-     ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role_id = VALUES(role_id), is_active = 1"
-);
-$stmt->execute([$hash, $role]);
-
-echo "Reset admin@local.test password (value not echoed). Use the password you supplied or the documented local default.\n";
+echo "Reset " . BAKERY_ADMIN_EMAIL . " login code (value not echoed).\n";

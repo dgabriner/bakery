@@ -1,12 +1,12 @@
 <?php
 /**
- * Ensure a durable local admin login (APP_ENV=local only).
+ * Ensure a durable local admin login code (APP_ENV=local only).
  * Reads LOCAL_ADMIN_* from env / .env / .env.production.pull.
- * Does not echo passwords.
+ * Does not echo codes.
  *
  * Usage:
  *   C:\php\php.exe scripts/ensure_local_admin.php
- *   C:\php\php.exe scripts/ensure_local_admin.php --password=Secret
+ *   C:\php\php.exe scripts/ensure_local_admin.php --code=9741
  */
 define('ACCESS_ALLOWED', true);
 
@@ -25,16 +25,17 @@ if (is_readable($pullEnv)) {
 }
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
+require_once $root . '/includes/auth.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: ensure_local_admin only when APP_ENV=local\n");
     exit(1);
 }
 
-$email = 'danny@sourflour.org';
-$name = 'Danny';
+$email = BAKERY_ADMIN_EMAIL;
+$name = BAKERY_ADMIN_DISPLAY_NAME;
 $role = 'administrator';
-$password = '';
+$code = BAKERY_ADMIN_CODE;
 
 foreach ($argv as $arg) {
     if (strpos($arg, '--email=') === 0) {
@@ -43,20 +44,32 @@ foreach ($argv as $arg) {
         $name = substr($arg, strlen('--name='));
     } elseif (strpos($arg, '--role=') === 0) {
         $role = substr($arg, strlen('--role='));
+    } elseif (strpos($arg, '--code=') === 0) {
+        $code = substr($arg, strlen('--code='));
     } elseif (strpos($arg, '--password=') === 0) {
-        $password = substr($arg, strlen('--password='));
+        // Backward-compatible alias for older scripts/docs.
+        $code = substr($arg, strlen('--password='));
     }
 }
 
 $email = $_ENV['LOCAL_ADMIN_EMAIL'] ?? getenv('LOCAL_ADMIN_EMAIL') ?: $email;
 $name = $_ENV['LOCAL_ADMIN_NAME'] ?? getenv('LOCAL_ADMIN_NAME') ?: $name;
 $role = $_ENV['LOCAL_ADMIN_ROLE'] ?? getenv('LOCAL_ADMIN_ROLE') ?: $role;
-if ($password === '') {
-    $password = (string)($_ENV['LOCAL_ADMIN_PASSWORD'] ?? getenv('LOCAL_ADMIN_PASSWORD') ?: '');
+
+$envCode = (string)($_ENV['LOCAL_ADMIN_CODE'] ?? getenv('LOCAL_ADMIN_CODE') ?: '');
+if ($envCode !== '') {
+    $code = $envCode;
+} else {
+    // Fall back to legacy env var if someone still has a 4-digit value there.
+    $legacy = (string)($_ENV['LOCAL_ADMIN_PASSWORD'] ?? getenv('LOCAL_ADMIN_PASSWORD') ?: '');
+    if (bakery_normalize_login_code($legacy) !== '') {
+        $code = $legacy;
+    }
 }
 
-if ($password === '' || strlen($password) < 8) {
-    fwrite(STDERR, "Set LOCAL_ADMIN_PASSWORD in .env or .env.production.pull, or pass --password=\n");
+$code = bakery_normalize_login_code($code);
+if ($code === '') {
+    fwrite(STDERR, "Set LOCAL_ADMIN_CODE (4 digits) in .env or pass --code=\n");
     exit(1);
 }
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -87,28 +100,20 @@ function bakery_ensure_auth_schema(PDO $db, $root) {
 
 $db = check_mysql_connection();
 bakery_ensure_auth_schema($db, $root);
+bakery_ensure_login_code_column($db);
 
-$roleStmt = $db->prepare('SELECT id FROM roles WHERE slug = ?');
-$roleStmt->execute([$role]);
-$roleId = $roleStmt->fetchColumn();
-if (!$roleId) {
-    fwrite(STDERR, "Missing role: {$role}\n");
+if (!bakery_upsert_code_user($db, [
+    'email' => $email,
+    'display_name' => $name,
+    'role' => $role,
+    'code' => $code,
+    'driver_id' => null,
+])) {
+    fwrite(STDERR, "Failed to upsert admin user (code may already be in use)\n");
     exit(1);
 }
 
-$hash = password_hash($password, PASSWORD_DEFAULT);
-$stmt = $db->prepare(
-    "INSERT INTO users (email, password_hash, display_name, role_id, is_active)
-     VALUES (?, ?, ?, ?, 1)
-     ON DUPLICATE KEY UPDATE
-       password_hash = VALUES(password_hash),
-       display_name = VALUES(display_name),
-       role_id = VALUES(role_id),
-       is_active = 1"
-);
-$stmt->execute([$email, $hash, $name, $roleId]);
-
-$check = $db->prepare('SELECT id, email, is_active FROM users WHERE email = ?');
+$check = $db->prepare('SELECT id, email, is_active, login_code FROM users WHERE email = ?');
 $check->execute([$email]);
 $user = $check->fetch(PDO::FETCH_ASSOC);
-echo "OK local admin id={$user['id']} email={$user['email']} role={$role} active={$user['is_active']}\n";
+echo "OK local admin id={$user['id']} email={$user['email']} role={$role} active={$user['is_active']} code_set=1\n";

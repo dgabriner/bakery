@@ -4,18 +4,27 @@
  *
  * Managers/admins: today's ops snapshot, quick links, 7-day order chart.
  * Drivers: reduced view with their assignments for today.
+ * Bakers are routed directly to Daily Production and do not use this dashboard.
  */
 define('ACCESS_ALLOWED', true);
 
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'Operations Dashboard';
-
 $user = bakery_current_user();
 $isDriver = $user && $user['role_slug'] === 'driver';
+$isBaker = $user && $user['role_slug'] === 'baker';
+if ($isDriver) {
+    header('Location: ' . BASE_URL . 'driver.php');
+    exit;
+}
+$page_title = $isBaker ? 'Baker Dashboard' : 'Operations Dashboard';
 $today = date('Y-m-d');
 $selectedDate = bakery_dashboard_resolve_date();
+// Baker workflow targets the next calendar day (Fri → Sat production)
+if ($isBaker && !isset($_GET['date'])) {
+    $selectedDate = date('Y-m-d', strtotime('+1 day'));
+}
 $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 $weekday = bakery_standing_day_from_date($selectedDate);
 $dayLabel = $dayNames[$weekday] ?? date('l', strtotime($selectedDate));
@@ -28,7 +37,9 @@ $chartData = [];
 $driverView = null;
 
 try {
-    if ($isDriver) {
+    if ($isBaker) {
+        // Baker dashboard needs no ops metrics.
+    } elseif ($isDriver) {
         $driverId = (int)($user['driver_id'] ?? 0);
         $driverView = bakery_dashboard_driver_view($db, $driverId, $selectedDate);
     } else {
@@ -37,7 +48,9 @@ try {
     }
 } catch (Exception $e) {
     $dbError = $e->getMessage();
-    if (!$isDriver) {
+    if ($isBaker) {
+        // no-op
+    } elseif (!$isDriver) {
         $snapshot = [
             'date' => $selectedDate,
             'weekday' => $weekday,
@@ -69,7 +82,7 @@ require_once 'includes/nav.php';
 <div class="ops-dashboard">
     <header class="ops-header">
         <div>
-            <h1><?php echo $isDriver ? 'My Deliveries' : 'Operations Dashboard'; ?></h1>
+            <h1><?php echo $isBaker ? 'Baker Dashboard' : ($isDriver ? 'My Deliveries' : 'Operations Dashboard'); ?></h1>
             <p class="ops-date-line">
                 <?php echo htmlspecialchars($dateDisplay); ?>
                 <?php if (!$isToday): ?>
@@ -77,6 +90,7 @@ require_once 'includes/nav.php';
                 <?php endif; ?>
             </p>
         </div>
+        <?php if (!$isBaker): ?>
         <nav class="ops-date-nav" aria-label="Date navigation">
             <a href="?date=<?php echo urlencode(date('Y-m-d', strtotime($selectedDate . ' -1 day'))); ?>">← Prev</a>
             <?php if (!$isToday): ?>
@@ -84,15 +98,37 @@ require_once 'includes/nav.php';
             <?php endif; ?>
             <a href="?date=<?php echo urlencode(date('Y-m-d', strtotime($selectedDate . ' +1 day'))); ?>">Next →</a>
         </nav>
+        <?php endif; ?>
     </header>
 
-    <?php if ($dbError): ?>
+    <?php if ($dbError && !$isBaker): ?>
         <div class="ops-alert ops-alert-warning">
             Some dashboard data could not be loaded. Metrics may show zero.
         </div>
     <?php endif; ?>
 
-    <?php if ($isDriver): ?>
+    <?php if ($isBaker): ?>
+        <section class="ops-section">
+            <h2>Quick Links</h2>
+            <div class="ops-quick-links">
+                <a class="ops-quick-link" href="<?php echo htmlspecialchars(BASE_URL); ?>production.php?date=<?php echo urlencode($selectedDate); ?>">
+                    <span class="ops-quick-link-icon">⚙️</span>
+                    <span>
+                        <div class="ops-quick-link-title">Production</div>
+                        <div class="ops-quick-link-desc"><?php echo htmlspecialchars($dayLabel); ?> bake quantities</div>
+                    </span>
+                </a>
+                <a class="ops-quick-link" href="<?php echo htmlspecialchars(BASE_URL); ?>pack_list.php?day=<?php echo (int)$weekday; ?>">
+                    <span class="ops-quick-link-icon">📦</span>
+                    <span>
+                        <div class="ops-quick-link-title">Pack List</div>
+                        <div class="ops-quick-link-desc"><?php echo htmlspecialchars($dayLabel); ?> packing</div>
+                    </span>
+                </a>
+            </div>
+        </section>
+
+    <?php elseif ($isDriver): ?>
         <?php
         $driverId = (int)($user['driver_id'] ?? 0);
         if ($driverId <= 0):

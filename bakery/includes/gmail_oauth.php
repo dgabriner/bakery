@@ -3,6 +3,8 @@
 require_once __DIR__ . '/../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../vendor/phpmailer/src/Exception.php';
+// OAuth.php implements this interface — must load before OAuth.php
+require_once __DIR__ . '/../vendor/phpmailer/src/OAuthTokenProvider.php';
 require_once __DIR__ . '/../vendor/phpmailer/src/OAuth.php';
 
 use PHPMailer\PHPMailer\PHPMailer;

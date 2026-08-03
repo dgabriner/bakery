@@ -1,7 +1,6 @@
 <?php
 /**
- * Seed local-only users for Checkpoint 0D.
- * Passwords are nonproduction fixtures documented in LOCAL_SETUP.md.
+ * Seed local-only users with 4-digit login codes.
  *
  * Usage: C:\php\php.exe bakery/scripts/seed_local_users.php
  */
@@ -15,6 +14,7 @@ if (PHP_SAPI !== 'cli') {
 $root = dirname(__DIR__);
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
+require_once $root . '/includes/auth.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: seed only allowed when APP_ENV=local\n");
@@ -44,65 +44,55 @@ $authSchema = $root . '/database/schema/002_auth.sql';
 bakery_apply_sql_file($db, $authSchema);
 echo "Ensured auth schema/roles/permissions\n";
 
+$bakerRoleSchema = $root . '/database/schema/007_baker_role.sql';
+if (is_readable($bakerRoleSchema)) {
+    bakery_apply_sql_file($db, $bakerRoleSchema);
+    echo "Ensured baker role\n";
+}
+
+bakery_ensure_login_code_column($db);
+
 $seeds = [
     [
         'email' => 'admin@local.test',
-        'name' => 'Local Admin',
+        'display_name' => 'Local Admin',
         'role' => 'administrator',
-        'password' => 'LocalAdmin!234',
+        'code' => '9001',
         'driver_id' => null,
     ],
     [
         'email' => 'manager@local.test',
-        'name' => 'Local Manager',
+        'display_name' => 'Local Manager',
         'role' => 'manager',
-        'password' => 'LocalManager!234',
+        'code' => '9002',
         'driver_id' => null,
     ],
     [
         'email' => 'driver@local.test',
-        'name' => 'Local Driver',
+        'display_name' => 'Local Driver',
         'role' => 'driver',
-        'password' => 'LocalDriver!234',
+        'code' => '9003',
         'driver_id' => 1,
     ],
 ];
 
 foreach ($seeds as $seed) {
-    $roleId = $db->prepare('SELECT id FROM roles WHERE slug = ?');
-    $roleId->execute([$seed['role']]);
-    $rid = $roleId->fetchColumn();
-    if (!$rid) {
-        fwrite(STDERR, "Missing role {$seed['role']}\n");
+    if (!bakery_upsert_code_user($db, $seed)) {
+        fwrite(STDERR, "Failed seeding {$seed['email']}\n");
         exit(1);
     }
-    $hash = password_hash($seed['password'], PASSWORD_DEFAULT);
-    $stmt = $db->prepare(
-        "INSERT INTO users (email, password_hash, display_name, role_id, driver_id, is_active)
-         VALUES (?, ?, ?, ?, ?, 1)
-         ON DUPLICATE KEY UPDATE
-           password_hash = VALUES(password_hash),
-           display_name = VALUES(display_name),
-           role_id = VALUES(role_id),
-           driver_id = VALUES(driver_id),
-           is_active = 1"
-    );
-    $stmt->execute([
-        $seed['email'],
-        $hash,
-        $seed['name'],
-        $rid,
-        $seed['driver_id'],
-    ]);
-    echo "Seeded {$seed['email']} ({$seed['role']})\n";
+    echo "Seeded {$seed['email']} ({$seed['role']}) code={$seed['code']}\n";
 }
 
-// Durable operator login (danny@sourflour.org by default) from LOCAL_ADMIN_* env
+bakery_ensure_staff_code_users($db);
+echo "Ensured staff code users (Danny/Juan Carlos/Sergio/Laura)\n";
+
+// Durable operator login override from LOCAL_ADMIN_* env when set
 $ensure = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'ensure_local_admin.php';
 if (is_readable($ensure)) {
     passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($ensure), $ensureCode);
     if ($ensureCode !== 0) {
-        echo "Skipped durable admin (set LOCAL_ADMIN_PASSWORD in .env or .env.production.pull).\n";
+        echo "Staff admin defaults kept (set LOCAL_ADMIN_CODE in .env to override).\n";
     }
 }
 
