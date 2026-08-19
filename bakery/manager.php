@@ -15,6 +15,7 @@ require_once 'includes/exception_workshop.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/demand_review.php';
 require_once 'includes/operational_timeline.php';
+require_once 'includes/staging_live_approval.php';
 
 $today = date('Y-m-d');
 $selectedDate = trim((string)($_GET['date'] ?? $today));
@@ -90,7 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         bakery_require_csrf();
         $mutation = (string)($_POST['manager_mutation'] ?? '');
-        if ($mutation === 'exception_work') {
+        if ($mutation === 'approve_live') {
+            if (!hash_equals('READY_FOR_LIVE', trim((string)($_POST['confirm_phrase'] ?? '')))) {
+                throw new RuntimeException('Type READY_FOR_LIVE to confirm this staging approval.');
+            }
+            bakery_staging_live_approval_submit((string)($_POST['release_id'] ?? ''), (string)($_POST['git_commit'] ?? ''));
+            $managerNotice = 'Staging approved for live. Live has not been changed.';
+        } elseif ($mutation === 'exception_work') {
             $workKey = (string)($_POST['work_key'] ?? '');
             $matched = null;
             foreach ($exceptions as $exception) {
@@ -457,6 +464,20 @@ require_once 'includes/nav.php';
       <p class="manager-hero__copy">See production, packing, baker activity, routes, and the work that must be reconciled before closeout.</p>
     </div>
     <div class="manager-hero__actions">
+      <?php if (bakery_staging_live_approval_available()): $approval = bakery_staging_live_approval_latest(); ?>
+        <details class="manager-live-approval">
+          <summary class="sf-btn sf-btn--primary">Approve staging for Live</summary>
+          <form method="post" class="manager-live-approval__form">
+            <?php echo bakery_csrf_field(); ?>
+            <input type="hidden" name="manager_mutation" value="approve_live">
+            <label>Release ID <input name="release_id" required pattern="[A-Za-z0-9._:-]{3,160}" placeholder="release_YYYYMMDD_HHMMSS"></label>
+            <label>Git commit (optional) <input name="git_commit" pattern="[0-9a-fA-F]{7,64}"></label>
+            <label>Type <code>READY_FOR_LIVE</code> <input name="confirm_phrase" required autocomplete="off"></label>
+            <button type="submit" class="sf-btn sf-btn--outline">Record approval</button>
+            <?php if (is_array($approval)): ?><small>Last approval: <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?> — <?php echo htmlspecialchars((string)($approval['approved_at'] ?? '')); ?></small><?php endif; ?>
+          </form>
+        </details>
+      <?php endif; ?>
       <a class="sf-btn sf-btn--primary" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_run.php?date=<?php echo urlencode($selectedDate); ?>">Open Daily Run</a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_brief.php?date=<?php echo urlencode($selectedDate); ?>">Shift brief</a>
     </div>
