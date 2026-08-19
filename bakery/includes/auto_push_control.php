@@ -131,7 +131,9 @@ function bakery_auto_push_run_live_promotion($direct = false) {
         }
         if (!$candidate) throw new RuntimeException('No immutable release candidate could be created from the verified Staging release.');
         usort($candidate, static function ($a, $b) { return filemtime($b) <=> filemtime($a); });
-        $data = json_decode((string)file_get_contents($candidate[0]), true);
+        $candidateJson = (string)file_get_contents($candidate[0]);
+        $candidateJson = preg_replace('/^\xEF\xBB\xBF/', '', $candidateJson);
+        $data = json_decode($candidateJson, true);
         $id = (string)($data['release_id'] ?? '');
         if ($id === '') throw new RuntimeException('Latest release candidate is invalid.');
         $args[] = '-Candidate'; $args[] = $candidate[0];
