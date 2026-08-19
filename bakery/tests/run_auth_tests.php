@@ -13,7 +13,9 @@ ob_start();
 $root = dirname(__DIR__);
 require_once $root . '/tests/isolate_test_db.php';
 
-exec('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset --database=bakerysf_test', $setupOut, $setupCode);
+bakery_reset_isolated_test_db($root);
+$setupCode = 0;
+$setupOut = [];
 if ($setupCode !== 0) {
     fwrite(STDERR, "setup_local_db failed\n" . implode("\n", $setupOut) . "\n");
     exit(1);
@@ -90,11 +92,20 @@ bakery_touch_session();
 t_assert(bakery_current_user() !== null, 'driver route session remains valid through a full workday');
 
 echo "=== Driver Assistant pairing ===\n";
+$assistantCode = '2937';
+$codeProbe = $db->prepare('SELECT 1 FROM users WHERE login_code = ? LIMIT 1');
+for ($attempt = 0; $attempt < 20; $attempt++) {
+    $codeProbe->execute([$assistantCode]);
+    if (!$codeProbe->fetchColumn()) {
+        break;
+    }
+    $assistantCode = (string)random_int(2000, 8999);
+}
 $assistantCreated = bakery_upsert_code_user($db, [
     'email' => 'juan.assistant@local.test',
     'display_name' => 'Juan',
     'role' => 'driver_assistant',
-    'code' => '2937',
+    'code' => $assistantCode,
     'driver_id' => 1,
 ]);
 t_assert($assistantCreated, 'Driver Assistant user can be created with a route driver');
@@ -119,7 +130,7 @@ t_assert(
 );
 bakery_logout();
 auth_test_reset_session();
-t_assert(bakery_login($db, '2937') === true, 'Driver Assistant code login succeeds');
+t_assert(bakery_login($db, $assistantCode) === true, 'Driver Assistant code login succeeds');
 t_assert(bakery_user_has_role(['driver_assistant']), 'assistant session has Driver Assistant role');
 t_assert(bakery_user_has_permission($db, 'delivery.execute'), 'assistant has delivery.execute');
 $_SESSION['auth_login_at'] = time() - BAKERY_SESSION_ABSOLUTE_SECONDS - 10;

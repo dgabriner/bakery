@@ -16,9 +16,21 @@ if (PHP_SAPI !== 'cli') {
 $root = dirname(__DIR__);
 require_once $root . '/includes/env_loader.php';
 
+$requestedMigrationDb = '';
+foreach ($argv as $arg) {
+    if (strpos($arg, '--database=') === 0) {
+        $requestedMigrationDb = strtolower(trim(substr($arg, 11)));
+    }
+}
+
 $envPath = $root . DIRECTORY_SEPARATOR . '.env';
 if (is_readable($envPath)) {
     bakery_load_env_file($envPath);
+}
+if ($requestedMigrationDb !== '') {
+    putenv('DB_NAME=' . $requestedMigrationDb);
+    $_ENV['DB_NAME'] = $requestedMigrationDb;
+    $_SERVER['DB_NAME'] = $requestedMigrationDb;
 }
 
 require_once $root . '/includes/config.php';
@@ -94,7 +106,12 @@ function bakery_mark_migration(PDO $db, $id) {
 
 try {
     $db = check_mysql_connection();
-    bakery_assert_local_test_target($db);
+    $migrationTarget = strtolower((string)(defined('DB_NAME') ? DB_NAME : ''));
+    if ($migrationTarget === 'bakerysf_refresh_local' || $migrationTarget === 'bakerysf_stage_local') {
+        bakery_assert_local_connection($db, [$migrationTarget]);
+    } else {
+        bakery_assert_local_test_target($db);
+    }
     bakery_ensure_migrations_table($db);
 
     $migrationsDir = $root . '/database/schema';

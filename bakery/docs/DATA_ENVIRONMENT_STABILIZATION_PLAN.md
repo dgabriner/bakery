@@ -197,8 +197,25 @@ static/source-contract checks only. Database regression tests run through the
 trusted local agent gate. A self-hosted runner can be considered later, but is
 not required for stabilization.
 
-Exit gate: mirror cannot be mutated by the app/tests; local staging and test can
-be rebuilt from the same snapshot; full regression gate refuses every other DB.
+Phase 2 implementation evidence (2026-08-19 UTC):
+
+- Verified snapshot: `storage/dumps/nightly/live_20260819_003445_phase2_baseline.sql.gz`
+  (SHA-256 `25a702bda30a820d4259c26a2a29f1b39acb40719b3eccef0e6547a6320f10e3`).
+- The same snapshot rebuilt `bakerysf_local`, `bakerysf_stage_local`, and
+  `bakerysf_test`; each matched the captured core counts (107 customers, 54
+  products, 4,441 standing orders, 6 drivers, 105 default quantities, 11 users,
+  878 daily orders). Pre-refresh checkpoints were retained.
+- Test resets now use the newest verified snapshot only. The exact target guard
+  rejects every database except `bakerysf_test`; mirror/staging-local writes are
+  separately allow-listed for refresh tooling.
+- The full local lint, snapshot, authentication, characterization, driver,
+  golden-day, integrity, SF Baker, and operational gate completed with exit code
+  0. Informational findings remain documented; no production behavior was
+  changed to hide them.
+
+Exit gate: **passed locally**. The mirror cannot be mutated by app/tests; local
+staging and test rebuild from the same verified snapshot; full regression gate
+refuses every other DB.
 
 Rollback: point local `.env` back to the preserved `bakerysf_local` only for
 read-only inspection, or restore the pre-refresh local staging dump.
@@ -358,7 +375,8 @@ limited to approving these gates:
 
 ## Immediate next mission
 
-Begin Phase 2 planning only after a separate owner decision on the local
-nightly production-derived mirror and DreamHost staging resources. Keep
-auto-push disabled, keep local runtime selected, and do not refresh staging or
-promote anything to production until the named gates are approved.
+Begin Phase 3 resource preparation: obtain the DreamHost staging hostname,
+separate database/user, and isolated SFTP/document root. Keep auto-push disabled
+and local runtime selected. Do not refresh DreamHost staging, enable automatic
+deployment, or promote anything to production until those resources are named
+and the corresponding owner gates are approved.

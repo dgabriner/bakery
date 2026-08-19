@@ -349,7 +349,7 @@ function bakery_demo_recorder_connect(string $root): PDO
     require_once $root . '/includes/database.php';
     require_once $root . '/includes/test_target_guard.php';
     $db = check_mysql_connection();
-    bakery_assert_local_test_target($db);
+    bakery_assert_local_mirror_target($db);
     $name = strtolower((string)$db->query('SELECT DATABASE()')->fetchColumn());
     if ($name !== 'bakerysf_local') {
         throw new RuntimeException('Walkthroughs use the local production-data mirror bakerysf_local, not ' . $name);

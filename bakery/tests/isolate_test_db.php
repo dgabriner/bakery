@@ -11,8 +11,15 @@ $_ENV['DB_NAME'] = 'bakerysf_test';
 $_SERVER['DB_NAME'] = 'bakerysf_test';
 
 function bakery_reset_isolated_test_db($root) {
-    $cmd = '"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php')
-        . ' --reset --force-reset --database=bakerysf_test';
+    $nightly = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dumps' . DIRECTORY_SEPARATOR . 'nightly';
+    $snapshots = glob($nightly . DIRECTORY_SEPARATOR . 'live_*.sql.gz') ?: [];
+    rsort($snapshots, SORT_STRING);
+    if (!$snapshots) {
+        fwrite(STDERR, "No verified production snapshot found under storage/dumps/nightly.\n");
+        exit(1);
+    }
+    $cmd = '"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/refresh_local_from_snapshot.php')
+        . ' --snapshot=' . escapeshellarg($snapshots[0]) . ' --target=bakerysf_test';
     passthru($cmd, $code);
     if ($code !== 0) {
         fwrite(STDERR, "Isolated test database reset failed\n");

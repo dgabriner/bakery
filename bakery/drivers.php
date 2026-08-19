@@ -266,16 +266,17 @@ try {
         $customersByZone[$zone][] = $customer;
     }
 
-    $routesResult = $db->query('
-        SELECT r.driver_id, r.customer_id, r.day_of_week, r.route_order,
-               c.name as customer_name, c.zone as customer_zone, c.address,
-               c.latitude, c.longitude, c.deliver_by, c.deliver_after,
-               COALESCE(c.delivery_time, 20) AS delivery_time
-        FROM standing_routes r
-        JOIN customers c ON r.customer_id = c.id
-        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
-        ORDER BY r.day_of_week, r.driver_id, COALESCE(r.route_order, 2147483647), c.name
-    ')->fetchAll();
+    $routesResult = $db->query(
+        'SELECT r.driver_id, r.customer_id, r.day_of_week, r.route_order,
+                c.name as customer_name, c.zone as customer_zone, c.address,
+                c.latitude, c.longitude, c.deliver_by, c.deliver_after,
+                COALESCE(c.delivery_time, 20) AS delivery_time
+         FROM standing_routes r
+         JOIN customers c ON r.customer_id = c.id
+         WHERE 1=1'
+        . bakery_sfb_ops_origin_clause('c', $db)
+        . ' ORDER BY r.day_of_week, r.driver_id, COALESCE(r.route_order, 2147483647), c.name'
+    )->fetchAll();
 
     foreach ($routesResult as $route) {
         $dayOfWeek = (int)$route['day_of_week'];

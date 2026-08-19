@@ -3,6 +3,9 @@
 if (PHP_SAPI !== 'cli') { exit(1); }
 define('ACCESS_ALLOWED', true);
 $root = dirname(__DIR__);
+putenv('DB_NAME=bakerysf_test');
+$_ENV['DB_NAME'] = 'bakerysf_test';
+$_SERVER['DB_NAME'] = 'bakerysf_test';
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
@@ -14,6 +17,7 @@ $checks = [
     'USE_PROD_DB is rejected' => strpos($source, 'USE_PROD_DB=false') !== false,
     'actual selected database is checked' => strpos($source, 'SELECT DATABASE()') !== false,
     'loopback PDO connection status is checked' => strpos($source, 'ATTR_CONNECTION_STATUS') !== false,
+    'exact disposable test database is required' => strpos($source, "['bakerysf_test']") !== false,
 ];
 $failed = 0;
 foreach ($checks as $label => $ok) {

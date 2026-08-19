@@ -11,6 +11,10 @@ bakery_reset_isolated_test_db($root);
 
 /** @var PDO $db */
 $db = require __DIR__ . '/harness.php';
+$integrityCustomerId = (int)$db->query("SELECT id FROM customers ORDER BY id LIMIT 1")->fetchColumn();
+if ($integrityCustomerId <= 0) {
+    throw new RuntimeException('Production-derived test clone has no customer for integrity checks');
+}
 
 echo "\n=== Zone filter by name (bread_distribution shape) ===\n";
 $zones = $db->query("SELECT id, name FROM zones ORDER BY id")->fetchAll();
@@ -57,7 +61,7 @@ $db->beginTransaction();
 try {
     $db->exec("INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES ('Integrity Test No Weight', 1, 1.00, NULL)");
     $productId = (int)$db->lastInsertId();
-    standing_save($db, 1, $productId, 1, 3);
+    standing_save($db, $integrityCustomerId, $productId, 1, 3);
 
     $stmt = $db->prepare("
         SELECT p.name, p.weight_grams, SUM(so.quantity) AS total_quantity
@@ -88,7 +92,7 @@ try {
     $doughTypeId = (int)$db->lastInsertId();
     $db->exec("INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES ('Integrity Test Product', $doughTypeId, 2.00, 500)");
     $productId = (int)$db->lastInsertId();
-    standing_save($db, 1, $productId, 1, 2);
+    standing_save($db, $integrityCustomerId, $productId, 1, 2);
 
     $stmt = $db->prepare("
         SELECT dt.name AS dough_type_name, SUM(so.quantity) AS total_quantity
@@ -121,7 +125,7 @@ try {
     $db->exec("INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES ('Integrity Daily No Weight', 1, 1.00, NULL)");
     $productId = (int)$db->lastInsertId();
     $orderDate = '2099-06-01';
-    $db->prepare("INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (1, ?, 'pending', 0)")
+    $db->prepare("INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES ({$integrityCustomerId}, ?, 'pending', 0)")
         ->execute([$orderDate]);
     $dailyOrderId = (int)$db->lastInsertId();
     $db->prepare("INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, 4, 1.00, 4.00)")

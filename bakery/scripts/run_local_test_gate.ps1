@@ -5,8 +5,11 @@ $php = 'php'
 
 & $php (Join-Path $root 'scripts\verify_local_env.php')
 if ($LASTEXITCODE -ne 0) { throw 'Local environment verification failed.' }
-& $php (Join-Path $root 'scripts\setup_local_db.php') --reset --force-reset --database=bakerysf_test
-if ($LASTEXITCODE -ne 0) { throw 'Isolated test database reset failed.' }
+$snapshotDir = Join-Path $root 'storage\dumps\nightly'
+$snapshot = Get-ChildItem $snapshotDir -Filter 'live_*.sql.gz' -File | Sort-Object Name -Descending | Select-Object -First 1
+if (-not $snapshot) { throw 'No verified production snapshot exists under storage\dumps\nightly.' }
+& $php (Join-Path $root 'scripts\refresh_local_from_snapshot.php') "--snapshot=$($snapshot.FullName)" --target=bakerysf_test
+if ($LASTEXITCODE -ne 0) { throw 'Production-derived isolated test refresh failed.' }
 $env:DB_NAME = 'bakerysf_test'
 $env:USE_PROD_DB = 'false'
 

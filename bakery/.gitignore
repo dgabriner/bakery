@@ -50,6 +50,9 @@ database_contents.txt
 *_contents.txt
 *_data_dump.sql
 storage/dumps/
+storage/dumps/nightly/
+storage/dumps/local-checkpoints/
+storage/dumps/refresh-work/
 storage/.prod_data_active
 storage/deploy/*.zip
 storage/deploy/manifest_*.txt
