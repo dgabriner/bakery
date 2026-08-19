@@ -2,7 +2,7 @@
 
 **Owner intent recorded:** 2026-08-18  
 **Execution owner:** an agent, with the bakery owner approving only the named production gates  
-**Current status:** Phase 0 complete; additive Phase 1 Git recovery in progress
+**Current status:** Phase 1 complete; production/staging untouched; live auto-push disabled
 
 This is the authoritative plan for separating development, staging, production,
 backups, and Git without losing the current working tree or overwriting bakery
@@ -138,6 +138,20 @@ local archive and a new GitHub branch; production and `main` are untouched.
 
 Rollback: delete only the newly created remote branch if the owner requests it;
 the local archive, bundle, existing branch, and databases remain intact.
+
+Phase 1 recovery evidence (2026-08-18): the explicit source allow-list staged
+587 bakery paths, including the previously ignored 67-file PHPMailer runtime
+dependency. It excluded environment files, production dumps, logs, deploy
+runtime state, driver uploads, temporary repair files, and sibling projects.
+Secret-pattern and local-secret-value scans found no matches. PHP lint passed
+for 297 of 298 staged PHP files; the known pre-existing failure is
+`drivers.php:276` (unexpected identifier `c`). The recovery commit is
+`060464e8bb5cc931a18e2513f56ce5ed625456e5` on
+`codex/data-stabilization-recovery-20260818`, and the owner remote verifies the
+same commit at
+`https://github.com/dgabriner/bakery/tree/codex/data-stabilization-recovery-20260818`.
+No force-push, `main` update, deployment, staging write, or production write
+occurred.
 
 ## Phase 2 — production-derived local development and testing
 
@@ -344,10 +358,7 @@ limited to approving these gates:
 
 ## Immediate next mission
 
-Complete the owner-authorized additive Phase 1 Git recovery only:
-
-- keep auto-push disabled and local runtime selected;
-- secret-scan and explicitly inventory intended `bakery/...` source paths;
-- create and commit to a new `codex/` recovery branch;
-- push only that new branch to the owner's `origin` and verify it;
-- do not update `main`, deploy files, or write to staging or production.
+Begin Phase 2 planning only after a separate owner decision on the local
+nightly production-derived mirror and DreamHost staging resources. Keep
+auto-push disabled, keep local runtime selected, and do not refresh staging or
+promote anything to production until the named gates are approved.
