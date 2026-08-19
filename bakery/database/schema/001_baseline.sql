@@ -53,8 +53,12 @@ CREATE TABLE customers (
   zone VARCHAR(50) DEFAULT NULL,
   zone_id INT DEFAULT NULL,
   default_pan_dulce_price DECIMAL(10,2) DEFAULT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  inactive_at TIMESTAMP NULL DEFAULT NULL,
+  inactive_reason VARCHAR(255) DEFAULT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY name (name),
+  KEY idx_customers_is_active (is_active),
   KEY idx_customers_coordinates (latitude, longitude),
   KEY idx_customers_zone_id (zone_id),
   CONSTRAINT fk_customers_zone_id FOREIGN KEY (zone_id) REFERENCES zones(id) ON DELETE SET NULL ON UPDATE CASCADE
@@ -215,12 +219,13 @@ CREATE TABLE daily_order_assignments (
   actual_delivery_time TIME DEFAULT NULL,
   route_order INT NOT NULL DEFAULT 0,
   estimated_delivery_time TIME DEFAULT NULL,
-  delivery_status ENUM('pending','in_transit','delivered','failed','cancelled') NOT NULL DEFAULT 'pending',
+  delivery_status ENUM('pending','in_transit','delivered','failed','cancelled','rescheduled') NOT NULL DEFAULT 'pending',
   notes TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY unique_assignment (daily_order_id, driver_id, delivery_date),
+  UNIQUE KEY uq_assignment_driver_date_route_order (driver_id, delivery_date, route_order),
   KEY idx_driver_date (driver_id, delivery_date),
   KEY idx_delivery_date (delivery_date),
   KEY idx_daily_order (daily_order_id),
@@ -275,9 +280,12 @@ CREATE TABLE leads (
   address TEXT,
   notes TEXT,
   status ENUM('new','contacted','interested','qualified','converted','closed') DEFAULT 'new',
+  customer_id INT DEFAULT NULL,
   created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  KEY idx_leads_customer_id (customer_id),
+  CONSTRAINT fk_leads_customer_id FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE lead_contacts (

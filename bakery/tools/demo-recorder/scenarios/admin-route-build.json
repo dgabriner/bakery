@@ -1,0 +1,52 @@
+{
+  "id": "admin-route-build",
+  "title": { "en": "Admin: Build the daily route", "es": "Admin: Crear la ruta del día" },
+  "description": {
+    "en": "Prepare dated demand and build the daily route from the standing weekday plan.",
+    "es": "Prepara la demanda con fecha y crea la ruta del día desde el plan semanal."
+  },
+  "prepare": "admin-route-build",
+  "viewport": { "width": 1280, "height": 720 },
+  "slowMo": 220,
+  "captionHoldMs": 650,
+  "endHoldMs": 1200,
+  "steps": [
+    { "action": "goto", "path": "login.php", "caption": { "en": "Sign in as Admin", "es": "Entra como Admin" } },
+    { "action": "waitForSelector", "selector": "#code" },
+    { "action": "fill", "selector": "#code", "value": "{{ADMIN_CODE}}", "delay": 120 },
+    { "action": "waitForURL", "includes": "index.php" },
+    {
+      "action": "goto",
+      "path": "driver_assignment.php?date={{DATE}}",
+      "caption": {
+        "en": "Open Driver Assignment for the delivery date",
+        "es": "Abre Asignación de repartidores para la fecha"
+      }
+    },
+    {
+      "action": "waitForSelector",
+      "selector": ".route-first-guide",
+      "caption": {
+        "en": "Demand comes first; the dated route comes second",
+        "es": "Primero va la demanda; después la ruta con fecha"
+      }
+    },
+    {
+      "action": "click",
+      "selector": "button[onclick='autoAssignFromStandingRoutes()']",
+      "caption": {
+        "en": "Build Route Plan prepares demand and creates dated stops",
+        "es": "Crear plan de ruta prepara la demanda y crea las paradas"
+      },
+      "waitAfter": 1200
+    },
+    {
+      "action": "waitForSelector",
+      "selector": ".driver-section[data-driver-id='{{DRIVER_ID}}'] .order-item",
+      "caption": {
+        "en": "Confirm the stops appear under the correct driver",
+        "es": "Confirma que las paradas estén con el repartidor correcto"
+      }
+    }
+  ]
+}

@@ -22,16 +22,31 @@ if (!defined('ACCESS_ALLOWED')) {
 function check_mysql_connection() {
     try {
         $port = defined('DB_PORT') ? DB_PORT : '3306';
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
+        ];
+        if (defined('USE_PROD_DB') && USE_PROD_DB) {
+            // Remote DreamHost from local — bounded waits when the driver supports them.
+            if (defined('PDO::MYSQL_ATTR_CONNECT_TIMEOUT')) {
+                $options[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 15;
+            }
+            if (defined('PDO::MYSQL_ATTR_READ_TIMEOUT')) {
+                $options[PDO::MYSQL_ATTR_READ_TIMEOUT] = 120;
+            }
+            if (defined('PDO::MYSQL_ATTR_COMPRESS')) {
+                $options[PDO::MYSQL_ATTR_COMPRESS] = true;
+            }
+            // Reuse TCP handshakes across PHP built-in server requests when possible.
+            $options[PDO::ATTR_PERSISTENT] = true;
+        }
         $db = new PDO(
             "mysql:host=" . DB_HOST . ";port=" . $port . ";dbname=" . DB_NAME . ";charset=utf8mb4",
             DB_USER,
             DB_PASS,
-            [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
-            ]
+            $options
         );
         return $db;
     } catch (PDOException $e) {
@@ -67,16 +82,74 @@ function safe_table_count($db, $table, $where = '') {
  * @param string $table Table name
  * @return bool True if table exists
  */
+function &bakery_table_exists_cache() {
+    static $cache = [];
+    return $cache;
+}
+
 function table_exists($db, $table) {
+    $cache = &bakery_table_exists_cache();
+    $key = (string)$table;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
     try {
-        // MariaDB/MySQL reject placeholders in SHOW TABLES LIKE
-        $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string)$table);
-        $query = "SHOW TABLES LIKE " . $db->quote($safe);
-        return $db->query($query)->fetchColumn() !== false;
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $stmt->execute([$key]);
+        $cache[$key] = (int)$stmt->fetchColumn() > 0;
+        return $cache[$key];
     } catch (Exception $e) {
         error_log("Table exists check error for $table: " . $e->getMessage());
+        $cache[$key] = false;
         return false;
     }
+}
+
+/** Clear a cached table_exists result after runtime schema creation. */
+function bakery_forget_table_exists($table) {
+    $cache = &bakery_table_exists_cache();
+    unset($cache[(string)$table]);
+}
+
+/**
+ * Check if a column exists on a table.
+ *
+ * @param PDO $db Database connection
+ * @param string $table Table name
+ * @param string $column Column name
+ * @return bool True if column exists
+ */
+function &bakery_schema_column_cache() {
+    static $cache = [];
+    return $cache;
+}
+
+function column_exists($db, $table, $column) {
+    $cache = &bakery_schema_column_cache();
+    $key = (string)$table . '.' . (string)$column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $safeTable = str_replace('`', '``', (string)$table);
+        $safeColumn = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string)$column);
+        $query = "SHOW COLUMNS FROM `{$safeTable}` LIKE " . $db->quote($safeColumn);
+        $cache[$key] = $db->query($query)->fetchColumn() !== false;
+        return $cache[$key];
+    } catch (Exception $e) {
+        error_log("Column exists check error for {$table}.{$column}: " . $e->getMessage());
+        $cache[$key] = false;
+        return false;
+    }
+}
+
+/** Clear a cached column_exists result (after runtime ALTER). */
+function bakery_forget_column_exists($table, $column) {
+    $cache = &bakery_schema_column_cache();
+    unset($cache[(string)$table . '.' . (string)$column]);
 }
 
 /**

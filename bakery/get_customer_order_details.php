@@ -4,12 +4,12 @@ define('ACCESS_ALLOWED', true);
 
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/driver_assignments.php';
 
 header('Content-Type: application/json');
 
-// Enable error reporting for debugging
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+error_reporting(0);
+ini_set('display_errors', 0);
 
 try {
     if (!isset($_POST['daily_order_id'])) {
@@ -17,6 +17,7 @@ try {
     }
     
     $dailyOrderId = (int)$_POST['daily_order_id'];
+    bakery_delivery_assert_driver_access($db, $dailyOrderId);
     
     // Get order details
     $stmt = $db->prepare("

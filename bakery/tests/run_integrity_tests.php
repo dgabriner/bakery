@@ -6,12 +6,8 @@
  *   C:\php\php.exe bakery\tests\run_integrity_tests.php
  */
 $root = dirname(__DIR__);
-
-passthru('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset', $setupCode);
-if ($setupCode !== 0) {
-    fwrite(STDERR, "Fixture reset failed\n");
-    exit(1);
-}
+require_once $root . '/tests/isolate_test_db.php';
+bakery_reset_isolated_test_db($root);
 
 /** @var PDO $db */
 $db = require __DIR__ . '/harness.php';
@@ -154,14 +150,29 @@ try {
     throw $e;
 }
 
+echo "\n=== column_exists on underscored table names ===\n";
+assert_true(
+    table_exists($db, 'daily_order_assignments'),
+    'daily_order_assignments table exists in fixtures'
+);
+assert_true(
+    column_exists($db, 'daily_order_assignments', 'notes'),
+    'column_exists finds notes on daily_order_assignments (underscore table name)'
+);
+assert_true(
+    table_exists($db, 'login_audit_activity'),
+    'login_audit_activity exists after 036 (underscore table name)'
+);
+
 echo "\n=== Ingredient low-stock detection ===\n";
 assert_true(bakery_ingredients_inventory_ready($db), 'migration 005 inventory columns present');
+assert_true(bakery_ingredients_purchasing_ready($db), 'migration 017 purchasing columns present');
 
 $db->beginTransaction();
 try {
     $db->exec(
-        "INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name)
-         VALUES ('Integrity Test Low Stock', 'kg', 5.000, 10.000, 'Test Supplier')"
+        "INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name, package_size, unit_cost)
+         VALUES ('Integrity Test Low Stock', 'kg', 5.000, 10.000, 'Test Supplier', 25.000, 42.50)"
     );
     $lowId = (int)$db->lastInsertId();
 
@@ -186,6 +197,7 @@ try {
     assert_true($fixture !== null, 'low-stock helper returns fixture row');
     assert_eq('Integrity Test Low Stock', $fixture['name'], 'low-stock row name matches fixture');
     assert_true(bakery_ingredient_is_low_stock($fixture), 'bakery_ingredient_is_low_stock true for fixture');
+    assert_eq('25 kg', bakery_ingredient_package_label(['package_size' => 25, 'unit' => 'kg']), 'package label uses size and unit');
 
     $db->rollBack();
 } catch (Exception $e) {

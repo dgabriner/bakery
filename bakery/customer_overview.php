@@ -8,7 +8,43 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
 
-$page_title = 'Customer Overview by Zone';
+$page_title = bakery_t('page.customer_overview');
+
+// Soft-deactivate/reactivate a customer while preserving order and delivery history.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_customer_status') {
+    header('Content-Type: application/json');
+    try {
+        $customerId = filter_var($_POST['customer_id'] ?? null, FILTER_VALIDATE_INT);
+        $isActive = ($_POST['is_active'] ?? '0') === '1';
+        $reason = trim((string)($_POST['inactive_reason'] ?? ''));
+        if (!$customerId) {
+            throw new InvalidArgumentException('A valid customer is required.');
+        }
+        $stmt = $db->prepare(
+            'UPDATE customers
+             SET is_active = ?, inactive_at = ?, inactive_reason = ?
+             WHERE id = ?'
+        );
+        $stmt->execute([
+            $isActive ? 1 : 0,
+            $isActive ? null : date('Y-m-d H:i:s'),
+            $isActive ? null : ($reason !== '' ? $reason : null),
+            $customerId
+        ]);
+        if ($stmt->rowCount() === 0) {
+            $check = $db->prepare('SELECT id FROM customers WHERE id = ?');
+            $check->execute([$customerId]);
+            if (!$check->fetchColumn()) {
+                throw new RuntimeException('Customer not found.');
+            }
+        }
+        echo json_encode(['success' => true, 'is_active' => $isActive]);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
 
 // Handle AJAX driver assignment updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_driver') {
@@ -16,6 +52,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $customerId = $_POST['customer_id'];
         $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
         $driverId = empty($_POST['driver_id']) ? null : $_POST['driver_id'];
+        $customerCheck = $db->prepare('SELECT is_active FROM customers WHERE id = ?');
+        $customerCheck->execute([$customerId]);
+        $customerIsActive = $customerCheck->fetchColumn();
+        if ($customerIsActive === false) {
+            throw new RuntimeException('Customer not found.');
+        }
+        if (!(bool)$customerIsActive) {
+            throw new RuntimeException('Reactivate this client before changing delivery assignments.');
+        }
         
         if ($driverId === null) {
             // Remove the standing route entry
@@ -59,6 +104,9 @@ try {
             c.name as customer_name,
             c.address,
             c.zone,
+            c.is_active,
+            c.inactive_at,
+            c.inactive_reason,
             sr.day_of_week,
             sr.driver_id,
             d.name as driver_name
@@ -102,6 +150,9 @@ try {
                 'name' => $row['customer_name'],
                 'address' => $row['address'],
                 'zone' => $row['zone'] ?: 'No Zone',
+                'is_active' => (bool)$row['is_active'],
+                'inactive_at' => $row['inactive_at'],
+                'inactive_reason' => $row['inactive_reason'],
                 'delivery_days' => [],
                 'visit_count' => 0
             ];
@@ -181,6 +232,9 @@ $days = [
     1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 
     5 => 'Fri', 6 => 'Sat', 0 => 'Sun'
 ];
+$initialStatusFilter = in_array($_GET['client_status'] ?? '', ['active', 'inactive', 'all'], true)
+    ? $_GET['client_status']
+    : 'active';
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
@@ -392,6 +446,21 @@ require_once 'includes/nav.php';
     background: #e9ecef;
     border-color: #007bff;
 }
+
+.customer-card.inactive-client {
+    opacity: .78;
+    border-left: 5px solid #6c757d;
+}
+
+.customer-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.client-status { padding: 3px 9px; border-radius: 999px; font-size: .75rem; font-weight: 700; }
+.client-status.active { background: #d4edda; color: #155724; }
+.client-status.inactive { background: #e2e3e5; color: #383d41; }
+.customer-actions { margin-top: 14px; padding-top: 12px; border-top: 1px solid #dee2e6; display: flex; gap: 8px; align-items: center; }
+.btn-client-status { border: 0; border-radius: 7px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+.btn-deactivate { background: #fff3cd; color: #856404; }
+.btn-reactivate { background: #d4edda; color: #155724; }
+.inactive-reason { color: #6c757d; font-size: .85rem; margin-top: 8px; }
 
 .customer-header {
     display: flex;
@@ -815,6 +884,8 @@ require_once 'includes/nav.php';
     <div class="stats-overview">
         <?php 
         $totalCustomers = array_sum(array_column($visitStats, 'total_customers'));
+        $activeCustomerCount = count(array_filter($customerDeliveries, function($customer) { return $customer['is_active']; }));
+        $inactiveCustomerCount = $totalCustomers - $activeCustomerCount;
         $totalVisits = array_sum(array_column($visitStats, 'total_weekly_visits'));
         $totalZones = count($customersByZone);
         $avgVisitsPerCustomer = $totalCustomers > 0 ? round($totalVisits / $totalCustomers, 1) : 0;
@@ -824,12 +895,12 @@ require_once 'includes/nav.php';
             <h3>📊 Overall Statistics</h3>
             <div class="stat-grid">
                 <div class="stat-item">
-                    <span class="stat-number"><?php echo $totalCustomers; ?></span>
-                    <span class="stat-label">Total Customers</span>
+                    <span class="stat-number"><?php echo $activeCustomerCount; ?></span>
+                    <span class="stat-label">Active Clients</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-number"><?php echo $totalZones; ?></span>
-                    <span class="stat-label">Active Zones</span>
+                    <span class="stat-number"><?php echo $inactiveCustomerCount; ?></span>
+                    <span class="stat-label">Inactive Clients</span>
                 </div>
                 <div class="stat-item">
                     <span class="stat-number"><?php echo $totalVisits; ?></span>
@@ -886,6 +957,14 @@ require_once 'includes/nav.php';
                 <?php foreach (array_keys($customersByZone) as $zoneName): ?>
                 <option value="<?php echo htmlspecialchars($zoneName); ?>"><?php echo htmlspecialchars($zoneName); ?></option>
                 <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Client status:</span>
+            <select class="filter-select" id="statusFilter">
+                <option value="active" <?php echo $initialStatusFilter === 'active' ? 'selected' : ''; ?>>Active clients</option>
+                <option value="all" <?php echo $initialStatusFilter === 'all' ? 'selected' : ''; ?>>All clients</option>
+                <option value="inactive" <?php echo $initialStatusFilter === 'inactive' ? 'selected' : ''; ?>>Inactive clients</option>
             </select>
         </div>
     </div>
@@ -972,9 +1051,22 @@ require_once 'includes/nav.php';
                         }
                     }
                 ?>
-                <div class="customer-card" data-frequency="<?php echo $customerFrequencyClass; ?>">
+                <div class="customer-card <?php echo $displayCustomer['is_active'] ? '' : 'inactive-client'; ?>"
+                     data-frequency="<?php echo $customerFrequencyClass; ?>"
+                     data-client-status="<?php echo $displayCustomer['is_active'] ? 'active' : 'inactive'; ?>">
                     <div class="customer-header">
-                        <h3 class="customer-name"><?php echo htmlspecialchars($displayCustomer['name']); ?></h3>
+                        <div class="customer-title-row">
+                            <h3 class="customer-name">
+                                <a href="customer_record.php?customer_id=<?php echo (int)$displayCustomer['id']; ?>"
+                                   style="color:inherit;text-decoration:none;"
+                                   title="Open operational customer record">
+                                    <?php echo htmlspecialchars($displayCustomer['name']); ?>
+                                </a>
+                            </h3>
+                            <span class="client-status <?php echo $displayCustomer['is_active'] ? 'active' : 'inactive'; ?>">
+                                <?php echo $displayCustomer['is_active'] ? 'Active client' : 'Inactive client'; ?>
+                            </span>
+                        </div>
                         <span class="visit-frequency <?php echo $customerFrequencyClass; ?>"><?php echo $customerFrequencyText; ?></span>
                     </div>
                     
@@ -1042,6 +1134,17 @@ require_once 'includes/nav.php';
                             No scheduled deliveries
                         </div>
                     <?php endif; ?>
+
+                    <?php if (!$displayCustomer['is_active'] && $displayCustomer['inactive_reason']): ?>
+                        <div class="inactive-reason">Reason: <?php echo htmlspecialchars($displayCustomer['inactive_reason']); ?></div>
+                    <?php endif; ?>
+                    <div class="customer-actions">
+                        <button type="button"
+                                class="btn-client-status <?php echo $displayCustomer['is_active'] ? 'btn-deactivate' : 'btn-reactivate'; ?>"
+                                onclick="changeCustomerStatus(<?php echo (int)$displayCustomer['id']; ?>, <?php echo $displayCustomer['is_active'] ? 'false' : 'true'; ?>, <?php echo htmlspecialchars(json_encode($displayCustomer['name']), ENT_QUOTES, 'UTF-8'); ?>)">
+                            <?php echo $displayCustomer['is_active'] ? 'Make inactive' : 'Reactivate client'; ?>
+                        </button>
+                    </div>
                 </div>
                 <?php endforeach; ?>
                 </div>
@@ -1104,10 +1207,12 @@ const driversData = <?php echo json_encode($drivers); ?>;
 document.addEventListener('DOMContentLoaded', function() {
     const frequencyFilter = document.getElementById('frequencyFilter');
     const zoneFilter = document.getElementById('zoneFilter');
+    const statusFilter = document.getElementById('statusFilter');
     
     function applyFilters() {
         const frequencyValue = frequencyFilter.value;
         const zoneValue = zoneFilter.value;
+        const statusValue = statusFilter.value;
         
         // Filter zones
         document.querySelectorAll('.zone-section').forEach(zoneSection => {
@@ -1124,8 +1229,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 customerCards.forEach(card => {
                     const customerFrequency = card.dataset.frequency;
                     const frequencyMatch = frequencyValue === 'all' || customerFrequency === frequencyValue;
+                    const statusMatch = statusValue === 'all' || card.dataset.clientStatus === statusValue;
                     
-                    if (frequencyMatch) {
+                    if (frequencyMatch && statusMatch) {
                         card.style.display = 'block';
                         visibleCustomers++;
                     } else {
@@ -1134,7 +1240,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 
                 // Hide zone if no customers match
-                if (visibleCustomers === 0 && frequencyValue !== 'all') {
+                if (visibleCustomers === 0) {
                     zoneSection.style.display = 'none';
                 }
             } else {
@@ -1145,16 +1251,47 @@ document.addEventListener('DOMContentLoaded', function() {
     
     frequencyFilter.addEventListener('change', applyFilters);
     zoneFilter.addEventListener('change', applyFilters);
+    statusFilter.addEventListener('change', applyFilters);
+    applyFilters();
     
     // Add click handlers to day slots
     const daySlots = document.querySelectorAll('.clickable-day');
     daySlots.forEach(slot => {
         slot.addEventListener('click', function(e) {
             e.stopPropagation();
+            if (this.closest('.customer-card').dataset.clientStatus === 'inactive') {
+                showMessage('Reactivate this client before changing delivery assignments.', 'error');
+                return;
+            }
             openDriverAssignModal(this);
         });
     });
 });
+
+async function changeCustomerStatus(customerId, makeActive, customerName) {
+    let reason = '';
+    if (!makeActive) {
+        if (!confirm('Make ' + customerName + ' an inactive client? Their history will be preserved.')) return;
+        reason = prompt('Optional reason for making this client inactive:', '') || '';
+    } else if (!confirm('Reactivate ' + customerName + '?')) {
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('action', 'update_customer_status');
+    formData.append('customer_id', customerId);
+    formData.append('is_active', makeActive ? '1' : '0');
+    formData.append('inactive_reason', reason);
+
+    try {
+        const response = await fetch('customer_overview.php', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to update client status.');
+        location.reload();
+    } catch (error) {
+        showMessage(error.message, 'error');
+    }
+}
 
 function openDriverAssignModal(daySlot) {
     const customerId = daySlot.dataset.customerId;

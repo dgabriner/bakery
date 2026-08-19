@@ -9,6 +9,8 @@
 !.env.example
 !.env.production.pull.example
 !.env.sftp.example
+!.env.sftp.breadeducation.example
+!.env.sftp.domain_root.example
 *.local.php
 local_config.php
 includes/local_*.php
@@ -32,6 +34,10 @@ uploads/driver_photos/**
 uploads/**
 !uploads/driver_photos/
 !uploads/driver_photos/.htaccess
+# App-owned temporary catalog placeholders are deployable assets, not user uploads.
+!uploads/product_photos/
+!uploads/product_photos/catalog/
+!uploads/product_photos/catalog/**
 
 # --- Production / PII-bearing SQL (do not commit as-is) ---
 bakerysf_schema.sql
@@ -58,6 +64,8 @@ storage/deploy/.push_lock
 storage/deploy/.push_worker
 storage/deploy/.auto_push_disabled
 storage/deploy/.watch_push.pid
+# Per-target deploy state (history, locks, and generated manifests).
+storage/deploy/*/
 .env.production.pull
 
 # --- OS / IDE ---
@@ -73,7 +81,15 @@ Thumbs.db
 coverage/
 tmp/
 temp/
+tmp_catalog_repairs/
+__pycache__/
+*.py[cod]
 *.tmp
+
+# --- Demo recorder (generated videos + local Python venv) ---
+storage/demo-recordings/**
+!storage/demo-recordings/.gitkeep
+tools/demo-recorder/.venv/
 
 # --- Quarantine / legacy variants (see docs/QUARANTINE_INVENTORY.md) ---
 .htaccess.bak

@@ -3,7 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'Pan Dulce Standard Quantities';
+$page_title = bakery_t('page.pan_dulce_quantities');
 $message = null;
 $error = null;
 
@@ -28,8 +28,8 @@ try {
             VALUES (?, ?) ON DUPLICATE KEY UPDATE standard_quantity = VALUES(standard_quantity)");
         foreach ($quantities as $productId => $quantity) {
             $quantity = (int)$quantity;
-            if ($quantity < 1 || $quantity > 1000) {
-                throw new Exception('Standard quantities must be between 1 and 1000.');
+            if ($quantity < 0 || $quantity > 1000) {
+                throw new Exception('Standard quantities must be between 0 and 1000.');
             }
             $stmt->execute([(int)$productId, $quantity]);
         }
@@ -52,10 +52,11 @@ require_once 'includes/nav.php';
 ?>
 <div class="container" style="max-width:760px; margin:0 auto; padding:20px;">
     <h1>Pan Dulce Standard Quantities</h1>
-    <p>Set the default quantity for each Pan Dulce product. Products in the same dough type can have different standards; Daily Orders offers 1×, 1.5×, and 2× of each product’s amount.</p>
+    <p>Set the default quantity for each Pan Dulce product. Use <strong>0</strong> to exclude a product from standard apply. Daily Orders offers 1×, 1.5×, and 2× of each product’s amount.</p>
     <?php if ($message): ?><div class="alert alert-success"><?= htmlspecialchars($message) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
-    <form method="post">
+    <form method="post" novalidate>
+        <?php echo bakery_csrf_field(); ?>
         <table class="items-table">
             <thead><tr><th>Dough Type</th><th>Product</th><th>Standard quantity</th></tr></thead>
             <tbody>
@@ -66,7 +67,7 @@ require_once 'includes/nav.php';
                 <tr>
                     <td class="dough-type-repeat"><?= htmlspecialchars($type['dough_type_name']) ?></td>
                     <td><strong><?= htmlspecialchars($type['product_name']) ?></strong></td>
-                    <td><input class="quantity-input" type="number" min="1" max="1000" name="standard_quantity[<?= (int)$type['product_id'] ?>]" value="<?= (int)$type['standard_quantity'] ?>"></td>
+                    <td><input class="standard-quantity-input" type="number" min="0" max="1000" step="1" inputmode="numeric" name="standard_quantity[<?= (int)$type['product_id'] ?>]" value="<?= (int)$type['standard_quantity'] ?>"></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -75,6 +76,6 @@ require_once 'includes/nav.php';
     </form>
 </div>
 <style>
-.dough-group-row th{padding:9px 10px;background:#f4ebe5;color:#5d3b2d;text-align:left;font-size:.95rem}.dough-type-repeat{color:#6d7771;font-size:.9rem}@media(max-width:600px){.items-table th,.items-table td{padding:9px 7px;vertical-align:top}.quantity-input{width:90px;min-height:42px;font-size:16px}}
+.dough-group-row th{padding:9px 10px;background:#f4ebe5;color:#5d3b2d;text-align:left;font-size:.95rem}.dough-type-repeat{color:#6d7771;font-size:.9rem}@media(max-width:600px){.items-table th,.items-table td{padding:9px 7px;vertical-align:top}.standard-quantity-input{width:90px;min-height:42px;font-size:16px}}
 </style>
 <?php require_once 'includes/footer.php'; ?>

@@ -6,7 +6,7 @@ require_once 'includes/database.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
-$page_title = 'Daily Route';
+$page_title = bakery_t('page.daily_route');
 bakery_ensure_standing_routes_order_column($db);
 
 $days = [
@@ -30,9 +30,17 @@ if (!in_array($listScope, ['all', 'upcoming', 'past'], true)) {
 }
 
 $selectedDriverId = isset($_GET['driver_id']) ? (int)$_GET['driver_id'] : 0;
-$selectedDay = isset($_GET['day']) ? (int)$_GET['day'] : date('N');
 $selectedDate = $_GET['date'] ?? date('Y-m-d');
-$selectedMonth = $_GET['month'] ?? date('Y-m', strtotime($selectedDate));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || date('Y-m-d', strtotime($selectedDate)) !== $selectedDate) {
+    $selectedDate = date('Y-m-d');
+}
+// Keep the date and weekday in sync when navigating into day view.
+$selectedDay = $view === 'day'
+    ? (int)date('N', strtotime($selectedDate))
+    : (isset($_GET['day']) ? (int)$_GET['day'] : (int)date('N'));
+$selectedMonth = $view === 'day'
+    ? date('Y-m', strtotime($selectedDate))
+    : ($_GET['month'] ?? date('Y-m', strtotime($selectedDate)));
 
 if (!preg_match('/^\d{4}-\d{2}$/', $selectedMonth)) {
     $selectedMonth = date('Y-m');
@@ -44,6 +52,8 @@ $monthEnd = date('Y-m-t', $monthTimestamp);
 $monthLabel = date('F Y', $monthTimestamp);
 $prevMonth = date('Y-m', strtotime($monthStart . ' -1 month'));
 $nextMonth = date('Y-m', strtotime($monthStart . ' +1 month'));
+$previousDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
+$nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 
 $drivers = [];
 try {
@@ -110,9 +120,20 @@ function assignmentStatusLabel(?string $status): string
     return $labels[$status] ?? ucfirst((string)$status);
 }
 
+function formatRouteTime(?string $time): string
+{
+    if (empty($time)) {
+        return '';
+    }
+    return date('g:i A', strtotime($time));
+}
+
 $routeData = [];
 $totalItems = 0;
 $productSummaryByDoughType = [];
+$scheduledStopCount = 0;
+$routeStartTime = null;
+$routeEndTime = null;
 $routesByDay = [];
 $calendarDays = [];
 $monthTotals = [
@@ -141,6 +162,7 @@ if ($selectedDriverId > 0) {
                 COALESCE(SUM(so.quantity), 0) AS item_count
             FROM standing_routes sr
             JOIN customers c ON sr.customer_id = c.id
+            " . bakery_sfb_ops_origin_clause('c', $db) . "
             LEFT JOIN standing_orders so
                 ON so.customer_id = c.id
                AND CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END
@@ -228,6 +250,7 @@ if ($selectedDriverId > 0) {
                 JOIN daily_orders do
                     ON do.id = doa.daily_order_id AND do.order_date = doa.delivery_date
                 JOIN customers c ON do.customer_id = c.id
+                " . bakery_sfb_ops_origin_clause('c', $db) . "
                 WHERE doa.driver_id = ?{$scopeSql}
                 ORDER BY doa.delivery_date ASC, doa.route_order ASC, c.name ASC
             ");
@@ -248,6 +271,8 @@ if ($selectedDriverId > 0) {
                         'item_count' => 0,
                         'pending' => 0,
                         'delivered' => 0,
+                        'time_start' => null,
+                        'time_end' => null,
                         'is_today' => $date === date('Y-m-d'),
                         'is_past' => $date < date('Y-m-d'),
                     ];
@@ -267,6 +292,14 @@ if ($selectedDriverId > 0) {
                 ];
                 $grouped[$date]['stop_count']++;
                 $grouped[$date]['item_count'] += (int)$row['item_count'];
+                if (!empty($row['scheduled_delivery_time'])) {
+                    if ($grouped[$date]['time_start'] === null || $row['scheduled_delivery_time'] < $grouped[$date]['time_start']) {
+                        $grouped[$date]['time_start'] = $row['scheduled_delivery_time'];
+                    }
+                    if ($grouped[$date]['time_end'] === null || $row['scheduled_delivery_time'] > $grouped[$date]['time_end']) {
+                        $grouped[$date]['time_end'] = $row['scheduled_delivery_time'];
+                    }
+                }
                 $assignmentTotals['assignments']++;
                 $assignmentTotals['items'] += (int)$row['item_count'];
 
@@ -292,6 +325,12 @@ if ($selectedDriverId > 0) {
                     c.address,
                     c.phone,
                     c.email,
+                    c.deliver_after,
+                    c.deliver_by,
+                    c.delivery_time AS stop_duration,
+                    MAX(doa.scheduled_delivery_time) AS scheduled_time,
+                    MAX(doa.estimated_delivery_time) AS estimated_time,
+                    MAX(COALESCE(doa.scheduled_delivery_time, doa.estimated_delivery_time, daily_order.delivery_time)) AS route_time,
                     GROUP_CONCAT(DISTINCT
                         CONCAT(
                             COALESCE(dt.name, 'Unclassified'), '|',
@@ -303,6 +342,14 @@ if ($selectedDriverId > 0) {
                     ) AS orders
                 FROM standing_routes sr
                 JOIN customers c ON sr.customer_id = c.id
+                " . bakery_sfb_ops_origin_clause('c', $db) . "
+                LEFT JOIN daily_orders daily_order
+                    ON daily_order.customer_id = c.id
+                   AND daily_order.order_date = ?
+                LEFT JOIN daily_order_assignments doa
+                    ON doa.daily_order_id = daily_order.id
+                   AND doa.driver_id = ?
+                   AND doa.delivery_date = ?
                 LEFT JOIN standing_orders so
                     ON so.customer_id = c.id
                    AND CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END
@@ -311,13 +358,25 @@ if ($selectedDriverId > 0) {
                 LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
                 WHERE sr.driver_id = ?
                   AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
-                GROUP BY c.id, c.name, c.address, c.phone, c.email
+                GROUP BY c.id, c.name, c.address, c.phone, c.email, c.deliver_after, c.deliver_by, c.delivery_time
                 ORDER BY COALESCE(MIN(sr.route_order), 2147483647), c.name
             ");
-            $stmt->execute([$selectedDriverId, $selectedDay]);
+            $stmt->execute([$selectedDate, $selectedDriverId, $selectedDate, $selectedDriverId, $selectedDay]);
             $routeData = $stmt->fetchAll();
 
             foreach ($routeData as &$customer) {
+                $customer['route_time_label'] = !empty($customer['scheduled_time'])
+                    ? 'Scheduled'
+                    : (!empty($customer['estimated_time']) ? 'Estimated' : 'Order time');
+                if (!empty($customer['route_time'])) {
+                    $scheduledStopCount++;
+                    if ($routeStartTime === null || $customer['route_time'] < $routeStartTime) {
+                        $routeStartTime = $customer['route_time'];
+                    }
+                    if ($routeEndTime === null || $customer['route_time'] > $routeEndTime) {
+                        $routeEndTime = $customer['route_time'];
+                    }
+                }
                 if (empty($customer['orders'])) {
                     continue;
                 }
@@ -403,16 +462,10 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
 
             <?php if ($view === 'day'): ?>
                 <div class="form-group">
-                    <label for="day">Day</label>
-                    <select name="day" id="day" class="form-control" required>
-                        <?php foreach ($days as $dayNum => $dayName): ?>
-                            <option value="<?php echo $dayNum; ?>" <?php echo $selectedDay == $dayNum ? 'selected' : ''; ?>>
-                                <?php echo $dayName; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <label for="date">Route date</label>
+                    <input type="date" name="date" id="date" class="form-control" value="<?php echo htmlspecialchars($selectedDate); ?>" required>
                 </div>
-                <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
                 <input type="hidden" name="month" value="<?php echo htmlspecialchars($selectedMonth); ?>">
             <?php elseif ($view === 'month'): ?>
                 <div class="form-group">
@@ -544,6 +597,9 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                                             · <?php echo $day['item_count']; ?> items
                                             · <?php echo $day['pending']; ?> pending
                                             · <?php echo $day['delivered']; ?> delivered
+                                            <?php if ($day['time_start']): ?>
+                                                · <strong><?php echo htmlspecialchars(formatRouteTime($day['time_start'])); ?>–<?php echo htmlspecialchars(formatRouteTime($day['time_end'])); ?></strong>
+                                            <?php endif; ?>
                                         </div>
                                         <a href="driver.php?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo urlencode($day['date']); ?>"
                                            class="btn btn-sm btn-outline">View Route</a>
@@ -567,9 +623,11 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                                     </td>
                                     <td class="list-items"><?php echo $assignment['item_count']; ?></td>
                                     <td class="list-time">
-                                        <?php echo $assignment['scheduled_delivery_time']
-                                            ? date('g:i A', strtotime($assignment['scheduled_delivery_time']))
-                                            : '—'; ?>
+                                        <?php if ($assignment['scheduled_delivery_time']): ?>
+                                            <span class="list-time-badge"><i class="fas fa-clock"></i> <?php echo htmlspecialchars(formatRouteTime($assignment['scheduled_delivery_time'])); ?></span>
+                                        <?php else: ?>
+                                            <span class="muted-text">Not set</span>
+                                        <?php endif; ?>
                                     </td>
                                     <td class="list-action">
                                         <a href="driver.php?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo urlencode($day['date']); ?>"
@@ -708,6 +766,23 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
             <?php endif; ?>
         </div>
 
+        <div class="day-toolbar" aria-label="Route day controls">
+            <div class="day-navigation">
+                <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars(buildDailyRouteUrl(['view' => 'day', 'driver_id' => $selectedDriverId, 'date' => $previousDate, 'month' => date('Y-m', strtotime($previousDate))])); ?>">&larr; Previous day</a>
+                <a class="btn btn-secondary btn-sm" href="<?php echo htmlspecialchars(buildDailyRouteUrl(['view' => 'day', 'driver_id' => $selectedDriverId, 'date' => date('Y-m-d'), 'month' => date('Y-m')])); ?>">Today</a>
+                <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars(buildDailyRouteUrl(['view' => 'day', 'driver_id' => $selectedDriverId, 'date' => $nextDate, 'month' => date('Y-m', strtotime($nextDate))])); ?>">Next day &rarr;</a>
+            </div>
+            <div class="route-tools">
+                <a class="btn btn-primary btn-sm" href="driver_assignment.php?date=<?php echo urlencode($selectedDate); ?>">
+                    Add One-Time Stop
+                </a>
+                <label class="route-search-label" for="route-search">Find a stop</label>
+                <input id="route-search" class="form-control route-search" type="search" placeholder="Customer or address" autocomplete="off">
+                <span id="route-search-count" class="search-count" aria-live="polite"></span>
+                <button type="button" class="btn btn-outline btn-sm" id="print-route">Print route</button>
+            </div>
+        </div>
+
         <div class="route-summary">
             <h3>Route Summary — <?php echo htmlspecialchars($selectedDriverName); ?> · <?php echo htmlspecialchars($days[$selectedDay]); ?></h3>
             <div class="summary-grid">
@@ -718,6 +793,16 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                 <div class="summary-item">
                     <span class="summary-label">Total Items</span>
                     <span class="summary-value"><?php echo $totalItems; ?></span>
+                </div>
+                <div class="summary-item time-summary-item">
+                    <span class="summary-label">Stops With Times</span>
+                    <span class="summary-value"><?php echo $scheduledStopCount; ?> <small>of <?php echo count($routeData); ?></small></span>
+                </div>
+                <div class="summary-item time-summary-item">
+                    <span class="summary-label">Scheduled Span</span>
+                    <span class="summary-value summary-time-range">
+                        <?php echo $routeStartTime ? htmlspecialchars(formatRouteTime($routeStartTime) . ' – ' . formatRouteTime($routeEndTime)) : 'Not scheduled'; ?>
+                    </span>
                 </div>
             </div>
 
@@ -757,13 +842,42 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         <div class="route-customers">
             <?php if (!empty($routeData)): ?>
                 <?php foreach ($routeData as $index => $customer): ?>
-                    <div class="customer-card">
+                    <div class="customer-card" data-route-stop data-search-text="<?php echo htmlspecialchars(strtolower($customer['customer_name'] . ' ' . ($customer['address'] ?? '')), ENT_QUOTES); ?>">
                         <div class="customer-header">
-                            <h3>#<?php echo ($index + 1); ?> - <?php echo htmlspecialchars($customer['customer_name']); ?></h3>
+                            <div class="stop-heading">
+                                <span class="stop-number" aria-label="Stop <?php echo $index + 1; ?>"><?php echo $index + 1; ?></span>
+                                <div>
+                                    <h3><?php echo htmlspecialchars($customer['customer_name']); ?></h3>
+                                    <div class="stop-time-row">
+                                        <?php if (!empty($customer['route_time'])): ?>
+                                            <span class="time-badge time-scheduled"><i class="fas fa-clock"></i> <?php echo htmlspecialchars(formatRouteTime($customer['route_time'])); ?></span>
+                                            <span class="time-caption"><?php echo htmlspecialchars($customer['route_time_label']); ?></span>
+                                        <?php elseif (!empty($customer['deliver_after']) || !empty($customer['deliver_by'])): ?>
+                                            <span class="time-badge time-window"><i class="fas fa-clock"></i>
+                                                <?php if (!empty($customer['deliver_after']) && !empty($customer['deliver_by'])): ?>
+                                                    <?php echo htmlspecialchars(formatRouteTime($customer['deliver_after']) . ' – ' . formatRouteTime($customer['deliver_by'])); ?>
+                                                <?php elseif (!empty($customer['deliver_after'])): ?>
+                                                    After <?php echo htmlspecialchars(formatRouteTime($customer['deliver_after'])); ?>
+                                                <?php else: ?>
+                                                    By <?php echo htmlspecialchars(formatRouteTime($customer['deliver_by'])); ?>
+                                                <?php endif; ?>
+                                            </span>
+                                            <span class="time-caption">Customer window</span>
+                                        <?php else: ?>
+                                            <span class="time-badge time-missing"><i class="far fa-clock"></i> No time set</span>
+                                        <?php endif; ?>
+                                        <?php if (!empty($customer['stop_duration'])): ?>
+                                            <span class="duration-label"><?php echo (int)$customer['stop_duration']; ?> min stop</span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="customer-actions">
-                                <a href="tel:<?php echo htmlspecialchars($customer['phone']); ?>" class="btn btn-sm btn-outline-primary">
-                                    <i class="fas fa-phone"></i> Call
-                                </a>
+                                <?php if (!empty($customer['phone'])): ?>
+                                    <a href="tel:<?php echo htmlspecialchars($customer['phone']); ?>" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-phone"></i> Call
+                                    </a>
+                                <?php endif; ?>
                                 <?php if (!empty($customer['address'])): ?>
                                     <a href="https://www.google.com/maps/search/?api=1&query=<?php echo urlencode($customer['address']); ?>"
                                        target="_blank" class="btn btn-sm btn-outline-primary">
@@ -774,6 +888,14 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                         </div>
 
                         <div class="customer-details">
+                            <?php if (!empty($customer['route_time']) && (!empty($customer['deliver_after']) || !empty($customer['deliver_by']))): ?>
+                                <div class="delivery-window-note">
+                                    Customer window:
+                                    <?php echo !empty($customer['deliver_after']) ? 'after ' . htmlspecialchars(formatRouteTime($customer['deliver_after'])) : ''; ?>
+                                    <?php echo (!empty($customer['deliver_after']) && !empty($customer['deliver_by'])) ? ' · ' : ''; ?>
+                                    <?php echo !empty($customer['deliver_by']) ? 'by ' . htmlspecialchars(formatRouteTime($customer['deliver_by'])) : ''; ?>
+                                </div>
+                            <?php endif; ?>
                             <?php if (!empty($customer['address'])): ?>
                                 <p><strong>Address:</strong> <?php echo nl2br(htmlspecialchars($customer['address'])); ?></p>
                             <?php endif; ?>
@@ -814,6 +936,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                         </div>
                     </div>
                 <?php endforeach; ?>
+                <div id="route-search-empty" class="alert alert-info" hidden>No stops match that search.</div>
             <?php else: ?>
                 <div class="alert alert-info">No customers found for the selected driver and day.</div>
             <?php endif; ?>
@@ -897,11 +1020,12 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
     }
 
     .route-summary {
-        background-color: #e9f7ef;
-        padding: 20px;
-        border-radius: 8px;
+        background: linear-gradient(135deg, #f2f7ff 0%, #f7fbf8 100%);
+        padding: 22px;
+        border: 1px solid #dce7f5;
+        border-radius: 12px;
         margin-bottom: 25px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 24px rgba(44, 62, 80, 0.06);
     }
 
     .route-summary h3 {
@@ -916,15 +1040,19 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
     }
 
     .summary-grid {
-        display: flex;
-        gap: 30px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 12px;
         margin-bottom: 15px;
-        flex-wrap: wrap;
     }
 
     .summary-item {
         display: flex;
         flex-direction: column;
+        padding: 12px 14px;
+        background: rgba(255,255,255,0.78);
+        border: 1px solid rgba(209, 220, 235, 0.9);
+        border-radius: 9px;
     }
 
     .summary-label {
@@ -934,10 +1062,13 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
     }
 
     .summary-value {
-        font-size: 1.2em;
+        font-size: 1.35em;
         font-weight: bold;
         color: #2c3e50;
     }
+
+    .summary-value small { color: #7a8794; font-size: 0.58em; font-weight: 600; }
+    .summary-time-range { font-size: 1.05rem; white-space: nowrap; }
 
     .summary-actions {
         margin-top: 8px;
@@ -966,6 +1097,37 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         color: #6c757d;
         font-weight: 500;
     }
+
+    .day-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        margin-bottom: 18px;
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        flex-wrap: wrap;
+    }
+
+    .day-navigation, .route-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .route-search-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+    }
+
+    .route-search { min-width: 220px; }
+    .search-count { color: #6c757d; font-size: 0.82rem; min-width: 58px; }
 
     .month-calendar {
         background: #fff;
@@ -1366,6 +1528,18 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         color: #495057;
     }
 
+    .list-time-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 8px;
+        color: #174f37;
+        background: #e2f3ea;
+        border: 1px solid #c3e2d1;
+        border-radius: 7px;
+        font-weight: 750;
+    }
+
     .status-badge.status-pending {
         background: #fff3cd;
         color: #856404;
@@ -1434,15 +1608,23 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
 
     .customer-card {
         background-color: #fff;
-        border: 1px solid #dee2e6;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px solid #dfe5ec;
+        border-radius: 12px;
+        margin-bottom: 14px;
+        box-shadow: 0 4px 14px rgba(35, 52, 70, 0.06);
+        overflow: hidden;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .customer-card:hover {
+        transform: translateY(-1px);
+        border-color: #bdcce0;
+        box-shadow: 0 8px 22px rgba(35, 52, 70, 0.1);
     }
 
     .customer-header {
-        background-color: #f8f9fa;
-        padding: 12px 15px;
+        background: #f8fafc;
+        padding: 15px 17px;
         border-bottom: 1px solid #dee2e6;
         display: flex;
         justify-content: space-between;
@@ -1452,16 +1634,66 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
 
     .customer-header h3 {
         margin: 0;
-        font-size: 1.1rem;
+        font-size: 1.08rem;
+        color: #24364b;
+        line-height: 1.25;
     }
+
+    .stop-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+    .stop-number {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: #355c9a;
+        font-size: 0.95rem;
+        font-weight: 800;
+        box-shadow: 0 3px 8px rgba(53, 92, 154, 0.24);
+    }
+
+    .stop-time-row { display: flex; align-items: center; gap: 7px; margin-top: 6px; flex-wrap: wrap; }
+
+    .time-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 7px;
+        font-size: 0.86rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+    }
+
+    .time-scheduled { color: #174f37; background: #dff3e9; border: 1px solid #b9dfcc; }
+    .time-window { color: #664d03; background: #fff4ce; border: 1px solid #ecd98a; }
+    .time-missing { color: #6f7780; background: #edf0f3; border: 1px solid #d9dee3; font-weight: 650; }
+    .time-caption, .duration-label { color: #788593; font-size: 0.76rem; }
+    .duration-label { padding-left: 7px; border-left: 1px solid #ccd4dc; }
 
     .customer-actions {
         display: flex;
         gap: 5px;
     }
 
-    .customer-details { padding: 15px; }
+    .customer-details { padding: 16px 18px 18px; }
     .customer-details p { margin-bottom: 8px; }
+
+    .delivery-window-note {
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        color: #5a4a13;
+        background: #fff9e6;
+        border-left: 3px solid #e4bd3d;
+        border-radius: 4px;
+        font-size: 0.84rem;
+        font-weight: 600;
+    }
 
     .customer-orders {
         margin-top: 15px;
@@ -1490,10 +1722,27 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         .pattern-grid { grid-template-columns: 1fr; }
         .delivery-list { overflow-x: auto; }
         .delivery-list-table { min-width: 720px; }
+        .day-toolbar, .day-navigation, .route-tools { align-items: stretch; }
+        .day-navigation, .route-tools { width: 100%; }
+        .day-navigation .btn { flex: 1; }
+        .route-search { min-width: 0; flex: 1 1 180px; }
+        .customer-header { align-items: flex-start; }
+        .customer-actions { flex-direction: column; }
+        .time-caption { display: none; }
+        .summary-time-range { white-space: normal; }
+    }
+
+    @media (max-width: 560px) {
+        .customer-header { padding: 13px; }
+        .customer-details { padding: 13px; }
+        .stop-heading { align-items: flex-start; gap: 9px; }
+        .stop-number { width: 32px; height: 32px; flex-basis: 32px; }
+        .time-badge { font-size: 0.8rem; }
+        .duration-label { width: 100%; padding-left: 0; border-left: 0; }
     }
 
     @media print {
-        .route-filters, .view-toggles, .customer-actions, .back-link, .summary-actions, .pattern-link {
+        .route-filters, .view-toggles, .customer-actions, .back-link, .summary-actions, .pattern-link, .day-toolbar {
             display: none;
         }
         .customer-card { page-break-inside: avoid; }
@@ -1510,6 +1759,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 filterForm.submit();
             }
         });
+    }
+
+    document.querySelectorAll('#driver_id, #date').forEach(function(field) {
+        field.addEventListener('change', function() {
+            if (filterForm && document.getElementById('driver_id').value) {
+                filterForm.submit();
+            }
+        });
+    });
+
+    const searchInput = document.getElementById('route-search');
+    const stopCards = Array.from(document.querySelectorAll('[data-route-stop]'));
+    const searchCount = document.getElementById('route-search-count');
+    const searchEmpty = document.getElementById('route-search-empty');
+    if (searchInput && stopCards.length) {
+        const filterStops = function() {
+            const query = searchInput.value.trim().toLocaleLowerCase();
+            let visible = 0;
+            stopCards.forEach(function(card) {
+                const matches = !query || card.dataset.searchText.includes(query);
+                card.hidden = !matches;
+                if (matches) visible++;
+            });
+            searchCount.textContent = query ? visible + ' of ' + stopCards.length : stopCards.length + ' stops';
+            searchEmpty.hidden = visible !== 0;
+        };
+        searchInput.addEventListener('input', filterStops);
+        filterStops();
+    }
+
+    const printButton = document.getElementById('print-route');
+    if (printButton) {
+        printButton.addEventListener('click', function() { window.print(); });
     }
 });
 </script>

@@ -1,0 +1,53 @@
+{
+  "id": "driver-call-hq",
+  "title": { "en": "Call headquarters", "es": "Llamar a sede" },
+  "description": {
+    "en": "Use Call HQ on the driver bar when you need the bakery.",
+    "es": "Usa Llamar HQ en la barra de abajo cuando necesites a la panadería."
+  },
+  "prepare": "driver-login",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 380,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2400,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "driver.php" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "caption",
+      "caption": {
+        "en": "Call HQ is on the bar at the bottom of the screen",
+        "es": "Llamar HQ está en la barra de abajo de la pantalla"
+      },
+      "captionHoldMs": 1600
+    },
+    {
+      "action": "click",
+      "selector": "a.bakery-nav__direct[href*='call_headquarters.php']",
+      "caption": {
+        "en": "Tap Call HQ",
+        "es": "Toca Llamar HQ"
+      }
+    },
+    { "action": "waitForURL", "includes": "call_headquarters.php" },
+    { "action": "waitForSelector", "selector": "a.call-button.phone-call" },
+    {
+      "action": "scroll",
+      "selector": "a.call-button.phone-call",
+      "caption": {
+        "en": "Tap Call to reach the bakery. We do not tap it here.",
+        "es": "Toca Llamar para comunicarte con la panadería. Aquí no lo tocamos."
+      },
+      "waitAfter": 2200
+    }
+  ]
+}

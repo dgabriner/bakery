@@ -3,7 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'Call Headquarters';
+$page_title = bakery_t('page.call_headquarters');
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
@@ -489,43 +489,43 @@ require_once 'includes/nav.php';
 
 <div class="call-container">
     <div class="page-header">
-        <h1>📞 Call Headquarters</h1>
-        <p>Quick and easy contact to our main office</p>
-        
-        <!-- Debug button -->
-        <button onclick="testFunction()" style="background: #f39c12; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin: 10px 0; cursor: pointer; font-size: 0.9rem;">
+        <h1>📞 <?php bakery_te('page.call_headquarters'); ?></h1>
+        <p><?php bakery_te('hq.lead'); ?></p>
+        <?php if (bakery_user_has_role('administrator')): ?>
+        <button type="button" id="hqDebugBtn" onclick="testFunction()" style="background: #f39c12; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin: 10px 0; cursor: pointer; font-size: 0.9rem;">
             🧪 Test Function (Debug)
         </button>
+        <?php endif; ?>
     </div>
     
     <div class="headquarters-info">
-        <h2 style="margin: 0 0 10px 0; color: #2c3e50;">Headquarters Phone</h2>
+        <h2 style="margin: 0 0 10px 0; color: #2c3e50;"><?php bakery_te('hq.phone_heading'); ?></h2>
         <div class="phone-number">(415) 509-1210</div>
         
         <div class="call-options">
             <div class="call-option-grid">
                 <a href="tel:+14155091210" class="call-button phone-call">
                     <span class="call-icon">📞</span>
-                    <span>Phone Call</span>
+                    <span><?php bakery_te('hq.phone_call'); ?></span>
                 </a>
                 
                 <button onclick="startVideoCall()" class="call-button video-call" id="videoCallBtn">
                     <span class="call-icon">📹</span>
-                    <span>Video Call</span>
+                    <span><?php bakery_te('hq.video_call'); ?></span>
                 </button>
                 
                 <button onclick="startVoiceCall()" class="call-button voice-call" id="voiceCallBtn">
                     <span class="call-icon">🎤</span>
-                    <span>Voice Call</span>
+                    <span><?php bakery_te('hq.voice_call'); ?></span>
                 </button>
             </div>
         </div>
         
         <div class="device-note">
-            <strong>Call Options:</strong><br>
-            • <strong>Phone Call:</strong> Uses your device's phone app<br>
-            • <strong>Video Call:</strong> Browser-based video calling<br>
-            • <strong>Voice Call:</strong> Browser-based audio calling
+            <strong><?php bakery_te('hq.call_options'); ?></strong><br>
+            • <strong><?php bakery_te('hq.phone_call'); ?>:</strong> <?php bakery_te('hq.phone_call_help'); ?><br>
+            • <strong><?php bakery_te('hq.video_call'); ?>:</strong> <?php bakery_te('hq.video_call_help'); ?><br>
+            • <strong><?php bakery_te('hq.voice_call'); ?>:</strong> <?php bakery_te('hq.voice_call_help'); ?>
         </div>
         
         <div class="webrtc-setup">

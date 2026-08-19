@@ -218,7 +218,7 @@ C:\php\php.exe scripts\ensure_local_admin.php
 
 `LOCAL_ADMIN_*` in `.env` is the durable source for `danny@sourflour.org` login. After a prod pull, `ensure_local_admin.php` runs automatically.
 
-**Protecting production pull data:** After `pull_prod_to_local.php`, a marker file `storage/.prod_data_active` is created. `setup_local_db.php --reset` **refuses** to run without `--force-reset` while that marker exists. Automated tests pass `--force-reset` intentionally — **do not run test suites while you need real data**.
+**Protecting the production mirror:** `bakerysf_local` is the local copy of live data. `setup_local_db.php` will not load demo fixtures into it. Automated tests use an isolated `bakerysf_test` database (`--database=bakerysf_test`). Refresh real data with `scripts/pull_prod_to_local.php`.
 
 5. Verify data and login:
 

@@ -77,7 +77,7 @@ try {
 }
 
 // Set page title
-$page_title = 'Standing Orders';
+$page_title = bakery_t('page.standing_orders');
 
 // Load existing standing orders
 try {

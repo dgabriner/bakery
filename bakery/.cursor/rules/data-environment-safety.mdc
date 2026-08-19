@@ -1,0 +1,24 @@
+---
+description: Protect Sour Flour data environments, Git recovery, backups, and deploy targets during stabilization.
+alwaysApply: true
+---
+
+# Data environment stabilization
+
+Read `docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md` before changing database,
+backup, Git, sync, deploy, environment, hook, or DreamHost behavior.
+
+- Keep live auto-push disabled. Editor hooks must not target production.
+- Keep `USE_PROD_DB=false` unless the owner explicitly authorizes the exact
+  production operation in the current mission.
+- Full data copies flow production → local/staging only. Never replace live
+  operational data with a staging/local database.
+- Production promotion moves a committed code artifact, schema migrations, and
+  explicitly reviewed reference-data patches—not a whole staging dump.
+- The nightly mirror and weekly backups are never test targets.
+- Tests must target exactly the disposable production-derived test database.
+- Git is additive during recovery: no reset, clean, force-push, history rewrite,
+  checkout-overwrite, or broad staging.
+- No database dumps, credentials, uploads, logs, or production PII enter Git.
+- Stop at the owner gates listed in the plan. Record every phase in Homebase.
+

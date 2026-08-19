@@ -5,8 +5,12 @@ define('BAKERY_PAGE_BUILD', 'driver-assignment-append-20260801');
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
+require_once 'includes/operational_timeline.php';
+require_once 'includes/driver_assignments.php';
+require_once 'includes/operational_exceptions.php';
+require_once 'includes/customer_record.php';
 
-$page_title = 'Driver Assignment';
+$page_title = bakery_t('page.driver_assignment');
 bakery_ensure_standing_routes_order_column($db);
 
 // Handle AJAX requests
@@ -16,9 +20,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     try {
         switch ($_POST['action']) {
             case 'assign_orders':
-                $driverId = (int)$_POST['driver_id'];
-                $deliveryDate = $_POST['delivery_date'];
-                $assignments = json_decode($_POST['assignments'], true);
+                $driverId = (int)($_POST['driver_id'] ?? 0);
+                $deliveryDate = (string)($_POST['delivery_date'] ?? '');
+                $assignments = json_decode($_POST['assignments'] ?? '[]', true);
                 // replace = full route rewrite (edit/optimize/reorder)
                 // append = add selected orders without clearing existing ones
                 $mode = strtolower(trim((string)($_POST['mode'] ?? 'replace')));
@@ -26,88 +30,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $mode = 'replace';
                 }
                 
-                if (!$assignments || !is_array($assignments)) {
-                    throw new Exception('No assignments provided');
+                if (!is_array($assignments)) {
+                    throw new Exception('Invalid assignments');
                 }
-                
-                // Validate driver exists and is active
-                $driverRow = bakery_get_driver_by_id($db, $driverId);
-                if (!$driverRow) {
-                    throw new Exception("Driver ID $driverId does not exist in the drivers table");
-                }
-                if ((int)($driverRow['archived'] ?? 0) === 1) {
-                    throw new Exception('Cannot assign orders to an archived driver. Restore the driver first.');
-                }
-              
-                $db->beginTransaction();
 
-                $insertStmt = $db->prepare("
-                    INSERT INTO daily_order_assignments (
-                        daily_order_id, driver_id, delivery_date, route_order, 
-                        scheduled_delivery_time, delivery_status
-                    ) VALUES (?, ?, ?, ?, ?, 'pending')
-                ");
+                $result = bakery_driver_assign_orders($db, $driverId, $deliveryDate, $assignments, $mode);
 
-                if ($mode === 'append') {
-                    // Keep existing route; only add the selected orders at the end
-                    $maxStmt = $db->prepare("
-                        SELECT COALESCE(MAX(route_order), 0)
-                        FROM daily_order_assignments
-                        WHERE driver_id = ? AND delivery_date = ?
-                    ");
-                    $maxStmt->execute([$driverId, $deliveryDate]);
-                    $nextRouteOrder = (int)$maxStmt->fetchColumn() + 1;
-
-                    $clearOrderStmt = $db->prepare("
-                        DELETE FROM daily_order_assignments
-                        WHERE daily_order_id = ? AND delivery_date = ?
-                    ");
-
-                    $added = 0;
-                    foreach ($assignments as $assignment) {
-                        $dailyOrderId = (int)($assignment['daily_order_id'] ?? 0);
-                        if ($dailyOrderId <= 0) {
-                            continue;
-                        }
-                        // Drop any prior assignment for this order/date (other driver or duplicate)
-                        $clearOrderStmt->execute([$dailyOrderId, $deliveryDate]);
-                        $insertStmt->execute([
-                            $dailyOrderId,
-                            $driverId,
-                            $deliveryDate,
-                            $nextRouteOrder,
-                            $assignment['scheduled_delivery_time'] ?? null
-                        ]);
-                        $nextRouteOrder++;
-                        $added++;
-                    }
-
-                    if ($added === 0) {
-                        throw new Exception('No valid orders to assign');
-                    }
-                } else {
-                    // Clear existing assignments for this driver and date, then rewrite
-                    $stmt = $db->prepare("DELETE FROM daily_order_assignments WHERE driver_id = ? AND delivery_date = ?");
-                    $stmt->execute([$driverId, $deliveryDate]);
-
-                    foreach ($assignments as $assignment) {
-                        $insertStmt->execute([
-                            $assignment['daily_order_id'],
-                            $driverId,
-                            $deliveryDate,
-                            $assignment['route_order'],
-                            $assignment['scheduled_delivery_time']
-                        ]);
-                    }
-                }
-                
-                $db->commit();
                 echo json_encode([
                     'success' => true,
-                    'message' => $mode === 'append'
-                        ? 'Orders added to driver without replacing existing assignments'
-                        : 'Orders assigned successfully',
-                    'mode' => $mode
+                    'message' => $result['mode'] === 'append'
+                        ? ($result['stop_count'] > 0
+                            ? $result['stop_count'] . ' stop' . ($result['stop_count'] === 1 ? '' : 's') . ' added to ' . $result['driver_name']
+                            : 'Those stops are already on ' . $result['driver_name'] . '\'s route')
+                        : ($result['stop_count'] > 0
+                            ? 'Route saved for ' . $result['driver_name']
+                            : 'Route cleared for ' . $result['driver_name']),
+                    'mode' => $result['mode'],
+                    'stop_count' => $result['stop_count'],
                 ]);
                 break;
                 
@@ -129,6 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         c.longitude
                     FROM daily_orders do
                     JOIN customers c ON do.customer_id = c.id
+                    " . bakery_sfb_ops_origin_clause('c', $db) . "
                     WHERE do.order_date = ?
                     AND do.id IN (
                         SELECT daily_order_id 
@@ -157,13 +97,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 break;
                 
             case 'remove_assignment':
-                $dailyOrderId = (int)$_POST['daily_order_id'];
-                $driverId = (int)$_POST['driver_id'];
+                $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
+                $driverId = (int)($_POST['driver_id'] ?? 0);
+                $deliveryDate = (string)($_POST['delivery_date'] ?? '');
+
+                bakery_driver_remove_assignment($db, $dailyOrderId, $driverId, $deliveryDate);
+                echo json_encode(['success' => true, 'message' => 'Stop unassigned; the dated order and quantities were kept']);
+                break;
+
+            case 'transfer_assignments':
+                $toDriverId = (int)$_POST['to_driver_id'];
                 $deliveryDate = $_POST['delivery_date'];
-                
-                $stmt = $db->prepare("DELETE FROM daily_order_assignments WHERE daily_order_id = ? AND driver_id = ? AND delivery_date = ?");
-                $success = $stmt->execute([$dailyOrderId, $driverId, $deliveryDate]);
-                echo json_encode(['success' => $success]);
+                $fromDriverId = isset($_POST['from_driver_id']) && $_POST['from_driver_id'] !== ''
+                    ? (int)$_POST['from_driver_id']
+                    : null;
+                $dailyOrderIds = json_decode($_POST['daily_order_ids'] ?? '[]', true);
+                if (!is_array($dailyOrderIds)) {
+                    throw new Exception('Invalid daily_order_ids');
+                }
+
+                $result = bakery_driver_transfer_assignments(
+                    $db,
+                    $dailyOrderIds,
+                    $toDriverId,
+                    $deliveryDate,
+                    $fromDriverId
+                );
+
+                $message = $result['transferred_count'] . ' stop'
+                    . ($result['transferred_count'] === 1 ? '' : 's')
+                    . ' moved to ' . $result['to_driver_name'];
+                if (!empty($result['skipped'])) {
+                    $message .= ' (' . count($result['skipped']) . ' skipped)';
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => $message,
+                    'transferred_count' => $result['transferred_count'],
+                    'skipped' => $result['skipped'],
+                ]);
                 break;
 
             case 'save_as_standing_route':
@@ -233,6 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     SELECT sr.customer_id, c.name AS customer_name, sr.route_order
                     FROM standing_routes sr
                     JOIN customers c ON c.id = sr.customer_id
+                    " . bakery_sfb_ops_origin_clause('c', $db) . "
                     WHERE sr.driver_id = ?
                       AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
                     ORDER BY COALESCE(sr.route_order, 2147483647), c.name
@@ -243,132 +217,136 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     throw new Exception('This driver has no standing-route stops for ' . date('l', strtotime($deliveryDate)) . '.');
                 }
 
-                $db->beginTransaction();
-                try {
-                    $findOrder = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?');
-                    $createOrder = $db->prepare("INSERT INTO daily_orders (customer_id, order_date, total_amount) VALUES (?, ?, 0)");
-                    $removeAssignment = $db->prepare('DELETE FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ?');
-                    $insertAssignment = $db->prepare(" 
-                        INSERT INTO daily_order_assignments (
-                            daily_order_id, driver_id, delivery_date, route_order,
-                            scheduled_delivery_time, delivery_status
-                        ) VALUES (?, ?, ?, ?, NULL, 'pending')
-                    ");
+                bakery_generate_daily_orders_from_standing($db, $deliveryDate, [
+                    'overwrite_changed' => false,
+                    'record_event' => true,
+                    'assign_routes' => false,
+                ]);
 
-                    $routeOrder = 0;
-                    foreach ($routeStops as $stop) {
+                $findOrder = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?');
+                $createOrder = $db->prepare(
+                    "INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
+                     VALUES (?, ?, 'pending', 0)"
+                );
+                $assignments = [];
+                foreach ($routeStops as $index => $stop) {
+                    $findOrder->execute([$stop['customer_id'], $deliveryDate]);
+                    $dailyOrderId = (int)$findOrder->fetchColumn();
+                    if ($dailyOrderId <= 0) {
+                        $createOrder->execute([$stop['customer_id'], $deliveryDate]);
                         $findOrder->execute([$stop['customer_id'], $deliveryDate]);
-                        $dailyOrderId = $findOrder->fetchColumn();
-                        if (!$dailyOrderId) {
-                            $createOrder->execute([$stop['customer_id'], $deliveryDate]);
-                            $dailyOrderId = $db->lastInsertId();
-                        }
-
-                        $routeOrder++;
-                        $removeAssignment->execute([$dailyOrderId, $deliveryDate]);
-                        $insertAssignment->execute([$dailyOrderId, $driverId, $deliveryDate, $routeOrder]);
+                        $dailyOrderId = (int)$findOrder->fetchColumn();
                     }
-
-                    $db->commit();
-                    echo json_encode([
-                        'success' => true,
-                        'message' => 'Synced ' . count($routeStops) . ' standing-route stops for ' . $driverRow['name'] . '.'
-                    ]);
-                } catch (Exception $e) {
-                    $db->rollBack();
-                    throw $e;
+                    $assignments[] = [
+                        'daily_order_id' => $dailyOrderId,
+                        'route_order' => $index + 1,
+                    ];
                 }
+
+                $result = bakery_driver_assign_orders($db, $driverId, $deliveryDate, $assignments, 'append');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Restored ' . $result['stop_count'] . ' missing standing-route stop'
+                        . ($result['stop_count'] === 1 ? '' : 's') . ' for ' . $driverRow['name'] . '.'
+                ]);
                 break;
                 
             case 'create_orders_and_assign':
                 $deliveryDate = $_POST['delivery_date'];
-                
-                $db->beginTransaction();
-                
-                try {
-                    // The route is the source of truth for this action. Only standing-route
-                    // customers become route stops; unrelated daily orders are not invented.
-                    $dayOfWeek = date('N', strtotime($deliveryDate));
-                    $stmt = $db->prepare(" 
-                        SELECT sr.customer_id, sr.driver_id, c.name AS customer_name, sr.route_order
-                        FROM standing_routes sr
-                        JOIN customers c ON c.id = sr.customer_id
-                        WHERE CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
-                        ORDER BY sr.driver_id, COALESCE(sr.route_order, 2147483647), c.name
-                    ");
-                    $stmt->execute([$dayOfWeek]);
-                    $standingRoutes = $stmt->fetchAll();
+                $result = bakery_driver_assign_from_standing_routes($db, $deliveryDate);
+                echo json_encode([
+                    'success' => true,
+                    'message' => bakery_t('driver_assignment.build_success', [
+                        'count' => $result['stop_count'],
+                        'date' => date('l, F j, Y', strtotime($deliveryDate)),
+                    ]),
+                    'assignments' => $result['assignments'],
+                    'demand' => $result['demand'],
+                ]);
+                break;
 
-                    if (empty($standingRoutes)) {
-                        throw new Exception('No standing-route stops are configured for ' . date('l', strtotime($deliveryDate)) . '.');
-                    }
+            case 'save_standing_route':
+                $customerId = (int)$_POST['customer_id'];
+                $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
+                $driverId = (int)$_POST['driver_id'];
 
-                    // Ensure each route stop has a dated order record, then assign it.
-                    $assignments = [];
-                    $routeOrderByDriver = [];
-
-                    foreach ($standingRoutes as $route) {
-                        $stmt = $db->prepare(" 
-                            SELECT id FROM daily_orders 
-                            WHERE customer_id = ? AND order_date = ?
-                        ");
-                        $stmt->execute([$route['customer_id'], $deliveryDate]);
-                        $existingOrder = $stmt->fetch();
-
-                        if ($existingOrder) {
-                            $dailyOrderId = $existingOrder['id'];
-                        } else {
-                            $stmt = $db->prepare(" 
-                                INSERT INTO daily_orders (customer_id, order_date, total_amount) 
-                                VALUES (?, ?, 0)
-                            ");
-                            $stmt->execute([$route['customer_id'], $deliveryDate]);
-                            $dailyOrderId = $db->lastInsertId();
-                        }
-
-                        $assignedDriverId = (int)$route['driver_id'];
-                        $routeOrderByDriver[$assignedDriverId] = ($routeOrderByDriver[$assignedDriverId] ?? 0) + 1;
-                        $assignments[] = [
-                            'daily_order_id' => $dailyOrderId,
-                            'driver_id' => $assignedDriverId,
-                            'route_order' => $routeOrderByDriver[$assignedDriverId],
-                            'scheduled_delivery_time' => null
-                        ];
-                    }
-
-                    // This action is a full synchronization for the selected date.
-                    // Do not leave stale assignments from an earlier weekday/template.
-                    $db->prepare("DELETE FROM daily_order_assignments WHERE delivery_date = ?")
-                        ->execute([$deliveryDate]);
-
-                    $insertAssignment = $db->prepare("
-                        INSERT INTO daily_order_assignments (
-                            daily_order_id, driver_id, delivery_date, route_order,
-                            scheduled_delivery_time, delivery_status
-                        ) VALUES (?, ?, ?, ?, ?, 'pending')
-                    ");
-                    foreach ($assignments as $assignment) {
-                        $insertAssignment->execute([
-                            $assignment['daily_order_id'],
-                            $assignment['driver_id'],
-                            $deliveryDate,
-                            $assignment['route_order'],
-                            $assignment['scheduled_delivery_time']
-                        ]);
-                    }
-                    
-                    $db->commit();
-                    
-                    echo json_encode([
-                        'success' => true, 
-                        'message' => 'Built ' . count($assignments) . ' route stops from the standing route and assigned them for ' . date('l, F j, Y', strtotime($deliveryDate)),
-                        'assignments' => $assignments
-                    ]);
-                    
-                } catch (Exception $e) {
-                    $db->rollBack();
-                    throw $e;
+                if ($customerId <= 0) {
+                    throw new Exception('Invalid customer ID');
                 }
+                if ($dayOfWeek < 1 || $dayOfWeek > 7) {
+                    throw new Exception('Invalid day of week');
+                }
+
+                $dayClause = $dayOfWeek === 7 ? 'IN (0, 7)' : '= ?';
+                $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week $dayClause");
+                $stmt->execute($dayOfWeek === 7 ? [$customerId] : [$customerId, $dayOfWeek]);
+
+                if ($driverId > 0) {
+                    $driverRow = bakery_get_driver_by_id($db, $driverId);
+                    if (!$driverRow) {
+                        throw new Exception('Invalid driver selected');
+                    }
+                    if ((int)($driverRow['archived'] ?? 0) === 1) {
+                        throw new Exception('Cannot assign an archived driver to a standing route');
+                    }
+                    if ($dayOfWeek === 7) {
+                        $db->prepare('DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week = 0')
+                            ->execute([$customerId]);
+                    }
+                    $stmt = $db->prepare('INSERT INTO standing_routes (driver_id, customer_id, day_of_week) VALUES (?, ?, ?)');
+                    $stmt->execute([$driverId, $customerId, $dayOfWeek]);
+                }
+
+                echo json_encode(['success' => true]);
+                break;
+
+            case 'add_customer_to_route':
+                $customerId = (int)$_POST['customer_id'];
+                $driverId = (int)$_POST['driver_id'];
+                $deliveryDate = $_POST['delivery_date'] ?? '';
+                // A customer added from the dated route is a one-time stop unless
+                // the dispatcher explicitly chooses to make it recurring.
+                $saveStandingRoute = ($_POST['save_standing_route'] ?? '0') === '1';
+                $applyPanDulce = $saveStandingRoute && ($_POST['apply_pan_dulce'] ?? '0') === '1';
+                $standingOrderLines = json_decode($_POST['standing_order_lines'] ?? '[]', true);
+                if (!is_array($standingOrderLines)) {
+                    $standingOrderLines = [];
+                }
+                if (!$saveStandingRoute) {
+                    $standingOrderLines = [];
+                }
+
+                $result = bakery_driver_add_customer_to_route(
+                    $db,
+                    $customerId,
+                    $driverId,
+                    $deliveryDate,
+                    $saveStandingRoute,
+                    $standingOrderLines,
+                    $applyPanDulce
+                );
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => $result['message'],
+                    'daily_order_id' => $result['daily_order_id'],
+                ]);
+                break;
+
+            case 'remove_daily_order':
+                $dailyOrderId = (int)$_POST['daily_order_id'];
+                $deliveryDate = $_POST['delivery_date'] ?? '';
+                $confirmed = ($_POST['confirm_delivered'] ?? '0') === '1';
+                $result = bakery_remove_empty_dated_order($db, $dailyOrderId, $deliveryDate, $confirmed);
+                if ($result['requires_confirmation']) {
+                    echo json_encode([
+                        'success' => false,
+                        'requires_delivered_confirmation' => true,
+                        'status' => $result['status'],
+                    ]);
+                    break;
+                }
+                echo json_encode(['success' => true, 'message' => $result['message']]);
                 break;
                 
             default:
@@ -385,7 +363,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Get selected date (default to tomorrow)
-$selectedDate = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
+$selectedDate = (string)($_GET['date'] ?? date('Y-m-d', strtotime('+1 day')));
+try {
+    $selectedDate = bakery_driver_validate_delivery_date($selectedDate);
+} catch (RuntimeException $e) {
+    $selectedDate = date('Y-m-d', strtotime('+1 day'));
+}
+$returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
+$filterUnassigned = (string)($_GET['filter'] ?? '') === 'unassigned';
+$attentionFailed = (string)($_GET['attention'] ?? '') === 'failed' || (string)($_GET['filter'] ?? '') === 'failed';
+$attentionLabel = '';
+if ($filterUnassigned) {
+    $attentionLabel = function_exists('bakery_t') ? bakery_t('ops.attention.unassigned') : 'Showing unassigned orders only';
+} elseif ($attentionFailed) {
+    $attentionLabel = function_exists('bakery_t') ? bakery_t('ops.attention.failed') : 'Showing failed stops';
+}
+$pageReturnKey = $returnTarget['key'] ?? null;
 $dayName = date('l', strtotime($selectedDate));
 $dayOfWeek = date('N', strtotime($selectedDate)); // 1=Monday, 7=Sunday
 $pageLoadError = null;
@@ -398,9 +391,25 @@ $otherUnassignedOrders = [];
 $standingCustomerIds = [];
 $routeSyncCountByDriver = [];
 $standingRoutesByDriver = [];
+$weeklyStandingRoutesByCustomer = [];
+$driversById = [];
+$weekDayLabels = bakery_day_names(true);
+$activeCustomers = [];
+$productsForStanding = [];
+$assignedCustomerIdsToday = [];
+$driverColors = [
+    '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
+    '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
+];
 
 try {
     $drivers = bakery_get_drivers($db);
+    foreach ($drivers as $index => $driver) {
+        $driversById[(int)$driver['id']] = [
+            'name' => $driver['name'],
+            'color' => $driverColors[$index % count($driverColors)],
+        ];
+    }
 
     $stmt = $db->prepare("
         SELECT 
@@ -420,6 +429,7 @@ try {
             d.name as assigned_driver_name
         FROM daily_orders do
         JOIN customers c ON do.customer_id = c.id
+        " . bakery_sfb_ops_origin_clause('c', $db) . "
         LEFT JOIN daily_order_assignments doa ON do.id = doa.daily_order_id AND doa.delivery_date = do.order_date
         LEFT JOIN drivers d ON doa.driver_id = d.id
         WHERE do.order_date = ?
@@ -437,6 +447,7 @@ try {
             d.name as driver_name
         FROM standing_routes sr
         JOIN customers c ON sr.customer_id = c.id
+        " . bakery_sfb_ops_origin_clause('c', $db) . "
         JOIN drivers d ON sr.driver_id = d.id
                         WHERE CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
         ORDER BY d.name, COALESCE(sr.route_order, 2147483647), c.name
@@ -459,6 +470,20 @@ try {
         }
     }
 
+    if ($attentionFailed) {
+        foreach ($ordersByDriver as &$bundle) {
+            usort($bundle['orders'], static function ($a, $b) {
+                $af = (($a['delivery_status'] ?? '') === 'failed') ? 0 : 1;
+                $bf = (($b['delivery_status'] ?? '') === 'failed') ? 0 : 1;
+                if ($af !== $bf) {
+                    return $af <=> $bf;
+                }
+                return ((int)($a['route_order'] ?? 0)) <=> ((int)($b['route_order'] ?? 0));
+            });
+        }
+        unset($bundle);
+    }
+
     foreach ($standingRoutes as $route) {
         $standingCustomerIds[(int)$route['customer_id']] = true;
         $driverId = $route['driver_id'];
@@ -471,6 +496,32 @@ try {
     foreach ($unassignedOrders as $order) {
         if (!isset($standingCustomerIds[(int)$order['customer_id']])) {
             $otherUnassignedOrders[] = $order;
+        }
+    }
+
+    if (!empty($otherUnassignedOrders)) {
+        $otherCustomerIds = array_values(array_unique(array_map(
+            static fn($order) => (int)$order['customer_id'],
+            $otherUnassignedOrders
+        )));
+        $placeholders = implode(',', array_fill(0, count($otherCustomerIds), '?'));
+        $stmt = $db->prepare("
+            SELECT sr.customer_id, sr.day_of_week, sr.driver_id, d.name AS driver_name
+            FROM standing_routes sr
+            LEFT JOIN drivers d ON d.id = sr.driver_id
+            WHERE sr.customer_id IN ($placeholders)
+        ");
+        $stmt->execute($otherCustomerIds);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $routeRow) {
+            $customerId = (int)$routeRow['customer_id'];
+            $routeDay = bakery_normalize_standing_day((int)$routeRow['day_of_week']);
+            $routeDriverId = (int)$routeRow['driver_id'];
+            $driverInfo = $driversById[$routeDriverId] ?? null;
+            $weeklyStandingRoutesByCustomer[$customerId][$routeDay] = [
+                'driver_id' => $routeDriverId,
+                'driver_name' => $routeRow['driver_name'] ?: '',
+                'driver_color' => $driverInfo['color'] ?? '#6c757d',
+            ];
         }
     }
 
@@ -487,12 +538,44 @@ try {
             $routeSyncCountByDriver[$driverId] = ($routeSyncCountByDriver[$driverId] ?? 0) + 1;
         }
     }
+
+    foreach ($dailyOrders as $order) {
+        if (!empty($order['assigned_driver_id'])) {
+            $assignedCustomerIdsToday[(int)$order['customer_id']] = (int)$order['assigned_driver_id'];
+        }
+    }
+
+    $activeCustomers = $db->query("
+        SELECT c.id, c.name, c.address, c.zone
+        FROM customers c
+        WHERE c.is_active = 1
+        ORDER BY
+            CASE WHEN c.zone IS NULL OR c.zone = '' THEN 'ZZZ' ELSE c.zone END,
+            c.name
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $productsForStanding = $db->query("
+        SELECT p.id, p.name, COALESCE(pl.name, 'Other') AS product_line_name
+        FROM products p
+        LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
+        LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
+        ORDER BY product_line_name, p.name
+    ")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $pageLoadError = $e->getMessage();
     error_log('driver_assignment.php load failed: ' . $e->getMessage());
 }
 if (!empty($pageLoadError)) {
     }
+
+$pageExceptions = [];
+if (empty($pageLoadError)) {
+    try {
+        $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
+    } catch (Throwable $e) {
+        error_log('driver_assignment exceptions: ' . $e->getMessage());
+    }
+}
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
@@ -509,12 +592,13 @@ require_once 'includes/nav.php';
 </div>
 <?php require_once 'includes/footer.php'; exit; endif; ?>
 
-<div class="container">
+<div class="container<?php echo $filterUnassigned ? ' driver-assignment-filter-active' : ''; ?><?php echo $attentionFailed ? ' driver-assignment-failed-active' : ''; ?>">
+    <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <div class="page-header">
         <h1>🚚 Driver Assignment</h1>
         <div class="button-group">
             <button type="button" class="btn btn-primary" onclick="autoAssignFromStandingRoutes()">
-                Build Today's Routes
+                Build Route Plan
             </button>
             <?php if (!empty($ordersByDriver)): ?>
                 <button type="button" class="btn btn-success" onclick="saveAsStandingRoute()">
@@ -541,15 +625,15 @@ require_once 'includes/nav.php';
             </div>
         </div>
         <div class="date-controls">
-            <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' -1 day')) ?>" class="btn btn-outline">← Previous Day</a>
-            <a href="?date=<?= date('Y-m-d') ?>" class="btn btn-primary">Today</a>
-            <a href="?date=<?= date('Y-m-d', strtotime($selectedDate . ' +1 day')) ?>" class="btn btn-outline">Next Day →</a>
+            <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' -1 day'))]))); ?>" class="btn btn-outline">← Previous Day</a>
+            <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d')]))); ?>" class="btn btn-primary">Today</a>
+            <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' +1 day'))]))); ?>" class="btn btn-outline">Next Day →</a>
         </div>
     </div>
 
     <div class="route-first-guide">
-        <strong>Route-first workflow</strong>
-        <span>Build the date from the standing route, then drag stops to reorder or move them between drivers. Products and order totals are supporting details for each stop.</span>
+        <strong><?= htmlspecialchars(bakery_t('driver_assignment.workflow_title')) ?></strong>
+        <span><?= htmlspecialchars(bakery_t('driver_assignment.workflow_help')) ?></span>
         <span class="guide-save">When the route is right, save it back to the weekday template for next week.</span>
         <?php if (!empty($standingRoutes)): ?>
             <span class="guide-status">Configured for this day: <?= count($standingRoutes) ?> stops across <?= count($standingRoutesByDriver) ?> drivers</span>
@@ -558,21 +642,55 @@ require_once 'includes/nav.php';
         <?php endif; ?>
     </div>
     
-    <?php if (empty($dailyOrders) && empty($standingRoutes)): ?>
+    <?php if (empty($drivers)): ?>
         <div class="empty-state">
-            <h3>No route stops for this date</h3>
-            <p>Set up a standing route for <?= htmlspecialchars($dayName) ?> first.</p>
+            <h3>No drivers configured</h3>
+            <p>Add drivers before assigning routes.</p>
         </div>
     <?php else: ?>
+        <?php if (empty($dailyOrders) && empty($standingRoutes)): ?>
+            <div class="empty-state empty-state-compact">
+                <p>No route stops yet for <?= htmlspecialchars($dayName) ?>.
+                   Use <strong>+ Add One-Time Stop</strong> on a driver below to add someone directly,
+                   or configure standing routes first.</p>
+            </div>
+        <?php endif; ?>
         <div class="route-plan-heading">
-            <h2>Today's Route Plan</h2>
+            <h2>Route Plan for <?= htmlspecialchars(date('F j', strtotime($selectedDate))) ?></h2>
             <p>Each driver section is a delivery route. Reorder stops here; use Daily Orders separately to manage products and quantities.</p>
         </div>
+        <?php if ($filterUnassigned && !empty($unassignedOrders)): ?>
+            <div class="unassigned-section ops-attention-row" id="unassigned-orders">
+                <div class="unassigned-header">
+                    <h3>Unassigned orders (<?= count($unassignedOrders) ?>)</h3>
+                    <p class="unassigned-hint">These dated orders have no driver for this date. Build from standing or assign below.</p>
+                </div>
+                <div class="unassigned-orders">
+                    <?php foreach ($unassignedOrders as $order): ?>
+                        <div class="order-item unassigned-item ops-attention-row" id="order-<?= (int)$order['id'] ?>" data-order-id="<?= (int)$order['id'] ?>" data-customer-id="<?= (int)$order['customer_id'] ?>">
+                            <div class="order-info">
+                                <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                <?php
+                                echo bakery_ops_render_row_chips($pageExceptions, [
+                                    'customer_id' => (int)$order['customer_id'],
+                                    'daily_order_id' => (int)$order['id'],
+                                    'flags' => ['unassigned' => true],
+                                ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey, 'daily_order_id' => (int)$order['id']]);
+                                ?>
+                                </div>
+                                <div class="customer-address"><?= htmlspecialchars($order['address']) ?></div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
         <div class="driver-assignments">
             <?php foreach ($drivers as $driver): ?>
                 <?php
                 $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
                 $missingRouteCount = $routeSyncCountByDriver[$driver['id']] ?? 0;
+                $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
                 ?>
                 <div class="driver-section" data-driver-id="<?= $driver['id'] ?>">
                     <div class="driver-header">
@@ -583,6 +701,22 @@ require_once 'includes/nav.php';
                                     Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?>
                                 </button>
                             <?php endif; ?>
+                            <?php if (!empty($driverOrders['orders'])): ?>
+                                <select class="driver-select move-all-select" id="move-all-select-<?= $driver['id'] ?>" title="Move all stops to another driver">
+                                    <option value="">Move all to…</option>
+                                    <?php foreach ($drivers as $otherDriver): ?>
+                                        <?php if ((int)$otherDriver['id'] !== (int)$driver['id']): ?>
+                                            <option value="<?= (int)$otherDriver['id'] ?>"><?= htmlspecialchars($otherDriver['name']) ?></option>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="moveAllStops(<?= $driver['id'] ?>)">
+                                    Move all
+                                </button>
+                            <?php endif; ?>
+                            <button class="btn btn-sm btn-outline-primary" onclick="openAddCustomerModal(<?= $driver['id'] ?>)">
+                                + Add One-Time Stop
+                            </button>
                             <button class="btn btn-sm btn-primary" onclick="optimizeRoute(<?= $driver['id'] ?>)">
                                 🚀 Optimize Route
                             </button>
@@ -593,53 +727,103 @@ require_once 'includes/nav.php';
                     </div>
                     
                     <div class="driver-orders">
-                        <?php 
-                        $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
-                        ?>
                         <div class="driver-stop-summary">
                             <?= count($driverOrders['orders']) ?> assigned stop<?= count($driverOrders['orders']) === 1 ? '' : 's' ?>
                             <?php if (!empty($standingDriverRoutes)): ?>
                                 · <?= count($standingDriverRoutes) ?> standing-route stop<?= count($standingDriverRoutes) === 1 ? '' : 's' ?>
                             <?php endif; ?>
+                            <?php if (!empty($driverOrders['orders'])): ?>
+                                · <span class="route-time-estimate" title="Calculating route times…"></span>
+                            <?php endif; ?>
                         </div>
                         
                         <div class="orders-list">
+                            <div class="route-order-list<?= empty($driverOrders['orders']) ? ' route-order-list-empty' : '' ?>" data-driver-id="<?= $driver['id'] ?>">
                             <?php if (empty($driverOrders['orders'])): ?>
-                                <div class="no-orders">
+                                <div class="no-orders no-orders-inline">
                                     <?php if (!empty($standingDriverRoutes)): ?>
                                         <p class="route-stop-count"><?= count($standingDriverRoutes) ?> standing-route stop<?= count($standingDriverRoutes) === 1 ? '' : 's' ?> configured</p>
                                         <?php if (empty($dailyOrders)): ?>
-                                            <p>Click <strong>Build Today's Routes</strong> above to create the dated route.</p>
+                                            <p>Click <strong>Build Route Plan</strong> above to create the dated route.</p>
                                         <?php elseif ($missingRouteCount > 0): ?>
                                             <p>Use <strong>Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?></strong> above to sync this route.</p>
+                                        <?php else: ?>
+                                            <p class="drop-hint">Drop stops here to assign to this driver</p>
                                         <?php endif; ?>
                                     <?php else: ?>
                                         <p>No standing-route stops for this driver on <?= htmlspecialchars($dayName) ?>.</p>
+                                        <p class="drop-hint">Drop stops here to assign to this driver</p>
                                     <?php endif; ?>
                                 </div>
                             <?php else: ?>
-                                <div class="route-order-list" data-driver-id="<?= $driver['id'] ?>">
                                     <?php foreach ($driverOrders['orders'] as $order): ?>
-                                        <div class="order-item" data-order-id="<?= $order['id'] ?>" draggable="true">
-                                            <div class="drag-handle">⋮⋮</div>
+                                        <?php
+                                        $isLocked = in_array($order['delivery_status'] ?? '', ['delivered', 'in_transit'], true);
+                                        ?>
+                                        <div class="order-item<?= $isLocked ? ' order-item-locked' : '' ?><?= (($order['delivery_status'] ?? '') === 'failed') ? ' ops-attention-row' : '' ?>"
+                                             id="order-<?= (int)$order['id'] ?>"
+                                             data-order-id="<?= $order['id'] ?>"
+                                             data-address="<?= htmlspecialchars($order['address']) ?>"
+                                             data-delivery-minutes="<?= (int)$order['delivery_time'] ?>"
+                                             data-deliver-by="<?= htmlspecialchars($order['deliver_by'] ?? '') ?>"
+                                             data-deliver-after="<?= htmlspecialchars($order['deliver_after'] ?? '') ?>"
+                                             data-delivery-status="<?= htmlspecialchars($order['delivery_status'] ?? 'pending') ?>"
+                                             draggable="<?= $isLocked ? 'false' : 'true' ?>">
+                                            <div class="drag-handle"><?= $isLocked ? '🔒' : '⋮⋮' ?></div>
                                             <div class="order-info">
-                                                <div class="customer-name"><?= htmlspecialchars($order['customer_name']) ?></div>
+                                                <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                                <?php
+                                                $orderFlags = [];
+                                                if (($order['delivery_status'] ?? '') === 'failed') {
+                                                    $orderFlags['failed_delivery'] = true;
+                                                }
+                                                echo bakery_ops_render_row_chips($pageExceptions, [
+                                                    'customer_id' => (int)$order['customer_id'],
+                                                    'daily_order_id' => (int)$order['id'],
+                                                    'driver_id' => (int)($order['assigned_driver_id'] ?? 0),
+                                                    'flags' => $orderFlags,
+                                                ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey, 'daily_order_id' => (int)$order['id']]);
+                                                ?>
+                                                </div>
                                                 <div class="customer-address"><?= htmlspecialchars($order['address']) ?></div>
                                                 <div class="order-details">
                                                     <span class="route-order">#<?= $order['route_order'] ?></span>
                                                     <span class="delivery-time"><?= $order['scheduled_delivery_time'] ?: 'TBD' ?></span>
                                                     <span class="order-amount">$<?= number_format($order['total_amount'], 2) ?></span>
+                                                    <?php if ($isLocked): ?>
+                                                        <span class="delivery-status-badge"><?= htmlspecialchars($order['delivery_status']) ?></span>
+                                                    <?php endif; ?>
                                                 </div>
                                             </div>
                                             <div class="order-actions">
-                                                <button class="btn btn-sm btn-outline-danger" onclick="removeAssignmentFromDatabase(<?= $order['id'] ?>)">
-                                                    Remove
-                                                </button>
+                                                <?php if (!$isLocked): ?>
+                                                    <select class="driver-select move-stop-select"
+                                                            title="Move to another driver"
+                                                            onchange="moveStopToDriver(<?= $order['id'] ?>, <?= $driver['id'] ?>, this)">
+                                                        <option value="">Move to…</option>
+                                                        <?php foreach ($drivers as $otherDriver): ?>
+                                                            <?php if ((int)$otherDriver['id'] !== (int)$driver['id']): ?>
+                                                                <option value="<?= (int)$otherDriver['id'] ?>"><?= htmlspecialchars($otherDriver['name']) ?></option>
+                                                            <?php endif; ?>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                <?php endif; ?>
+                                                <?php if ($isLocked): ?>
+                                                    <span class="route-stop-lock-note" title="Completed and in-transit stops stay on their recorded route">Locked</span>
+                                                <?php else: ?>
+                                                    <a class="btn btn-sm btn-outline-primary"
+                                                       href="daily_orders.php?date=<?= urlencode($selectedDate) ?>&view=edit&review=all#order-<?= (int)$order['id'] ?>">
+                                                        <?= htmlspecialchars(bakery_t('driver_assignment.edit_dated_order')) ?>
+                                                    </a>
+                                                    <button class="btn btn-sm btn-outline-danger" onclick="removeAssignmentFromDatabase(<?= $order['id'] ?>)">
+                                                        <?= htmlspecialchars(bakery_t('driver_assignment.unassign_stop')) ?>
+                                                    </button>
+                                                <?php endif; ?>
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
-                                </div>
                             <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -650,7 +834,7 @@ require_once 'includes/nav.php';
                 <div class="unassigned-section">
                     <div class="unassigned-header">
                         <h3>Other Daily Orders (<?= count($otherUnassignedOrders) ?>)</h3>
-                        <p class="unassigned-hint">These orders do not have a standing route for <?= htmlspecialchars($dayName) ?>. Add them only if they are a one-off stop for this date.</p>
+                        <p class="unassigned-hint"><?= htmlspecialchars(bakery_t('driver_assignment.other_orders_help', ['day' => $dayName])) ?></p>
                     </div>
                     <div class="bulk-assign-bar">
                         <label class="bulk-select-all">
@@ -668,9 +852,24 @@ require_once 'includes/nav.php';
                             Assign selected
                         </button>
                     </div>
+                    <div class="unassigned-week-header">
+                        <div class="unassigned-week-header-store">Store</div>
+                        <div class="unassigned-week-header-days">
+                            <?php foreach ($weekDayLabels as $dayNum => $dayLabel): ?>
+                                <div class="unassigned-week-header-day<?= (int)$dayNum === (int)$dayOfWeek ? ' is-current-day' : '' ?>">
+                                    <?= htmlspecialchars($dayLabel) ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="unassigned-week-header-actions">Actions</div>
+                    </div>
                     <div class="unassigned-orders">
                         <?php foreach ($otherUnassignedOrders as $order): ?>
-                            <div class="order-item unassigned-item" data-order-id="<?= $order['id'] ?>">
+                            <?php
+                            $customerId = (int)$order['customer_id'];
+                            $customerWeeklyRoutes = $weeklyStandingRoutesByCustomer[$customerId] ?? [];
+                            ?>
+                            <div class="order-item unassigned-item" id="order-<?= (int)$order['id'] ?>" data-order-id="<?= $order['id'] ?>" data-customer-id="<?= $customerId ?>">
                                 <label class="order-check">
                                     <input type="checkbox"
                                            class="unassigned-checkbox"
@@ -678,11 +877,52 @@ require_once 'includes/nav.php';
                                            onchange="updateBulkSelectedCount()">
                                 </label>
                                 <div class="order-info">
-                                    <div class="customer-name"><?= htmlspecialchars($order['customer_name']) ?></div>
+                                    <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                    <?php
+                                    echo bakery_ops_render_row_chips($pageExceptions, [
+                                        'customer_id' => $customerId,
+                                        'daily_order_id' => (int)$order['id'],
+                                        'flags' => ['unassigned' => true],
+                                    ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey, 'daily_order_id' => (int)$order['id']]);
+                                    ?>
+                                    </div>
                                     <div class="customer-address"><?= htmlspecialchars($order['address']) ?></div>
                                     <div class="order-details">
                                         <span class="order-amount">$<?= number_format($order['total_amount'], 2) ?></span>
                                     </div>
+                                </div>
+                                <div class="weekly-standing-routes">
+                                    <?php foreach ($weekDayLabels as $dayNum => $dayLabel): ?>
+                                        <?php
+                                        $routeInfo = $customerWeeklyRoutes[(int)$dayNum] ?? null;
+                                        $selectedDriverId = $routeInfo['driver_id'] ?? 0;
+                                        $dayClass = (int)$dayNum === (int)$dayOfWeek ? ' is-current-day' : '';
+                                        $selectStyle = $selectedDriverId > 0
+                                            ? 'background-color:' . htmlspecialchars($routeInfo['driver_color']) . ';color:#fff;border-color:transparent;'
+                                            : '';
+                                        ?>
+                                        <div class="weekly-route-day<?= $dayClass ?>">
+                                            <select class="standing-route-select driver-select"
+                                                    data-customer-id="<?= $customerId ?>"
+                                                    data-day="<?= (int)$dayNum ?>"
+                                                    title="<?= htmlspecialchars($dayLabel) ?> standing route"
+                                                    style="<?= $selectStyle ?>"
+                                                    onchange="saveStandingRoute(this)">
+                                                <option value="0">—</option>
+                                                <?php foreach ($drivers as $driver): ?>
+                                                    <option value="<?= (int)$driver['id'] ?>"<?= $selectedDriverId === (int)$driver['id'] ? ' selected' : '' ?>>
+                                                        <?= htmlspecialchars($driver['name']) ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                <div class="unassigned-row-actions">
+                                    <a class="btn btn-sm btn-outline-primary"
+                                       href="daily_orders.php?date=<?= urlencode($selectedDate) ?>&view=edit&review=all#order-<?= (int)$order['id'] ?>">
+                                        <?= htmlspecialchars(bakery_t('driver_assignment.edit_dated_order')) ?>
+                                    </a>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -712,6 +952,86 @@ require_once 'includes/nav.php';
     </div>
 </div>
 
+<!-- Add Customer to Route Modal -->
+<div id="add-customer-modal" class="modal-overlay" style="display: none;">
+    <div class="modal add-customer-modal">
+        <div class="modal-header">
+            <h3>Add a One-Time Stop</h3>
+            <button type="button" class="close-btn" onclick="closeAddCustomerModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="add-customer-intro">
+                Choose the customer and they will be added to this driver's route for
+                <?= htmlspecialchars(date('l, F j', strtotime($selectedDate))) ?> only.
+            </p>
+            <input type="hidden" id="add-customer-driver-id" value="">
+            <label class="add-customer-field">
+                <span>Driver</span>
+                <select id="add-customer-driver-select" class="driver-select">
+                    <?php foreach ($drivers as $driver): ?>
+                        <option value="<?= (int)$driver['id'] ?>"><?= htmlspecialchars($driver['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label class="add-customer-field">
+                <span>Customer</span>
+                <input type="search" id="add-customer-search" class="add-customer-search"
+                       placeholder="Search by name, address, or zone…" autocomplete="off">
+                <select id="add-customer-select" size="8" required>
+                    <?php foreach ($activeCustomers as $customer): ?>
+                        <?php
+                        $custId = (int)$customer['id'];
+                        $assignedDriverId = $assignedCustomerIdsToday[$custId] ?? 0;
+                        $statusHint = $assignedDriverId > 0
+                            ? ' (on route today)'
+                            : '';
+                        $searchBlob = strtolower(trim(
+                            ($customer['name'] ?? '') . ' '
+                            . ($customer['address'] ?? '') . ' '
+                            . ($customer['zone'] ?? '')
+                        ));
+                        ?>
+                        <option value="<?= $custId ?>"
+                                data-search="<?= htmlspecialchars($searchBlob, ENT_QUOTES) ?>"
+                                data-assigned-driver="<?= $assignedDriverId ?>">
+                            <?= htmlspecialchars($customer['name']) ?><?= $statusHint ?>
+                            <?php if (!empty($customer['address'])): ?>
+                                — <?= htmlspecialchars($customer['address']) ?>
+                            <?php endif; ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label class="add-customer-checkbox">
+                <input type="checkbox" id="add-customer-save-standing-route"
+                       onchange="setAddCustomerStandingOptionsVisibility()">
+                Also make this a recurring <?= htmlspecialchars($dayName) ?> stop
+            </label>
+            <div id="add-customer-standing-section" class="add-customer-standing-section" hidden>
+                <div class="add-customer-standing-header">
+                    <strong>Standing order for <?= htmlspecialchars($dayName) ?></strong>
+                    <span class="add-customer-standing-hint">Optional — set products for future weeks too</span>
+                </div>
+                <div class="add-customer-standing-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="applyPanDulceInAddModal()">
+                        Apply Pan Dulce standard
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="addStandingOrderRow()">
+                        + Add product
+                    </button>
+                </div>
+                <div id="add-customer-standing-rows" class="add-customer-standing-rows"></div>
+                <input type="hidden" id="add-customer-apply-pan-dulce" value="0">
+            </div>
+            <div id="add-customer-status" class="add-customer-status" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" onclick="submitAddCustomerToRoute()">Add Stop to Today’s Route</button>
+            <button type="button" class="btn btn-secondary" onclick="closeAddCustomerModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Assignments Modal -->
 <div id="edit-modal" class="modal-overlay" style="display: none;">
     <div class="modal">
@@ -735,7 +1055,13 @@ const driverAssignmentConfig = {
     mapsKey: <?php echo bakery_json_for_html(GOOGLE_MAPS_API_KEY, '""'); ?>,
     standingRoutes: <?php echo bakery_json_for_html($standingRoutes, '[]'); ?>,
     dailyOrders: <?php echo bakery_json_for_html($dailyOrders, '[]'); ?>,
-    ordersByDriver: <?php echo bakery_json_for_html($ordersByDriver, '{}'); ?>
+    ordersByDriver: <?php echo bakery_json_for_html($ordersByDriver, '{}'); ?>,
+    driversById: <?php echo bakery_json_for_html($driversById, '{}'); ?>,
+    currentDayOfWeek: <?php echo (int)$dayOfWeek; ?>,
+    dayName: <?php echo bakery_json_for_html($dayName, '""'); ?>,
+    activeCustomers: <?php echo bakery_json_for_html($activeCustomers, '[]'); ?>,
+    productsForStanding: <?php echo bakery_json_for_html($productsForStanding, '[]'); ?>,
+    assignedCustomerIdsToday: <?php echo bakery_json_for_html($assignedCustomerIdsToday, '{}'); ?>
 };
 
 // Global variables
@@ -746,6 +1072,169 @@ let directionsService = null;
 let directionsRenderer = null;
 let geocoder = null;
 let markers = [];
+
+const bakeryAddress = '484 5th Street, San Francisco, CA';
+const routeStartMinutes = (6 * 60) + 40;
+
+function formatDuration(totalMinutes) {
+    const minutes = Math.max(0, Math.round(totalMinutes));
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return hours ? hours + 'h ' + remainder + 'm' : remainder + 'm';
+}
+
+function formatClock(totalMinutes) {
+    const minutesInDay = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+    const hours24 = Math.floor(minutesInDay / 60);
+    const minutes = minutesInDay % 60;
+    const suffix = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 || 12;
+    return hours12 + ':' + String(minutes).padStart(2, '0') + ' ' + suffix;
+}
+
+function timeToMinutes(value) {
+    if (!value) return null;
+    const parts = String(value).split(':').map(Number);
+    return Number.isFinite(parts[0]) ? (parts[0] * 60) + (parts[1] || 0) : null;
+}
+
+function minutesToTimeString(totalMinutes) {
+    const minutesInDay = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+    const hours = Math.floor(minutesInDay / 60);
+    const mins = minutesInDay % 60;
+    return String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+}
+
+function mainViewStopData(element) {
+    return {
+        element,
+        orderId: element.dataset.orderId,
+        address: element.dataset.address,
+        deliverBy: timeToMinutes(element.dataset.deliverBy),
+        deliverAfter: timeToMinutes(element.dataset.deliverAfter),
+        deliveryMinutes: Number(element.dataset.deliveryMinutes) || 20
+    };
+}
+
+function getMainViewRouteStops(routeList) {
+    return Array.from(routeList.querySelectorAll('.order-item')).map(mainViewStopData);
+}
+
+function calculateMainViewRouteSchedule(result, stops) {
+    const legs = result.routes[0].legs;
+    let currentMinutes = routeStartMinutes;
+    const arrivals = [];
+    const departures = [];
+    stops.forEach((stop, index) => {
+        currentMinutes += legs[index].duration.value / 60;
+        if (stop.deliverAfter !== null && currentMinutes < stop.deliverAfter) {
+            currentMinutes = stop.deliverAfter;
+        }
+        arrivals.push(currentMinutes);
+        currentMinutes += stop.deliveryMinutes;
+        departures.push(currentMinutes);
+    });
+    if (legs[stops.length]) {
+        currentMinutes += legs[stops.length].duration.value / 60;
+    }
+    return {
+        totalMinutes: currentMinutes - routeStartMinutes,
+        arrivals,
+        departures
+    };
+}
+
+function updateMainViewRoutePresentation(routeList, exactSchedule) {
+    const stops = getMainViewRouteStops(routeList);
+    const driverSection = routeList.closest('.driver-section');
+    const estimate = driverSection ? driverSection.querySelector('.route-time-estimate') : null;
+
+    if (!stops.length) {
+        if (estimate) {
+            estimate.textContent = '';
+            estimate.title = '';
+        }
+        return null;
+    }
+
+    let routineFinish = routeStartMinutes;
+    const routineArrivals = [];
+    stops.forEach(stop => {
+        routineFinish += 10;
+        if (stop.deliverAfter !== null && routineFinish < stop.deliverAfter) {
+            routineFinish = stop.deliverAfter;
+        }
+        routineArrivals.push(routineFinish);
+        routineFinish += stop.deliveryMinutes;
+    });
+    routineFinish += 10;
+
+    const schedule = exactSchedule || {
+        totalMinutes: routineFinish - routeStartMinutes,
+        arrivals: routineArrivals
+    };
+    const isApprox = !exactSchedule;
+
+    stops.forEach((stop, index) => {
+        const timeSpan = stop.element.querySelector('.delivery-time');
+        if (timeSpan) {
+            timeSpan.textContent = (isApprox ? '≈ ' : '') + formatClock(schedule.arrivals[index]);
+            timeSpan.classList.toggle('delivery-time-estimated', isApprox);
+            timeSpan.classList.toggle('delivery-time-exact', !isApprox);
+        }
+    });
+
+    if (estimate) {
+        estimate.textContent = (isApprox ? '≈ ' : '') + formatDuration(schedule.totalMinutes)
+            + ' · finishes ' + (isApprox ? '~' : '') + formatClock(routeStartMinutes + schedule.totalMinutes);
+        estimate.title = (isApprox ? 'Routine estimate' : 'Directions estimate')
+            + ' · starts 6:40 AM · finishes about ' + formatClock(routeStartMinutes + schedule.totalMinutes);
+    }
+
+    return schedule;
+}
+
+function fetchExactMainViewRouteTimes(routeList) {
+    const stops = getMainViewRouteStops(routeList);
+    if (!stops.length) {
+        return Promise.resolve(null);
+    }
+    if (typeof google === 'undefined' || !google.maps) {
+        return Promise.resolve(null);
+    }
+
+    const service = directionsService || new google.maps.DirectionsService();
+    return new Promise(resolve => {
+        service.route({
+            origin: bakeryAddress,
+            destination: bakeryAddress,
+            waypoints: stops.map(stop => ({ location: stop.address, stopover: true })),
+            optimizeWaypoints: false,
+            travelMode: google.maps.TravelMode.DRIVING
+        }, (result, status) => {
+            if (status === 'OK') {
+                resolve(calculateMainViewRouteSchedule(result, stops));
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
+function refreshMainViewRouteTimes(routeList) {
+    updateMainViewRoutePresentation(routeList, null);
+    return fetchExactMainViewRouteTimes(routeList).then(schedule => {
+        if (schedule) {
+            updateMainViewRoutePresentation(routeList, schedule);
+        }
+        return schedule;
+    });
+}
+
+function refreshAllMainViewRouteTimes() {
+    const lists = document.querySelectorAll('.route-order-list');
+    lists.forEach(list => refreshMainViewRouteTimes(list));
+}
 
 // Initialize Google Maps
 function initMap() {
@@ -772,7 +1261,7 @@ function initMap() {
 
 // Auto-assign from standing routes
 function autoAssignFromStandingRoutes() {
-    if (!confirm('Build this date from the standing route? This will replace the dated route assignments for this date.')) {
+    if (!confirm(<?= json_encode(bakery_t('driver_assignment.build_confirm')) ?>)) {
         return;
     }
     
@@ -923,19 +1412,39 @@ function showConstraintAwareRouteModal(orders) {
 }
 
 // Constraint-aware optimization logic (adapted from Route Tester)
+function hasValidRouteCoordinates(order) {
+    const latitude = Number(order.latitude);
+    const longitude = Number(order.longitude);
+    return Number.isFinite(latitude) && Number.isFinite(longitude)
+        && latitude >= -90 && latitude <= 90
+        && longitude >= -180 && longitude <= 180;
+}
+
+function routeLocationForOrder(order) {
+    if (hasValidRouteCoordinates(order)) {
+        return {
+            lat: Number(order.latitude),
+            lng: Number(order.longitude)
+        };
+    }
+    return order.address;
+}
+
 function optimizeConstraintAwareRoute(orders) {
     if (!orders || orders.length === 0) {
         alert('No orders to optimize.');
         return;
     }
     // Validate addresses
-    const invalidAddresses = orders.filter(o => !o.address || o.address.trim().length < 10);
+    const invalidAddresses = orders.filter(o =>
+        !hasValidRouteCoordinates(o) && (!o.address || o.address.trim().length < 10)
+    );
     if (invalidAddresses.length > 0) {
         document.getElementById('route-info').innerHTML = `<div class="alert alert-danger">❌ Invalid addresses detected:<br><small>${invalidAddresses.map(o => o.customer_name + ': ' + o.address).join('<br>')}</small></div>`;
         return;
     }
     // Prepare waypoints
-    const waypoints = orders.map(order => ({ location: order.address, stopover: true }));
+    const waypoints = orders.map(order => ({ location: routeLocationForOrder(order), stopover: true }));
     if (waypoints.length > 25) {
         document.getElementById('route-info').innerHTML = `<div class="alert alert-danger">❌ Too many stops (${waypoints.length}) for route optimization. Please reduce to 25 or fewer.</div>`;
         return;
@@ -1055,7 +1564,7 @@ function moveCustomerOneStepEarlier(customerOrder, targetCustomer, orders) {
 // Get route for a specific order
 function getRouteForOrder(customerOrder, orders) {
     return new Promise(resolve => {
-        const waypoints = customerOrder.map(order => ({ location: order.address, stopover: true }));
+        const waypoints = customerOrder.map(order => ({ location: routeLocationForOrder(order), stopover: true }));
         const request = {
             origin: '484 5th Street, San Francisco, CA',
             destination: '484 5th Street, San Francisco, CA',
@@ -1309,18 +1818,20 @@ function editAssignments(driverId) {
     `;
     
     driverOrders.orders.forEach(order => {
+        const isLocked = ['delivered', 'in_transit'].includes(order.delivery_status || '');
         content += `
-            <div class="assignment-item" data-order-id="${order.id}">
+            <div class="assignment-item${isLocked ? ' assignment-item-locked' : ''}" data-order-id="${order.id}">
                 <div class="assignment-info">
                     <div class="customer-name">${order.customer_name}</div>
                     <div class="customer-address">${order.address}</div>
+                    ${isLocked ? `<div class="route-stop-lock-note">${order.delivery_status === 'delivered' ? 'Completed' : 'In transit'} — kept on this route</div>` : ''}
                 </div>
                 <div class="assignment-controls">
                     <input type="number" class="route-order-input" value="${order.route_order || 0}" 
-                           placeholder="Route Order" min="1">
+                           placeholder="Route Order" min="1" ${isLocked ? 'disabled' : ''}>
                     <input type="time" class="delivery-time-input" value="${order.scheduled_delivery_time || ''}" 
-                           placeholder="Delivery Time">
-                    <button class="btn btn-sm btn-outline-danger" onclick="removeAssignment(${order.id})">Remove</button>
+                           placeholder="Delivery Time" ${isLocked ? 'disabled' : ''}>
+                    ${isLocked ? '' : `<button class="btn btn-sm btn-outline-danger" onclick="removeAssignment(${order.id})">Remove</button>`}
                 </div>
             </div>
         `;
@@ -1329,7 +1840,7 @@ function editAssignments(driverId) {
     content += `
             </div>
             <div class="add-assignment">
-                <h5>Add Orders</h5>
+                <h5>Add Existing Daily Orders</h5>
                 <select id="add-order-select" onchange="addAssignment(this.value)">
                     <option value="">Select order to add...</option>
     `;
@@ -1342,6 +1853,10 @@ function editAssignments(driverId) {
     
     content += `
                 </select>
+                <p class="add-customer-edit-hint">
+                    Need a customer without a daily order?
+                    <button type="button" class="btn-link" onclick="closeEditModal(); openAddCustomerModal(${driverId});">Add customer to route…</button>
+                </p>
             </div>
         </div>
     `;
@@ -1359,6 +1874,7 @@ function addAssignment(orderId) {
     if (!order) return;
     
     const assignmentsList = document.querySelector('.assignments-list');
+    const nextRouteOrder = assignmentsList.querySelectorAll('.assignment-item').length + 1;
     const assignmentItem = document.createElement('div');
     assignmentItem.className = 'assignment-item';
     assignmentItem.dataset.orderId = orderId;
@@ -1368,7 +1884,7 @@ function addAssignment(orderId) {
             <div class="customer-address">${order.address}</div>
         </div>
         <div class="assignment-controls">
-            <input type="number" class="route-order-input" value="0" placeholder="Route Order" min="1">
+            <input type="number" class="route-order-input" value="${nextRouteOrder}" placeholder="Route Order" min="1">
             <input type="time" class="delivery-time-input" value="" placeholder="Delivery Time">
             <button class="btn btn-sm btn-outline-danger" onclick="removeAssignment(${orderId})">Remove</button>
         </div>
@@ -1378,22 +1894,121 @@ function addAssignment(orderId) {
     document.getElementById('add-order-select').value = '';
 }
 
-// Remove assignment from main view (immediate database removal)
-function removeAssignmentFromDatabase(orderId) {
-    if (!confirm('Are you sure you want to remove this assignment?')) {
+// Transfer one or more stops to another driver
+function transferAssignments(dailyOrderIds, fromDriverId, toDriverId, options = {}) {
+    toDriverId = parseInt(toDriverId, 10);
+    fromDriverId = fromDriverId ? parseInt(fromDriverId, 10) : null;
+
+    if (!toDriverId || toDriverId <= 0) {
+        alert('Choose a destination driver');
+        return Promise.reject(new Error('no_target_driver'));
+    }
+
+    const orderIds = (Array.isArray(dailyOrderIds) ? dailyOrderIds : [dailyOrderIds])
+        .map(id => parseInt(id, 10))
+        .filter(id => id > 0);
+
+    if (orderIds.length === 0) {
+        alert('No stops selected to move');
+        return Promise.reject(new Error('no_orders'));
+    }
+
+    const confirmMessage = options.confirmMessage
+        || ('Move ' + orderIds.length + ' stop' + (orderIds.length === 1 ? '' : 's') + ' to the selected driver?');
+    if (options.skipConfirm !== true && !confirm(confirmMessage)) {
+        return Promise.reject(new Error('cancelled'));
+    }
+
+    let body = 'action=transfer_assignments'
+        + '&to_driver_id=' + toDriverId
+        + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
+        + '&daily_order_ids=' + encodeURIComponent(JSON.stringify(orderIds));
+    if (fromDriverId && fromDriverId > 0) {
+        body += '&from_driver_id=' + fromDriverId;
+    }
+
+    return fetch('driver_assignment.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (options.reload !== false) {
+                location.reload();
+            }
+            return data;
+        }
+        throw new Error(data.error || 'Transfer failed');
+    })
+    .catch(error => {
+        if (error.message === 'cancelled') {
+            throw error;
+        }
+        console.error('Error:', error);
+        alert('Error moving stops: ' + error.message);
+        throw error;
+    });
+}
+
+function moveStopToDriver(orderId, fromDriverId, selectEl) {
+    const toDriverId = parseInt(selectEl.value, 10);
+    if (!toDriverId || toDriverId <= 0) {
         return;
     }
-    
+
+    transferAssignments([orderId], fromDriverId, toDriverId)
+        .catch(() => {
+            selectEl.value = '';
+        });
+}
+
+function moveAllStops(fromDriverId) {
+    const selectEl = document.getElementById('move-all-select-' + fromDriverId);
+    const toDriverId = parseInt(selectEl && selectEl.value, 10);
+    if (!toDriverId || toDriverId <= 0) {
+        alert('Choose a destination driver from the "Move all to…" dropdown');
+        return;
+    }
+
+    const routeList = document.querySelector('.route-order-list[data-driver-id="' + fromDriverId + '"]');
+    const orderIds = routeList
+        ? Array.from(routeList.querySelectorAll('.order-item:not(.order-item-locked)')).map(item => parseInt(item.dataset.orderId, 10))
+        : [];
+
+    if (orderIds.length === 0) {
+        alert('No movable stops on this driver');
+        return;
+    }
+
+    transferAssignments(orderIds, fromDriverId, toDriverId, {
+        confirmMessage: 'Move all ' + orderIds.length + ' stop' + (orderIds.length === 1 ? '' : 's') + ' to the selected driver?'
+    }).catch(() => {
+        if (selectEl) {
+            selectEl.value = '';
+        }
+    });
+}
+
+// Remove assignment from main view (immediate database removal)
+function removeAssignmentFromDatabase(orderId) {
+    if (!confirm(<?= json_encode(bakery_t('driver_assignment.unassign_confirm')) ?>)) {
+        return;
+    }
+
     // Find the driver ID for this order
     const orderItem = document.querySelector(`[data-order-id="${orderId}"]`);
     const driverSection = orderItem.closest('.driver-section');
     const driverId = driverSection.dataset.driverId;
-    
+
     if (!driverId) {
         alert('Could not determine driver ID');
         return;
     }
-    
+
     // Remove the assignment from database
     fetch('driver_assignment.php', {
         method: 'POST',
@@ -1429,7 +2044,7 @@ function removeAssignment(orderId) {
 function saveAssignments(assignments = null, mode = 'replace') {
     if (!assignments) {
         // Collect assignments from edit modal
-        const assignmentItems = document.querySelectorAll('.assignment-item');
+        const assignmentItems = document.querySelectorAll('#edit-assignments-content .assignment-item');
         assignments = [];
         
         assignmentItems.forEach(item => {
@@ -1449,14 +2064,20 @@ function saveAssignments(assignments = null, mode = 'replace') {
         mode = 'replace';
     }
     
-    if (assignments.length === 0) {
-        alert('No assignments to save');
+    // Use the driver_id from the first assignment if currentDriverId is not set
+    const saveMode = mode === 'append' ? 'append' : 'replace';
+    const driverId = currentDriverId || (assignments[0] && assignments[0].driver_id);
+    if (!driverId) {
+        alert('Choose a driver before saving');
         return;
     }
-    
-    // Use the driver_id from the first assignment if currentDriverId is not set
-    const driverId = currentDriverId || assignments[0].driver_id;
-    const saveMode = mode === 'append' ? 'append' : 'replace';
+    if (assignments.length === 0 && saveMode === 'append') {
+        alert('Check one or more stops to add');
+        return;
+    }
+    if (assignments.length === 0 && !confirm('Clear every movable stop from this driver\'s route for this date?')) {
+        return;
+    }
     
     fetch('driver_assignment.php', {
         method: 'POST',
@@ -1489,6 +2110,192 @@ function closeEditModal() {
     document.getElementById('edit-modal').style.display = 'none';
     currentDriverId = null;
 }
+
+function buildStandingProductOptions(selectedId) {
+    const products = driverAssignmentConfig.productsForStanding || [];
+    const byLine = {};
+    products.forEach(p => {
+        const line = p.product_line_name || 'Other';
+        if (!byLine[line]) {
+            byLine[line] = [];
+        }
+        byLine[line].push(p);
+    });
+    let html = '<option value="">Choose product…</option>';
+    Object.keys(byLine).sort().forEach(line => {
+        html += '<optgroup label="' + line.replace(/"/g, '&quot;') + '">';
+        byLine[line].forEach(p => {
+            const sel = parseInt(selectedId, 10) === parseInt(p.id, 10) ? ' selected' : '';
+            html += '<option value="' + p.id + '"' + sel + '>' + p.name + '</option>';
+        });
+        html += '</optgroup>';
+    });
+    return html;
+}
+
+function resetAddCustomerModal() {
+    document.getElementById('add-customer-search').value = '';
+    document.getElementById('add-customer-save-standing-route').checked = false;
+    document.getElementById('add-customer-apply-pan-dulce').value = '0';
+    document.getElementById('add-customer-standing-rows').innerHTML = '';
+    document.getElementById('add-customer-status').textContent = '';
+    setAddCustomerStandingOptionsVisibility();
+    filterAddCustomerOptions();
+}
+
+function setAddCustomerStandingOptionsVisibility() {
+    const saveStandingRoute = document.getElementById('add-customer-save-standing-route')?.checked;
+    const standingSection = document.getElementById('add-customer-standing-section');
+    if (standingSection) {
+        standingSection.hidden = !saveStandingRoute;
+    }
+    if (!saveStandingRoute) {
+        document.getElementById('add-customer-apply-pan-dulce').value = '0';
+    }
+}
+
+function openAddCustomerModal(driverId) {
+    driverId = parseInt(driverId, 10);
+    document.getElementById('add-customer-driver-id').value = driverId > 0 ? String(driverId) : '';
+    const driverSelect = document.getElementById('add-customer-driver-select');
+    if (driverSelect && driverId > 0) {
+        driverSelect.value = String(driverId);
+    }
+    resetAddCustomerModal();
+    document.getElementById('add-customer-modal').style.display = 'flex';
+    window.setTimeout(() => document.getElementById('add-customer-search')?.focus(), 0);
+}
+
+function closeAddCustomerModal() {
+    document.getElementById('add-customer-modal').style.display = 'none';
+}
+
+function filterAddCustomerOptions() {
+    const searchEl = document.getElementById('add-customer-search');
+    const selectEl = document.getElementById('add-customer-select');
+    if (!searchEl || !selectEl) {
+        return;
+    }
+    const query = searchEl.value.trim().toLowerCase();
+    Array.from(selectEl.options).forEach(opt => {
+        const blob = (opt.dataset.search || opt.textContent || '').toLowerCase();
+        opt.hidden = query !== '' && !blob.includes(query);
+    });
+    const visible = Array.from(selectEl.options).filter(opt => !opt.hidden);
+    if (visible.length > 0 && (!selectEl.value || selectEl.selectedOptions[0]?.hidden)) {
+        selectEl.value = visible[0].value;
+    }
+}
+
+function addStandingOrderRow(productId, quantity) {
+    const container = document.getElementById('add-customer-standing-rows');
+    const row = document.createElement('div');
+    row.className = 'add-customer-standing-row';
+    row.innerHTML = `
+        <select class="standing-product-select">${buildStandingProductOptions(productId || '')}</select>
+        <input type="number" class="standing-qty-input" min="1" step="1" value="${quantity || 1}">
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.add-customer-standing-row').remove()">Remove</button>
+    `;
+    container.appendChild(row);
+    document.getElementById('add-customer-apply-pan-dulce').value = '0';
+}
+
+function applyPanDulceInAddModal() {
+    document.getElementById('add-customer-standing-rows').innerHTML = '';
+    document.getElementById('add-customer-apply-pan-dulce').value = '1';
+    document.getElementById('add-customer-status').textContent =
+        'Pan Dulce standard will be applied when you add this customer.';
+}
+
+function collectStandingOrderLines() {
+    if (!document.getElementById('add-customer-save-standing-route')?.checked) {
+        return [];
+    }
+    const lines = [];
+    document.querySelectorAll('#add-customer-standing-rows .add-customer-standing-row').forEach(row => {
+        const productId = parseInt(row.querySelector('.standing-product-select')?.value, 10);
+        const quantity = parseInt(row.querySelector('.standing-qty-input')?.value, 10);
+        if (productId > 0 && quantity > 0) {
+            lines.push({ product_id: productId, quantity: quantity });
+        }
+    });
+    return lines;
+}
+
+function submitAddCustomerToRoute() {
+    const customerId = parseInt(document.getElementById('add-customer-select')?.value, 10);
+    const driverId = parseInt(document.getElementById('add-customer-driver-select')?.value, 10);
+    const saveStandingRoute = document.getElementById('add-customer-save-standing-route')?.checked;
+    const applyPanDulce = saveStandingRoute
+        && document.getElementById('add-customer-apply-pan-dulce')?.value === '1';
+    const standingOrderLines = collectStandingOrderLines();
+    const statusEl = document.getElementById('add-customer-status');
+
+    if (!customerId || customerId <= 0) {
+        alert('Choose a customer');
+        return;
+    }
+    if (!driverId || driverId <= 0) {
+        alert('Choose a driver');
+        return;
+    }
+
+    const assignedDriverId = parseInt(
+        driverAssignmentConfig.assignedCustomerIdsToday[String(customerId)]
+            || driverAssignmentConfig.assignedCustomerIdsToday[customerId]
+            || 0,
+        10
+    );
+    if (assignedDriverId > 0 && assignedDriverId === driverId) {
+        alert('This customer is already on this driver\'s route today.');
+        return;
+    }
+    if (assignedDriverId > 0 && assignedDriverId !== driverId) {
+        if (!confirm('This customer is already on another driver\'s route today. Move them to the selected driver?')) {
+            return;
+        }
+    }
+
+    if (statusEl) {
+        statusEl.textContent = 'Adding customer…';
+    }
+
+    let body = 'action=add_customer_to_route'
+        + '&customer_id=' + customerId
+        + '&driver_id=' + driverId
+        + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date)
+        + '&save_standing_route=' + (saveStandingRoute ? '1' : '0')
+        + '&apply_pan_dulce=' + (applyPanDulce ? '1' : '0')
+        + '&standing_order_lines=' + encodeURIComponent(JSON.stringify(standingOrderLines));
+
+    fetch('driver_assignment.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+            return;
+        }
+        throw new Error(data.error || 'Failed to add customer');
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        if (statusEl) {
+            statusEl.textContent = '';
+        }
+        alert('Error adding customer: ' + error.message);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const searchEl = document.getElementById('add-customer-search');
+    if (searchEl) {
+        searchEl.addEventListener('input', filterAddCustomerOptions);
+    }
+});
 
 function getSelectedUnassignedOrderIds() {
     return Array.from(document.querySelectorAll('.unassigned-checkbox:checked'))
@@ -1542,6 +2349,62 @@ function assignSelectedToDriver() {
     saveAssignments(assignments, 'append');
 }
 
+function updateStandingRouteSelectStyle(selectEl) {
+    const driverId = parseInt(selectEl.value, 10);
+    const driverInfo = driverAssignmentConfig.driversById[String(driverId)] || driverAssignmentConfig.driversById[driverId];
+    if (driverId > 0 && driverInfo) {
+        selectEl.style.backgroundColor = driverInfo.color;
+        selectEl.style.color = '#fff';
+        selectEl.style.borderColor = 'transparent';
+    } else {
+        selectEl.style.backgroundColor = '';
+        selectEl.style.color = '';
+        selectEl.style.borderColor = '';
+    }
+}
+
+function saveStandingRoute(selectEl) {
+    const customerId = parseInt(selectEl.dataset.customerId, 10);
+    const dayOfWeek = parseInt(selectEl.dataset.day, 10);
+    const driverId = parseInt(selectEl.value, 10);
+
+    if (!customerId || !dayOfWeek) {
+        alert('Could not determine customer or day');
+        return;
+    }
+
+    selectEl.disabled = true;
+
+    fetch('driver_assignment.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'action=save_standing_route'
+            + '&customer_id=' + customerId
+            + '&day_of_week=' + dayOfWeek
+            + '&driver_id=' + driverId
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateStandingRouteSelectStyle(selectEl);
+            if (dayOfWeek === driverAssignmentConfig.currentDayOfWeek) {
+                location.reload();
+            }
+        } else {
+            alert('Error saving standing route: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error saving standing route');
+    })
+    .finally(() => {
+        selectEl.disabled = false;
+    });
+}
+
 // Assign a single order to a driver without wiping that driver's existing stops
 function assignToDriver(orderId, driverId) {
     driverId = parseInt(driverId, 10);
@@ -1572,6 +2435,8 @@ function showDatePicker() {
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
+    refreshAllMainViewRouteTimes();
+
     // Load Google Maps API with async, defer, and onload (no callback in URL)
     const script = document.createElement('script');
     script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(driverAssignmentConfig.mapsKey) + '&libraries=geometry';
@@ -1579,24 +2444,31 @@ document.addEventListener('DOMContentLoaded', function() {
     script.defer = true;
     script.onload = function() {
         if (typeof initMap === 'function') initMap();
+        refreshAllMainViewRouteTimes();
     };
     document.head.appendChild(script);
     
     // Setup drag and drop for main view
     setupMainViewDragAndDrop();
     updateBulkSelectedCount();
+
 });
 
 // Setup drag and drop functionality for main driver assignment view
 function setupMainViewDragAndDrop() {
     const routeLists = document.querySelectorAll('.route-order-list');
-    
+    let draggedItem = null;
+    let draggedIndex = null;
+    let sourceRouteList = null;
+    let sourceDriverId = null;
+
     routeLists.forEach(routeList => {
-        let draggedItem = null;
-        let draggedIndex = null;
-        
-        // Add event listeners to all draggable items in this driver's section
-        const items = routeList.querySelectorAll('.order-item');
+        routeList.addEventListener('dragover', handleRouteListDragOver);
+        routeList.addEventListener('drop', handleRouteListDrop);
+        routeList.addEventListener('dragenter', handleRouteListDragEnter);
+        routeList.addEventListener('dragleave', handleRouteListDragLeave);
+
+        const items = routeList.querySelectorAll('.order-item[draggable="true"]');
         items.forEach(item => {
             item.addEventListener('dragstart', handleMainDragStart);
             item.addEventListener('dragend', handleMainDragEnd);
@@ -1605,60 +2477,166 @@ function setupMainViewDragAndDrop() {
             item.addEventListener('dragenter', handleMainDragEnter);
             item.addEventListener('dragleave', handleMainDragLeave);
         });
-        
-        function handleMainDragStart(e) {
-            draggedItem = this;
-            draggedIndex = Array.from(routeList.querySelectorAll('.order-item')).indexOf(this);
-            this.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/html', this.outerHTML);
+    });
+
+    function handleMainDragStart(e) {
+        draggedItem = this;
+        sourceRouteList = this.closest('.route-order-list');
+        sourceDriverId = sourceRouteList ? sourceRouteList.dataset.driverId : null;
+        draggedIndex = sourceRouteList
+            ? Array.from(sourceRouteList.querySelectorAll('.order-item')).indexOf(this)
+            : null;
+        this.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', this.dataset.orderId || '');
+    }
+
+    function handleMainDragEnd() {
+        this.classList.remove('dragging');
+        routeLists.forEach(list => list.classList.remove('drag-over'));
+        draggedItem = null;
+        draggedIndex = null;
+        sourceRouteList = null;
+        sourceDriverId = null;
+    }
+
+    function handleMainDragOver(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleRouteListDragOver(e) {
+        if (!draggedItem) {
+            return;
         }
-        
-        function handleMainDragEnd(e) {
-            this.classList.remove('dragging');
-            draggedItem = null;
-            draggedIndex = null;
-        }
-        
-        function handleMainDragOver(e) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        }
-        
-        function handleMainDragEnter(e) {
-            e.preventDefault();
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleMainDragEnter(e) {
+        e.preventDefault();
+        if (draggedItem && draggedItem !== this) {
             this.classList.add('drag-over');
         }
-        
-        function handleMainDragLeave(e) {
+    }
+
+    function handleRouteListDragEnter(e) {
+        if (!draggedItem) {
+            return;
+        }
+        e.preventDefault();
+        this.classList.add('drag-over');
+    }
+
+    function handleMainDragLeave() {
+        this.classList.remove('drag-over');
+    }
+
+    function handleRouteListDragLeave(e) {
+        if (!this.contains(e.relatedTarget)) {
             this.classList.remove('drag-over');
         }
-        
-        function handleMainDrop(e) {
-            e.preventDefault();
-            this.classList.remove('drag-over');
-            
-            if (draggedItem === this) return;
-            
-            const dropIndex = Array.from(routeList.querySelectorAll('.order-item')).indexOf(this);
-            const driverId = routeList.dataset.driverId;
-            
-            // Reorder the items
-            if (draggedIndex < dropIndex) {
-                // Moving down
-                this.parentNode.insertBefore(draggedItem, this.nextSibling);
-            } else {
-                // Moving up
-                this.parentNode.insertBefore(draggedItem, this);
+    }
+
+    function handleMainDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.classList.remove('drag-over');
+
+        if (!draggedItem || draggedItem === this) {
+            return;
+        }
+
+        const targetRouteList = this.closest('.route-order-list');
+        const targetDriverId = targetRouteList ? targetRouteList.dataset.driverId : null;
+
+        if (targetRouteList && sourceRouteList && targetDriverId !== sourceDriverId) {
+            moveStopBetweenDrivers(draggedItem, sourceRouteList, targetRouteList, this);
+            return;
+        }
+
+        const dropIndex = Array.from(targetRouteList.querySelectorAll('.order-item')).indexOf(this);
+        if (draggedIndex < dropIndex) {
+            this.parentNode.insertBefore(draggedItem, this.nextSibling);
+        } else {
+            this.parentNode.insertBefore(draggedItem, this);
+        }
+
+        updateMainViewRouteNumbers(targetRouteList);
+        saveMainViewOrder(targetDriverId, targetRouteList);
+    }
+
+    function handleRouteListDrop(e) {
+        if (e.target.classList && e.target.classList.contains('order-item')) {
+            return;
+        }
+
+        e.preventDefault();
+        this.classList.remove('drag-over');
+
+        if (!draggedItem || !sourceRouteList) {
+            return;
+        }
+
+        const targetDriverId = this.dataset.driverId;
+        if (targetDriverId !== sourceDriverId) {
+            moveStopBetweenDrivers(draggedItem, sourceRouteList, this, null);
+            return;
+        }
+
+        this.appendChild(draggedItem);
+        updateMainViewRouteNumbers(this);
+        saveMainViewOrder(targetDriverId, this);
+    }
+
+    function moveStopBetweenDrivers(item, fromList, toList, beforeItem) {
+        const orderId = parseInt(item.dataset.orderId, 10);
+        const fromDriverId = parseInt(fromList.dataset.driverId, 10);
+        const toDriverId = parseInt(toList.dataset.driverId, 10);
+
+        if (!orderId || !fromDriverId || !toDriverId || fromDriverId === toDriverId) {
+            return;
+        }
+
+        const emptyPlaceholder = toList.querySelector('.no-orders-inline');
+        if (emptyPlaceholder) {
+            emptyPlaceholder.remove();
+            toList.classList.remove('route-order-list-empty');
+        }
+
+        if (beforeItem) {
+            toList.insertBefore(item, beforeItem);
+        } else {
+            toList.appendChild(item);
+        }
+        updateMainViewRouteNumbers(toList);
+
+        const saveIndicator = document.createElement('div');
+        saveIndicator.className = 'save-indicator';
+        saveIndicator.textContent = 'Moving...';
+        saveIndicator.style.cssText = 'position: absolute; top: 10px; right: 10px; background: #007bff; color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; z-index: 100;';
+        const driverSection = toList.closest('.driver-section');
+        driverSection.style.position = 'relative';
+        driverSection.appendChild(saveIndicator);
+
+        transferAssignments([orderId], fromDriverId, toDriverId, {
+            skipConfirm: true,
+            reload: false
+        })
+        .then(() => {
+            saveIndicator.textContent = 'Moved!';
+            saveIndicator.style.background = '#28a745';
+            setTimeout(() => location.reload(), 600);
+        })
+        .catch(() => {
+            fromList.appendChild(item);
+            updateMainViewRouteNumbers(fromList);
+            updateMainViewRouteNumbers(toList);
+            if (saveIndicator.parentNode) {
+                saveIndicator.parentNode.removeChild(saveIndicator);
             }
-            
-            // Update route order numbers
-            updateMainViewRouteNumbers(routeList);
-            
-            // Save the new order automatically
-            saveMainViewOrder(driverId, routeList);
-        }
-    });
+        });
+    }
 }
 
 // Update route order numbers in main view
@@ -1674,18 +2652,8 @@ function updateMainViewRouteNumbers(routeList) {
 
 // Save the new order from main view drag and drop
 function saveMainViewOrder(driverId, routeList) {
-    const items = routeList.querySelectorAll('.order-item');
-    const assignments = Array.from(items).map((item, index) => {
-        const orderId = item.dataset.orderId;
-        return {
-            daily_order_id: orderId,
-            driver_id: parseInt(driverId),
-            route_order: index + 1,
-            scheduled_delivery_time: null // Keep existing time or recalculate if needed
-        };
-    });
-    
-    // Show saving indicator
+    updateMainViewRoutePresentation(routeList, null);
+
     const driverSection = routeList.closest('.driver-section');
     const saveIndicator = document.createElement('div');
     saveIndicator.className = 'save-indicator';
@@ -1693,14 +2661,25 @@ function saveMainViewOrder(driverId, routeList) {
     saveIndicator.style.cssText = 'position: absolute; top: 10px; right: 10px; background: #28a745; color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; z-index: 100;';
     driverSection.style.position = 'relative';
     driverSection.appendChild(saveIndicator);
-    
-    // Save assignments
-    fetch('driver_assignment.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'action=assign_orders&driver_id=' + driverId + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date) + '&assignments=' + encodeURIComponent(JSON.stringify(assignments))
+
+    refreshMainViewRouteTimes(routeList).then(schedule => {
+        const stops = getMainViewRouteStops(routeList);
+        const assignments = stops.map((stop, index) => ({
+            daily_order_id: stop.orderId,
+            driver_id: parseInt(driverId, 10),
+            route_order: index + 1,
+            scheduled_delivery_time: schedule
+                ? minutesToTimeString(schedule.arrivals[index])
+                : null
+        }));
+
+        return fetch('driver_assignment.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'action=assign_orders&driver_id=' + driverId + '&delivery_date=' + encodeURIComponent(driverAssignmentConfig.date) + '&assignments=' + encodeURIComponent(JSON.stringify(assignments))
+        });
     })
     .then(response => response.json())
     .then(data => {
@@ -1853,6 +2832,10 @@ function saveMainViewOrder(driverId, routeList) {
     font-weight: 600;
 }
 
+.route-time-estimate {
+    color: #495057;
+}
+
 .no-orders {
     text-align: center;
     padding: 40px;
@@ -1868,6 +2851,90 @@ function saveMainViewOrder(driverId, routeList) {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 48px;
+}
+
+.route-order-list-empty {
+    border: 2px dashed #dee2e6;
+    border-radius: 6px;
+    padding: 12px;
+    background: #fcfcfd;
+}
+
+.route-order-list.drag-over {
+    border-color: #007bff;
+    background: #f0f7ff;
+}
+
+.no-orders-inline {
+    text-align: center;
+    padding: 16px;
+    color: #6c757d;
+}
+
+.no-orders-inline p {
+    margin: 4px 0;
+}
+
+.drop-hint {
+    font-size: 0.85rem;
+    color: #adb5bd;
+    font-style: italic;
+}
+
+.order-item-locked {
+    cursor: default;
+    opacity: 0.85;
+}
+
+.order-item-locked .drag-handle {
+    cursor: default;
+}
+
+.route-stop-lock-note {
+    color: #6c5a38;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.assignment-item-locked {
+    background: #f7f4ed;
+    border-color: #d8cdb8;
+}
+
+.assignment-item-locked input:disabled {
+    background: #ece7dc;
+    color: #6c6255;
+    cursor: not-allowed;
+}
+
+.delivery-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #fff3cd;
+    color: #856404;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.order-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.move-stop-select,
+.move-all-select {
+    min-width: 130px;
+    font-size: 0.85rem;
+}
+
+.driver-controls .move-all-select {
+    max-width: 160px;
 }
 
 .order-item {
@@ -1938,6 +3005,16 @@ function saveMainViewOrder(driverId, routeList) {
     margin-bottom: 5px;
 }
 
+.customer-name a.customer-hub-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.customer-name a.customer-hub-link:hover {
+    color: #0d6efd;
+    text-decoration: underline;
+}
+
 .customer-address {
     font-size: 0.9em;
     color: #6c757d;
@@ -1963,15 +3040,20 @@ function saveMainViewOrder(driverId, routeList) {
     font-weight: 500;
 }
 
-.order-amount {
+.delivery-time.delivery-time-estimated {
     color: #6c757d;
+    font-style: italic;
     font-weight: 500;
 }
 
-.order-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
+.delivery-time.delivery-time-exact {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.order-amount {
+    color: #6c757d;
+    font-weight: 500;
 }
 
 .driver-select {
@@ -2040,8 +3122,72 @@ function saveMainViewOrder(driverId, routeList) {
     gap: 10px;
 }
 
+.unassigned-week-header,
+.order-item.unassigned-item {
+    display: grid;
+    grid-template-columns: auto minmax(220px, 1.2fr) minmax(420px, 2fr) auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.unassigned-week-header {
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #495057;
+}
+
+.unassigned-week-header-store,
+.unassigned-week-header-actions {
+    text-align: center;
+}
+
+.unassigned-week-header-days,
+.weekly-standing-routes {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(72px, 1fr));
+    gap: 6px;
+}
+
+.unassigned-week-header-day {
+    text-align: center;
+}
+
+.unassigned-week-header-day.is-current-day,
+.weekly-route-day.is-current-day .standing-route-select {
+    box-shadow: 0 0 0 2px rgba(78, 115, 223, 0.35);
+}
+
+.weekly-route-day {
+    min-width: 0;
+}
+
+.standing-route-select {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 4px;
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+}
+
+.standing-route-select:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.unassigned-row-actions {
+    display: flex;
+    justify-content: flex-end;
+    min-width: 140px;
+}
+
 .order-item.unassigned-item {
     cursor: default;
+    padding: 12px;
 }
 
 .order-item.unassigned-item:hover {
@@ -2070,6 +3216,45 @@ function saveMainViewOrder(driverId, routeList) {
 
     .bulk-assign-bar .driver-select,
     .bulk-assign-bar .btn {
+        width: 100%;
+    }
+
+    .unassigned-week-header {
+        display: none;
+    }
+
+    .unassigned-week-header-days,
+    .weekly-standing-routes {
+        grid-template-columns: repeat(7, minmax(56px, 1fr));
+    }
+
+    .unassigned-week-header,
+    .order-item.unassigned-item {
+        grid-template-columns: auto 1fr;
+        grid-template-areas:
+            "check store"
+            "routes routes"
+            "actions actions";
+    }
+
+    .order-item.unassigned-item .order-check {
+        grid-area: check;
+    }
+
+    .order-item.unassigned-item .order-info {
+        grid-area: store;
+    }
+
+    .order-item.unassigned-item .weekly-standing-routes {
+        grid-area: routes;
+    }
+
+    .order-item.unassigned-item .unassigned-row-actions {
+        grid-area: actions;
+        justify-content: stretch;
+    }
+
+    .order-item.unassigned-item .unassigned-row-actions .btn {
         width: 100%;
     }
 }
@@ -2451,6 +3636,134 @@ function saveMainViewOrder(driverId, routeList) {
 @keyframes fadeInOut {
     0% { opacity: 0; transform: translateY(-10px); }
     100% { opacity: 1; transform: translateY(0); }
+}
+
+.empty-state-compact {
+    margin-bottom: 1rem;
+    padding: 0.85rem 1rem;
+    background: #fff3cd;
+    border: 1px solid #ffeeba;
+    border-radius: 6px;
+}
+
+.empty-state-compact p {
+    margin: 0;
+    color: #856404;
+}
+
+.add-customer-modal {
+    max-width: 640px;
+}
+
+.add-customer-intro {
+    color: #555;
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+.add-customer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+}
+
+.add-customer-field > span {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.add-customer-search {
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+#add-customer-select {
+    width: 100%;
+    min-height: 10rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.add-customer-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+.add-customer-standing-section {
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 0.85rem;
+    background: #f8f9fa;
+}
+
+.add-customer-standing-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-bottom: 0.65rem;
+}
+
+.add-customer-standing-hint {
+    color: #6c757d;
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+.add-customer-standing-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+}
+
+.add-customer-standing-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.add-customer-standing-row {
+    display: grid;
+    grid-template-columns: 1fr 5rem auto;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.add-customer-standing-row select,
+.add-customer-standing-row input {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.add-customer-status {
+    margin-top: 0.75rem;
+    color: #155724;
+    font-size: 0.9rem;
+}
+
+.add-customer-edit-hint {
+    margin: 0.65rem 0 0;
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: #007bff;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    font: inherit;
 }
 </style>
 

@@ -25,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 break;
                 
             case 'update_lead':
+                $allowedStatuses = ['new', 'contacted', 'interested', 'qualified', 'converted', 'closed'];
+                if (!in_array($_POST['status'] ?? '', $allowedStatuses, true)) {
+                    throw new InvalidArgumentException('Invalid pipeline stage.');
+                }
                 $stmt = $db->prepare("UPDATE leads SET customer_name = ?, contact_name = ?, phone = ?, email = ?, address = ?, notes = ?, status = ? WHERE id = ?");
                 $success = $stmt->execute([
                     $_POST['customer_name'],
@@ -37,6 +41,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $_POST['id']
                 ]);
                 echo json_encode(['success' => $success]);
+                break;
+
+            case 'convert_lead':
+                $leadId = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT);
+                if (!$leadId) {
+                    throw new InvalidArgumentException('A valid lead is required.');
+                }
+                $db->beginTransaction();
+                $stmt = $db->prepare('SELECT * FROM leads WHERE id = ? FOR UPDATE');
+                $stmt->execute([$leadId]);
+                $lead = $stmt->fetch();
+                if (!$lead) {
+                    throw new RuntimeException('Lead not found.');
+                }
+                if (!empty($lead['customer_id'])) {
+                    $customerId = (int)$lead['customer_id'];
+                    $stmt = $db->prepare("UPDATE leads SET status = 'converted' WHERE id = ?");
+                    $stmt->execute([$leadId]);
+                } else {
+                    $existingCustomer = $db->prepare('SELECT id FROM customers WHERE name = ? LIMIT 1');
+                    $existingCustomer->execute([$lead['customer_name']]);
+                    if ($existingCustomer->fetchColumn()) {
+                        throw new RuntimeException('A customer with this name already exists. Rename the lead or manage the existing customer.');
+                    }
+                    $stmt = $db->prepare('INSERT INTO customers (name, address, phone, email, is_active) VALUES (?, ?, ?, ?, 1)');
+                    $stmt->execute([$lead['customer_name'], $lead['address'], $lead['phone'], $lead['email']]);
+                    $customerId = (int)$db->lastInsertId();
+                    $stmt = $db->prepare("UPDATE leads SET status = 'converted', customer_id = ? WHERE id = ?");
+                    $stmt->execute([$customerId, $leadId]);
+                }
+                $db->commit();
+                echo json_encode(['success' => true, 'customer_id' => $customerId]);
                 break;
                 
             case 'delete_lead':
@@ -80,27 +116,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             default:
                 echo json_encode(['success' => false, 'error' => 'Invalid action']);
         }
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        http_response_code(400);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
     exit;
 }
 
-$page_title = 'Leads Management';
+$page_title = bakery_t('page.leads');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
 // Fetch all leads with contact count
 $leads = $db->query("
-    SELECT l.*, 
+    SELECT l.*,
+           MAX(c.is_active) AS linked_customer_active,
            COUNT(lc.id) as contact_count,
            MAX(lc.contact_date) as last_contact_date,
            SUM(CASE WHEN lc.follow_up_needed = 1 AND lc.follow_up_date <= CURDATE() THEN 1 ELSE 0 END) as overdue_followups
     FROM leads l
     LEFT JOIN lead_contacts lc ON l.id = lc.lead_id
+    LEFT JOIN customers c ON l.customer_id = c.id
     GROUP BY l.id
     ORDER BY l.created_at DESC
 ")->fetchAll();
+
+$pipelineCounts = array_fill_keys(['new', 'contacted', 'interested', 'qualified', 'converted', 'closed'], 0);
+foreach ($leads as $pipelineLead) {
+    if (isset($pipelineCounts[$pipelineLead['status']])) {
+        $pipelineCounts[$pipelineLead['status']]++;
+    }
+}
+$clientCounts = $db->query(
+    'SELECT SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_clients,
+            SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) AS inactive_clients
+     FROM customers'
+)->fetch();
+$activeClients = (int)($clientCounts['active_clients'] ?? 0);
+$inactiveClients = (int)($clientCounts['inactive_clients'] ?? 0);
 
 // Get status options
 $status_options = ['new', 'contacted', 'interested', 'qualified', 'converted', 'closed'];
@@ -113,6 +169,32 @@ $contact_modes = ['phone', 'email', 'in_person', 'text', 'social_media'];
         <p class="subtitle">Track prospects and manage contact history</p>
         <button id="add-lead-btn" class="btn btn-primary">+ Add New Lead</button>
     </div>
+
+    <section class="pipeline-section" aria-label="Customer lifecycle pipeline">
+        <div class="pipeline-heading">
+            <div><h2>Customer pipeline</h2><p>From first conversation through active and inactive client relationships.</p></div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="filterPipeline('all')">Show all leads</button>
+        </div>
+        <div class="pipeline-track">
+            <?php foreach (['new' => 'New', 'contacted' => 'Contacted', 'interested' => 'Interested', 'qualified' => 'Qualified'] as $stage => $label): ?>
+                <button type="button" class="pipeline-stage" onclick="filterPipeline('<?php echo $stage; ?>')">
+                    <span class="pipeline-count"><?php echo $pipelineCounts[$stage]; ?></span><span><?php echo $label; ?></span>
+                </button>
+            <?php endforeach; ?>
+            <div class="pipeline-stage client-stage active-stage">
+                <span class="pipeline-count"><?php echo $activeClients; ?></span><span>Active clients</span>
+                <a href="customer_overview.php?client_status=active">View clients</a>
+            </div>
+            <div class="pipeline-stage client-stage inactive-stage">
+                <span class="pipeline-count"><?php echo $inactiveClients; ?></span><span>Inactive clients</span>
+                <a href="customer_overview.php?client_status=inactive">Manage clients</a>
+            </div>
+        </div>
+        <div class="pipeline-exits">
+            <button type="button" onclick="filterPipeline('converted')">Converted lead records: <?php echo $pipelineCounts['converted']; ?></button>
+            <button type="button" onclick="filterPipeline('closed')">Closed/lost: <?php echo $pipelineCounts['closed']; ?></button>
+        </div>
+    </section>
 
     <!-- Add Lead Form (Hidden by default) -->
     <div id="add-lead-form" class="form-container" style="display: none;">
@@ -169,7 +251,7 @@ $contact_modes = ['phone', 'email', 'in_person', 'text', 'social_media'];
             </div>
         <?php else: ?>
             <?php foreach ($leads as $lead): ?>
-                <div class="lead-card" data-lead-id="<?php echo $lead['id']; ?>">
+                <div class="lead-card" data-lead-id="<?php echo $lead['id']; ?>" data-pipeline-status="<?php echo htmlspecialchars($lead['status']); ?>">
                     <div class="lead-header">
                         <div class="lead-info">
                             <h3 class="lead-name editable" data-field="customer_name" data-id="<?php echo $lead['id']; ?>">
@@ -190,6 +272,11 @@ $contact_modes = ['phone', 'email', 'in_person', 'text', 'social_media'];
                                 <?php endforeach; ?>
                             </select>
                             <div class="lead-actions">
+                                <?php if (empty($lead['customer_id']) && $lead['status'] !== 'closed'): ?>
+                                    <button class="btn btn-sm btn-convert" onclick="convertLead(<?php echo (int)$lead['id']; ?>, <?php echo htmlspecialchars(json_encode($lead['customer_name']), ENT_QUOTES, 'UTF-8'); ?>)" title="Create an active customer">Convert to client</button>
+                                <?php elseif (!empty($lead['customer_id'])): ?>
+                                    <a class="btn btn-sm btn-client-link" href="customer_record.php?customer_id=<?php echo (int)$lead['customer_id']; ?>"><?php echo $lead['linked_customer_active'] ? 'Active client' : 'Inactive client'; ?></a>
+                                <?php endif; ?>
                                 <button class="btn-icon" onclick="deleteLead(<?php echo $lead['id']; ?>)" title="Delete Lead">🗑️</button>
                             </div>
                         </div>
@@ -673,6 +760,28 @@ function toggleFollowUp(contactId, needed) {
         alert('Error updating follow-up');
     });
 }
+
+function filterPipeline(status) {
+    document.querySelectorAll('.lead-card').forEach(function(card) {
+        card.style.display = status === 'all' || card.dataset.pipelineStatus === status ? '' : 'none';
+    });
+}
+
+function convertLead(leadId, leadName) {
+    if (!confirm('Convert ' + leadName + ' into an active client?')) return;
+    const formData = new FormData();
+    formData.append('action', 'convert_lead');
+    formData.append('id', leadId);
+    fetch('', { method: 'POST', body: formData })
+        .then(function(response) {
+            return response.json().then(function(data) {
+                if (!response.ok || !data.success) throw new Error(data.error || 'Unable to convert lead.');
+                return data;
+            });
+        })
+        .then(function() { location.reload(); })
+        .catch(function(error) { alert('Error converting lead: ' + error.message); });
+}
 </script>
 
 <style>
@@ -700,6 +809,25 @@ function toggleFollowUp(contactId, needed) {
     color: #666;
     margin: 5px 0 0 0;
 }
+
+.pipeline-section { background: #fff; border: 1px solid #dee2e6; border-radius: 12px; padding: 20px; margin-bottom: 28px; }
+.pipeline-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.pipeline-heading h2 { margin: 0 0 4px; color: #2c3e50; }
+.pipeline-heading p { margin: 0; color: #6c757d; }
+.pipeline-track { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; }
+.pipeline-stage { position: relative; min-height: 92px; border: 0; border-radius: 9px; padding: 12px; background: #eef3f8; color: #34495e; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; }
+.pipeline-stage:not(:last-child)::after { content: '›'; position: absolute; right: -9px; z-index: 2; font-size: 25px; color: #7f8c8d; }
+.pipeline-count { font-size: 1.7rem; line-height: 1; font-weight: 800; margin-bottom: 7px; }
+.client-stage { cursor: default; }
+.client-stage a { font-size: .78rem; margin-top: 5px; color: inherit; }
+.active-stage { background: #d4edda; color: #155724; }
+.inactive-stage { background: #e2e3e5; color: #383d41; }
+.pipeline-exits { display: flex; gap: 10px; margin-top: 12px; }
+.pipeline-exits button { background: transparent; border: 0; color: #6c757d; text-decoration: underline; cursor: pointer; }
+.btn-convert { background: #28a745; color: #fff; }
+.btn-client-link { background: #d4edda; color: #155724; }
+
+@media (max-width: 900px) { .pipeline-track { grid-template-columns: repeat(2, 1fr); } .pipeline-stage::after { display: none; } }
 
 .btn {
     padding: 10px 20px;
@@ -1150,4 +1278,4 @@ function toggleFollowUp(contactId, needed) {
 }
 </style>
 
-<?php require_once 'includes/footer.php'; ?> 
+<?php require_once 'includes/footer.php'; ?>

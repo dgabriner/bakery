@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS users (
 INSERT INTO roles (slug, name, description) VALUES
 ('administrator', 'Administrator', 'Full system access'),
 ('manager', 'Manager', 'Operational management'),
-('driver', 'Driver', 'Delivery route access')
+('driver', 'Driver', 'Delivery route access'),
+('driver_assistant', 'Driver Assistant', 'Paired delivery route access')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO permissions (slug, description) VALUES
@@ -74,4 +75,10 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r
 JOIN permissions p ON p.slug = 'delivery.execute'
 WHERE r.slug = 'driver'
+ON DUPLICATE KEY UPDATE role_id = role_id;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r
+JOIN permissions p ON p.slug = 'delivery.execute'
+WHERE r.slug = 'driver_assistant'
 ON DUPLICATE KEY UPDATE role_id = role_id;

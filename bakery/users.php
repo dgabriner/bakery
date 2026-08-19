@@ -13,7 +13,7 @@ require_once __DIR__ . '/includes/auth.php';
 bakery_require_role(['administrator']);
 bakery_ensure_login_code_column($db);
 
-$page_title = 'User Management';
+$page_title = bakery_t('page.users');
 $error = '';
 $success = '';
 
@@ -22,6 +22,7 @@ $roleLabels = [
     'manager' => 'Manager',
     'baker' => 'Baker',
     'driver' => 'Driver',
+    'driver_assistant' => 'Driver Assistant',
 ];
 
 function bakery_users_page_roles(PDO $db) {
@@ -67,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Role not found.');
             }
 
-            if ($roleSlug !== 'driver') {
+            if (!bakery_is_driver_route_role($roleSlug)) {
                 $driverId = 0;
             }
             $driverIdValue = $driverId > 0 ? $driverId : null;
@@ -102,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      VALUES (?, ?, ?, ?, ?, ?, 1)'
                 );
                 $stmt->execute([$email, $hash, $code, $displayName, (int)$roleId, $driverIdValue]);
+                $id = (int)$db->lastInsertId();
                 $success = 'User created.';
             } else {
                 if ($id <= 0) {
@@ -124,6 +126,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $id,
                 ]);
                 $success = 'User updated.';
+            }
+
+            $pairingDate = trim((string)($_POST['pairing_date'] ?? ''));
+            if ($roleSlug === 'driver_assistant' && $pairingDate !== '') {
+                $date = DateTimeImmutable::createFromFormat('!Y-m-d', $pairingDate);
+                if (!$date || $date->format('Y-m-d') !== $pairingDate) {
+                    throw new Exception('Route pairing date must use YYYY-MM-DD.');
+                }
+                if ($driverIdValue === null) {
+                    throw new Exception('Choose the driver this assistant will pair with.');
+                }
+                if (!table_exists($db, 'driver_assistant_assignments')) {
+                    throw new Exception('Driver Assistant pairing is not installed yet. Run migration 045.');
+                }
+                $pair = $db->prepare(
+                    'INSERT INTO driver_assistant_assignments (assistant_user_id, driver_id, delivery_date)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE driver_id = VALUES(driver_id)'
+                );
+                $pair->execute([$id, $driverIdValue, $pairingDate]);
+                $success .= ' Route pairing saved for ' . $pairingDate . '.';
             }
         } elseif ($action === 'deactivate') {
             $id = (int)($_POST['id'] ?? 0);
@@ -259,8 +282,8 @@ require_once __DIR__ . '/includes/nav.php';
               </td>
               <td>
                 <strong><?php echo htmlspecialchars($u['display_name']); ?></strong>
-                <?php if ($u['role_slug'] === 'driver' && !empty($u['driver_name'])): ?>
-                  <div class="users-muted">Driver: <?php echo htmlspecialchars($u['driver_name']); ?></div>
+                <?php if (bakery_is_driver_route_role($u['role_slug']) && !empty($u['driver_name'])): ?>
+                  <div class="users-muted"><?php echo bakery_t($u['role_slug'] === 'driver_assistant' ? 'users.paired_driver' : 'users.driver'); ?>: <?php echo htmlspecialchars($u['driver_name']); ?></div>
                 <?php endif; ?>
               </td>
               <td><span class="users-code"><?php echo htmlspecialchars($u['login_code'] ?? '————'); ?></span></td>
@@ -322,7 +345,7 @@ require_once __DIR__ . '/includes/nav.php';
                value="<?php echo htmlspecialchars($editUser['login_code'] ?? ($_POST['login_code'] ?? '')); ?>">
 
         <div class="driver-link-fields" id="driverFields">
-          <label for="driver_id">Linked driver (for route access)</label>
+          <label for="driver_id"><?php bakery_te('users.route_driver'); ?></label>
           <select id="driver_id" name="driver_id">
             <option value="0">— None —</option>
             <?php
@@ -335,6 +358,13 @@ require_once __DIR__ . '/includes/nav.php';
               </option>
             <?php endforeach; ?>
           </select>
+        </div>
+
+        <div class="driver-link-fields" id="pairingDateFields">
+          <label for="pairing_date"><?php bakery_te('users.pairing_date'); ?></label>
+          <input type="text" id="pairing_date" name="pairing_date" inputmode="numeric" placeholder="YYYY-MM-DD"
+                 value="<?php echo htmlspecialchars($_POST['pairing_date'] ?? ''); ?>">
+          <div class="users-muted"><?php bakery_te('users.pairing_date_hint'); ?></div>
         </div>
 
         <label for="email">Email (optional identifier)</label>
@@ -366,7 +396,9 @@ require_once __DIR__ . '/includes/nav.php';
   var code = document.getElementById('login_code');
   function syncDriverFields() {
     if (!role || !fields) return;
-    fields.hidden = role.value !== 'driver';
+    var isRouteWorker = role.value === 'driver' || role.value === 'driver_assistant';
+    fields.hidden = !isRouteWorker;
+    document.getElementById('pairingDateFields').hidden = role.value !== 'driver_assistant';
   }
   if (role) {
     role.addEventListener('change', syncDriverFields);

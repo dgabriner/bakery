@@ -2,27 +2,33 @@
 /**
  * Authentication, authorization, and CSRF (Checkpoint 0D).
  *
- * Roles: administrator, manager, driver, baker (extensible via permissions tables).
+ * Roles: administrator, manager, driver, driver_assistant, baker (extensible via permissions tables).
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
-define('BAKERY_SESSION_IDLE_SECONDS', 8 * 60 * 60); // 8 hours idle
-define('BAKERY_SESSION_ABSOLUTE_SECONDS', 12 * 60 * 60);
+require_once __DIR__ . '/login_audit.php';
+
+// Bakery work often spans invoicing, dispatch, and a later photo at the next stop.
+// Keep a signed-in session through that operational window instead of making a
+// driver or manager re-enter a code mid-route. The lower-level PHP session store
+// is kept for the same duration in config.php.
+define('BAKERY_SESSION_IDLE_SECONDS', 30 * 24 * 60 * 60); // 30 days idle
+define('BAKERY_SESSION_ABSOLUTE_SECONDS', 90 * 24 * 60 * 60); // 90 days maximum
+define('BAKERY_DRIVER_SESSION_IDLE_SECONDS', 60 * 24 * 60 * 60); // 60 days idle
+define('BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS', 180 * 24 * 60 * 60); // 180 days maximum
 
 /** Fixed baker auto-login credentials (used by baker.php). */
-define('BAKERY_BAKER_EMAIL', 'juan.carlos@sourflour.local');
-define('BAKERY_BAKER_CODE', '1234');
-define('BAKERY_BAKER_DISPLAY_NAME', 'Juan Carlos Hernandez');
-define('BAKERY_NIKO_EMAIL', 'niko@sourflour.local');
-define('BAKERY_NIKO_CODE', '2468');
-define('BAKERY_NIKO_DISPLAY_NAME', 'Niko');
-
-/** Durable admin code login (danny@sourflour.org). */
-define('BAKERY_ADMIN_EMAIL', 'danny@sourflour.org');
-define('BAKERY_ADMIN_CODE', '9741');
-define('BAKERY_ADMIN_DISPLAY_NAME', 'Danny');
+define('BAKERY_BAKER_EMAIL', trim((string)($_ENV['BAKERY_BAKER_EMAIL'] ?? getenv('BAKERY_BAKER_EMAIL') ?: '')));
+define('BAKERY_BAKER_CODE', bakery_normalize_login_code($_ENV['BAKERY_BAKER_CODE'] ?? getenv('BAKERY_BAKER_CODE') ?: ''));
+define('BAKERY_BAKER_DISPLAY_NAME', trim((string)($_ENV['BAKERY_BAKER_DISPLAY_NAME'] ?? getenv('BAKERY_BAKER_DISPLAY_NAME') ?: 'Baker')));
+define('BAKERY_NIKO_EMAIL', trim((string)($_ENV['BAKERY_NIKO_EMAIL'] ?? getenv('BAKERY_NIKO_EMAIL') ?: '')));
+define('BAKERY_NIKO_CODE', bakery_normalize_login_code($_ENV['BAKERY_NIKO_CODE'] ?? getenv('BAKERY_NIKO_CODE') ?: ''));
+define('BAKERY_NIKO_DISPLAY_NAME', trim((string)($_ENV['BAKERY_NIKO_DISPLAY_NAME'] ?? getenv('BAKERY_NIKO_DISPLAY_NAME') ?: 'Baker')));
+define('BAKERY_ADMIN_EMAIL', trim((string)($_ENV['BAKERY_ADMIN_EMAIL'] ?? getenv('BAKERY_ADMIN_EMAIL') ?: '')));
+define('BAKERY_ADMIN_CODE', bakery_normalize_login_code($_ENV['BAKERY_ADMIN_CODE'] ?? getenv('BAKERY_ADMIN_CODE') ?: ''));
+define('BAKERY_ADMIN_DISPLAY_NAME', trim((string)($_ENV['BAKERY_ADMIN_DISPLAY_NAME'] ?? getenv('BAKERY_ADMIN_DISPLAY_NAME') ?: 'Administrator')));
 
 /**
  * Scripts reachable without login.
@@ -31,14 +37,13 @@ function bakery_public_scripts() {
     return [
         'login.php',
         'logout.php',
-        'baker.php',
+        'guias.php',
         'health_local.php',
-        'health_prod.php',
-        'health_driver.php',
-        'health_deploy.php',
-        'ping.php',
-        'trace_driver_list.php',
-        'driver_pages_probe.php',
+        'customer_login.php',
+        'customer_qr_login.php',
+        'customer_portal_login.php',
+        'customer_portal_logout.php',
+        'login_audit_api.php',
     ];
 }
 
@@ -87,14 +92,28 @@ function bakery_driver_scripts() {
     return [
         'index.php',
         'driver.php',
+        'driver_stops.php',
+        'pack_list.php',
         'driver_list.php',
+        'route_closeout.php',
         'complete_delivery.php',
+        'driver_session_ping.php',
         'upload_driver_photo.php',
         'get_customer_order_details.php',
         'get_driver_orders.php',
         'global_gps_handler.php',
         'call_headquarters.php',
+        'qr_login.php',
     ];
+}
+
+/** Roles that work a driver route (the assistant works their paired driver's route). */
+function bakery_driver_route_roles(): array {
+    return ['driver', 'driver_assistant'];
+}
+
+function bakery_is_driver_route_role($role): bool {
+    return in_array((string)$role, bakery_driver_route_roles(), true);
 }
 
 /**
@@ -118,6 +137,27 @@ function bakery_normalize_login_code($code) {
         return '';
     }
     return $digits;
+}
+
+/** Durable IP-based throttle backed by the login audit table. */
+function bakery_login_attempt_allowed(PDO $db, string $authType): bool
+{
+    if (!function_exists('bakery_login_audit_ready') || !bakery_login_audit_ready($db)) {
+        return false; // Fail closed until the durable audit table is installed.
+    }
+    $ip = substr(trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')), 0, 64);
+    try {
+        $stmt = $db->prepare(
+            "SELECT COUNT(*) FROM login_audit
+             WHERE auth_type = ? AND outcome = 'failure' AND ip_address = ?
+               AND login_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)"
+        );
+        $stmt->execute([$authType === 'customer' ? 'customer' : 'staff', $ip]);
+        return (int)$stmt->fetchColumn() < 5;
+    } catch (Throwable $e) {
+        error_log('Login throttle lookup failed: ' . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -217,6 +257,9 @@ function bakery_upsert_code_user(PDO $db, array $user) {
  * Ensure baker role and Juan Carlos baker user exist (idempotent).
  */
 function bakery_ensure_baker_user(PDO $db) {
+    if (!IS_LOCAL || BAKERY_BAKER_EMAIL === '' || BAKERY_BAKER_CODE === '') {
+        return false;
+    }
     $db->exec(
         "INSERT INTO roles (slug, name, description) VALUES
          ('baker', 'Baker', 'Production and pack list only')
@@ -266,6 +309,9 @@ function bakery_ensure_baker_user(PDO $db) {
 }
 
 function bakery_ensure_niko_user(PDO $db) {
+    if (!IS_LOCAL || BAKERY_NIKO_EMAIL === '' || BAKERY_NIKO_CODE === '') {
+        return false;
+    }
     return bakery_upsert_code_user($db, [
         'email' => BAKERY_NIKO_EMAIL,
         'display_name' => BAKERY_NIKO_DISPLAY_NAME,
@@ -317,34 +363,21 @@ function bakery_baker_product_ids(PDO $db) {
  * Ensure primary staff code logins (admin, baker, drivers).
  */
 function bakery_ensure_staff_code_users(PDO $db) {
+    if (!IS_LOCAL) {
+        return false;
+    }
     bakery_ensure_login_code_column($db);
     bakery_ensure_baker_user($db);
 
-    bakery_upsert_code_user($db, [
-        'email' => BAKERY_ADMIN_EMAIL,
-        'display_name' => BAKERY_ADMIN_DISPLAY_NAME,
-        'role' => 'administrator',
-        'code' => BAKERY_ADMIN_CODE,
-        'driver_id' => null,
-    ]);
-
-    $sergioId = bakery_ensure_driver_named($db, 'Sergio');
-    bakery_upsert_code_user($db, [
-        'email' => 'sergio@sourflour.local',
-        'display_name' => 'Sergio',
-        'role' => 'driver',
-        'code' => '1111',
-        'driver_id' => $sergioId,
-    ]);
-
-    $lauraId = bakery_ensure_driver_named($db, 'Laura');
-    bakery_upsert_code_user($db, [
-        'email' => 'laura@sourflour.local',
-        'display_name' => 'Laura',
-        'role' => 'driver',
-        'code' => '7286',
-        'driver_id' => $lauraId,
-    ]);
+    if (BAKERY_ADMIN_EMAIL !== '' && BAKERY_ADMIN_CODE !== '') {
+        bakery_upsert_code_user($db, [
+            'email' => BAKERY_ADMIN_EMAIL,
+            'display_name' => BAKERY_ADMIN_DISPLAY_NAME,
+            'role' => 'administrator',
+            'code' => BAKERY_ADMIN_CODE,
+            'driver_id' => null,
+        ]);
+    }
 
     return true;
 }
@@ -360,6 +393,36 @@ function bakery_current_user() {
         'role_slug' => $_SESSION['user_role_slug'] ?? '',
         'driver_id' => isset($_SESSION['user_driver_id']) ? (int)$_SESSION['user_driver_id'] : null,
     ];
+}
+
+/**
+ * Resolve the route identity a route worker may use on one operating date.
+ * A Driver Assistant follows a dated pairing when present, otherwise their
+ * default linked driver. The route itself stays owned by that driver record.
+ */
+function bakery_route_worker_driver_id(PDO $db, ?array $user, string $date): int {
+    if (!$user || !bakery_is_driver_route_role($user['role_slug'] ?? '')) {
+        return 0;
+    }
+
+    $defaultDriverId = (int)($user['driver_id'] ?? 0);
+    if (($user['role_slug'] ?? '') !== 'driver_assistant' || $defaultDriverId <= 0) {
+        return $defaultDriverId;
+    }
+
+    $dateObject = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+    if (!$dateObject || $dateObject->format('Y-m-d') !== $date
+        || !function_exists('table_exists') || !table_exists($db, 'driver_assistant_assignments')) {
+        return $defaultDriverId;
+    }
+
+    $stmt = $db->prepare(
+        'SELECT driver_id FROM driver_assistant_assignments
+         WHERE assistant_user_id = ? AND delivery_date = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$user['id'], $date]);
+    $datedDriverId = (int)$stmt->fetchColumn();
+    return $datedDriverId > 0 ? $datedDriverId : $defaultDriverId;
 }
 
 function bakery_user_has_role($roles) {
@@ -450,6 +513,15 @@ function bakery_wants_json() {
         'get_driver_orders.php',
         'auto_push_api.php',
         'generate_invoice_simple.php',
+        'customer_routes.php',
+        'customer_overview.php',
+        'customer_schedule.php',
+        'drivers.php',
+        'standing_routes.php',
+        'driver_overview.php',
+        'upload_product_photo.php',
+        'customer_portal_api.php',
+        'route_manager.php',
     ];
     return in_array(basename($uri), $jsonScripts, true);
 }
@@ -459,12 +531,15 @@ function bakery_touch_session() {
     if (!isset($_SESSION['auth_login_at'])) {
         return;
     }
-    if (($now - (int)$_SESSION['auth_login_at']) > BAKERY_SESSION_ABSOLUTE_SECONDS) {
+    $isDriver = bakery_is_driver_route_role($_SESSION['user_role_slug'] ?? '');
+    $absoluteSeconds = $isDriver ? BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS : BAKERY_SESSION_ABSOLUTE_SECONDS;
+    $idleSeconds = $isDriver ? BAKERY_DRIVER_SESSION_IDLE_SECONDS : BAKERY_SESSION_IDLE_SECONDS;
+    if (($now - (int)$_SESSION['auth_login_at']) > $absoluteSeconds) {
         bakery_logout();
         return;
     }
     if (isset($_SESSION['auth_last_activity']) &&
-        ($now - (int)$_SESSION['auth_last_activity']) > BAKERY_SESSION_IDLE_SECONDS) {
+        ($now - (int)$_SESSION['auth_last_activity']) > $idleSeconds) {
         bakery_logout();
         return;
     }
@@ -473,6 +548,10 @@ function bakery_touch_session() {
 
 function bakery_login(PDO $db, $code) {
     bakery_ensure_login_code_column($db);
+
+    if (!bakery_login_attempt_allowed($db, 'staff')) {
+        return false;
+    }
 
     $code = bakery_normalize_login_code($code);
     if ($code === '') {
@@ -511,13 +590,24 @@ function bakery_login(PDO $db, $code) {
     $upd = $db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?');
     $upd->execute([(int)$row['id']]);
 
-    // Drivers land on their own route identity.
-    if ($row['role_slug'] === 'driver' && $row['driver_id'] !== null) {
+    bakery_login_audit_start($db, 'staff', [
+        'user_id' => (int)$row['id'],
+        'principal' => (string)$row['email'],
+        'credential_code' => $code,
+    ]);
+
+    if (function_exists('bakery_apply_locale_default_for_user')) {
+        bakery_apply_locale_default_for_user($row['role_slug'] ?? null, false);
+    }
+
+    // Route workers land on their own or paired route identity.
+    if (bakery_is_driver_route_role($row['role_slug'] ?? '') && $row['driver_id'] !== null) {
+        $routeDriverId = bakery_route_worker_driver_id($db, bakery_current_user(), date('Y-m-d'));
         $driverName = '';
         $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ? LIMIT 1');
-        $nameStmt->execute([(int)$row['driver_id']]);
+        $nameStmt->execute([$routeDriverId]);
         $driverName = (string)($nameStmt->fetchColumn() ?: $row['display_name']);
-        bakery_set_selected_driver((int)$row['driver_id'], $driverName);
+        bakery_set_selected_driver($routeDriverId, $driverName);
     }
 
     return true;
@@ -614,6 +704,17 @@ function bakery_set_selected_driver($driverId, $driverName = '') {
 }
 
 function bakery_logout() {
+    global $db;
+    if (bakery_login_audit_current_id()) {
+        try {
+            $auditDb = ($db instanceof PDO) ? $db : (function_exists('check_mysql_connection') ? check_mysql_connection() : null);
+            if ($auditDb instanceof PDO) {
+                bakery_login_audit_close($auditDb);
+            }
+        } catch (Throwable $e) {
+            error_log('Login audit logout error: ' . $e->getMessage());
+        }
+    }
     $cookiePath = (defined('BASE_URL') && BASE_URL !== '') ? BASE_URL : '/';
     $secure = function_exists('isHTTPS') ? isHTTPS() : (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     if (PHP_SAPI !== 'cli' && !headers_sent()) {
@@ -648,7 +749,16 @@ function bakery_logout() {
 
 function bakery_require_login() {
     bakery_touch_session();
-    if (bakery_current_user()) {
+    $user = bakery_current_user();
+    if ($user) {
+        // Adopt sessions that were already open when login telemetry was deployed.
+        if (!bakery_login_audit_current_id() && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO) {
+            bakery_login_audit_start($GLOBALS['db'], 'staff', [
+                'user_id' => (int)$user['id'],
+                'principal' => (string)$user['email'],
+                'login_at' => $_SESSION['auth_login_at'] ?? null,
+            ]);
+        }
         return;
     }
     if (is_ajax_request() || bakery_wants_json()) {
@@ -685,9 +795,42 @@ function bakery_enforce_request_security(PDO $db = null) {
         return;
     }
 
+    require_once __DIR__ . '/customer_portal.php';
+    require_once __DIR__ . '/sf_baker.php';
+
     $script = basename($_SERVER['PHP_SELF'] ?? '');
 
     if (in_array($script, bakery_public_scripts(), true)) {
+        return;
+    }
+
+    $communityScripts = function_exists('bakery_sfb_community_scripts')
+        ? bakery_sfb_community_scripts()
+        : ['sfb_community.php', 'sfb_community_topic.php', 'sfb_shared_batch.php'];
+    if (in_array($script, $communityScripts, true)) {
+        $staffOk = bakery_current_user() && bakery_user_has_role(['administrator']);
+        if (!$staffOk) {
+            bakery_require_portal_login($db);
+        }
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            bakery_require_csrf();
+        }
+        return;
+    }
+
+    $portalScripts = array_values(array_unique(array_merge(
+        bakery_customer_portal_scripts(),
+        bakery_sfb_portal_scripts()
+    )));
+
+    // Customer portal uses phone + passcode session (not staff login).
+    if (in_array($script, $portalScripts, true)) {
+        bakery_require_portal_login($db);
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            bakery_require_csrf();
+        }
         return;
     }
 
@@ -705,7 +848,7 @@ function bakery_enforce_request_security(PDO $db = null) {
     } elseif ($isBakerScript) {
         bakery_require_role(['administrator', 'manager', 'baker']);
     } elseif ($isDriverScript) {
-        bakery_require_role(['administrator', 'manager', 'driver']);
+        bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
     } else {
         // Default ops UI: manager + administrator. Drivers/bakers stay on their scripts.
         bakery_require_role(['administrator', 'manager']);

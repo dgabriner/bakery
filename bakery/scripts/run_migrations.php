@@ -23,50 +23,8 @@ if (is_readable($envPath)) {
 
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
-
-function bakery_run_sql_file(PDO $db, $path) {
-    if (!is_readable($path)) {
-        throw new RuntimeException("SQL file not readable: {$path}");
-    }
-    $sql = file_get_contents($path);
-    $lines = preg_split("/\r\n|\n|\r/", $sql);
-    $buf = '';
-    foreach ($lines as $line) {
-        $trim = ltrim($line);
-        if (strpos($trim, '--') === 0) {
-            continue;
-        }
-        $buf .= $line . "\n";
-    }
-    $statements = [];
-    $current = '';
-    $inString = false;
-    $len = strlen($buf);
-    for ($i = 0; $i < $len; $i++) {
-        $ch = $buf[$i];
-        if ($ch === "'" && ($i === 0 || $buf[$i - 1] !== '\\')) {
-            $inString = !$inString;
-            $current .= $ch;
-            continue;
-        }
-        if ($ch === ';' && !$inString) {
-            $statement = trim($current);
-            if ($statement !== '') {
-                $statements[] = $statement;
-            }
-            $current = '';
-            continue;
-        }
-        $current .= $ch;
-    }
-    $tail = trim($current);
-    if ($tail !== '') {
-        $statements[] = $tail;
-    }
-    foreach ($statements as $statement) {
-        $db->exec($statement);
-    }
-}
+require_once $root . '/includes/test_target_guard.php';
+require_once $root . '/includes/schema_sql.php';
 
 function bakery_column_exists(PDO $db, $table, $column) {
     $stmt = $db->prepare(
@@ -75,6 +33,34 @@ function bakery_column_exists(PDO $db, $table, $column) {
     );
     $stmt->execute([$table, $column]);
     return (int)$stmt->fetchColumn() > 0;
+}
+
+function bakery_schema_table_exists(PDO $db, $table) {
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+    );
+    $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function bakery_login_audit_context_ready(PDO $db) {
+    if (!table_exists($db, 'login_audit')) {
+        return false;
+    }
+
+    foreach ([
+        'credential_method', 'credential_fingerprint', 'credential_suffix',
+        'request_method', 'request_uri', 'referer', 'accept_language',
+        'forwarded_for', 'server_protocol', 'server_port', 'session_id_hash',
+        'last_page_path', 'last_page_at', 'page_views_count',
+    ] as $column) {
+        if (!bakery_column_exists($db, 'login_audit', $column)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function bakery_fk_exists(PDO $db, $table, $constraintName) {
@@ -108,6 +94,7 @@ function bakery_mark_migration(PDO $db, $id) {
 
 try {
     $db = check_mysql_connection();
+    bakery_assert_local_test_target($db);
     bakery_ensure_migrations_table($db);
 
     $migrationsDir = $root . '/database/schema';
@@ -318,6 +305,697 @@ try {
         echo "  OK\n";
     } else {
         echo "Skip 015_production_center_plans (already applied)\n";
+    }
+
+    // 016 — customer lifecycle and lead-to-customer conversion linkage
+    if (!bakery_migration_applied($db, '016_customer_lifecycle')) {
+        echo "Applying migration 016_customer_lifecycle...\n";
+        if (!bakery_column_exists($db, 'customers', 'is_active')) {
+            $db->exec(
+                'ALTER TABLE customers
+                 ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER default_pan_dulce_price,
+                 ADD COLUMN inactive_at TIMESTAMP NULL DEFAULT NULL AFTER is_active,
+                 ADD COLUMN inactive_reason VARCHAR(255) NULL DEFAULT NULL AFTER inactive_at,
+                 ADD KEY idx_customers_is_active (is_active)'
+            );
+            echo "  Added customer lifecycle columns\n";
+        }
+        if (!bakery_column_exists($db, 'leads', 'customer_id')) {
+            $db->exec('ALTER TABLE leads ADD COLUMN customer_id INT NULL AFTER status, ADD KEY idx_leads_customer_id (customer_id)');
+            echo "  Added leads.customer_id\n";
+        }
+        if (!bakery_fk_exists($db, 'leads', 'fk_leads_customer_id')) {
+            $db->exec(
+                'ALTER TABLE leads ADD CONSTRAINT fk_leads_customer_id
+                 FOREIGN KEY (customer_id) REFERENCES customers(id)
+                 ON DELETE SET NULL ON UPDATE CASCADE'
+            );
+            echo "  Linked leads to customers\n";
+        }
+        bakery_mark_migration($db, '016_customer_lifecycle');
+        echo "  OK\n";
+    } else {
+        echo "Skip 016_customer_lifecycle (already applied)\n";
+    }
+
+    // 017 — ingredient package size and unit cost for mobile inventory & ordering
+    if (!bakery_migration_applied($db, '017_ingredient_purchasing')) {
+        echo "Applying migration 017_ingredient_purchasing...\n";
+        if (!table_exists($db, 'ingredients')) {
+            echo "  Note: ingredients table missing — skipping purchasing columns\n";
+        } else {
+            if (!bakery_column_exists($db, 'ingredients', 'package_size')) {
+                $db->exec(
+                    'ALTER TABLE ingredients
+                     ADD COLUMN package_size DECIMAL(12,3) NULL DEFAULT NULL AFTER supplier_name,
+                     ADD COLUMN unit_cost DECIMAL(10,2) NULL DEFAULT NULL AFTER package_size'
+                );
+                echo "  Added package_size and unit_cost to ingredients\n";
+            }
+            bakery_run_sql_file($db, $migrationsDir . '/017_ingredient_purchasing.sql');
+        }
+        bakery_mark_migration($db, '017_ingredient_purchasing');
+        echo "  OK\n";
+    } else {
+        echo "Skip 017_ingredient_purchasing (already applied)\n";
+    }
+
+    // 018 — customer portal, pricing tiers, week pauses, product images
+    if (!bakery_migration_applied($db, '018_customer_portal')) {
+        echo "Applying migration 018_customer_portal...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/018_customer_portal.sql');
+        bakery_mark_migration($db, '018_customer_portal');
+        echo "  OK\n";
+    } else {
+        echo "Skip 018_customer_portal (already applied)\n";
+    }
+
+    // 019 — optional notes on daily_order_assignments (older route tables)
+    if (!bakery_migration_applied($db, '019_daily_order_assignment_notes')) {
+        echo "Applying migration 019_daily_order_assignment_notes...\n";
+        if (!table_exists($db, 'daily_order_assignments')) {
+            echo "  Note: daily_order_assignments table missing — skipping notes column\n";
+        } elseif (!bakery_column_exists($db, 'daily_order_assignments', 'notes')) {
+            $db->exec(
+                'ALTER TABLE daily_order_assignments
+                 ADD COLUMN notes TEXT NULL AFTER delivery_status'
+            );
+            echo "  Added daily_order_assignments.notes\n";
+        } else {
+            echo "  daily_order_assignments.notes already present\n";
+        }
+        bakery_mark_migration($db, '019_daily_order_assignment_notes');
+        echo "  OK\n";
+    } else {
+        echo "Skip 019_daily_order_assignment_notes (already applied)\n";
+    }
+
+    // 020 — COD vs signature payment collection
+    if (!bakery_migration_applied($db, '020_cod_payment_collection')) {
+        echo "Applying migration 020_cod_payment_collection...\n";
+        if (!table_exists($db, 'customers')) {
+            echo "  Note: customers table missing — skipping payment_collection\n";
+        } elseif (!bakery_column_exists($db, 'customers', 'payment_collection')) {
+            $db->exec(
+                "ALTER TABLE customers
+                 ADD COLUMN payment_collection ENUM('cod', 'signature') NOT NULL DEFAULT 'cod'
+                 AFTER pricing_tier"
+            );
+            echo "  Added customers.payment_collection\n";
+        } else {
+            echo "  customers.payment_collection already present\n";
+        }
+        if (!table_exists($db, 'daily_orders')) {
+            echo "  Note: daily_orders table missing — skipping amount_collected\n";
+        } elseif (!bakery_column_exists($db, 'daily_orders', 'amount_collected')) {
+            $db->exec(
+                'ALTER TABLE daily_orders
+                 ADD COLUMN amount_collected DECIMAL(10,2) NULL DEFAULT NULL
+                 AFTER delivery_confirmed_at'
+            );
+            echo "  Added daily_orders.amount_collected\n";
+        } else {
+            echo "  daily_orders.amount_collected already present\n";
+        }
+        bakery_mark_migration($db, '020_cod_payment_collection');
+        echo "  OK\n";
+    } else {
+        echo "Skip 020_cod_payment_collection (already applied)\n";
+    }
+
+    // 021 — operating day closeout
+    if (!bakery_migration_applied($db, '021_operating_day_closeout')) {
+        echo "Applying migration 021_operating_day_closeout...\n";
+        if (is_readable($migrationsDir . '/021_operating_day_closeout.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/021_operating_day_closeout.sql');
+            echo "  Applied operating_day_closeouts table\n";
+        } else {
+            echo "  Note: 021_operating_day_closeout.sql missing — skipping\n";
+        }
+        bakery_mark_migration($db, '021_operating_day_closeout');
+        echo "  OK\n";
+    } else {
+        echo "Skip 021_operating_day_closeout (already applied)\n";
+    }
+
+    // 022 — billing center (audit, statements, exports)
+    if (!bakery_migration_applied($db, '022_billing_center')) {
+        echo "Applying migration 022_billing_center...\n";
+        if (!table_exists($db, 'customers') || !table_exists($db, 'daily_orders')) {
+            echo "  Note: core tables missing — skipping billing_center migration\n";
+        } elseif (is_readable($migrationsDir . '/022_billing_center.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/022_billing_center.sql');
+            echo "  Applied billing audit/statement/export tables\n";
+        } else {
+            echo "  Note: 022_billing_center.sql missing — skipping\n";
+        }
+        bakery_mark_migration($db, '022_billing_center');
+        echo "  OK\n";
+    } else {
+        echo "Skip 022_billing_center (already applied)\n";
+    }
+
+    // 021 — operational timeline / audit events
+    if (!bakery_migration_applied($db, '021_operational_events')) {
+        echo "Applying migration 021_operational_events...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/021_operational_events.sql');
+        bakery_mark_migration($db, '021_operational_events');
+        echo "  OK\n";
+    } else {
+        echo "Skip 021_operational_events (already applied)\n";
+    }
+
+    // 023 — optional standard batch dough reference on dough_types
+    if (!bakery_migration_applied($db, '023_dough_type_batch_reference')) {
+        echo "Applying migration 023_dough_type_batch_reference...\n";
+        if (!table_exists($db, 'dough_types')) {
+            echo "  Note: dough_types table missing — skipping batch reference column\n";
+        } elseif (!bakery_column_exists($db, 'dough_types', 'standard_batch_dough_grams')) {
+            if (is_readable($migrationsDir . '/023_dough_type_batch_reference.sql')) {
+                bakery_run_sql_file($db, $migrationsDir . '/023_dough_type_batch_reference.sql');
+            } else {
+                $db->exec(
+                    'ALTER TABLE dough_types
+                     ADD COLUMN standard_batch_dough_grams DECIMAL(12,3) NULL DEFAULT NULL
+                     AFTER product_line_id'
+                );
+            }
+            echo "  Added dough_types.standard_batch_dough_grams\n";
+        } else {
+            echo "  dough_types.standard_batch_dough_grams already present\n";
+        }
+        bakery_mark_migration($db, '023_dough_type_batch_reference');
+        echo "  OK\n";
+    } else {
+        echo "Skip 023_dough_type_batch_reference (already applied)\n";
+    }
+
+    // 024 — customer order power tools (skips, date-range pauses, change requests)
+    if (!bakery_migration_applied($db, '024_customer_order_power_tools')) {
+        echo "Applying migration 024_customer_order_power_tools...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/024_customer_order_power_tools.sql');
+        bakery_mark_migration($db, '024_customer_order_power_tools');
+        echo "  OK\n";
+    } else {
+        echo "Skip 024_customer_order_power_tools (already applied)\n";
+    }
+
+    // 025 — customer notifications
+    if (!bakery_migration_applied($db, '025_customer_notifications')) {
+        echo "Applying migration 025_customer_notifications...\n";
+        if (is_readable($migrationsDir . '/025_customer_notifications.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/025_customer_notifications.sql');
+        }
+        bakery_mark_migration($db, '025_customer_notifications');
+        echo "  OK\n";
+    } else {
+        echo "Skip 025_customer_notifications (already applied)\n";
+    }
+
+    // 026 — customer delivery issues
+    if (!bakery_migration_applied($db, '026_customer_delivery_issues')) {
+        echo "Applying migration 026_customer_delivery_issues...\n";
+        if (is_readable($migrationsDir . '/026_customer_delivery_issues.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/026_customer_delivery_issues.sql');
+        }
+        bakery_mark_migration($db, '026_customer_delivery_issues');
+        echo "  OK\n";
+    } else {
+        echo "Skip 026_customer_delivery_issues (already applied)\n";
+    }
+
+    // 027 — login, device, optional location, and session-duration audit
+    if (!bakery_migration_applied($db, '027_login_audit')) {
+        echo "Applying migration 027_login_audit...\n";
+        if (is_readable($migrationsDir . '/027_login_audit.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/027_login_audit.sql');
+        }
+        bakery_mark_migration($db, '027_login_audit');
+        echo "  OK\n";
+    } else {
+        echo "Skip 027_login_audit (already applied)\n";
+    }
+
+    // 028 — additional request, credential, session, and client context
+    if (!bakery_migration_applied($db, '028_login_audit_context')) {
+        echo "Applying migration 028_login_audit_context...\n";
+        if (bakery_login_audit_context_ready($db)) {
+            echo "  Context columns already present - marking migration applied\n";
+        } elseif (is_readable($migrationsDir . '/028_login_audit_context.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/028_login_audit_context.sql');
+        }
+        bakery_mark_migration($db, '028_login_audit_context');
+        echo "  OK\n";
+    } else {
+        echo "Skip 028_login_audit_context (already applied)\n";
+    }
+
+    // 029 — short-lived customer portal QR invitations
+    if (!bakery_migration_applied($db, '029_customer_qr_login')) {
+        echo "Applying migration 029_customer_qr_login...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/029_customer_qr_login.sql');
+        bakery_mark_migration($db, '029_customer_qr_login');
+        echo "  OK\n";
+    } else {
+        echo "Skip 029_customer_qr_login (already applied)\n";
+    }
+
+    // 030 — pack list check-off progress (shared per delivery date)
+    if (!bakery_migration_applied($db, '030_pack_progress')) {
+        echo "Applying migration 030_pack_progress...\n";
+        if (is_readable($migrationsDir . '/030_pack_progress.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/030_pack_progress.sql');
+        }
+        bakery_mark_migration($db, '030_pack_progress');
+        echo "  OK\n";
+    } else {
+        echo "Skip 030_pack_progress (already applied)\n";
+    }
+
+    // 031 — per-date manager demand confirmations ("Tomorrow, confirmed")
+    if (!bakery_migration_applied($db, '031_demand_confirmations')) {
+        echo "Applying migration 031_demand_confirmations...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/031_demand_confirmations.sql');
+        bakery_mark_migration($db, '031_demand_confirmations');
+        echo "  OK\n";
+    } else {
+        echo "Skip 031_demand_confirmations (already applied)\n";
+    }
+
+    // 032 — SF Baker module (starters, formulas, batches, turns, temps, photos)
+    if (!table_exists($db, 'customers')) {
+        echo "  Note: customers table missing — skipping sf_baker column check\n";
+    } elseif (!bakery_column_exists($db, 'customers', 'sf_baker_enabled')) {
+        echo "Applying customers.sf_baker_enabled (032_sf_baker)...\n";
+        $db->exec(
+            'ALTER TABLE customers
+             ADD COLUMN sf_baker_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER portal_enabled'
+        );
+        echo "  Added customers.sf_baker_enabled\n";
+    }
+    if (!bakery_migration_applied($db, '032_sf_baker')) {
+        echo "Applying migration 032_sf_baker...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/032_sf_baker.sql');
+        bakery_mark_migration($db, '032_sf_baker');
+        echo "  OK\n";
+    } elseif (!table_exists($db, 'sfb_batches') && is_readable($migrationsDir . '/032_sf_baker.sql')) {
+        echo "Applying migration 032_sf_baker (tables missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/032_sf_baker.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 032_sf_baker (already applied)\n";
+    }
+
+    // 033 — immutable formula snapshots for SF Baker batch history
+    if (!bakery_migration_applied($db, '033_sfb_batch_formula_snapshots')) {
+        echo "Applying migration 033_sfb_batch_formula_snapshots...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/033_sfb_batch_formula_snapshots.sql');
+        bakery_mark_migration($db, '033_sfb_batch_formula_snapshots');
+        echo "  OK\n";
+    } elseif ((!table_exists($db, 'sfb_batch_formula_snapshots') || !table_exists($db, 'sfb_batch_formula_snapshot_lines'))
+        && is_readable($migrationsDir . '/033_sfb_batch_formula_snapshots.sql')) {
+        echo "Applying migration 033_sfb_batch_formula_snapshots (tables missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/033_sfb_batch_formula_snapshots.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 033_sfb_batch_formula_snapshots (already applied)\n";
+    }
+
+    // 034 — baker/admin conversation threads on each SF Baker batch
+    if (!bakery_migration_applied($db, '034_sfb_batch_messages')) {
+        echo "Applying migration 034_sfb_batch_messages...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/034_sfb_batch_messages.sql');
+        bakery_mark_migration($db, '034_sfb_batch_messages');
+        echo "  OK\n";
+    } elseif (!table_exists($db, 'sfb_batch_messages')
+        && is_readable($migrationsDir . '/034_sfb_batch_messages.sql')) {
+        echo "Applying migration 034_sfb_batch_messages (table missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/034_sfb_batch_messages.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 034_sfb_batch_messages (already applied)\n";
+    }
+
+    // 035 — opt-in community forum and public-within-SF-Baker batch cards
+    if (!bakery_migration_applied($db, '035_sfb_community')) {
+        echo "Applying migration 035_sfb_community...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/035_sfb_community.sql');
+        bakery_mark_migration($db, '035_sfb_community');
+        echo "  OK\n";
+    } elseif ((!table_exists($db, 'sfb_community_topics') || !table_exists($db, 'sfb_community_replies') || !table_exists($db, 'sfb_batch_shares'))
+        && is_readable($migrationsDir . '/035_sfb_community.sql')) {
+        echo "Applying migration 035_sfb_community (tables missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/035_sfb_community.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 035_sfb_community (already applied)\n";
+    }
+
+    // 036 — per-session navigation history for the Login History investigator
+    $activityTableReady = bakery_schema_table_exists($db, 'login_audit_activity');
+    if (!bakery_migration_applied($db, '036_login_audit_activity')) {
+        echo "Applying migration 036_login_audit_activity...\n";
+        if (!bakery_schema_table_exists($db, 'login_audit')) {
+            echo "  Note: login_audit table missing — skipping activity timeline\n";
+        } elseif (!is_readable($migrationsDir . '/036_login_audit_activity.sql')) {
+            throw new RuntimeException('Missing 036_login_audit_activity.sql');
+        } else {
+            bakery_run_sql_file($db, $migrationsDir . '/036_login_audit_activity.sql');
+            bakery_mark_migration($db, '036_login_audit_activity');
+            echo "  OK\n";
+        }
+    } elseif (!$activityTableReady
+        && bakery_schema_table_exists($db, 'login_audit')
+        && is_readable($migrationsDir . '/036_login_audit_activity.sql')) {
+        echo "Applying migration 036_login_audit_activity (table missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/036_login_audit_activity.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 036_login_audit_activity (already applied)\n";
+    }
+
+    // 037 — route closeout: waste/delivery movements + returned/wasted load lines
+    if (!bakery_migration_applied($db, '037_route_closeout')) {
+        echo "Applying migration 037_route_closeout...\n";
+        if (!table_exists($db, 'inventory_movements') || !table_exists($db, 'driver_load_items')) {
+            echo "  Note: finished-goods inventory tables missing — skipping route closeout\n";
+        } else {
+            if (!bakery_column_exists($db, 'driver_load_items', 'wasted_quantity')) {
+                $db->exec(
+                    'ALTER TABLE driver_load_items
+                     ADD COLUMN wasted_quantity INT NOT NULL DEFAULT 0 AFTER returned_quantity'
+                );
+                echo "  Added driver_load_items.wasted_quantity\n";
+            }
+            if (!bakery_column_exists($db, 'driver_loads', 'reconciled_at')) {
+                $db->exec(
+                    'ALTER TABLE driver_loads
+                     ADD COLUMN reconciled_at TIMESTAMP NULL DEFAULT NULL AFTER status,
+                     ADD COLUMN reconciled_by_user_id INT NULL DEFAULT NULL AFTER reconciled_at'
+                );
+                echo "  Added driver_loads.reconciled_at columns\n";
+            }
+            try {
+                $db->exec(
+                    "ALTER TABLE inventory_movements
+                     MODIFY COLUMN movement_type
+                     ENUM('production','count','load','load_correction','return','waste','delivery') NOT NULL"
+                );
+                echo "  Extended inventory_movements.movement_type with waste + delivery\n";
+            } catch (Throwable $e) {
+                echo "  Note: movement_type enum update skipped (" . $e->getMessage() . ")\n";
+            }
+        }
+        bakery_mark_migration($db, '037_route_closeout');
+        echo "  OK\n";
+    } else {
+        echo "Skip 037_route_closeout (already applied)\n";
+    }
+
+    // 038 — manager exception ownership and failed-stop recovery workflow.
+    if (!bakery_migration_applied($db, '038_manager_exception_and_delivery_recovery')) {
+        echo "Applying migration 038_manager_exception_and_delivery_recovery...\n";
+        if (is_readable($migrationsDir . '/038_manager_exception_and_delivery_recovery.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/038_manager_exception_and_delivery_recovery.sql');
+        } else {
+            throw new RuntimeException('Missing 038_manager_exception_and_delivery_recovery.sql');
+        }
+        bakery_mark_migration($db, '038_manager_exception_and_delivery_recovery');
+        echo "  OK\n";
+    } else {
+        echo "Skip 038_manager_exception_and_delivery_recovery (already applied)\n";
+    }
+
+    // 039 — real vs synthetic SF Baker origin + community contract columns
+    if (!bakery_migration_applied($db, '039_sfb_origin')) {
+        echo "Applying migration 039_sfb_origin...\n";
+        if (table_exists($db, 'customers') && !bakery_column_exists($db, 'customers', 'sfb_origin')) {
+            $after = bakery_column_exists($db, 'customers', 'sf_baker_enabled')
+                ? ' AFTER sf_baker_enabled'
+                : '';
+            $db->exec(
+                "ALTER TABLE customers
+                 ADD COLUMN sfb_origin ENUM('human','synthetic') NOT NULL DEFAULT 'human'{$after}"
+            );
+            echo "  Added customers.sfb_origin\n";
+            if (function_exists('bakery_forget_column_exists')) {
+                bakery_forget_column_exists('customers', 'sfb_origin');
+            }
+        }
+        if (table_exists($db, 'customers') && bakery_column_exists($db, 'customers', 'sfb_origin')) {
+            try {
+                $db->exec('CREATE INDEX idx_customers_sfb_origin ON customers (sfb_origin)');
+                echo "  Added idx_customers_sfb_origin\n";
+            } catch (Throwable $e) {
+                echo "  Note: origin index skipped (" . $e->getMessage() . ")\n";
+            }
+            $db->exec(
+                "UPDATE customers SET sfb_origin = 'synthetic' WHERE name IN ('Customer1', 'Customer2')"
+            );
+            echo "  Tagged Customer1/Customer2 as synthetic\n";
+        }
+        if (table_exists($db, 'sfb_community_topics')) {
+            try {
+                $db->exec(
+                    "ALTER TABLE sfb_community_topics
+                     MODIFY COLUMN category ENUM(
+                        'starter','formula','fermentation','shaping_baking','general',
+                        'failures','flours_mills','weekend_schedule'
+                     ) NOT NULL DEFAULT 'general'"
+                );
+                echo "  Extended community category enum\n";
+            } catch (Throwable $e) {
+                echo "  Note: category enum update skipped (" . $e->getMessage() . ")\n";
+            }
+            if (!bakery_column_exists($db, 'sfb_community_topics', 'is_pinned')) {
+                $db->exec(
+                    'ALTER TABLE sfb_community_topics
+                     ADD COLUMN is_pinned TINYINT(1) NOT NULL DEFAULT 0 AFTER is_locked'
+                );
+                echo "  Added sfb_community_topics.is_pinned\n";
+            }
+            if (!bakery_column_exists($db, 'sfb_community_topics', 'author_kind')) {
+                $db->exec(
+                    "ALTER TABLE sfb_community_topics
+                     ADD COLUMN author_kind ENUM('baker','coach') NOT NULL DEFAULT 'baker' AFTER author_customer_id"
+                );
+                echo "  Added sfb_community_topics.author_kind\n";
+            }
+            if (!bakery_column_exists($db, 'sfb_community_topics', 'author_user_id')) {
+                $db->exec(
+                    'ALTER TABLE sfb_community_topics
+                     ADD COLUMN author_user_id INT NULL DEFAULT NULL AFTER author_kind'
+                );
+                echo "  Added sfb_community_topics.author_user_id\n";
+            }
+            try {
+                $db->exec('ALTER TABLE sfb_community_topics MODIFY COLUMN author_customer_id INT NULL DEFAULT NULL');
+            } catch (Throwable $e) {
+                echo "  Note: topics.author_customer_id nullability skipped (" . $e->getMessage() . ")\n";
+            }
+        }
+        if (table_exists($db, 'sfb_community_replies')) {
+            if (!bakery_column_exists($db, 'sfb_community_replies', 'author_kind')) {
+                $db->exec(
+                    "ALTER TABLE sfb_community_replies
+                     ADD COLUMN author_kind ENUM('baker','coach') NOT NULL DEFAULT 'baker' AFTER author_customer_id"
+                );
+                echo "  Added sfb_community_replies.author_kind\n";
+            }
+            if (!bakery_column_exists($db, 'sfb_community_replies', 'author_user_id')) {
+                $db->exec(
+                    'ALTER TABLE sfb_community_replies
+                     ADD COLUMN author_user_id INT NULL DEFAULT NULL AFTER author_kind'
+                );
+                echo "  Added sfb_community_replies.author_user_id\n";
+            }
+            try {
+                $db->exec('ALTER TABLE sfb_community_replies MODIFY COLUMN author_customer_id INT NULL DEFAULT NULL');
+            } catch (Throwable $e) {
+                echo "  Note: replies.author_customer_id nullability skipped (" . $e->getMessage() . ")\n";
+            }
+        }
+        bakery_mark_migration($db, '039_sfb_origin');
+        echo "  OK\n";
+    } else {
+        echo "Skip 039_sfb_origin (already applied)\n";
+    }
+
+    // 040 — synthetic studio persona profiles
+    if (!bakery_migration_applied($db, '040_sfb_persona_profiles')) {
+        echo "Applying migration 040_sfb_persona_profiles...\n";
+        if (is_readable($migrationsDir . '/040_sfb_persona_profiles.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/040_sfb_persona_profiles.sql');
+        } else {
+            throw new RuntimeException('Missing 040_sfb_persona_profiles.sql');
+        }
+        bakery_mark_migration($db, '040_sfb_persona_profiles');
+        echo "  OK\n";
+    } else {
+        echo "Skip 040_sfb_persona_profiles (already applied)\n";
+    }
+
+    // 041 — synthetic studio clock, pace, and action log
+    if (!bakery_migration_applied($db, '041_sfb_studio_clock')) {
+        echo "Applying migration 041_sfb_studio_clock...\n";
+        if (is_readable($migrationsDir . '/041_sfb_studio_clock.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/041_sfb_studio_clock.sql');
+        } else {
+            throw new RuntimeException('Missing 041_sfb_studio_clock.sql');
+        }
+        bakery_mark_migration($db, '041_sfb_studio_clock');
+        echo "  OK\n";
+    } else {
+        echo "Skip 041_sfb_studio_clock (already applied)\n";
+    }
+
+    // 042 — phone + PIN self-serve accounts for the customer baking portal
+    if (!bakery_migration_applied($db, '042_customer_phone_pin_signup')) {
+        echo "Applying migration 042_customer_phone_pin_signup...\n";
+        if (!table_exists($db, 'customers')) {
+            throw new RuntimeException('customers table is required for phone/PIN signup');
+        }
+        if (!bakery_column_exists($db, 'customers', 'portal_phone_key')) {
+            $db->exec(
+                'ALTER TABLE customers
+                 ADD COLUMN portal_phone_key CHAR(10) NULL DEFAULT NULL AFTER portal_phone'
+            );
+            echo "  Added customers.portal_phone_key\n";
+        }
+        if (!bakery_column_exists($db, 'customers', 'portal_code_hash')) {
+            $db->exec(
+                'ALTER TABLE customers
+                 ADD COLUMN portal_code_hash VARCHAR(255) NULL DEFAULT NULL AFTER portal_code'
+            );
+            echo "  Added customers.portal_code_hash\n";
+        }
+        try {
+            $db->exec('CREATE UNIQUE INDEX uq_customers_portal_phone_key ON customers (portal_phone_key)');
+            echo "  Added uq_customers_portal_phone_key\n";
+        } catch (Throwable $e) {
+            echo "  Note: phone key index already exists or was not added (" . $e->getMessage() . ")\n";
+        }
+        bakery_mark_migration($db, '042_customer_phone_pin_signup');
+        echo "  OK\n";
+    } else {
+        echo "Skip 042_customer_phone_pin_signup (already applied)\n";
+    }
+
+    // 043 — a 4-digit portal code is a unique returning-customer login
+    if (!bakery_migration_applied($db, '043_unique_customer_portal_codes')) {
+        echo "Applying migration 043_unique_customer_portal_codes...\n";
+        try {
+            $db->exec('CREATE UNIQUE INDEX uq_customers_portal_code ON customers (portal_code)');
+            echo "  Added uq_customers_portal_code\n";
+        } catch (Throwable $e) {
+            echo "  Note: portal-code index already exists (" . $e->getMessage() . ")\n";
+        }
+        bakery_mark_migration($db, '043_unique_customer_portal_codes');
+        echo "  OK\n";
+    } else {
+        echo "Skip 043_unique_customer_portal_codes (already applied)\n";
+    }
+
+    // 044 — Agent Learning Studio / Homebase
+    if (!bakery_migration_applied($db, '044_agent_homebase')) {
+        echo "Applying migration 044_agent_homebase...\n";
+        if (is_readable($migrationsDir . '/044_agent_homebase.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/044_agent_homebase.sql');
+        } else {
+            throw new RuntimeException('Missing 044_agent_homebase.sql');
+        }
+        require_once $root . '/includes/agent_homebase.php';
+        bakery_agent_homebase_seed($db);
+        bakery_mark_migration($db, '044_agent_homebase');
+        echo "  OK\n";
+    } else {
+        echo "Skip 044_agent_homebase (already applied)\n";
+        require_once $root . '/includes/agent_homebase.php';
+        if (bakery_agent_homebase_ready($db)) {
+            bakery_agent_homebase_seed($db);
+            echo "  Refreshed Agent Homebase curriculum\n";
+        }
+    }
+
+    // 045 — Driver Assistant role and dated route pairings
+    if (!bakery_migration_applied($db, '045_driver_assistant')) {
+        echo "Applying migration 045_driver_assistant...\n";
+        if (is_readable($migrationsDir . '/045_driver_assistant.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/045_driver_assistant.sql');
+        } else {
+            throw new RuntimeException('Missing 045_driver_assistant.sql');
+        }
+        bakery_mark_migration($db, '045_driver_assistant');
+        echo "  OK\n";
+    } else {
+        echo "Skip 045_driver_assistant (already applied)\n";
+    }
+
+    // 046 — cancelled delivery status + historical skipped-stop repair
+    $assignmentStatusReady = false;
+    if (table_exists($db, 'daily_order_assignments')) {
+        $statusTypeStmt = $db->prepare(
+            'SELECT COLUMN_TYPE
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+               AND COLUMN_NAME = ?
+             LIMIT 1'
+        );
+        $statusTypeStmt->execute(['daily_order_assignments', 'delivery_status']);
+        $statusColumnType = strtolower((string)$statusTypeStmt->fetchColumn());
+        $assignmentStatusReady = strpos($statusColumnType, "'cancelled'") !== false
+            && strpos($statusColumnType, "'rescheduled'") !== false;
+    }
+    if (!bakery_migration_applied($db, '046_assignment_cancelled_status') || !$assignmentStatusReady) {
+        echo "Applying migration 046_assignment_cancelled_status...\n";
+        if (!table_exists($db, 'daily_order_assignments')) {
+            throw new RuntimeException('daily_order_assignments table is required for cancelled-stop migration');
+        }
+        if (is_readable($migrationsDir . '/046_assignment_cancelled_status.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/046_assignment_cancelled_status.sql');
+        } else {
+            throw new RuntimeException('Missing 046_assignment_cancelled_status.sql');
+        }
+        bakery_mark_migration($db, '046_assignment_cancelled_status');
+        echo "  OK\n";
+    } else {
+        echo "Skip 046_assignment_cancelled_status (already applied)\n";
+    }
+
+    // 047 — one unambiguous route position per driver and delivery date
+    $routePositionIndexReady = false;
+    if (table_exists($db, 'daily_order_assignments')) {
+        $routeIndexStmt = $db->prepare(
+            'SELECT COUNT(*)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+               AND INDEX_NAME = ?'
+        );
+        $routeIndexStmt->execute([
+            'daily_order_assignments',
+            'uq_assignment_driver_date_route_order',
+        ]);
+        $routePositionIndexReady = (int)$routeIndexStmt->fetchColumn() === 3;
+    }
+    if (!bakery_migration_applied($db, '047_unique_dated_route_positions') && $routePositionIndexReady) {
+        bakery_mark_migration($db, '047_unique_dated_route_positions');
+        echo "Skip 047_unique_dated_route_positions (baseline already enforces it)\n";
+    } elseif (!bakery_migration_applied($db, '047_unique_dated_route_positions') || !$routePositionIndexReady) {
+        echo "Applying migration 047_unique_dated_route_positions...\n";
+        if (!table_exists($db, 'daily_order_assignments')) {
+            throw new RuntimeException('daily_order_assignments table is required for route-position migration');
+        }
+        if (is_readable($migrationsDir . '/047_unique_dated_route_positions.sql')) {
+            bakery_run_sql_file($db, $migrationsDir . '/047_unique_dated_route_positions.sql');
+        } else {
+            throw new RuntimeException('Missing 047_unique_dated_route_positions.sql');
+        }
+        bakery_mark_migration($db, '047_unique_dated_route_positions');
+        echo "  OK\n";
+    } else {
+        echo "Skip 047_unique_dated_route_positions (already applied)\n";
     }
 
     echo "Migrations complete.\n";

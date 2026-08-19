@@ -26,6 +26,26 @@ function bakery_json_for_html($data, $default = 'null')
     return $json === false ? $default : $json;
 }
 
+/** True when bakerysf_local still has the fictional demo fixture set. */
+function bakery_local_using_demo_fixtures($db) {
+    if (!($db instanceof PDO) || !defined('IS_LOCAL') || !IS_LOCAL) {
+        return false;
+    }
+    if (defined('USE_PROD_DB') && USE_PROD_DB) {
+        return false;
+    }
+    if (!function_exists('table_exists') || !table_exists($db, 'customers')) {
+        return false;
+    }
+    try {
+        $demo = (int)$db->query("SELECT COUNT(*) FROM customers WHERE name LIKE 'Demo %'")->fetchColumn();
+        $total = (int)$db->query('SELECT COUNT(*) FROM customers')->fetchColumn();
+        return $total > 0 && $demo === $total;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 /**
  * 
  * @param PDO $db Database connection
@@ -228,8 +248,8 @@ function create_data_table($data, $columns, $options = []) {
         // Add action buttons if enabled
         if ($options['actions'] ?? false) {
             $html .= '<td class="actions">';
-            $html .= '<button class="btn-small btn-primary" onclick="editRecord(' . $row['id'] . ')">Edit</button>';
-            $html .= '<button class="btn-small btn-danger" onclick="deleteRecord(' . $row['id'] . ')">Delete</button>';
+            $html .= '<button class="btn-small btn-primary" onclick="editRecord(' . $row['id'] . ')">' . htmlspecialchars(bakery_t('common.edit')) . '</button>';
+            $html .= '<button class="btn-small btn-danger" onclick="deleteRecord(' . $row['id'] . ')">' . htmlspecialchars(bakery_t('common.delete')) . '</button>';
             $html .= '</td>';
         }
         
@@ -240,9 +260,9 @@ function create_data_table($data, $columns, $options = []) {
     // Add pagination if enabled
     if ($options['paginated'] ?? false) {
         $html .= '<div class="pagination">
-            <button id="prevPage" class="btn-secondary">Previous</button>
-            <span id="pageInfo">Page 1</span>
-            <button id="nextPage" class="btn-secondary">Next</button>
+            <button id="prevPage" class="btn-secondary">' . htmlspecialchars(bakery_t('ui.previous')) . '</button>
+            <span id="pageInfo">' . htmlspecialchars(bakery_t('ui.page', ['num' => '1'])) . '</span>
+            <button id="nextPage" class="btn-secondary">' . htmlspecialchars(bakery_t('ui.next')) . '</button>
         </div>';
     }
     
@@ -292,7 +312,7 @@ function generate_form($fields, $values = [], $options = []) {
             case 'select':
                 $html .= "<select id=\"$name\" name=\"$name\"" . ($required ? ' required' : '') . ">";
                 if (!$required) {
-                    $html .= "<option value=\"\">-- Select --</option>";
+                    $html .= "<option value=\"\">" . htmlspecialchars(bakery_t('ui.select')) . "</option>";
                 }
                 foreach ($field['options'] as $optValue => $optLabel) {
                     $selected = ($value == $optValue) ? ' selected' : '';
@@ -314,7 +334,7 @@ function generate_form($fields, $values = [], $options = []) {
     $submitText = $options['submit_text'] ?? 'Save';
     $html .= "<div class=\"form-actions\">";
     $html .= "<button type=\"submit\" class=\"btn-primary\">$submitText</button>";
-    $html .= "<button type=\"button\" class=\"btn-secondary\" onclick=\"hideForm()\">Cancel</button>";
+    $html .= "<button type=\"button\" class=\"btn-secondary\" onclick=\"hideForm()\">" . htmlspecialchars(bakery_t('common.cancel')) . "</button>";
     $html .= "</div>";
     
     $html .= '</form>';
@@ -331,14 +351,11 @@ function generate_form($fields, $values = [], $options = []) {
  * @param int $entityId ID of the entity
  * @param string $details Additional details
  */
-function log_user_action($db, $action, $entity, $entityId = null, $details = null) {
-    try {
-        $query = "INSERT INTO audit_log (action, entity, entity_id, details, created_at) VALUES (?, ?, ?, ?, NOW())";
-        safe_execute($db, $query, [$action, $entity, $entityId, $details]);
-    } catch (Exception $e) {
-        // Silently fail - audit logging shouldn't break the application
-        error_log("Audit log error: " . $e->getMessage());
+function log_user_action($db, $action, $entity, $entityId = null, $details = null, $userId = null) {
+    if (!function_exists('bakery_operational_log_user_action')) {
+        require_once __DIR__ . '/operational_timeline.php';
     }
+    bakery_operational_log_user_action($db, $action, $entity, $entityId, $details);
 }
 
 /**
@@ -482,6 +499,41 @@ function bakery_low_stock_ingredients(PDO $db) {
          ORDER BY name'
     );
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Whether migration 017 purchasing columns exist on ingredients.
+ */
+function bakery_ingredients_purchasing_ready(PDO $db) {
+    if (!table_exists($db, 'ingredients')) {
+        return false;
+    }
+    static $ready = null;
+    if ($ready !== null) {
+        return $ready;
+    }
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?
+           AND COLUMN_NAME IN (?, ?)'
+    );
+    $stmt->execute(['ingredients', 'package_size', 'unit_cost']);
+    $ready = (int)$stmt->fetchColumn() === 2;
+    return $ready;
+}
+
+/**
+ * Format an ingredient's package label, e.g. "50 lb bag" or "25 kg".
+ */
+function bakery_ingredient_package_label(array $ingredient) {
+    $size = $ingredient['package_size'] ?? null;
+    $unit = trim((string)($ingredient['unit'] ?? ''));
+    if ($size === null || $size === '') {
+        return $unit !== '' ? $unit : null;
+    }
+    $formatted = rtrim(rtrim(number_format((float)$size, 3, '.', ''), '0'), '.');
+    return $unit !== '' ? $formatted . ' ' . $unit : $formatted;
 }
 
 /**
@@ -649,6 +701,7 @@ function bakery_dashboard_driver_view(PDO $db, $driverId, $date) {
         FROM daily_order_assignments doa
         JOIN daily_orders do ON do.id = doa.daily_order_id
         JOIN customers c ON do.customer_id = c.id
+        " . bakery_sfb_ops_origin_clause('c', $db) . "
         WHERE doa.driver_id = ? AND doa.delivery_date = ? AND do.order_date = ?
         ORDER BY doa.route_order, c.name
     ");
@@ -778,4 +831,166 @@ function bakery_ensure_standing_routes_order_column(PDO $db): void
     }
 
     $checked = true;
+}
+
+/**
+ * Standard starter formula templates for empty dough formulas.
+ *
+ * @return array<string, array{label:string, description:string, ingredients:array<int, array{keywords:array<int, string>, percentage:float}>}>
+ */
+function bakery_formula_starter_templates(): array
+{
+    return [
+        'sourdough' => [
+            'label' => 'Sourdough basics',
+            'description' => 'Flour, water, salt, and starter for a classic levain dough.',
+            'ingredients' => [
+                ['keywords' => ['flour', 'harina'], 'percentage' => 100.0],
+                ['keywords' => ['water', 'agua'], 'percentage' => 75.0],
+                ['keywords' => ['salt', 'sal'], 'percentage' => 2.2],
+                ['keywords' => ['starter', 'levain', 'masa madre'], 'percentage' => 20.0],
+            ],
+        ],
+        'sweet' => [
+            'label' => 'Sweet dough basics',
+            'description' => 'Flour, water, sugar, and salt for pan dulce-style dough.',
+            'ingredients' => [
+                ['keywords' => ['flour', 'harina'], 'percentage' => 100.0],
+                ['keywords' => ['water', 'agua'], 'percentage' => 55.0],
+                ['keywords' => ['sugar', 'azucar', 'azúcar'], 'percentage' => 15.0],
+                ['keywords' => ['salt', 'sal'], 'percentage' => 1.8],
+            ],
+        ],
+        'white' => [
+            'label' => 'White bread basics',
+            'description' => 'Simple flour, water, and salt for sandwich loaves.',
+            'ingredients' => [
+                ['keywords' => ['flour', 'harina'], 'percentage' => 100.0],
+                ['keywords' => ['water', 'agua'], 'percentage' => 65.0],
+                ['keywords' => ['salt', 'sal'], 'percentage' => 2.0],
+            ],
+        ],
+    ];
+}
+
+/**
+ * Common ingredient suggestions shown as quick-add chips.
+ *
+ * @return array<int, array{keywords:array<int, string>, percentage:float, label:string}>
+ */
+function bakery_formula_common_suggestions(): array
+{
+    return [
+        ['keywords' => ['flour', 'harina'], 'percentage' => 100.0, 'label' => 'Flour'],
+        ['keywords' => ['water', 'agua'], 'percentage' => 75.0, 'label' => 'Water'],
+        ['keywords' => ['salt', 'sal'], 'percentage' => 2.0, 'label' => 'Salt'],
+        ['keywords' => ['starter', 'levain', 'masa madre'], 'percentage' => 20.0, 'label' => 'Starter'],
+        ['keywords' => ['sugar', 'azucar', 'azúcar'], 'percentage' => 15.0, 'label' => 'Sugar'],
+        ['keywords' => ['yeast', 'levadura'], 'percentage' => 1.0, 'label' => 'Yeast'],
+        ['keywords' => ['butter', 'mantequilla'], 'percentage' => 5.0, 'label' => 'Butter'],
+        ['keywords' => ['oil', 'aceite'], 'percentage' => 3.0, 'label' => 'Oil'],
+    ];
+}
+
+/**
+ * Match a catalogue ingredient by keyword list (case-insensitive substring).
+ */
+function bakery_match_ingredient_by_keywords(array $ingredients, array $keywords, array $exclude_ids = []): ?array
+{
+    foreach ($ingredients as $ingredient) {
+        $id = (int)($ingredient['id'] ?? 0);
+        if ($id <= 0 || in_array($id, $exclude_ids, true)) {
+            continue;
+        }
+        $name = strtolower((string)($ingredient['name'] ?? ''));
+        foreach ($keywords as $keyword) {
+            if ($keyword !== '' && str_contains($name, strtolower($keyword))) {
+                return $ingredient;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Resolve a starter template to ingredients available in the catalogue.
+ *
+ * @return array<int, array{ingredient_id:int, name:string, unit:string, percentage:float}>
+ */
+function bakery_formula_resolve_starter(array $ingredients, string $template_key, array $exclude_ids = []): array
+{
+    $templates = bakery_formula_starter_templates();
+    if (!isset($templates[$template_key])) {
+        return [];
+    }
+
+    $resolved = [];
+    $used = $exclude_ids;
+    foreach ($templates[$template_key]['ingredients'] as $item) {
+        $match = bakery_match_ingredient_by_keywords($ingredients, $item['keywords'], $used);
+        if (!$match) {
+            continue;
+        }
+        $resolved[] = [
+            'ingredient_id' => (int)$match['id'],
+            'name' => (string)$match['name'],
+            'unit' => (string)($match['unit'] ?? ''),
+            'percentage' => (float)$item['percentage'],
+        ];
+        $used[] = (int)$match['id'];
+    }
+    return $resolved;
+}
+
+/**
+ * Suggest common ingredients not yet in a formula.
+ *
+ * @return array<int, array{ingredient_id:int, name:string, percentage:float, label:string}>
+ */
+function bakery_formula_suggest_missing(array $all_ingredients, array $used_ids): array
+{
+    $suggestions = [];
+    foreach (bakery_formula_common_suggestions() as $suggestion) {
+        $match = bakery_match_ingredient_by_keywords($all_ingredients, $suggestion['keywords'], $used_ids);
+        if (!$match) {
+            continue;
+        }
+        $suggestions[] = [
+            'ingredient_id' => (int)$match['id'],
+            'name' => (string)$match['name'],
+            'percentage' => (float)$suggestion['percentage'],
+            'label' => (string)$suggestion['label'],
+        ];
+    }
+    return $suggestions;
+}
+
+/**
+ * Insert formula ingredients, skipping duplicates already in the formula.
+ */
+function bakery_formula_apply_ingredients(PDO $db, int $dough_type_id, array $items): int
+{
+    if ($dough_type_id <= 0 || empty($items)) {
+        return 0;
+    }
+
+    $added = 0;
+    $stmt = $db->prepare(
+        'INSERT IGNORE INTO formula_ingredients (dough_type_id, ingredient_id, percentage) VALUES (?, ?, ?)'
+    );
+    foreach ($items as $item) {
+        $ingredient_id = (int)($item['ingredient_id'] ?? 0);
+        if ($ingredient_id <= 0) {
+            continue;
+        }
+        $stmt->execute([$dough_type_id, $ingredient_id, $item['percentage']]);
+        if ($stmt->rowCount() > 0) {
+            $added++;
+        }
+    }
+    return $added;
+}
+
+if (is_readable(__DIR__ . '/sfb_origin.php')) {
+    require_once __DIR__ . '/sfb_origin.php';
 }

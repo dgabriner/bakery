@@ -1,0 +1,310 @@
+/* Desktop exception workshop. Hidden below 900px so Prompt 11's phone desk
+   (or the existing dense Manager Mode forms) stay unchanged. */
+.exception-workshop,
+.manager-workshop-host {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .exception-workshop,
+  .manager-workshop-host {
+    display: block;
+  }
+
+  .manager-page:has(.exception-workshop) .manager-attention-list,
+  .manager-page:has(.exception-workshop) .manager-attention > .manager-clear-state {
+    display: none;
+  }
+}
+
+.exception-workshop {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-md);
+  box-shadow: var(--sf-shadow-sm);
+  margin: 0 0 var(--sf-space-4);
+  padding: var(--sf-space-5);
+}
+
+.exception-workshop__header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--sf-space-4);
+  justify-content: space-between;
+  margin-bottom: var(--sf-space-4);
+}
+
+.exception-workshop__header h2 {
+  margin: 0;
+}
+
+.exception-workshop__lede {
+  color: var(--sf-text-secondary);
+  font-size: .88rem;
+  line-height: 1.4;
+  margin: .35rem 0 0;
+  max-width: 40rem;
+}
+
+.exception-workshop__keys {
+  background: var(--sf-surface-muted);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  color: var(--sf-text-secondary);
+  font-size: .75rem;
+  font-weight: 700;
+  margin: 0;
+  max-width: 16rem;
+  padding: .45rem .65rem;
+}
+
+.exception-workshop__filters {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem .75rem;
+  margin-bottom: var(--sf-space-3);
+}
+
+.exception-workshop__filters label,
+.exception-workshop__assign,
+.exception-workshop__note,
+.exception-workshop__work label {
+  color: var(--sf-text-secondary);
+  display: grid;
+  font-size: .75rem;
+  font-weight: 700;
+  gap: .2rem;
+}
+
+.exception-workshop__filters select,
+.exception-workshop__assign select,
+.exception-workshop__note input,
+.exception-workshop__work select,
+.exception-workshop__work input,
+.exception-workshop__work textarea {
+  font: inherit;
+  max-width: 100%;
+  min-height: 34px;
+}
+
+.exception-workshop__toggle {
+  align-items: center;
+  display: flex !important;
+  font-weight: 650;
+  gap: .4rem;
+  grid-auto-flow: column;
+}
+
+.exception-workshop__bulk {
+  background: var(--sf-surface-muted);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  display: grid;
+  gap: var(--sf-space-3);
+  margin-bottom: var(--sf-space-4);
+  padding: .75rem .85rem;
+}
+
+.exception-workshop__bulk-coord,
+.exception-workshop__bulk-ops {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem .65rem;
+}
+
+.exception-workshop__bulk strong {
+  color: var(--sf-text-secondary);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  margin-right: .35rem;
+  text-transform: uppercase;
+}
+
+.exception-workshop__split {
+  display: grid;
+  gap: var(--sf-space-4);
+  grid-template-columns: minmax(0, 1.05fr) minmax(18rem, .95fr);
+}
+
+.exception-workshop__queue {
+  display: grid;
+  gap: .45rem;
+  max-height: 42rem;
+  overflow: auto;
+}
+
+.exception-workshop__group h3 {
+  align-items: baseline;
+  display: flex;
+  font-size: .82rem;
+  gap: .45rem;
+  margin: .7rem 0 .35rem;
+}
+
+.exception-workshop__group h3 span {
+  background: var(--sf-surface-muted);
+  border-radius: 999px;
+  color: var(--sf-text-secondary);
+  font-size: .72rem;
+  font-weight: 800;
+  padding: .1rem .45rem;
+}
+
+.exception-workshop__row {
+  align-items: flex-start;
+  background: var(--sf-surface-muted);
+  border: 1px solid var(--sf-border);
+  border-left: 4px solid var(--sf-info);
+  border-radius: var(--sf-radius-sm);
+  cursor: pointer;
+  display: grid;
+  gap: var(--sf-space-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: .65rem .75rem;
+}
+
+.exception-workshop__row--critical {
+  background: var(--sf-danger-bg);
+  border-left-color: var(--sf-danger);
+}
+
+.exception-workshop__row--warning {
+  background: var(--sf-warning-bg);
+  border-left-color: var(--sf-warning);
+}
+
+.exception-workshop__row.is-selected,
+.exception-workshop__row:focus {
+  border-color: var(--sf-primary);
+  box-shadow: 0 0 0 2px rgba(23, 63, 60, .12);
+  outline: none;
+}
+
+.exception-workshop__check {
+  padding-top: .15rem;
+}
+
+.exception-workshop__row-copy h3 {
+  font-size: .92rem;
+  margin: .15rem 0 0;
+}
+
+.exception-workshop__row-copy p {
+  color: var(--sf-text-secondary);
+  font-size: .8rem;
+  margin: .15rem 0 0;
+}
+
+.exception-workshop__badge,
+.exception-workshop__state {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  margin-right: .4rem;
+  text-transform: uppercase;
+}
+
+.exception-workshop__state {
+  color: var(--sf-text-secondary);
+}
+
+.exception-workshop__panel {
+  background: linear-gradient(180deg, #f7fbfa 0%, #fff 42%);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  min-width: 0;
+  padding: var(--sf-space-4);
+}
+
+.exception-workshop__detail h3 {
+  margin: .25rem 0 .4rem;
+}
+
+.exception-workshop__detail h4 {
+  font-size: .78rem;
+  letter-spacing: .04em;
+  margin: 1rem 0 .4rem;
+  text-transform: uppercase;
+}
+
+.exception-workshop__detail > p,
+.exception-workshop__muted,
+.exception-workshop__hint {
+  color: var(--sf-text-secondary);
+  font-size: .84rem;
+  line-height: 1.4;
+}
+
+.exception-workshop__fix {
+  margin: .55rem 0 .2rem;
+}
+
+.exception-workshop__work,
+.exception-workshop__create,
+.exception-workshop__related,
+.exception-workshop__timeline {
+  border-top: 1px solid var(--sf-border);
+  margin-top: .9rem;
+  padding-top: .7rem;
+}
+
+.exception-workshop__work {
+  display: grid;
+  gap: .5rem;
+}
+
+.exception-workshop__work-actions,
+.exception-workshop__create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.exception-workshop__related ul,
+.exception-workshop__timeline ol {
+  display: grid;
+  gap: .4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.exception-workshop__related li,
+.exception-workshop__timeline li {
+  display: grid;
+  gap: .1rem;
+  font-size: .82rem;
+}
+
+.exception-workshop__related span,
+.exception-workshop__timeline small {
+  color: var(--sf-text-secondary);
+  font-size: .75rem;
+}
+
+.exception-workshop__timeline li {
+  grid-template-columns: 4.2rem minmax(0, 1fr);
+}
+
+.exception-workshop__timeline time {
+  color: var(--sf-primary);
+  font-size: .75rem;
+  font-weight: 800;
+}
+
+.exception-workshop-jump {
+  display: inline-block;
+  font-size: .76rem;
+  font-weight: 720;
+  margin-left: .45rem;
+}
+
+@media (max-width: 1100px) {
+  .exception-workshop__split {
+    grid-template-columns: 1fr;
+  }
+}

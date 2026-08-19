@@ -1,0 +1,78 @@
+/**
+ * Sour Flour OS — shared design tokens
+ * Warm, operational, calm. Flour-like surfaces with restrained green action color.
+ */
+:root {
+  /* Typography */
+  --sf-font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --sf-font-serif: Georgia, "Times New Roman", serif;
+  --sf-font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+
+  /* Text */
+  --sf-text: #1e2b28;
+  --sf-text-secondary: #4a5c57;
+  --sf-text-muted: #6b7d78;
+  --sf-text-inverse: #f8faf9;
+
+  /* Surfaces */
+  --sf-bg: #f6f3ee;
+  --sf-bg-elevated: #fffdf9;
+  --sf-surface: #ffffff;
+  --sf-surface-muted: #f0f4f2;
+  --sf-surface-inset: #e8eeeb;
+
+  /* Borders & shadows */
+  --sf-border: #d4ddd8;
+  --sf-border-strong: #b8c7c0;
+  --sf-radius-sm: 6px;
+  --sf-radius-md: 10px;
+  --sf-radius-lg: 14px;
+  --sf-shadow-sm: 0 1px 3px rgba(24, 40, 36, 0.06);
+  --sf-shadow-md: 0 4px 16px rgba(24, 40, 36, 0.08);
+  --sf-shadow-lg: 0 12px 32px rgba(24, 40, 36, 0.12);
+
+  /* Brand & actions */
+  --sf-brand: #173f3c;
+  --sf-brand-hover: #1f524e;
+  --sf-brand-muted: #28615d;
+  --sf-primary: #24746a;
+  --sf-primary-hover: #1d5f57;
+  --sf-accent: #d88346;
+  --sf-accent-hover: #c86e33;
+
+  /* Semantic states */
+  --sf-success: #1f7a48;
+  --sf-success-bg: #e8f5ec;
+  --sf-success-border: #a8d4b8;
+  --sf-warning: #9a6b12;
+  --sf-warning-bg: #fef6e4;
+  --sf-warning-border: #e8c96a;
+  --sf-danger: #a83232;
+  --sf-danger-bg: #fdeeee;
+  --sf-danger-border: #e7a1a1;
+  --sf-info: #1a5f7a;
+  --sf-info-bg: #e8f2f7;
+  --sf-info-border: #9ec4d8;
+
+  /* Spacing scale */
+  --sf-space-1: 0.25rem;
+  --sf-space-2: 0.5rem;
+  --sf-space-3: 0.75rem;
+  --sf-space-4: 1rem;
+  --sf-space-5: 1.25rem;
+  --sf-space-6: 1.5rem;
+  --sf-space-8: 2rem;
+
+  /* Layout */
+  --sf-content-max: 1200px;
+  --sf-content-wide: 1440px;
+  --sf-touch-min: 44px;
+
+  /* Focus ring */
+  --sf-focus-ring: 0 0 0 3px rgba(36, 116, 106, 0.35);
+
+  /* Nav (referenced by nav.css) */
+  --sf-nav-bg: var(--sf-brand);
+  --sf-nav-border: var(--sf-brand-muted);
+  --sf-nav-panel-bg: var(--sf-bg-elevated);
+}

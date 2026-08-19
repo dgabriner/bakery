@@ -14,6 +14,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $driverId = (int)$_POST['driver_id'];
         $customerId = (int)$_POST['customer_id'];
         $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
+
+        if (!bakery_sfb_ops_customer_allowed($db, $customerId)) {
+            throw new Exception('Synthetic SF Bakers cannot be added to standing routes');
+        }
         
         // First, remove any existing route for this customer on this day
         $dayClause = $dayOfWeek === 7 ? 'IN (0, 7)' : '= ?';
@@ -43,7 +47,7 @@ require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
 // Set page title
-$page_title = 'Standing Routes';
+$page_title = bakery_t('page.standing_routes');
 
 // Fetch data
 $drivers = [];
@@ -70,7 +74,8 @@ try {
     // Fetch all customers with zone information, grouped by zone
     $customers = $db->query("
         SELECT id, name, zone 
-        FROM customers 
+        FROM customers c
+        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
         ORDER BY 
             CASE 
                 WHEN zone IS NULL OR zone = '' THEN 'ZZZ_No Zone'
@@ -94,6 +99,7 @@ try {
         SELECT r.driver_id, r.customer_id, r.day_of_week, c.name as customer_name, c.zone as customer_zone
         FROM standing_routes r
         JOIN customers c ON r.customer_id = c.id
+        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
         ORDER BY r.day_of_week
     ")->fetchAll();
     

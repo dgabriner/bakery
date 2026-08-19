@@ -1,0 +1,35 @@
+-- Append-only operational timeline / audit events for Sour Flour OS.
+-- Complements authoritative rows (inventory_movements, driver_photos, etc.).
+
+CREATE TABLE IF NOT EXISTS operational_events (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  event_type VARCHAR(64) NOT NULL,
+  operational_date DATE NULL DEFAULT NULL,
+  occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actor_user_id INT NULL DEFAULT NULL,
+  actor_role VARCHAR(32) NULL DEFAULT NULL,
+  driver_id INT NULL DEFAULT NULL,
+  customer_id INT NULL DEFAULT NULL,
+  daily_order_id INT NULL DEFAULT NULL,
+  assignment_id INT NULL DEFAULT NULL,
+  invoice_ref VARCHAR(64) NULL DEFAULT NULL,
+  product_id INT NULL DEFAULT NULL,
+  summary VARCHAR(500) NOT NULL,
+  metadata JSON NULL DEFAULT NULL,
+  gps_latitude DECIMAL(10,8) NULL DEFAULT NULL,
+  gps_longitude DECIMAL(11,8) NULL DEFAULT NULL,
+  gps_accuracy_m DECIMAL(8,2) NULL DEFAULT NULL,
+  gps_status ENUM('captured','denied','unavailable','error') NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_op_events_date (operational_date, occurred_at),
+  KEY idx_op_events_customer (customer_id, occurred_at),
+  KEY idx_op_events_order (daily_order_id, occurred_at),
+  KEY idx_op_events_driver (driver_id, occurred_at),
+  KEY idx_op_events_actor (actor_user_id, occurred_at),
+  KEY idx_op_events_type (event_type, occurred_at),
+  CONSTRAINT fk_op_events_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_op_events_driver FOREIGN KEY (driver_id) REFERENCES drivers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_op_events_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_op_events_order FOREIGN KEY (daily_order_id) REFERENCES daily_orders(id) ON DELETE SET NULL,
+  CONSTRAINT fk_op_events_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

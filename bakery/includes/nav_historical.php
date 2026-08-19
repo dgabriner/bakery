@@ -6,7 +6,7 @@ if (!defined('ACCESS_ALLOWED')) {
 // Get the current page name for active state
 $current_page = basename($_SERVER['PHP_SELF'], '.php');
 $navUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
-$isDriverNav = $navUser && ($navUser['role_slug'] ?? '') === 'driver';
+$isDriverNav = $navUser && bakery_is_driver_route_role($navUser['role_slug'] ?? '');
 $isBakerNav = $navUser && ($navUser['role_slug'] ?? '') === 'baker';
 $navSelectedDriverId = function_exists('bakery_get_selected_driver_id') ? bakery_get_selected_driver_id() : 0;
 $navSelectedDriverName = function_exists('bakery_get_selected_driver_name') ? bakery_get_selected_driver_name() : '';

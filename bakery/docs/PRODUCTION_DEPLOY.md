@@ -100,7 +100,19 @@ C:\php\php.exe scripts/create_user_once.php --email=you@sourflour.org --password
 
 Run against production DB only from a whitelisted IP with production `.env` — or insert via SQL after generating `password_hash` locally.
 
-### 6. Post-deploy verification
+### 6. Studio clock cron (DreamHost only)
+
+Do **not** run a Windows scheduled task or local cron. The Synthetic Studio clock ticks from DreamHost.
+
+In the DreamHost panel → Cron Jobs, add a job that runs **every minute**:
+
+```
+/usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/sfb_studio_tick.php
+```
+
+Replace `YOUR_USER` with the shell/SFTP user and confirm the PHP binary (panel → Manage Cron Jobs / PHP version). App root on this host is `bakery.sourflour.org/bake/`. Unforced ticks require production `APP_ENV` and database `bakerysf`. Local testing uses Synthetic Manager → **Run tick now**.
+
+### 7. Post-deploy verification
 
 - [ ] `login.php` loads over HTTPS
 - [ ] Unauthenticated access to `index.php` redirects to login

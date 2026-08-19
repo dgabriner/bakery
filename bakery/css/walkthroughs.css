@@ -1,0 +1,129 @@
+/* Walkthrough gallery — English and Spanish usage videos */
+.walkthroughs-page {
+  color: var(--sf-text);
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 1.5rem 1rem 3rem;
+}
+.walkthroughs-hero {
+  background: linear-gradient(135deg, #173f3c 0%, #28615d 58%, #39776e 100%);
+  border-radius: var(--sf-radius-lg);
+  box-shadow: var(--sf-shadow-md);
+  color: #fff;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  padding: clamp(1.2rem, 3vw, 1.85rem);
+  position: relative;
+}
+.walkthroughs-hero:after {
+  background: rgba(255,255,255,.07);
+  border-radius: 50%;
+  content: "";
+  height: 280px;
+  position: absolute;
+  right: -120px;
+  top: -150px;
+  width: 280px;
+}
+.walkthroughs-hero > * { position: relative; z-index: 1; }
+.walkthroughs-kicker {
+  color: #bfe5df;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .09em;
+  margin: 0 0 .35rem;
+  text-transform: uppercase;
+}
+.walkthroughs-page h1 {
+  color: #fff;
+  font-family: var(--sf-font-serif);
+  font-size: clamp(1.8rem, 4vw, 2.35rem);
+  font-weight: 600;
+  margin: 0;
+}
+.walkthroughs-page h1::after { display: none; }
+.walkthroughs-lead {
+  color: rgba(255,255,255,.84);
+  margin: .4rem 0 0;
+  max-width: 46rem;
+}
+.walkthroughs-note {
+  background: #fff8eb;
+  border: 1px solid #ead5aa;
+  border-radius: 10px;
+  color: #6d5633;
+  font-size: .88rem;
+  margin: 0 0 1rem;
+  padding: .75rem 1rem;
+}
+.walkthroughs-grid {
+  display: grid;
+  gap: 1rem;
+}
+.walkthroughs-card {
+  background: #fff;
+  border: 1px solid var(--sf-border);
+  border-radius: 14px;
+  padding: 1rem 1.1rem 1.15rem;
+}
+.walkthroughs-card h2 {
+  background: none;
+  box-shadow: none;
+  color: #173f3c;
+  font-size: 1.2rem;
+  margin: 0 0 .35rem;
+  padding: 0;
+}
+.walkthroughs-card > p { color: var(--sf-text-secondary); margin: 0 0 .85rem; }
+.walkthroughs-videos {
+  display: grid;
+  gap: .85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.walkthroughs-video {
+  background: var(--sf-surface-muted);
+  border: 1px solid var(--sf-border);
+  border-radius: 12px;
+  margin: 0;
+  padding: .65rem;
+}
+.walkthroughs-video.is-preferred { border-color: var(--sf-brand-muted); }
+.walkthroughs-video figcaption {
+  color: #24574f;
+  font-size: .78rem;
+  font-weight: 750;
+  margin: 0 0 .45rem;
+}
+.walkthroughs-video video {
+  background: #111;
+  border-radius: 8px;
+  display: block;
+  max-height: 420px;
+  width: 100%;
+}
+.walkthroughs-download {
+  color: #a94f35;
+  display: inline-block;
+  font-size: .82rem;
+  font-weight: 700;
+  margin-top: .45rem;
+  text-decoration: none;
+}
+.walkthroughs-empty {
+  color: var(--sf-text-muted);
+  font-size: .9rem;
+  margin: 0;
+}
+.walkthroughs-hint {
+  color: var(--sf-text-secondary);
+  font-size: .82rem;
+  margin: .4rem 0 0;
+}
+.walkthroughs-hint code {
+  background: rgba(255,255,255,.75);
+  border-radius: 4px;
+  padding: .05rem .3rem;
+}
+@media (max-width: 820px) {
+  .walkthroughs-videos { grid-template-columns: 1fr; }
+}

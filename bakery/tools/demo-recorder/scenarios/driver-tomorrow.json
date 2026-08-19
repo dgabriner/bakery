@@ -1,0 +1,70 @@
+{
+  "id": "driver-tomorrow",
+  "title": { "en": "Tomorrow's route", "es": "La ruta de mañana" },
+  "description": {
+    "en": "From a day with stops, tap the next-day arrow to see the following day.",
+    "es": "Desde un día con paradas, toca SIG para ver el día siguiente."
+  },
+  "prepare": "driver-login",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 400,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2800,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 200
+    },
+    { "action": "waitForURL", "includes": "driver.php" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "goto",
+      "path": "driver.php?date={{TODAY}}",
+      "caption": {
+        "en": "This day has stops. ANT and SIG change the day at the top.",
+        "es": "Este día tiene paradas. ANT y SIG cambian el día arriba."
+      }
+    },
+    { "action": "waitForSelector", "selector": "a.route-day-nav-next" },
+    {
+      "action": "click",
+      "selector": "a.route-day-nav-next",
+      "force": true,
+      "caption": {
+        "en": "Tap Next to see the following day",
+        "es": "Toca SIG para ver el día siguiente"
+      },
+      "narration": {
+        "en": "Tap the next-day arrow on the right. That is how you see the following day.",
+        "es": "Toca la flecha SIG a la derecha. Así ves el día siguiente."
+      }
+    },
+    {
+      "action": "waitForURL",
+      "includes": "{{TOMORROW}}"
+    },
+    {
+      "action": "waitForSelector",
+      "selector": ".route-day-nav"
+    },
+    {
+      "action": "waitForSelector",
+      "selector": "#nextStopCard:not([hidden])"
+    },
+    {
+      "action": "scroll",
+      "selector": "#nextStopCard",
+      "caption": {
+        "en": "This is the next day. The next stop is below the map.",
+        "es": "Este es el día siguiente. La siguiente parada está debajo del mapa."
+      },
+      "captionHoldMs": 2200,
+      "waitAfter": 1800
+    }
+  ]
+}

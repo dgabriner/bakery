@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-$page_title = 'Customer Map';
+$page_title = bakery_t('page.map');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 

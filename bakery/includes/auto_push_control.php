@@ -246,6 +246,8 @@ function bakery_auto_push_run_sync() {
         2 => ['pipe', 'w'],
     ];
 
+    // Inherit PHP's environment. Get-PythonLauncher in push_sftp.ps1 also
+    // resolves absolute Python paths so a stripped PATH still works.
     $process = proc_open($cmd, $descriptors, $pipes, dirname(__DIR__), null, ['bypass_shell' => true]);
     if (!is_resource($process)) {
         throw new RuntimeException('Failed to start push script');
@@ -259,12 +261,17 @@ function bakery_auto_push_run_sync() {
     $stderr = '';
     $start = time();
     $timeout = 180;
+    $exit = null;
 
     while (true) {
         $stdout .= stream_get_contents($pipes[1]);
         $stderr .= stream_get_contents($pipes[2]);
         $status = proc_get_status($process);
         if (!$status['running']) {
+            // On Windows, only the first finished proc_get_status() has the real exit code.
+            if ($exit === null && isset($status['exitcode']) && (int)$status['exitcode'] >= 0) {
+                $exit = (int)$status['exitcode'];
+            }
             $stdout .= stream_get_contents($pipes[1]);
             $stderr .= stream_get_contents($pipes[2]);
             break;
@@ -281,15 +288,24 @@ function bakery_auto_push_run_sync() {
 
     fclose($pipes[1]);
     fclose($pipes[2]);
-    $exit = proc_close($process);
+    $closeExit = proc_close($process);
+    if ($exit === null || $exit < 0) {
+        $exit = (int)$closeExit;
+    }
 
     $output = trim($stdout . ($stderr !== '' ? "\n" . $stderr : ''));
+    // Strip PowerShell CLIXML noise sometimes written to stderr when piped.
+    $output = preg_replace('/#< CLIXML[\s\S]*$/m', '', $output);
+    $output = trim((string)$output);
+
     $log = bakery_auto_push_deploy_dir() . DIRECTORY_SEPARATOR . 'auto_push.log';
-    @file_put_contents(
-        $log,
-        date('Y-m-d H:i:s') . "  UI  SYNC exit={$exit}\n",
-        FILE_APPEND
-    );
+    $logLine = date('Y-m-d H:i:s') . "  UI  SYNC exit={$exit}";
+    if ($exit !== 0 && $output !== '') {
+        $snippet = preg_replace('/\s+/', ' ', $output);
+        $logLine .= '  ' . substr($snippet, 0, 500);
+    }
+    $logLine .= "\n";
+    @file_put_contents($log, $logLine, FILE_APPEND);
 
     return [
         'ok' => ($exit === 0),

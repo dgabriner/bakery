@@ -1,0 +1,40 @@
+{
+  "id": "login",
+  "title": { "en": "Staff login", "es": "Entrar con código" },
+  "description": {
+    "en": "Enter a 4-digit staff code and land on the operations home screen.",
+    "es": "Escribe el código de 4 dígitos y llega a la pantalla de inicio."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1280, "height": 720 },
+  "slowMo": 280,
+  "captionHoldMs": 800,
+  "endHoldMs": 1800,
+  "steps": [
+    {
+      "action": "goto",
+      "path": "login.php",
+      "caption": { "en": "Open the staff login screen", "es": "Abre la pantalla de entrada del personal" }
+    },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{ADMIN_CODE}}",
+      "delay": 220,
+      "caption": {
+        "en": "Type the 4-digit staff code — it submits itself",
+        "es": "Escribe el código de 4 dígitos; se envía solo"
+      }
+    },
+    {
+      "action": "waitForURL",
+      "includes": "index.php",
+      "caption": {
+        "en": "Land on the home screen after a successful sign-in",
+        "es": "Llegas al inicio después de entrar"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#ops-date-input", "waitAfter": 1200 }
+  ]
+}

@@ -46,12 +46,15 @@ function Test-WatchPathRelevant {
 
     $rel = $full.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/')
     foreach ($prefix in @('storage/', 'scripts/', 'docs/', 'tests/', 'database/', '.cursor/', 'logs/', 'uploads/', 'vendor/')) {
-        if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return ($rel.StartsWith('uploads/product_photos/catalog/', [System.StringComparison]::OrdinalIgnoreCase))
+        }
     }
 
     $ext = [System.IO.Path]::GetExtension($name).ToLowerInvariant()
+    $isCatalogImage = $rel.StartsWith('uploads/product_photos/catalog/', [System.StringComparison]::OrdinalIgnoreCase)
     if ($name -eq '.htaccess') { return $true }
-    if ($ext -notin @('.php', '.js', '.css', '.html')) { return $false }
+    if ($ext -notin @('.php', '.js', '.css', '.html') -and -not $isCatalogImage) { return $false }
 
     if ($rel -notmatch '/') { return $true }
     foreach ($dir in (Get-BakeryDeployDirectories)) {
@@ -93,15 +96,19 @@ foreach ($path in $paths) {
             $name = [System.IO.Path]::GetFileName($itemPath)
             if ($name -like '.env*') { return }
             $ext = [System.IO.Path]::GetExtension($name).ToLowerInvariant()
-            if ($name -ne '.htaccess' -and $ext -notin @('.php', '.js', '.css', '.html')) { return }
 
             $rel = $itemPath
             try {
                 $rel = $itemPath.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
             } catch { }
             foreach ($prefix in @('storage/', 'scripts/', 'docs/', 'tests/', 'database/', '.cursor/', 'logs/', 'uploads/', 'vendor/')) {
-                if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return }
+                if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    if (-not $rel.StartsWith('uploads/product_photos/catalog/', [System.StringComparison]::OrdinalIgnoreCase)) { return }
+                    break
+                }
             }
+            $isCatalogImage = $rel.StartsWith('uploads/product_photos/catalog/', [System.StringComparison]::OrdinalIgnoreCase)
+            if ($name -ne '.htaccess' -and $ext -notin @('.php', '.js', '.css', '.html') -and -not $isCatalogImage) { return }
 
             New-Item -ItemType Directory -Force -Path $deploy | Out-Null
             $line = "{0}  WATCH  change {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $rel

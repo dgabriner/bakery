@@ -1,0 +1,138 @@
+/* Focused day list for signed-in drivers. Keep this view intentionally quiet. */
+.driver-stops-page {
+    --stops-ink: #183c38;
+    --stops-muted: #6a7d78;
+    --stops-line: #d7e3de;
+    --stops-green: #23766a;
+    --stops-green-soft: #e8f4ef;
+    --stops-bg: #f6f3ee;
+    background: var(--stops-bg);
+    color: var(--stops-ink);
+    min-height: calc(100vh - 58px);
+    padding: 20px 16px 34px;
+}
+
+.driver-stops-header,
+.driver-current-stop,
+.driver-stops-list-section,
+.driver-stops-empty,
+.driver-route-complete {
+    margin: 0 auto 14px;
+    max-width: 680px;
+}
+
+.driver-stops-header {
+    align-items: flex-start;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 4px 2px 10px;
+}
+
+.driver-stops-eyebrow {
+    color: var(--stops-green);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.11em;
+    margin: 0 0 5px;
+    text-transform: uppercase;
+}
+
+.driver-stops-header h1,
+.driver-stops-list-heading h2,
+.driver-current-stop h2 {
+    color: var(--stops-ink);
+    margin: 0;
+}
+
+.driver-stops-header h1 { font-size: clamp(1.45rem, 6vw, 2rem); letter-spacing: -0.03em; }
+.driver-stops-date { color: var(--stops-muted); font-size: 0.9rem; margin: 4px 0 0; }
+
+.driver-stops-count {
+    align-items: flex-end;
+    display: flex;
+    flex-direction: column;
+    padding-top: 2px;
+}
+
+.driver-stops-count strong { font-size: 1.35rem; line-height: 1; }
+.driver-stops-count span { color: var(--stops-muted); font-size: 0.72rem; margin-top: 4px; text-transform: uppercase; }
+
+.driver-current-stop {
+    background: var(--stops-ink);
+    border-radius: 18px;
+    box-shadow: 0 10px 22px rgba(24, 60, 56, 0.16);
+    color: #f6fbf9;
+    padding: 18px;
+}
+
+.driver-current-stop-topline { align-items: center; color: #a8dbcb; display: flex; font-size: 0.75rem; font-weight: 800; gap: 7px; letter-spacing: 0.08em; text-transform: uppercase; }
+.driver-current-stop-marker { color: #75d6af; font-size: 0.9rem; }
+.driver-current-stop-position { color: #b7ceca; font-weight: 650; margin-left: auto; letter-spacing: 0; text-transform: none; }
+.driver-current-stop h2 { color: #fff; font-size: 1.35rem; margin-top: 16px; }
+.driver-current-stop p { color: #c4d8d4; line-height: 1.45; margin: 5px 0 14px; }
+.driver-current-stop-action { color: #fff; display: inline-flex; font-size: 0.88rem; font-weight: 800; gap: 6px; min-height: 44px; align-items: center; text-decoration: none; }
+.driver-current-stop-action:hover { color: #b9f0dc; }
+.driver-current-stop-action--qr { background: #f6fbf9; border-radius: 10px; color: var(--stops-ink); margin-left: 10px; padding: 0 13px; }
+.driver-current-stop-action--qr:hover { background: #dff3ea; color: var(--stops-ink); }
+
+.driver-route-complete,
+.driver-stops-empty { background: #fff; border: 1px solid var(--stops-line); border-radius: 16px; padding: 18px; }
+.driver-route-complete { display: flex; flex-direction: column; gap: 4px; }
+.driver-route-complete strong { color: var(--stops-green); }
+.driver-route-complete span,
+.driver-stops-empty p { color: var(--stops-muted); margin: 0; }
+.driver-stops-empty { text-align: center; }
+.driver-stops-empty-icon { align-items: center; background: var(--stops-green-soft); border-radius: 50%; color: var(--stops-green); display: inline-flex; font-size: 1.4rem; height: 42px; justify-content: center; margin-bottom: 10px; width: 42px; }
+.driver-stops-empty strong { display: block; font-size: 1.05rem; }
+.driver-stops-empty p { line-height: 1.45; margin-top: 5px; }
+
+.driver-stops-list-section { background: #fff; border: 1px solid var(--stops-line); border-radius: 18px; overflow: hidden; }
+.driver-stops-list-heading { align-items: flex-end; border-bottom: 1px solid var(--stops-line); display: flex; justify-content: space-between; gap: 12px; padding: 16px 16px 13px; }
+.driver-stops-list-heading h2 { font-size: 1.18rem; }
+.driver-stops-list-heading > span { color: var(--stops-muted); font-size: 0.78rem; padding-bottom: 2px; }
+.driver-stops-list-hint { color: var(--stops-muted); font-size: 0.82rem; line-height: 1.4; margin: 0; padding: 0 16px 12px; }
+.driver-stops-list { list-style: none; margin: 0; padding: 0; }
+
+.driver-stop-row { align-items: center; display: flex; gap: 12px; min-height: 76px; padding: 12px 14px 12px 16px; position: relative; }
+.driver-stop-open { align-items: center; color: inherit; display: flex; flex: 1 1 auto; gap: 12px; min-width: 0; text-decoration: none; -webkit-tap-highlight-color: rgba(35, 118, 106, 0.12); }
+.driver-stop-row.is-clickable { cursor: pointer; }
+.driver-stop-row.is-clickable .driver-stop-open:hover .driver-stop-title-row h3 { color: var(--stops-green); }
+.driver-stop-row.is-clickable .driver-stop-open:active { opacity: 0.88; }
+.driver-stop-row + .driver-stop-row { border-top: 1px solid #edf1ef; }
+.driver-stop-row.is-current { background: #f0f8f4; box-shadow: inset 4px 0 0 var(--stops-green); }
+.driver-stop-row.is-complete { background: #fbfcfb; }
+.driver-stop-number { align-items: center; background: #edf3f0; border: 1px solid #cfddd7; border-radius: 50%; color: var(--stops-ink); display: inline-flex; flex: 0 0 32px; font-size: 0.8rem; font-weight: 850; height: 32px; justify-content: center; width: 32px; }
+.is-current .driver-stop-number { background: var(--stops-green); border-color: var(--stops-green); color: #fff; }
+.is-complete .driver-stop-number { background: #e5f2e8; border-color: #b7d8bf; color: #237047; }
+.driver-stop-content { min-width: 0; flex: 1 1 auto; }
+.driver-stop-title-row { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.driver-stop-title-row h3 { color: var(--stops-ink); font-size: 0.98rem; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-complete .driver-stop-title-row h3 { color: #71827d; text-decoration: line-through; }
+.driver-stop-status,
+.driver-stop-current-badge { border-radius: 999px; flex: 0 0 auto; font-size: 0.66rem; font-weight: 800; padding: 4px 7px; text-transform: uppercase; }
+.driver-stop-current-badge { background: #ccebdd; color: #17634f; }
+.driver-stop-status--delivered { background: #e5f2e8; color: #237047; }
+.driver-stop-status--cancelled { background: #edf0ef; color: #65736f; }
+.driver-stop-status--failed { background: #fdeaea; color: #a33d3d; }
+.driver-stop-status--in_transit { background: #e4f1f7; color: #1a6580; }
+.driver-stop-status--pending { background: #f8f1df; color: #8a691e; }
+.driver-stop-content > p { color: var(--stops-muted); font-size: 0.84rem; line-height: 1.35; margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.driver-stop-meta { color: #84938e; display: flex; flex-wrap: wrap; font-size: 0.72rem; gap: 8px; margin-top: 4px; }
+.driver-stop-orders,
+.driver-stop-navigate { align-items: center; border: 1px solid #c9ded7; border-radius: 10px; color: var(--stops-green); display: inline-flex; font-weight: 800; height: 40px; justify-content: center; text-decoration: none; }
+.driver-stop-orders { flex: 0 0 auto; font-size: 0.72rem; letter-spacing: 0.02em; padding: 0 10px; text-transform: uppercase; }
+.driver-stop-navigate { flex: 0 0 40px; font-size: 1.05rem; width: 40px; }
+.driver-stop-orders:hover,
+.driver-stop-navigate:hover { background: var(--stops-green-soft); }
+
+@media (max-width: 420px) {
+    .driver-stops-page { padding-left: 10px; padding-right: 10px; }
+    .driver-current-stop { border-radius: 15px; padding: 16px; }
+    .driver-current-stop-position { font-size: 0.7rem; }
+    .driver-stop-row { gap: 9px; padding-left: 12px; padding-right: 10px; }
+    .driver-stop-title-row { align-items: flex-start; flex-direction: column; gap: 3px; }
+    .driver-stop-title-row h3 { max-width: 100%; }
+    .driver-stop-status, .driver-stop-current-badge { align-self: flex-start; }
+    .driver-current-stop-action--qr { display: flex; margin: 8px 0 0; width: 100%; }
+}

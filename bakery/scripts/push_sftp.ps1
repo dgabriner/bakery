@@ -28,8 +28,8 @@ $listFile = Join-Path $env:TEMP ("bakery_sftp_files_{0}.txt" -f [guid]::NewGuid(
 
 function Import-BakerySftpEnv {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return }
-    Get-Content $Path | ForEach-Object {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    Get-Content -LiteralPath $Path | ForEach-Object {
         $line = $_.Trim()
         if (-not $line -or $line.StartsWith("#")) { return }
         $eq = $line.IndexOf("=")
@@ -42,15 +42,40 @@ function Import-BakerySftpEnv {
         ) {
             $value = $value.Substring(1, $value.Length - 2)
         }
-        Set-Item -Path "Env:$name" -Value $value
+        # Set via .NET API — avoids Env: provider duplicate-key crashes.
+        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
     }
 }
 
 function Get-PythonLauncher {
-    foreach ($candidate in @("py", "python")) {
-        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    $candidates = @(
+        (Join-Path $localAppData 'Programs\Python\Launcher\py.exe'),
+        (Join-Path $localAppData 'Programs\Python\Python314\python.exe'),
+        (Join-Path $localAppData 'Programs\Python\Python313\python.exe'),
+        (Join-Path $localAppData 'Programs\Python\Python312\python.exe'),
+        'C:\Python314\python.exe',
+        'C:\Python313\python.exe',
+        'C:\Python312\python.exe'
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
     }
+
+    foreach ($name in @('py', 'python')) {
+        try {
+            $cmd = Get-Command $name -ErrorAction Stop
+            $source = [string]$cmd.Source
+            # Skip the WindowsApps alias stub (often breaks non-interactive runs).
+            if ($source -match 'WindowsApps') { continue }
+            if ($source -and (Test-Path -LiteralPath $source)) { return $source }
+        } catch {
+            # try next
+        }
+    }
+
     throw "Python not found. Install Python 3 and ensure 'py' or 'python' is on PATH."
 }
 
@@ -96,8 +121,8 @@ function Write-BakeryPushHistory {
         stamp           = $stamp
         method          = $Method
         mode            = $Mode
-        host            = $env:SFTP_HOST
-        remote_root     = $env:SFTP_REMOTE_ROOT
+        host            = [Environment]::GetEnvironmentVariable('SFTP_HOST', 'Process')
+        remote_root     = [Environment]::GetEnvironmentVariable('SFTP_REMOTE_ROOT', 'Process')
         git_commit      = $gitCommit
         file_count      = $UploadedFiles.Count
         files           = @($UploadedFiles)
@@ -131,7 +156,12 @@ Import-BakerySftpEnv -Path $envSftpPath
 
 $missingCreds = @()
 foreach ($required in @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD", "SFTP_REMOTE_ROOT")) {
-    $val = (Get-Item "Env:$required" -ErrorAction SilentlyContinue).Value
+    # Avoid Get-Item Env:... — on some Windows setups the Env: provider throws
+    # "An item with the same key has already been added" when PATH/Path collide.
+    $val = [Environment]::GetEnvironmentVariable($required, 'Process')
+    if ([string]::IsNullOrWhiteSpace($val)) {
+        $val = [Environment]::GetEnvironmentVariable($required)
+    }
     if ([string]::IsNullOrWhiteSpace($val)) { $missingCreds += $required }
 }
 if ($missingCreds.Count -gt 0) {
@@ -139,6 +169,39 @@ if ($missingCreds.Count -gt 0) {
     Write-Host "Copy .env.sftp.example to .env.sftp and fill in values."
     exit 1
 }
+
+# Serialize with the background worker so UI Sync and hooks cannot corrupt LAST_DEPLOY.json.
+$lockPath = Join-Path $deployDir ".push_lock"
+$ownsLock = $false
+$lockDeadline = (Get-Date).AddMinutes(3)
+while (Test-Path -LiteralPath $lockPath) {
+    try {
+        $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $lockPid = [int]$lock.pid
+        if ($lockPid -gt 0 -and $lockPid -eq $PID) { break }
+        if ($lockPid -gt 0 -and -not (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            break
+        }
+    } catch {
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        break
+    }
+    if ((Get-Date) -gt $lockDeadline) {
+        Write-Host "Another push is still running (lock timeout). Try Sync again in a minute."
+        exit 1
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not (Test-Path -LiteralPath $lockPath)) {
+    New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
+    @{ pid = $PID; at = (Get-Date).ToUniversalTime().ToString("o"); source = "push_sftp" } |
+        ConvertTo-Json -Compress |
+        Set-Content -Path $lockPath -Encoding UTF8
+    $ownsLock = $true
+}
+
+try {
 
 $baseline = Read-BakeryDeployState -Path $lastDeployPath
 $sinceUtc = [datetime]::MinValue
@@ -162,7 +225,7 @@ if ($All -or -not $baseline) {
 $schemaChanges = @(Get-BakerySchemaSqlChanges -BakeryRoot $bakeryRoot -SinceUtc $sinceUtc)
 
 Write-Host ""
-Write-Host "Push -> $($env:SFTP_REMOTE_ROOT)  ($mode)"
+Write-Host ("Push -> {0}  ({1})" -f [Environment]::GetEnvironmentVariable('SFTP_REMOTE_ROOT', 'Process'), $mode)
 if ($toUpload.Count -eq 0) {
     Write-Host "Nothing to upload."
     if ($schemaChanges.Count -gt 0) {
@@ -170,7 +233,7 @@ if ($toUpload.Count -eq 0) {
         foreach ($sql in $schemaChanges) { Write-Host "  - $($sql.path)" }
     }
     Write-Host ""
-    exit 0
+    return
 }
 
 Write-Host "Uploading $($toUpload.Count) file(s):"
@@ -206,7 +269,7 @@ try {
 
 if ($DryRun) {
     Write-Host "Dry run only - nothing recorded."
-    exit 0
+    return
 }
 
 $detailPath = Write-BakeryPushHistory `
@@ -225,3 +288,16 @@ Write-Host "Recorded: $detailPath"
 Write-Host "History:  $historyLog"
 Write-Host "Live:     https://bakery.sourflour.org/bake/login.php"
 Write-Host ""
+
+} finally {
+    if ($ownsLock -and (Test-Path -LiteralPath $lockPath)) {
+        try {
+            $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([int]$lock.pid -eq $PID) {
+                Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

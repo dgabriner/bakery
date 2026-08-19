@@ -1,0 +1,75 @@
+{
+  "id": "driver-skip-stop",
+  "title": { "en": "Skip a stop", "es": "Omitir una parada" },
+  "description": {
+    "en": "Skip the next stop with a required reason. The next store becomes next.",
+    "es": "Omite la siguiente parada con un motivo. La siguiente tienda pasa a ser la próxima."
+  },
+  "prepare": "skip-stop",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 400,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2600,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "driver.php" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "goto",
+      "path": "driver.php?date={{DATE}}",
+      "caption": {
+        "en": "If a store cannot receive the order, skip it",
+        "es": "Si una tienda no puede recibir el pedido, omítela"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn" },
+    {
+      "action": "scroll",
+      "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn",
+      "waitAfter": 700
+    },
+    {
+      "action": "click",
+      "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn",
+      "force": true,
+      "caption": { "en": "Tap Skip stop", "es": "Toca Omitir parada" }
+    },
+    { "action": "waitForSelector", "selector": "#skipStopModal:not([hidden])" },
+    {
+      "action": "fill",
+      "selector": "#skipStopReasonInput",
+      "value": "Tienda cerrada",
+      "delay": 90,
+      "caption": {
+        "en": "A reason is required so the office knows what happened",
+        "es": "El motivo es obligatorio para que la oficina sepa qué pasó"
+      }
+    },
+    {
+      "action": "scroll",
+      "selector": "#skipStopConfirmBtn"
+    },
+    {
+      "action": "click",
+      "selector": "#skipStopConfirmBtn",
+      "force": true,
+      "caption": {
+        "en": "Then tap Skip stop. The next store becomes next.",
+        "es": "Luego toca Omitir parada. La siguiente tienda pasa a ser la próxima."
+      }
+    },
+    {
+      "action": "waitForSelector",
+      "selector": "#routeSuccessToast.is-visible",
+      "waitAfter": 2200
+    }
+  ]
+}

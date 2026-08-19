@@ -74,6 +74,13 @@ $seeds = [
         'code' => '9003',
         'driver_id' => 1,
     ],
+    [
+        'email' => 'sfadmin@sourflour.org',
+        'display_name' => 'SFAdmin',
+        'role' => 'administrator',
+        'code' => '9099',
+        'driver_id' => null,
+    ],
 ];
 
 foreach ($seeds as $seed) {

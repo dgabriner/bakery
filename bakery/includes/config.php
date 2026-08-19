@@ -176,6 +176,20 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', 'utf8mb4_unicode_ci');
 
 /**
+ * When false, runtime code must not run idempotent CREATE/ALTER migrations.
+ * Local USE_PROD_DB sessions talk to live production — schema is managed on deploy.
+ */
+function bakery_runtime_schema_ddl_allowed(): bool {
+    return !(defined('USE_PROD_DB') && USE_PROD_DB);
+}
+
+// Local app → remote DreamHost: allow slower connect + many round-trips per page.
+if (PHP_SAPI !== 'cli' && defined('USE_PROD_DB') && USE_PROD_DB && defined('IS_LOCAL') && IS_LOCAL) {
+    @ini_set('max_execution_time', '180');
+    @ini_set('default_socket_timeout', '120');
+}
+
+/**
  * Safety rails:
  * - Default local mode must never target production hosts/names.
  * - USE_PROD_DB=true explicitly allows production, but requires PROD-looking credentials.
@@ -299,6 +313,12 @@ if (DEBUG_MODE) {
 // Session security (web only)
 if (PHP_SAPI !== 'cli') {
     $cookiePath = (defined('BASE_URL') && BASE_URL !== '') ? BASE_URL : '/';
+    // The application deliberately keeps bakery work sessions for up to 180 days.
+    // PHP otherwise commonly garbage-collects session data after 24 minutes,
+    // which looks like a random logout when a driver returns from the phone camera.
+    $sessionLifetime = 180 * 24 * 60 * 60;
+    ini_set('session.gc_maxlifetime', (string)$sessionLifetime);
+    ini_set('session.cookie_lifetime', (string)$sessionLifetime);
     if (isHTTPS()) {
         ini_set('session.cookie_secure', '1');
     }
@@ -310,7 +330,7 @@ if (PHP_SAPI !== 'cli') {
 
     if (session_status() === PHP_SESSION_NONE) {
         session_set_cookie_params([
-            'lifetime' => 0,
+            'lifetime' => $sessionLifetime,
             'path' => $cookiePath,
             'secure' => isHTTPS(),
             'httponly' => true,
@@ -323,12 +343,21 @@ if (PHP_SAPI !== 'cli') {
         session_regenerate_id(true);
         $_SESSION['last_regeneration'] = time();
     } elseif (time() - $_SESSION['last_regeneration'] > 300) {
-        session_regenerate_id(true);
+        // A driver can return from the phone camera into several concurrent API
+        // requests. Keep the previous session record until normal garbage
+        // collection so a sibling request using the prior cookie does not lose
+        // authentication or the CSRF token mid-workflow.
+        session_regenerate_id(false);
         $_SESSION['last_regeneration'] = time();
     }
 }
 
 date_default_timezone_set('America/Los_Angeles');
+
+require_once __DIR__ . '/i18n.php';
+if (PHP_SAPI !== 'cli') {
+    bakery_handle_locale_request();
+}
 
 define('MAX_UPLOAD_SIZE', 5 * 1024 * 1024);
 define('ALLOWED_UPLOAD_TYPES', ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx']);
@@ -386,4 +415,9 @@ function app_log($message, $level = 'info') {
     if (is_dir(dirname($logFile)) && is_writable(dirname($logFile))) {
         @file_put_contents($logFile, $logMessage, FILE_APPEND | LOCK_EX);
     }
+}
+
+require_once __DIR__ . '/client_cache.php';
+if (PHP_SAPI !== 'cli') {
+    bakery_send_document_cache_headers();
 }

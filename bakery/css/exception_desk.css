@@ -1,0 +1,254 @@
+/* Thumb-first exception desk. Scoped to .exception-desk and workspace body classes. */
+.exception-desk {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.exception-desk__title {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.exception-desk__kicker,
+.exception-desk__empty {
+  margin: 0;
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.92rem;
+}
+
+.exception-desk__card {
+  background: var(--sf-surface, #fff);
+  border: 1px solid var(--sf-border, #d5e0dc);
+  border-left: 5px solid var(--sf-info, #3d6e8c);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem;
+}
+
+.exception-desk__card--critical {
+  background: var(--sf-danger-bg, #fdecea);
+  border-left-color: var(--sf-danger, #c0392b);
+}
+
+.exception-desk__card--warning {
+  background: var(--sf-warning-bg, #fff6e8);
+  border-left-color: var(--sf-warning, #c77c31);
+}
+
+.exception-desk__card--info {
+  border-left-color: var(--sf-info, #3d6e8c);
+}
+
+.exception-desk__sev {
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.exception-desk__card h3 {
+  font-size: 1.05rem;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.exception-desk__who {
+  font-weight: 700;
+  margin: 0;
+}
+
+.exception-desk__detail,
+.exception-desk__reported {
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.exception-desk__actions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.exception-desk__btn-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr;
+}
+
+.exception-desk__action-form {
+  margin: 0;
+}
+
+.exception-desk__btn,
+a.exception-desk__btn {
+  align-items: center;
+  background: var(--sf-surface, #fff);
+  border: 1px solid var(--sf-border-strong, #b7c7c2);
+  border-radius: 10px;
+  box-sizing: border-box;
+  color: var(--sf-text, #1f2a24);
+  display: flex;
+  font: inherit;
+  font-weight: 750;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.65rem 0.8rem;
+  text-align: center;
+  text-decoration: none;
+  width: 100%;
+}
+
+.exception-desk__btn--primary {
+  background: var(--sf-primary, #1a6b63);
+  border-color: var(--sf-primary, #1a6b63);
+  color: #fff;
+}
+
+.exception-desk__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.exception-desk__chip {
+  cursor: pointer;
+}
+
+.exception-desk__chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.exception-desk__chip span {
+  background: #fff;
+  border: 1px solid var(--sf-border-strong, #b7c7c2);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.86rem;
+  font-weight: 700;
+  min-height: 40px;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+}
+
+.exception-desk__chip input:checked + span,
+.exception-desk__chip input:focus-visible + span {
+  background: var(--sf-primary, #1a6b63);
+  border-color: var(--sf-primary, #1a6b63);
+  color: #fff;
+}
+
+.exception-desk__note-label,
+.exception-desk__select-label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.exception-desk textarea,
+.exception-desk select,
+.exception-desk input[type="datetime-local"] {
+  border: 1px solid var(--sf-border-strong, #b7c7c2);
+  border-radius: 8px;
+  font: inherit;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.65rem;
+  width: 100%;
+}
+
+.exception-desk textarea {
+  min-height: 72px;
+}
+
+.exception-desk__more {
+  border-top: 1px solid var(--sf-border, #d5e0dc);
+  padding-top: 0.45rem;
+}
+
+.exception-desk__more summary {
+  cursor: pointer;
+  font-weight: 750;
+  min-height: 40px;
+}
+
+.exception-desk__note-form,
+.exception-desk__note-actions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+}
+
+.exception-desk--manager {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .manager-desktop-only {
+    display: none !important;
+  }
+
+  .exception-desk--manager {
+    display: grid;
+  }
+
+  .exception-desk__btn-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 480px) {
+  .exception-desk__btn-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+body.workspace-baker .exception-desk--baker,
+body.workspace-driver .exception-desk--driver {
+  margin-top: 0.75rem;
+}
+
+body.workspace-driver .exception-desk--driver .exception-desk__btn {
+  min-height: 52px;
+  font-size: 1.02rem;
+}
+
+#failStopModal.exception-desk-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+}
+
+#failStopModal.exception-desk-modal[hidden] {
+  display: none !important;
+}
+
+.exception-desk-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.exception-desk-modal__content {
+  position: relative;
+  width: min(100%, 440px);
+  background: #fff;
+  border-radius: 16px 16px 12px 12px;
+  padding: 20px 16px 16px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+body.fail-stop-modal-open {
+  overflow: hidden;
+}

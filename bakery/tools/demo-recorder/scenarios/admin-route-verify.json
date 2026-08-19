@@ -1,0 +1,37 @@
+{
+  "id": "admin-route-verify",
+  "title": { "en": "Admin: Verify My Route", "es": "Admin: Verificar Mi ruta" },
+  "description": {
+    "en": "Open the driver view for the same date and verify the next stop.",
+    "es": "Abre la vista del repartidor para la misma fecha y verifica la siguiente parada."
+  },
+  "prepare": "admin-route-verify",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 240,
+  "captionHoldMs": 650,
+  "endHoldMs": 1200,
+  "steps": [
+    { "action": "goto", "path": "login.php", "caption": { "en": "Sign in as Admin", "es": "Entra como Admin" } },
+    { "action": "waitForSelector", "selector": "#code" },
+    { "action": "fill", "selector": "#code", "value": "{{ADMIN_CODE}}", "delay": 120 },
+    { "action": "waitForURL", "includes": "index.php" },
+    {
+      "action": "goto",
+      "path": "driver.php?driver_id={{DRIVER_ID}}&date={{DATE}}",
+      "caption": {
+        "en": "Open My Route for the same driver and date",
+        "es": "Abre Mi ruta para el mismo repartidor y fecha"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#nextStopCard, .empty-state" },
+    {
+      "action": "scroll",
+      "selector": "#nextStopCard",
+      "caption": {
+        "en": "Verify the first remaining stop is now Next",
+        "es": "Verifica que la primera parada pendiente sea Siguiente"
+      }
+    }
+  ]
+}

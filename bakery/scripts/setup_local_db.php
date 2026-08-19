@@ -4,12 +4,10 @@
  * CLI only. Refuses non-local hosts/names. Does not print passwords.
  *
  * Usage:
- *   C:\php\php.exe bakery/scripts/setup_local_db.php
- *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset
- *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset --force-reset
+ *   C:\php\php.exe bakery/scripts/setup_local_db.php --reset --force-reset --database=bakerysf_test
  *
- * --reset without --force-reset is REFUSED while production pull data is active
- * (storage/.prod_data_active). Tests use --force-reset intentionally.
+ * bakerysf_local is the production mirror and is never loaded with demo fixtures.
+ * Isolated tests must pass --database=bakerysf_test.
  */
 define('ACCESS_ALLOWED', true);
 
@@ -51,6 +49,12 @@ $name = $_ENV['DB_NAME'] ?? '';
 $user = $_ENV['DB_USER'] ?? '';
 $pass = $_ENV['DB_PASS'] ?? '';
 
+foreach ($argv as $arg) {
+    if (strpos($arg, '--database=') === 0) {
+        $name = substr($arg, strlen('--database='));
+    }
+}
+
 $hostLower = strtolower($host);
 $nameLower = strtolower($name);
 
@@ -70,7 +74,22 @@ if ($nameLower === 'bakerysf' || (strpos($nameLower, '_local') === false && strp
 $reset = in_array('--reset', $argv, true);
 $forceReset = in_array('--force-reset', $argv, true);
 
+if ($nameLower === 'bakerysf_local') {
+    fwrite(STDERR, "Refusing: bakerysf_local is the production mirror and cannot be loaded with demo fixtures.\n");
+    fwrite(STDERR, "Refresh real data: php scripts/pull_prod_to_local.php\n");
+    fwrite(STDERR, "Isolated tests: php scripts/setup_local_db.php --reset --force-reset --database=bakerysf_test\n");
+    exit(1);
+}
+if (strpos($nameLower, 'test') === false && strpos($nameLower, 'dev') === false) {
+    fwrite(STDERR, "Refusing: setup_local_db.php only builds isolated test/dev databases, not the app mirror.\n");
+    exit(1);
+}
+
 bakery_refuse_reset_without_force($root, $argv);
+
+putenv('DB_NAME=' . $name);
+$_ENV['DB_NAME'] = $name;
+$_SERVER['DB_NAME'] = $name;
 
 try {
     $server = new PDO(
@@ -79,20 +98,15 @@ try {
         $pass,
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
+    require_once $root . '/includes/config.php';
+    require_once $root . '/includes/database.php';
+    require_once $root . '/includes/test_target_guard.php';
+    bakery_assert_local_test_target($server, true);
 
     if ($reset) {
-        if ($forceReset) {
-            echo "WARNING: --force-reset will DROP bakerysf_local and replace with demo fixtures.\n";
-        } else {
-            echo "WARNING: --reset will DROP bakerysf_local and destroy any production pull data.\n";
-        }
+        echo "WARNING: resetting isolated database {$name} with demo fixtures.\n";
         $server->exec('DROP DATABASE IF EXISTS `' . str_replace('`', '``', $name) . '`');
         echo "Dropped database {$name}\n";
-        $marker = bakery_prod_data_marker_path($root);
-        if (is_file($marker)) {
-            unlink($marker);
-            echo "Cleared production pull marker (demo fixtures mode).\n";
-        }
     }
 
     $server->exec(
@@ -153,8 +167,19 @@ try {
         }
     }
 
+    // Stable fictional portal fixture for isolated local portal/account tests.
+    if (table_exists($db, 'customers') && column_exists($db, 'customers', 'portal_enabled')) {
+        $fixture = $db->prepare(
+            "UPDATE customers
+             SET portal_enabled = 1, portal_phone = '5550101', portal_code = '0001'
+             WHERE id = 1"
+        );
+        $fixture->execute();
+        echo "Ensured fictional portal test fixture on customer #1\n";
+    }
+
     if ($reset) {
-        echo "WARNING: --reset replaced the DB with demo fixtures. Re-run scripts/pull_prod_to_local.php to restore production data.\n";
+        echo "Isolated test database {$name} reset with demo fixtures. App mirror bakerysf_local was not changed.\n";
     }
     exit(0);
 } catch (Throwable $e) {

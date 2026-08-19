@@ -3,7 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'Customer Schedule';
+$page_title = bakery_t('page.customer_schedule');
 
 // Handle AJAX zone updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_zone') {
@@ -14,6 +14,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt = $db->prepare("UPDATE customers SET zone = ? WHERE id = ?");
         $stmt->execute([$newZone, $customerId]);
         
+        echo json_encode(['success' => true]);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        exit;
+    }
+}
+
+// Handle AJAX customer removal (only when no route assignments)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_customer') {
+    header('Content-Type: application/json');
+    try {
+        $customerId = (int)($_POST['customer_id'] ?? 0);
+        if ($customerId <= 0) {
+            throw new Exception('Invalid customer ID');
+        }
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM standing_routes WHERE customer_id = ?');
+        $stmt->execute([$customerId]);
+        if ((int)$stmt->fetchColumn() > 0) {
+            throw new Exception('Cannot remove customer with active route assignments. Remove all driver assignments first.');
+        }
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE customer_id = ?');
+        $stmt->execute([$customerId]);
+        if ((int)$stmt->fetchColumn() > 0) {
+            throw new Exception('This customer has order history and cannot be removed. Use the Customers page to manage them.');
+        }
+
+        $stmt = $db->prepare('DELETE FROM customers WHERE id = ?');
+        $stmt->execute([$customerId]);
+        if ($stmt->rowCount() === 0) {
+            throw new Exception('Customer not found');
+        }
+
         echo json_encode(['success' => true]);
         exit;
     } catch (Exception $e) {
@@ -348,6 +383,23 @@ require_once 'includes/nav.php';
     background-color: #f8f9fa;
 }
 
+.customer-row.is-highlighted {
+    outline: 2px solid #3182ce;
+    outline-offset: -2px;
+    background-color: #ebf8ff;
+}
+
+.customer-name .customer-hub-link {
+    color: inherit;
+    font-weight: inherit;
+    text-decoration: none;
+}
+
+.customer-name .customer-hub-link:hover {
+    color: #2b6cb0;
+    text-decoration: underline;
+}
+
 .customer-row:last-child {
     border-bottom: none;
 }
@@ -357,11 +409,44 @@ require_once 'includes/nav.php';
     border-right: 1px solid #f1f3f4;
 }
 
+.customer-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
 .customer-name {
     font-weight: 600;
     color: #2c3e50;
-    margin-bottom: 4px;
     font-size: 0.95rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.btn-remove-customer {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    color: #dc3545;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.2s ease;
+    line-height: 1.2;
+}
+
+.customer-row:hover .btn-remove-customer,
+.btn-remove-customer:focus {
+    opacity: 1;
+}
+
+.btn-remove-customer:hover {
+    background: #fff5f5;
+    border-color: #f5c6cb;
 }
 
 .customer-address {
@@ -1366,7 +1451,21 @@ require_once 'includes/nav.php';
                              data-customer-name="<?php echo htmlspecialchars($customer['name']); ?>"
                              data-current-zone="<?php echo htmlspecialchars($zoneName === 'No Zone' ? '' : $zoneName); ?>">
                             <div class="customer-info">
-                                <div class="customer-name"><?php echo htmlspecialchars($customer['name']); ?></div>
+                                <div class="customer-name-row">
+                                    <div class="customer-name">
+                                        <a class="customer-hub-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" onclick="event.stopPropagation()"><?php echo htmlspecialchars($customer['name']); ?></a>
+                                    </div>
+                                    <?php if (empty($customer['delivery_days'])): ?>
+                                        <button type="button"
+                                                class="btn-remove-customer"
+                                                title="Remove customer (no route assignments)"
+                                                data-customer-id="<?php echo $customer['id']; ?>"
+                                                data-customer-name="<?php echo htmlspecialchars($customer['name']); ?>"
+                                                onclick="confirmRemoveCustomer(event, this)">
+                                            Remove
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
                                 <div class="customer-address"><?php echo htmlspecialchars($customer['address']); ?></div>
                                 <div class="zone-edit-hint">Click to change zone</div>
                             </div>
@@ -1530,12 +1629,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const customerRows = document.querySelectorAll('.clickable-customer');
     customerRows.forEach(row => {
         row.addEventListener('click', function(e) {
-            // Don't trigger if clicking on a day cell
-            if (!e.target.closest('.clickable-day')) {
+            // Don't trigger if clicking on a day cell, remove button, or customer hub link
+            if (!e.target.closest('.clickable-day') && !e.target.closest('.btn-remove-customer') && !e.target.closest('.customer-hub-link')) {
                 openZoneEditModal(this);
             }
         });
     });
+
+    // Deep-link from Customer Hub: ?customer_id= scrolls/highlights that row
+    (function initCustomerDeepLink() {
+        const params = new URLSearchParams(window.location.search);
+        const customerId = params.get('customer_id');
+        if (!customerId) return;
+        const row = document.querySelector('.customer-row[data-customer-id="' + customerId + '"]');
+        if (!row) return;
+        row.classList.add('is-highlighted');
+        const zone = row.closest('.zone-section');
+        if (zone) {
+            zone.classList.remove('collapsed');
+        }
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    })();
     
     // Add click handlers to day cells
     const dayCells = document.querySelectorAll('.clickable-day');
@@ -1620,6 +1734,7 @@ async function saveDriverAssignment(driverId) {
         if (result.success) {
             // Update the day cell in real-time
             updateDayCell(currentDriverAssignment.dayCell, driverId);
+            updateRemoveButton(currentDriverAssignment.dayCell.closest('.customer-row'));
             
             showMessage('Driver updated!', 'success');
             hideDriverAssignModal();
@@ -1655,6 +1770,30 @@ function updateDayCell(dayCell, driverId) {
             dayCell.dataset.currentDriverId = driverId;
             dayCell.dataset.currentDriverName = driver.name;
         }
+    }
+}
+
+function updateRemoveButton(customerRow) {
+    if (!customerRow) return;
+
+    const hasDeliveries = customerRow.querySelector('.day-indicator.has-delivery');
+    const nameRow = customerRow.querySelector('.customer-name-row');
+    if (!nameRow) return;
+
+    let removeBtn = nameRow.querySelector('.btn-remove-customer');
+
+    if (!hasDeliveries && !removeBtn) {
+        removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-remove-customer';
+        removeBtn.title = 'Remove customer (no route assignments)';
+        removeBtn.dataset.customerId = customerRow.dataset.customerId;
+        removeBtn.dataset.customerName = customerRow.dataset.customerName;
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = function(e) { confirmRemoveCustomer(e, this); };
+        nameRow.appendChild(removeBtn);
+    } else if (hasDeliveries && removeBtn) {
+        removeBtn.remove();
     }
 }
 
@@ -1853,10 +1992,62 @@ function moveCustomerToNewZone(customerRow, newZone, oldZone) {
     }
 }
 
+function confirmRemoveCustomer(event, button) {
+    event.stopPropagation();
+    const customerId = button.dataset.customerId;
+    const customerName = button.dataset.customerName;
+    const customerRow = button.closest('.customer-row');
+
+    if (!confirm(`Remove "${customerName}" from the schedule?\n\nThis customer has no route assignments and will be permanently deleted.`)) {
+        return;
+    }
+
+    removeCustomer(customerId, customerRow);
+}
+
+async function removeCustomer(customerId, customerRow) {
+    try {
+        const formData = new FormData();
+        formData.append('action', 'delete_customer');
+        formData.append('customer_id', customerId);
+
+        const response = await fetch('customer_schedule.php', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const zoneSection = customerRow.closest('.zone-section');
+            customerRow.remove();
+
+            if (zoneSection) {
+                const remainingRows = zoneSection.querySelectorAll('.customer-row');
+                const zoneHeader = zoneSection.querySelector('.zone-header');
+                const countSpan = zoneHeader?.querySelector('span:last-child');
+
+                if (remainingRows.length === 0) {
+                    zoneSection.remove();
+                } else if (countSpan) {
+                    countSpan.textContent = `(${remainingRows.length} customers)`;
+                }
+            }
+
+            updateSummaryStats();
+            showMessage('Customer removed', 'success');
+        } else {
+            showMessage('Error: ' + (result.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
 function attachCustomerRowEvents(customerRow) {
     // Reattach customer row click event
     customerRow.addEventListener('click', function(e) {
-        if (!e.target.closest('.clickable-day')) {
+        if (!e.target.closest('.clickable-day') && !e.target.closest('.btn-remove-customer')) {
             openZoneEditModal(this);
         }
     });

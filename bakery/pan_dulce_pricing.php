@@ -3,7 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'Pan Dulce Pricing by Zone';
+$page_title = bakery_t('page.pan_dulce_pricing');
 
 function panDulceZoneClass(?string $zone): string
 {

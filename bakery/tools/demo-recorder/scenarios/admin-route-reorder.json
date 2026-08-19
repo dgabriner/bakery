@@ -1,0 +1,47 @@
+{
+  "id": "admin-route-reorder",
+  "title": { "en": "Admin: Reorder route stops", "es": "Admin: Ordenar las paradas" },
+  "description": {
+    "en": "Drag dated stops into delivery order and confirm the route saves.",
+    "es": "Arrastra las paradas con fecha al orden de entrega y confirma que se guarde."
+  },
+  "prepare": "admin-route-reorder",
+  "viewport": { "width": 1280, "height": 720 },
+  "slowMo": 240,
+  "captionHoldMs": 650,
+  "endHoldMs": 1200,
+  "steps": [
+    { "action": "goto", "path": "login.php", "caption": { "en": "Sign in as Admin", "es": "Entra como Admin" } },
+    { "action": "waitForSelector", "selector": "#code" },
+    { "action": "fill", "selector": "#code", "value": "{{ADMIN_CODE}}", "delay": 120 },
+    { "action": "waitForURL", "includes": "index.php" },
+    { "action": "goto", "path": "driver_assignment.php?date={{DATE}}" },
+    {
+      "action": "scroll",
+      "selector": ".driver-section[data-driver-id='{{DRIVER_ID}}']",
+      "caption": {
+        "en": "Each driver section is that day's dated route",
+        "es": "Cada sección del repartidor es la ruta de ese día"
+      }
+    },
+    {
+      "action": "dragTo",
+      "selector": ".driver-section[data-driver-id='{{DRIVER_ID}}'] .route-order-list .order-item[draggable='true']",
+      "nth": 0,
+      "targetSelector": ".driver-section[data-driver-id='{{DRIVER_ID}}'] .route-order-list .order-item[draggable='true']",
+      "targetNth": 2,
+      "caption": {
+        "en": "Drag a stop into the delivery order",
+        "es": "Arrastra una parada al orden de entrega"
+      }
+    },
+    {
+      "action": "waitForSelector",
+      "selector": ".driver-section[data-driver-id='{{DRIVER_ID}}'] .save-indicator",
+      "caption": {
+        "en": "Saved confirms the dated route changed",
+        "es": "Guardado confirma que cambió la ruta con fecha"
+      }
+    }
+  ]
+}

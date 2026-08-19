@@ -40,12 +40,26 @@
       body: action === 'status' ? undefined : 'action=' + encodeURIComponent(action),
       credentials: 'same-origin',
     }).then(function (res) {
-      return res.json().then(function (data) {
-        if (!res.ok || data.ok === false) {
-          var err = (data && data.error) || ('HTTP ' + res.status);
+      return res.text().then(function (text) {
+        var data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (parseErr) {
+          throw new Error('HTTP ' + res.status + (text ? ': ' + text.slice(0, 180) : ''));
+        }
+        if (!res.ok || (data && data.ok === false)) {
+          var err =
+            (data && (data.error || data.message)) ||
+            ('HTTP ' + res.status);
+          if (data && data.output) {
+            var tail = String(data.output).trim().split(/\r?\n/).slice(-4).join(' | ');
+            if (tail) {
+              err += (err ? ' — ' : '') + tail;
+            }
+          }
           throw new Error(err);
         }
-        return data;
+        return data || {};
       });
     });
   }

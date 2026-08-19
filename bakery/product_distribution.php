@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/product_inventory.php';
 
 // Initialize database connection
 $db = new PDO(
@@ -15,7 +16,7 @@ $db = new PDO(
 );
 
 // Set page title
-$page_title = 'Product Distribution Explorer';
+$page_title = bakery_t('page.product_distribution');
 
 // Helper function to convert day number to day name
 function getDayName($dayNumber) {
@@ -75,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                            = CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END
                     LEFT JOIN drivers d ON sr.driver_id = d.id
                     WHERE so.product_id = ? $dayFilter
+                    " . bakery_sfb_ops_origin_clause('c', $db) . "
                     ORDER BY c.zone, c.name, so.day_of_week
                 ");
                 $stmt->execute([$productId]);
@@ -100,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         FROM standing_orders 
                         WHERE product_id = ? $dayFilterSubquery
                     ) $dayFilter2
+                    " . bakery_sfb_ops_origin_clause('c', $db) . "
                     ORDER BY c.zone, c.name, sr.day_of_week
                 ");
                 $stmt2->execute([$productId]);
@@ -115,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     WHERE c.id NOT IN (
                         SELECT DISTINCT customer_id FROM standing_routes
                     )
+                    " . bakery_sfb_ops_origin_clause('c', $db) . "
                     ORDER BY c.zone, c.name
                 ");
                 $stmt3->execute();
@@ -159,6 +163,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit;
 }
 
+// Build a dated production-needs view from the same sources used by the
+// production and finished-goods inventory pages.
+$productionDate = (string)($_GET['production_date'] ?? date('Y-m-d', strtotime('+1 day')));
+try {
+    $productionDate = bakery_inventory_validate_date($productionDate);
+} catch (Throwable $e) {
+    $productionDate = date('Y-m-d', strtotime('+1 day'));
+}
+$productionWeekday = bakery_standing_day_from_date($productionDate);
+$inventoryReady = bakery_inventory_ready($db);
+$productionError = '';
+$productionUsesActual = false;
+$productionGroups = [];
+$productionTotals = [
+    'required' => 0,
+    'stock' => 0,
+    'produced' => 0,
+    'to_produce' => 0,
+    'dough_grams' => 0,
+    'missing_weight_products' => 0,
+];
+
+try {
+    // Effective demand is the per-customer merge of dated orders and standing
+    // forecast — the same source Daily Production uses. No all-or-nothing flip.
+    require_once 'includes/demand_review.php';
+    $demand = bakery_operating_demand_by_product($db, $productionDate);
+    $productionUsesActual = $demand['has_daily'];
+    $demandByProduct = $demand['by_product'];
+
+    $inventorySelect = $inventoryReady
+        ? 'COALESCE(inv.available_quantity, 0) AS available_quantity,
+           COALESCE(inv.loaded_quantity, 0) AS loaded_quantity,
+           COALESCE(inv.produced_quantity, 0) AS produced_quantity'
+        : '0 AS available_quantity, 0 AS loaded_quantity, 0 AS produced_quantity';
+    $inventoryJoin = $inventoryReady
+        ? 'LEFT JOIN product_inventory_days inv
+               ON inv.product_id = p.id AND inv.delivery_date = ?'
+        : '';
+
+    $needsStmt = $db->prepare("
+        SELECT p.id, p.name, p.weight_grams,
+               dt.id AS dough_type_id, dt.name AS dough_type,
+               pl.id AS product_line_id, pl.name AS product_line,
+               pl.color_code, pl.sort_order,
+               {$inventorySelect}
+        FROM products p
+        LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+        LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+        {$inventoryJoin}
+        ORDER BY COALESCE(pl.sort_order, 999), pl.name, dt.name, p.name
+    ");
+    $needsStmt->execute($inventoryReady ? [$productionDate] : []);
+
+    foreach ($needsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $required = (int)($demandByProduct[(int)$row['id']] ?? 0);
+        $stock = (int)$row['available_quantity'] + (int)$row['loaded_quantity'];
+        $toProduce = max(0, $required - $stock);
+        $weightGrams = max(0, (int)($row['weight_grams'] ?? 0));
+        $doughGrams = $toProduce * $weightGrams;
+
+        // Keep the planning view focused on products that affect this delivery day.
+        if ($required === 0 && $stock === 0 && (int)$row['produced_quantity'] === 0) {
+            continue;
+        }
+
+        $className = trim((string)($row['product_line'] ?? '')) ?: 'Unclassified';
+        $doughName = trim((string)($row['dough_type'] ?? '')) ?: 'Unclassified';
+        $classKey = (string)($row['product_line_id'] ?? 'none') . ':' . $className;
+        $doughKey = (string)($row['dough_type_id'] ?? 'none') . ':' . $doughName;
+        if (!isset($productionGroups[$classKey])) {
+            $productionGroups[$classKey] = [
+                'name' => $className,
+                'color' => preg_match('/^#[0-9a-fA-F]{6}$/', (string)$row['color_code']) ? $row['color_code'] : '#39744d',
+                'totals' => ['required' => 0, 'stock' => 0, 'produced' => 0, 'to_produce' => 0, 'dough_grams' => 0],
+                'dough_types' => [],
+            ];
+        }
+        if (!isset($productionGroups[$classKey]['dough_types'][$doughKey])) {
+            $productionGroups[$classKey]['dough_types'][$doughKey] = [
+                'name' => $doughName,
+                'totals' => ['required' => 0, 'stock' => 0, 'produced' => 0, 'to_produce' => 0, 'dough_grams' => 0],
+                'products' => [],
+            ];
+        }
+
+        $metrics = [
+            'required' => $required,
+            'stock' => $stock,
+            'produced' => (int)$row['produced_quantity'],
+            'to_produce' => $toProduce,
+            'dough_grams' => $doughGrams,
+        ];
+        $row['metrics'] = $metrics;
+        $row['weight_missing'] = $toProduce > 0 && $weightGrams === 0;
+        $productionGroups[$classKey]['dough_types'][$doughKey]['products'][] = $row;
+        foreach ($metrics as $metric => $value) {
+            $productionGroups[$classKey]['totals'][$metric] += $value;
+            $productionGroups[$classKey]['dough_types'][$doughKey]['totals'][$metric] += $value;
+            $productionTotals[$metric] += $value;
+        }
+        if ($row['weight_missing']) {
+            $productionTotals['missing_weight_products']++;
+        }
+    }
+} catch (Throwable $e) {
+    $productionError = 'Unable to calculate production needs: ' . $e->getMessage();
+}
+
 // Include header
 require_once 'includes/header.php';
 
@@ -170,6 +283,96 @@ $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
 
 <div class="product-distribution-container">
     <h1>Product Distribution Explorer</h1>
+
+    <section class="production-needs" aria-labelledby="production-needs-heading">
+        <div class="production-needs-heading">
+            <div>
+                <p class="production-eyebrow">Production planning</p>
+                <h2 id="production-needs-heading">Needs by Product Class and Dough Type</h2>
+                <p>Required finished goods, current inventory coverage, and the remaining quantity and dough weight to produce.</p>
+            </div>
+            <div class="production-links">
+                <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($productionDate); ?>">Open inventory</a>
+                <a class="btn btn-primary" href="production.php?date=<?php echo urlencode($productionDate); ?>">Open production</a>
+            </div>
+        </div>
+
+        <form method="get" class="production-date-filter">
+            <label>Delivery day
+                <input type="date" name="production_date" value="<?php echo htmlspecialchars($productionDate, ENT_QUOTES, 'UTF-8'); ?>">
+            </label>
+            <button class="btn btn-outline" type="submit">View needs</button>
+            <span class="production-source <?php echo $productionUsesActual ? 'actual' : 'standing'; ?>">
+                <?php echo $productionUsesActual ? 'Daily Orders merged with standing' : 'Standing forecast'; ?>
+            </span>
+        </form>
+
+        <?php if ($productionError): ?>
+            <div class="production-notice error"><?php echo htmlspecialchars($productionError); ?></div>
+        <?php endif; ?>
+        <?php if (!$inventoryReady): ?>
+            <div class="production-notice warning">Finished-goods inventory is not installed, so inventory coverage is shown as zero until migration 009 is applied.</div>
+        <?php endif; ?>
+        <?php if ($productionTotals['missing_weight_products'] > 0): ?>
+            <div class="production-notice warning">
+                <?php echo number_format($productionTotals['missing_weight_products']); ?> product<?php echo $productionTotals['missing_weight_products'] === 1 ? '' : 's'; ?> needing production lack a saved weight. Unit needs are correct, but their dough weight is excluded.
+            </div>
+        <?php endif; ?>
+
+        <div class="production-summary" aria-label="Production totals">
+            <div><span>Required</span><strong><?php echo number_format($productionTotals['required']); ?></strong><small>finished units</small></div>
+            <div><span>Covered by stock</span><strong><?php echo number_format($productionTotals['required'] - $productionTotals['to_produce']); ?></strong><small><?php echo number_format($productionTotals['stock']); ?> units on hand</small></div>
+            <div class="<?php echo $productionTotals['to_produce'] > 0 ? 'needs-attention' : 'is-covered'; ?>"><span>Still to produce</span><strong><?php echo number_format($productionTotals['to_produce']); ?></strong><small>finished units</small></div>
+            <div><span>Dough needed</span><strong><?php echo number_format($productionTotals['dough_grams'] / 1000, 1); ?> kg</strong><small>for uncovered units</small></div>
+        </div>
+
+        <?php if ($productionGroups): ?>
+            <div class="production-classes">
+                <?php foreach ($productionGroups as $class): ?>
+                    <article class="production-class" style="--class-color: <?php echo htmlspecialchars($class['color'], ENT_QUOTES, 'UTF-8'); ?>;">
+                        <header class="production-class-header">
+                            <div><span>Product class</span><h3><?php echo htmlspecialchars($class['name']); ?></h3></div>
+                            <div class="class-metrics">
+                                <span><strong><?php echo number_format($class['totals']['required']); ?></strong> required</span>
+                                <span><strong><?php echo number_format($class['totals']['stock']); ?></strong> in stock</span>
+                                <span class="<?php echo $class['totals']['to_produce'] > 0 ? 'needs-attention' : 'is-covered'; ?>"><strong><?php echo number_format($class['totals']['to_produce']); ?></strong> to produce</span>
+                                <span><strong><?php echo number_format($class['totals']['dough_grams'] / 1000, 1); ?> kg</strong> dough</span>
+                            </div>
+                        </header>
+                        <div class="production-table-wrap">
+                            <table class="production-table">
+                                <thead><tr><th>Class / Dough Type / Product</th><th>Required</th><th>Produced</th><th>Inventory</th><th>Still to Produce</th><th>Dough Needed</th></tr></thead>
+                                <tbody>
+                                <?php foreach ($class['dough_types'] as $dough): ?>
+                                    <tr class="dough-total-row">
+                                        <td><strong><?php echo htmlspecialchars($dough['name']); ?></strong><small>Dough type · <?php echo count($dough['products']); ?> product<?php echo count($dough['products']) === 1 ? '' : 's'; ?></small></td>
+                                        <td><?php echo number_format($dough['totals']['required']); ?></td>
+                                        <td><?php echo number_format($dough['totals']['produced']); ?></td>
+                                        <td><?php echo number_format($dough['totals']['stock']); ?></td>
+                                        <td class="<?php echo $dough['totals']['to_produce'] > 0 ? 'needs-attention' : 'is-covered'; ?>"><?php echo number_format($dough['totals']['to_produce']); ?></td>
+                                        <td><strong><?php echo number_format($dough['totals']['dough_grams'] / 1000, 1); ?> kg</strong></td>
+                                    </tr>
+                                    <?php foreach ($dough['products'] as $product): $metrics = $product['metrics']; ?>
+                                        <tr class="product-need-row">
+                                            <td><span><?php echo htmlspecialchars($product['name']); ?></span><small><?php echo (int)($product['weight_grams'] ?? 0) > 0 ? number_format((int)$product['weight_grams']) . ' g each' : 'Weight not set'; ?></small></td>
+                                            <td><?php echo number_format($metrics['required']); ?></td>
+                                            <td><?php echo number_format($metrics['produced']); ?></td>
+                                            <td><?php echo number_format($metrics['stock']); ?><small><?php echo number_format((int)$product['available_quantity']); ?> available + <?php echo number_format((int)$product['loaded_quantity']); ?> loaded</small></td>
+                                            <td class="<?php echo $metrics['to_produce'] > 0 ? 'needs-attention' : 'is-covered'; ?>"><?php echo $metrics['to_produce'] > 0 ? number_format($metrics['to_produce']) : 'Covered'; ?></td>
+                                            <td><?php echo $product['weight_missing'] ? '—' : number_format($metrics['dough_grams'] / 1000, 2) . ' kg'; ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php elseif (!$productionError): ?>
+            <p class="production-empty">No standing orders, Daily Orders, or inventory activity affects this delivery day.</p>
+        <?php endif; ?>
+    </section>
     
     <div class="controls-panel">
         <div class="product-selector">
@@ -522,6 +725,243 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 20px;
 }
 
+.production-needs {
+    margin: 18px 0 28px;
+    padding: 22px;
+    background: #f7faf7;
+    border: 1px solid #d9e6dc;
+    border-radius: 12px;
+}
+
+.production-needs-heading,
+.production-class-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+}
+
+.production-needs-heading h2,
+.production-class-header h3 {
+    margin: 0;
+    color: #1d432c;
+}
+
+.production-needs-heading p:not(.production-eyebrow) {
+    margin: 6px 0 0;
+    color: #5c6e62;
+    max-width: 760px;
+}
+
+.production-eyebrow {
+    margin: 0 0 4px;
+    color: #2f7a4b;
+    font-size: .76rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.production-links,
+.production-date-filter,
+.class-metrics {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.production-links .btn {
+    white-space: nowrap;
+}
+
+.production-date-filter {
+    margin: 18px 0;
+}
+
+.production-date-filter label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #405248;
+}
+
+.production-date-filter input {
+    padding: 8px;
+    border: 1px solid #c5d2c9;
+    border-radius: 5px;
+    background: #fff;
+}
+
+.production-source {
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
+.production-source.actual {
+    color: #075d83;
+    background: #deeff8;
+}
+
+.production-source.standing {
+    color: #745410;
+    background: #fff0c9;
+}
+
+.production-notice {
+    margin: 12px 0;
+    padding: 11px 14px;
+    border-radius: 6px;
+}
+
+.production-notice.error {
+    color: #982727;
+    background: #fde9e9;
+}
+
+.production-notice.warning {
+    color: #76540f;
+    background: #fff3d7;
+}
+
+.production-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 12px;
+    margin: 16px 0 20px;
+}
+
+.production-summary > div {
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #dce7de;
+    border-radius: 8px;
+}
+
+.production-summary span,
+.production-summary small {
+    display: block;
+    color: #66776c;
+    font-size: .78rem;
+}
+
+.production-summary strong {
+    display: block;
+    margin: 3px 0;
+    color: #1d432c;
+    font-size: 1.55rem;
+}
+
+.production-classes {
+    display: grid;
+    gap: 16px;
+}
+
+.production-class {
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #dce6df;
+    border-top: 4px solid var(--class-color);
+    border-radius: 9px;
+}
+
+.production-class-header {
+    align-items: center;
+    padding: 14px 16px;
+    background: #fbfcfb;
+    border-bottom: 1px solid #e4ebe6;
+}
+
+.production-class-header > div:first-child span {
+    display: block;
+    color: #738178;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.class-metrics span {
+    color: #5a695f;
+    font-size: .82rem;
+}
+
+.class-metrics strong {
+    color: #243e2e;
+}
+
+.production-table-wrap {
+    overflow-x: auto;
+}
+
+.production-table {
+    width: 100%;
+    min-width: 780px;
+    border-collapse: collapse;
+}
+
+.production-table th,
+.production-table td {
+    padding: 11px 13px;
+    border-bottom: 1px solid #e9eeea;
+    text-align: right;
+    vertical-align: middle;
+}
+
+.production-table th {
+    color: #617168;
+    background: #f8faf8;
+    font-size: .75rem;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
+.production-table th:first-child,
+.production-table td:first-child {
+    text-align: left;
+}
+
+.production-table td small {
+    display: block;
+    margin-top: 2px;
+    color: #7a887f;
+    font-size: .72rem;
+}
+
+.dough-total-row td {
+    background: #edf5ef;
+    color: #294b35;
+}
+
+.product-need-row td:first-child {
+    padding-left: 32px;
+}
+
+.product-need-row:last-child td {
+    border-bottom: 0;
+}
+
+.needs-attention {
+    color: #b32d2d !important;
+    font-weight: 700;
+}
+
+.is-covered {
+    color: #21703f !important;
+    font-weight: 700;
+}
+
+.production-empty {
+    margin: 12px 0 0;
+    padding: 18px;
+    color: #637168;
+    background: #fff;
+    border: 1px dashed #cdd8d0;
+    border-radius: 7px;
+}
+
 .controls-panel {
     background: white;
     border-radius: 8px;
@@ -870,6 +1310,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
 /* Responsive design */
 @media (max-width: 768px) {
+    .production-needs {
+        padding: 15px;
+    }
+
+    .production-needs-heading,
+    .production-class-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .production-links {
+        width: 100%;
+    }
+
+    .production-links .btn {
+        flex: 1;
+        text-align: center;
+    }
+
+    .production-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .products-list {
         grid-template-columns: 1fr;
     }
@@ -887,6 +1350,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     .defaults-grid {
         grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .production-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .production-date-filter {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 </style>

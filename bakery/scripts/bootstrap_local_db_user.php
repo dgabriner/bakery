@@ -71,6 +71,9 @@ try {
     $admin->exec(
         "CREATE DATABASE IF NOT EXISTS `{$safeName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
+    $admin->exec(
+        "CREATE DATABASE IF NOT EXISTS `bakerysf_test` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
 
     // Create/update app user for both localhost and 127.0.0.1 (MariaDB auth hosts).
     foreach (['localhost', '127.0.0.1'] as $hostSpec) {
@@ -80,6 +83,7 @@ try {
         $admin->exec("CREATE USER IF NOT EXISTS {$quotedUser}@{$quotedHost} IDENTIFIED BY {$quotedPass}");
         $admin->exec("ALTER USER {$quotedUser}@{$quotedHost} IDENTIFIED BY {$quotedPass}");
         $admin->exec("GRANT ALL PRIVILEGES ON `{$safeName}`.* TO {$quotedUser}@{$quotedHost}");
+    $admin->exec("GRANT ALL PRIVILEGES ON `bakerysf_test`.* TO {$quotedUser}@{$quotedHost}");
     }
     $admin->exec('FLUSH PRIVILEGES');
 

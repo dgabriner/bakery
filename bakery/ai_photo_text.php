@@ -170,7 +170,7 @@ function bakery_ai_response_diagnostic(array $response) {
 
 $configuredModel = $_ENV['OPENAI_VISION_MODEL'] ?? getenv('OPENAI_VISION_MODEL') ?: 'gpt-4.1-mini';
 $configuredReasoning = $_ENV['OPENAI_VISION_REASONING_EFFORT'] ?? getenv('OPENAI_VISION_REASONING_EFFORT') ?: 'none';
-$page_title = 'Photo to Text';
+$page_title = bakery_t('page.ai_photo_text');
 require __DIR__ . '/includes/header.php';
 require __DIR__ . '/includes/nav.php';
 ?>

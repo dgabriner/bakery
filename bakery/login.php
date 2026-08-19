@@ -11,7 +11,7 @@ require_once __DIR__ . '/includes/auth.php';
 // Already logged in → home
 if ($existingUser = bakery_current_user()) {
     $existingRole = $existingUser['role_slug'] ?? '';
-    $existingHome = $existingRole === 'driver'
+    $existingHome = bakery_is_driver_route_role($existingRole)
         ? 'driver.php'
         : ($existingRole === 'baker'
             ? ('production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day'))))
@@ -32,7 +32,7 @@ if (function_exists('bakery_served_at_app_root') && bakery_served_at_app_root() 
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!bakery_verify_csrf()) {
-        $error = 'Invalid security token. Please try again.';
+        $error = bakery_t('common.error_csrf');
     } else {
         $code = $_POST['code'] ?? '';
         try {
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 // Drivers land on their route; bakers on their daily production work.
                 $user = bakery_current_user();
-                if ($user && $user['role_slug'] === 'driver') {
+                if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
                     $dest = BASE_URL . 'driver.php';
                 } elseif ($user && $user['role_slug'] === 'baker') {
                     $dest = BASE_URL . 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
@@ -55,26 +55,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . $dest);
                 exit;
             }
-            $error = 'Código incorrecto. Inténtalo de nuevo.';
+            $error = bakery_t('login.error_wrong');
+            bakery_login_audit_record_failure($db, 'staff', 'Staff login', (string)($_POST['code'] ?? ''));
             // Slow down brute force slightly
             usleep(300000);
         } catch (Exception $e) {
-            $error = 'No se puede iniciar sesión en este momento.';
+            $error = bakery_t('login.error_unavailable');
             error_log('Login error: ' . $e->getMessage());
         }
     }
 }
 
-$page_title = 'Código para entrar';
+$page_title = bakery_t('login.title');
+$currentLocale = bakery_locale();
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="<?php echo htmlspecialchars($currentLocale, ENT_QUOTES, 'UTF-8'); ?>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Código para entrar</title>
+  <title><?php echo htmlspecialchars($page_title); ?> — Sour Flour OS</title>
+  <?php require __DIR__ . '/includes/client_refresh.php'; ?>
+  <link rel="stylesheet" href="<?php echo bakery_asset_href('css/tokens.css'); ?>">
   <style>
-    :root { color-scheme: light; --ink: #33251f; --cream: #fffdf8; --terracotta: #b75c3f; }
+    :root {
+      color-scheme: light;
+      --ink: var(--sf-text, #33251f);
+      --cream: var(--sf-bg-elevated, #fffdf8);
+      --terracotta: var(--sf-accent, #b75c3f);
+      --muted: var(--sf-text-muted, #6b5c52);
+      --border: var(--sf-border, #c9b9a8);
+    }
     * { box-sizing: border-box; }
     body { align-items: center; background: var(--cream); color: var(--ink); display: flex; font-family: Georgia, 'Times New Roman', serif; justify-content: center; margin: 0; min-height: 100vh; min-height: 100svh; padding: clamp(20px, 5vh, 56px) clamp(20px, 5vw, 72px); }
     .wrap { text-align: center; width: min(100%, 760px); }
@@ -85,6 +96,10 @@ $page_title = 'Código para entrar';
     input[type=tel] { background: transparent; border: 0; border-bottom: 2px solid #c9b9a8; border-radius: 0; color: var(--ink); display: block; font-family: inherit; font-size: 2.5rem; letter-spacing: .55em; margin: 0 auto; max-width: 240px; outline: none; padding: 4px 0 9px 18px; text-align: center; width: 100%; }
     input[type=tel]:focus { border-bottom-color: var(--terracotta); }
     .error { color: #9b332c; font-size: .9rem; margin: 0 0 18px; }
+    .lang-row { display: flex; justify-content: center; margin-bottom: 20px; }
+    .bakery-lang-switch--inline { background: rgba(0,0,0,.04); border-radius: 999px; display: inline-flex; gap: 2px; padding: 3px; }
+    .bakery-lang-switch--inline .bakery-lang-switch__btn { border-radius: 999px; color: var(--muted); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: .82rem; padding: 6px 14px; text-decoration: none; }
+    .bakery-lang-switch--inline .bakery-lang-switch__btn--active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.12); color: var(--ink); font-weight: 600; }
     @media (max-width: 560px) {
       html { height: 100%; overflow: hidden; }
       body { align-items: flex-start; height: 100%; inset: 0; min-height: 0; overflow: hidden; padding: max(10px, env(safe-area-inset-top)) 18px 14px; position: fixed; width: 100%; }
@@ -109,16 +124,17 @@ $page_title = 'Código para entrar';
 <body>
   <div class="wrap">
     <div class="brands" aria-label="La Victoria y Sour Flour">
-      <img class="la-victoria-logo" src="assets/logos/la-victoria.png" alt="La Victoria San Francisco">
-      <img class="sour-flour-logo" src="assets/logos/sour-flour-full.png?v=20260802" alt="Sour Flour">
+      <img class="la-victoria-logo" src="<?php echo bakery_asset_href('assets/logos/la-victoria.png'); ?>" alt="La Victoria San Francisco">
+      <img class="sour-flour-logo" src="<?php echo bakery_asset_href('assets/logos/sour-flour-full.png'); ?>" alt="Sour Flour">
     </div>
     <?php if ($error): ?>
       <div class="error" role="alert"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
+    <div class="lang-row"><?php $langSwitchVariant = 'inline'; require __DIR__ . '/includes/language_switch.php'; ?></div>
     <form method="post" action="">
       <?php echo bakery_csrf_field(); ?>
       <input type="hidden" name="next" value="<?php echo htmlspecialchars($next); ?>">
-      <label for="code">Código para entrar</label>
+      <label for="code"><?php bakery_te('login.label'); ?></label>
       <input type="tel" id="code" name="code" required
              inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4"
              autocomplete="one-time-code" autofocus
@@ -158,5 +174,6 @@ $page_title = 'Código para entrar';
       });
     })();
   </script>
+  <p style="text-align:center;margin-top:20px;font-size:.85rem;"><a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php" style="color:#7a6a5c;"><?php bakery_te('login.customer_portal_link'); ?></a></p>
 </body>
 </html>

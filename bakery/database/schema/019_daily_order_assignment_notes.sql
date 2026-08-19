@@ -1,0 +1,1 @@
+-- Optional per-assignment notes for driver routes (older installs may lack this column).

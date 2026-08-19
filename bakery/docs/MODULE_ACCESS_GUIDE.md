@@ -31,6 +31,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Orders & Customers | Invoice Center | Delivery invoice review and generation. |
 | Orders & Customers | Sales Leads | Prospects and follow-up. |
 | Delivery | Driver Assignment | Assign daily delivery work to drivers. |
+| Delivery | My Route | Choose a driver identity and use that driver’s route workflow without ending an administrator or manager session. |
 | Delivery | Daily Route | View daily, monthly, or list route plans. |
 | Delivery | Driver Management | Driver records and recurring route maintenance. |
 | Delivery | Standing Routes | Recurring customer-to-driver route plan. |

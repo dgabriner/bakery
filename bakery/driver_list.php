@@ -8,12 +8,12 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 
 $legacyRouteUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
-if ($legacyRouteUser && ($legacyRouteUser['role_slug'] ?? '') === 'driver') {
+if ($legacyRouteUser && bakery_is_driver_route_role($legacyRouteUser['role_slug'] ?? '')) {
     header('Location: ' . BASE_URL . 'driver.php');
     exit;
 }
 
-$page_title = 'Driver Route List';
+$page_title = bakery_t('page.driver_list');
 
 // Get selected driver and date
 $selectedDriverId = isset($_GET['driver_id']) ? intval($_GET['driver_id']) : 0;
@@ -73,6 +73,7 @@ if ($selectedDriverId > 0 && $driver) {
                 d.name as driver_name
             FROM daily_orders do
             INNER JOIN customers c ON do.customer_id = c.id
+            " . bakery_sfb_ops_origin_clause('c', $db) . "
             INNER JOIN daily_order_assignments doa ON do.id = doa.daily_order_id
             INNER JOIN drivers d ON doa.driver_id = d.id
             WHERE doa.driver_id = ? AND do.order_date = ?
@@ -138,8 +139,8 @@ foreach ($driverDeliveries as $zoneStops) {
 }
 ?>
 
-<link rel="stylesheet" href="<?php echo htmlspecialchars(BASE_URL); ?>css/driver.css">
-<script src="<?php echo htmlspecialchars(BASE_URL); ?>includes/global_tracking.js"></script>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver.css'); ?>">
+<script src="<?php echo bakery_asset_href('includes/global_tracking.js'); ?>"></script>
 
 <style>
 .driver-container {

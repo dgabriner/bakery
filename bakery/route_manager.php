@@ -5,6 +5,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
 require_once 'includes/photo_handler.php';
+require_once 'includes/route_manager_cash.php';
 
 /**
  * Fetch assigned deliveries for a date, optionally filtered by driver IDs.
@@ -12,6 +13,33 @@ require_once 'includes/photo_handler.php';
 function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds = []): array
 {
     $photosAvailable = table_exists($db, 'driver_photos');
+    $hasPaymentCollection = column_exists($db, 'customers', 'payment_collection');
+    $hasAmountCollected = column_exists($db, 'daily_orders', 'amount_collected');
+    $hasDeliveryConfirmedAt = column_exists($db, 'daily_orders', 'delivery_confirmed_at');
+    $hasDeliveryOrderTotal = column_exists($db, 'daily_orders', 'delivery_order_total');
+    $customerPaymentSql = $hasPaymentCollection ? "COALESCE(c.payment_collection, 'cod')" : "'cod'";
+    // Pan Dulce deliveries are collected as cash by default. This also makes
+    // historical routes reconcile correctly even when the customer was created
+    // before payment_collection existed.
+    $paymentCollectionSql = "CASE WHEN EXISTS (
+        SELECT 1
+        FROM daily_order_items payment_doi
+        INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
+        INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
+        INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
+        WHERE payment_doi.daily_order_id = do.id
+          AND payment_pl.name = 'Pan Dulce'
+    ) THEN 'cod' ELSE {$customerPaymentSql} END";
+    $amountCollectedSql = $hasAmountCollected ? 'do.amount_collected' : 'NULL';
+    $deliveryConfirmedSql = $hasDeliveryConfirmedAt
+        ? 'do.delivery_confirmed_at'
+        : 'NULL';
+    $deliveryOrderTotalSql = $hasDeliveryOrderTotal ? 'do.delivery_order_total' : 'NULL';
+    $deliveredCondition = "doa.delivery_status = 'delivered' OR do.status IN ('delivered', 'invoiced')";
+    if ($hasDeliveryConfirmedAt) {
+        $deliveredCondition .= ' OR do.delivery_confirmed_at IS NOT NULL';
+    }
+    $deliveryStatusSql = "CASE WHEN {$deliveredCondition} THEN 'delivered' ELSE COALESCE(doa.delivery_status, 'pending') END";
     $photoCountSql = $photosAvailable
         ? "(
                 SELECT COUNT(*)
@@ -28,10 +56,14 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             d.name AS driver_name,
             doa.route_order,
             doa.scheduled_delivery_time,
-            doa.delivery_status,
+            {$deliveryStatusSql} AS delivery_status,
             doa.actual_delivery_time,
             do.id AS daily_order_id,
             do.total_amount,
+            {$deliveryOrderTotalSql} AS delivery_order_total,
+            {$deliveryConfirmedSql} AS delivery_confirmed_at,
+            {$amountCollectedSql} AS amount_collected,
+            {$paymentCollectionSql} AS payment_collection,
             c.id AS customer_id,
             c.name AS customer_name,
             c.address,
@@ -46,6 +78,11 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
                 FROM daily_order_items doi
                 WHERE doi.daily_order_id = do.id
             ) AS item_count,
+            (
+                SELECT COALESCE(SUM(doi.line_total), 0)
+                FROM daily_order_items doi
+                WHERE doi.daily_order_id = do.id
+            ) AS order_total_estimate,
             {$photoCountSql} AS photo_count
         FROM daily_order_assignments doa
         INNER JOIN drivers d ON doa.driver_id = d.id
@@ -95,6 +132,15 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             'actual_delivery_time' => $row['actual_delivery_time'] ?? null,
             'delivery_status' => $row['delivery_status'] ?: 'pending',
             'total_amount' => (float)$row['total_amount'],
+            'delivery_order_total' => $row['delivery_order_total'] !== null ? (float)$row['delivery_order_total'] : null,
+            'order_total_estimate' => (float)$row['order_total_estimate'],
+            'delivery_confirmed_at' => $row['delivery_confirmed_at'] ?? null,
+            'amount_collected' => $row['amount_collected'] !== null ? (float)$row['amount_collected'] : null,
+            // Schema default is COD; never treat a missing/blank value as signature
+            // or cash totals silently drop every stop.
+            'payment_collection' => in_array((string)($row['payment_collection'] ?? ''), ['cod', 'signature'], true)
+                ? (string)$row['payment_collection']
+                : 'cod',
             'item_count' => (int)$row['item_count'],
             'latitude' => $row['latitude'] !== null && $row['latitude'] !== '' ? (float)$row['latitude'] : null,
             'longitude' => $row['longitude'] !== null && $row['longitude'] !== '' ? (float)$row['longitude'] : null,
@@ -102,6 +148,10 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             'deliver_after' => $row['deliver_after'],
             'photo_count' => (int)$row['photo_count'],
         ];
+    }
+
+    foreach ($driversData as $driverId => $driverData) {
+        $driversData[$driverId]['cash_summary'] = route_manager_compute_cash_summary($driverData['deliveries']);
     }
 
     return $driversData;
@@ -303,11 +353,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-// Optional: GPS tracking overlay (kept for same-day monitoring)
+// GPS activity history and optional map trails for the selected workday.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'get_tracking_data') {
     header('Content-Type: application/json');
 
-    $date = $_POST['date'] ?? date('Y-m-d');
+    $date = trim((string)($_POST['date'] ?? date('Y-m-d')));
+    $parsedDate = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$parsedDate || $parsedDate->format('Y-m-d') !== $date) {
+        echo json_encode(['success' => false, 'error' => 'Invalid date format; use YYYY-MM-DD']);
+        exit;
+    }
     $driver_ids = isset($_POST['driver_ids']) ? json_decode($_POST['driver_ids'], true) : [];
 
     try {
@@ -362,18 +417,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-$page_title = 'Route Manager';
+$page_title = bakery_t('page.route_manager');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
-<link rel="stylesheet" href="<?php echo htmlspecialchars(BASE_URL); ?>assets/photo_styles.css">
+<link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <?php
 
 // Fetch all drivers
 $drivers = bakery_get_drivers($db);
 
-// Default to tomorrow (planning day), allow override via ?date=
-$defaultDate = date('Y-m-d', strtotime('+1 day'));
+// Start on the active delivery day; future routes remain available via the date picker.
+$defaultDate = date('Y-m-d');
 $selectedDate = $_GET['date'] ?? $defaultDate;
 $parsedSelected = DateTime::createFromFormat('Y-m-d', $selectedDate);
 if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
@@ -382,8 +437,15 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
 ?>
 
 <div class="container">
-    <h1>Route Manager</h1>
-    <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route</p>
+    <div class="route-manager-header">
+        <div>
+            <h1>Route Manager</h1>
+            <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route. <strong>Cash totals for COD and Pan Dulce deliveries appear below and in each route header.</strong></p>
+        </div>
+        <div class="route-manager-actions">
+            <a class="btn btn-secondary" href="billing_center.php?panel=invoices&amp;range=custom&amp;start_date=<?php echo htmlspecialchars($selectedDate); ?>&amp;end_date=<?php echo htmlspecialchars($selectedDate); ?>">Invoice reconciliation</a>
+        </div>
+    </div>
 
     <!-- Controls Panel -->
     <div class="controls-panel">
@@ -410,9 +472,9 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
 
         <div class="control-group">
             <button type="button" id="refresh-data" class="btn btn-primary">Refresh</button>
-            <label class="driver-checkbox" title="Show GPS breadcrumb trails when available">
+            <label class="driver-checkbox" title="Show GPS breadcrumb trails on the map">
                 <input type="checkbox" id="show-tracking">
-                <span class="checkbox-label">Show GPS trails</span>
+                <span class="checkbox-label">Show GPS trail on map</span>
             </label>
         </div>
     </div>
@@ -435,11 +497,32 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
             <span class="status-label">Delivered</span>
             <span id="delivered-count" class="status-value">0</span>
         </div>
+        <div class="status-item status-item--cash" title="Cash from delivered COD and Pan Dulce stops">
+            <span class="status-label">Cash on hand</span>
+            <span id="cod-cash-on-hand" class="status-value">$0.00</span>
+        </div>
+        <div class="status-item status-item--cash" title="Cash on hand plus estimated amounts from remaining COD and Pan Dulce stops">
+            <span class="status-label">Cash turn-in total</span>
+            <span id="cod-turn-in-total" class="status-value">$0.00</span>
+        </div>
+        <div class="status-item status-item--cash" title="Sum of order amounts for all active stops on the selected routes (COD and signature)">
+            <span class="status-label">Total sold</span>
+            <span id="route-total-sold" class="status-value">$0.00</span>
+        </div>
         <div class="status-item">
             <span class="status-label">Last update</span>
             <span id="last-update-time" class="status-value">Never</span>
         </div>
     </div>
+
+    <p class="cash-help-banner" role="note">
+        <strong>Driver cash totals live here.</strong>
+        Per-driver amounts also appear above each route in the delivery list and in the driver legend.
+        <em>Cash on hand</em> = cash from delivered COD and Pan Dulce stops (using the delivery total when an older stop has no recorded cash amount).
+        <em>Turn-in total</em> = on hand + estimated from undelivered COD and Pan Dulce stops.
+        <em>Total sold</em> = order amounts for all active stops on the selected routes (COD and signature).
+        For billable invoice amounts, use <a href="billing_center.php?panel=invoices&amp;range=custom&amp;start_date=<?php echo htmlspecialchars($selectedDate); ?>&amp;end_date=<?php echo htmlspecialchars($selectedDate); ?>">Billing Center</a>.
+    </p>
 
     <div class="route-layout">
         <!-- Map Container -->
@@ -460,6 +543,18 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
             </div>
         </div>
     </div>
+
+    <section class="gps-activity-panel" aria-labelledby="gpsActivityTitle">
+        <div class="gps-activity-heading">
+            <div>
+                <p class="gps-activity-kicker">Driver activity</p>
+                <h3 id="gpsActivityTitle">GPS history</h3>
+            </div>
+            <span id="gps-activity-status" class="gps-activity-status" aria-live="polite">Loading activity…</span>
+        </div>
+        <p class="gps-activity-help">Location pings recorded while drivers use My Route. Select an update to view it on the map.</p>
+        <div id="gps-activity-list" class="gps-activity-list" aria-live="polite"></div>
+    </section>
 
     <!-- Driver Legend -->
     <div class="driver-legend">
@@ -491,6 +586,41 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
     <img id="photoLightboxImage" alt="Delivery photo">
 </div>
 
+<!-- Stop detail sheet -->
+<div id="stopDetailModal" class="stop-detail-modal" style="display:none;" aria-hidden="true" role="dialog" aria-labelledby="stopDetailModalTitle">
+    <div class="stop-detail-backdrop" id="stopDetailBackdrop"></div>
+    <div class="stop-detail-sheet">
+        <div class="stop-detail-header">
+            <div class="stop-detail-header-text">
+                <p class="stop-detail-kicker" id="stopDetailKicker">Stop details</p>
+                <h3 id="stopDetailModalTitle">Stop</h3>
+            </div>
+            <button type="button" class="stop-detail-close" id="stopDetailModalClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="stop-detail-actions" id="stopDetailActions"></div>
+        <div class="stop-detail-body" id="stopDetailBody">
+            <div class="stop-detail-section">
+                <h4>Timing</h4>
+                <dl class="stop-detail-grid" id="stopDetailTiming"></dl>
+            </div>
+            <div class="stop-detail-section">
+                <h4>Status &amp; payment</h4>
+                <dl class="stop-detail-grid" id="stopDetailStatus"></dl>
+            </div>
+            <div class="stop-detail-section">
+                <h4>Order &amp; invoice</h4>
+                <div id="stopDetailInvoiceStatus" class="text-muted">Loading order details…</div>
+                <div id="stopDetailInvoice"></div>
+            </div>
+            <div class="stop-detail-section">
+                <h4>Photos</h4>
+                <div id="stopDetailPhotosStatus" class="text-muted">Loading photos…</div>
+                <div id="stopDetailPhotos" class="photo-grid"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 const apiKey = <?php echo bakery_json_for_html(GOOGLE_MAPS_API_KEY, '""'); ?>;
 const drivers = <?php echo bakery_json_for_html($drivers, '[]'); ?>;
@@ -509,6 +639,37 @@ const statusLabels = {
     cancelled: 'Cancelled'
 };
 
+const paymentLabels = {
+    cod: 'COD',
+    signature: 'Signature'
+};
+
+function formatMoney(amount) {
+    return '$' + Number(amount || 0).toFixed(2);
+}
+
+function stopPaymentAmount(delivery) {
+    if ((delivery.payment_collection || 'cod') !== 'cod') {
+        return null;
+    }
+    if (delivery.delivery_status === 'delivered') {
+        if (delivery.amount_collected != null) {
+            return delivery.amount_collected;
+        }
+        if (delivery.delivery_order_total > 0) {
+            return delivery.delivery_order_total;
+        }
+        return delivery.total_amount > 0 ? delivery.total_amount : delivery.order_total_estimate;
+    }
+    if (delivery.delivery_order_total > 0) {
+        return delivery.delivery_order_total;
+    }
+    if (delivery.total_amount > 0) {
+        return delivery.total_amount;
+    }
+    return delivery.order_total_estimate || 0;
+}
+
 let map;
 let geocoder;
 let driversData = {};
@@ -521,7 +682,11 @@ let reorderSaveTimer = null;
 let didDragStop = false;
 
 function initMap() {
-    map = new google.maps.Map(document.getElementById('route-map'), {
+    const mapEl = document.getElementById('route-map');
+    if (!mapEl || typeof google === 'undefined' || !google.maps) {
+        return;
+    }
+    map = new google.maps.Map(mapEl, {
         zoom: 11,
         center: { lat: 37.7749, lng: -122.4194 },
         mapTypeId: 'roadmap',
@@ -537,7 +702,10 @@ function initMap() {
     });
     geocoder = new google.maps.Geocoder();
     infoWindow = new google.maps.InfoWindow();
-    loadDeliveries();
+    // Deliveries load on DOMContentLoaded; refresh map markers if data already arrived.
+    if (Object.keys(driversData).length) {
+        updateMap();
+    }
 }
 
 function getSelectedDrivers() {
@@ -569,6 +737,7 @@ function loadDeliveries() {
     if (selectedDrivers.length === 0) {
         driversData = {};
         clearMapElements();
+        renderGpsActivity({});
         updateStatistics();
         updateLegend();
         updateDeliveryList();
@@ -583,9 +752,19 @@ function loadDeliveries() {
 
     fetch(window.location.pathname + window.location.search, {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
     })
-    .then(response => response.json())
+    .then(async response => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data) {
+            throw new Error((data && data.error) || ('HTTP ' + response.status));
+        }
+        return data;
+    })
     .then(data => {
         if (data.success) {
             driversData = data.data || {};
@@ -594,9 +773,8 @@ function loadDeliveries() {
             updateLegend();
             updateDeliveryList();
             updateLastRefreshTime();
-            if (document.getElementById('show-tracking').checked) {
-                loadTrackingOverlay();
-            }
+            // GPS history is always useful context; map trails remain an opt-in overlay.
+            loadTrackingOverlay();
         } else {
             console.error('Failed to load deliveries:', data.error);
             showError('Failed to load deliveries: ' + (data.error || 'Unknown error'));
@@ -604,7 +782,7 @@ function loadDeliveries() {
     })
     .catch(error => {
         console.error('Error loading deliveries:', error);
-        showError('Network error loading deliveries');
+        showError('Network error loading deliveries' + (error && error.message ? ': ' + error.message : ''));
     });
 }
 
@@ -619,12 +797,17 @@ function loadTrackingOverlay() {
 
     fetch(window.location.pathname + window.location.search, {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
     })
     .then(response => response.json())
     .then(data => {
         clearTrackingPaths();
-        if (!data.success || !data.data) return;
+        renderGpsActivity(data && data.success ? data.data : {});
+        if (!map || !data.success || !data.data || !document.getElementById('show-tracking').checked) return;
 
         Object.keys(data.data).forEach(driverId => {
             const points = data.data[driverId].points || [];
@@ -640,7 +823,65 @@ function loadTrackingOverlay() {
             driverPaths[driverId] = path;
         });
     })
-    .catch(err => console.warn('Tracking overlay failed:', err));
+    .catch(err => {
+        console.warn('Tracking overlay failed:', err);
+        renderGpsActivity({});
+    });
+}
+
+function formatGpsActivityTime(value) {
+    if (!value) return 'Time unavailable';
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function renderGpsActivity(data) {
+    const list = document.getElementById('gps-activity-list');
+    const status = document.getElementById('gps-activity-status');
+    if (!list || !status) return;
+
+    const events = [];
+    Object.keys(data || {}).forEach(driverId => {
+        const driver = data[driverId] || {};
+        (driver.points || []).forEach(point => {
+            events.push({
+                driverId: String(driverId),
+                driverName: driver.name || 'Driver',
+                lat: Number(point.lat),
+                lng: Number(point.lng),
+                timestamp: point.timestamp || ''
+            });
+        });
+    });
+
+    events.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+    if (!events.length) {
+        status.textContent = 'No GPS updates yet';
+        list.innerHTML = '<p class="gps-activity-empty">No location updates have been recorded for the selected day.</p>';
+        return;
+    }
+
+    const shown = events.slice(0, 60);
+    status.textContent = events.length + (events.length === 1 ? ' update' : ' updates');
+    list.innerHTML = shown.map(event =>
+        '<button type="button" class="gps-activity-item" data-driver-id="' + escapeHtml(event.driverId) +
+        '" data-lat="' + escapeHtml(String(event.lat)) + '" data-lng="' + escapeHtml(String(event.lng)) + '">' +
+            '<span class="gps-activity-time">' + escapeHtml(formatGpsActivityTime(event.timestamp)) + '</span>' +
+            '<span class="gps-activity-detail"><strong>' + escapeHtml(event.driverName) + '</strong><span>Location updated</span></span>' +
+            '<span class="gps-activity-map">View map</span>' +
+        '</button>'
+    ).join('');
+
+    list.querySelectorAll('.gps-activity-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const lat = Number(this.dataset.lat);
+            const lng = Number(this.dataset.lng);
+            if (!map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            map.panTo({ lat, lng });
+            if (map.getZoom() < 14) map.setZoom(14);
+        });
+    });
 }
 
 function clearTrackingPaths() {
@@ -670,16 +911,10 @@ function markerIcon(color, label) {
 
 function deliveryInfoHtml(driverName, delivery, driverId) {
     const status = statusLabels[delivery.delivery_status] || delivery.delivery_status;
-    const canViewPhotos = delivery.delivery_status === 'delivered' || (delivery.photo_count || 0) > 0;
-    const photoLabel = (delivery.photo_count || 0) > 0
-        ? `View photos (${delivery.photo_count})`
-        : 'View photos';
-    const photosBtn = canViewPhotos
-        ? `<br><button type="button" class="btn btn-primary map-photos-btn"
-                onclick="viewDeliveryPhotos(${parseInt(driverId, 10)}, ${parseInt(delivery.daily_order_id, 10)})">
-                ${escapeHtml(photoLabel)}
-           </button>`
-        : '';
+    const detailsBtn = `<br><button type="button" class="btn btn-primary map-photos-btn"
+                onclick="viewStopDetail(${parseInt(driverId, 10)}, ${parseInt(delivery.daily_order_id, 10)})">
+                View stop details
+           </button>`;
     return `
         <div class="map-info-window">
             <strong>#${delivery.route_order || '—'} ${escapeHtml(delivery.customer_name)}</strong><br>
@@ -687,9 +922,11 @@ function deliveryInfoHtml(driverName, delivery, driverId) {
             <span>${escapeHtml(delivery.address || 'No address')}</span><br>
             <span>Zone: ${escapeHtml(delivery.zone)}</span><br>
             <span>Status: ${escapeHtml(status)}</span><br>
+            <span>Payment: ${escapeHtml(paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature')}</span><br>
+            ${stopPaymentAmount(delivery) != null ? '<span>Amount: ' + formatMoney(stopPaymentAmount(delivery)) + '</span><br>' : ''}
             <span>Scheduled: ${escapeHtml(formatTime(delivery.scheduled_delivery_time))}</span>
             ${delivery.item_count ? '<br><span>Items: ' + delivery.item_count + '</span>' : ''}
-            ${photosBtn}
+            ${detailsBtn}
         </div>
     `;
 }
@@ -782,9 +1019,16 @@ function updateStatistics() {
     let total = 0;
     let pending = 0;
     let delivered = 0;
+    let cashOnHand = 0;
+    let turnInTotal = 0;
+    let totalSold = 0;
     const activeDrivers = Object.keys(driversData).filter(id => (driversData[id].deliveries || []).length > 0).length;
 
     Object.values(driversData).forEach(driver => {
+        const summary = driver.cash_summary || {};
+        cashOnHand += Number(summary.cash_on_hand) || 0;
+        turnInTotal += Number(summary.turn_in_total) || 0;
+        totalSold += Number(summary.total_sold) || 0;
         (driver.deliveries || []).forEach(d => {
             total++;
             if (d.delivery_status === 'delivered') delivered++;
@@ -796,6 +1040,10 @@ function updateStatistics() {
     document.getElementById('total-deliveries-count').textContent = total;
     document.getElementById('pending-count').textContent = pending;
     document.getElementById('delivered-count').textContent = delivered;
+    document.getElementById('cod-cash-on-hand').textContent = formatMoney(cashOnHand);
+    document.getElementById('cod-turn-in-total').textContent = formatMoney(turnInTotal);
+    const soldEl = document.getElementById('route-total-sold');
+    if (soldEl) soldEl.textContent = formatMoney(totalSold);
 }
 
 function updateLegend() {
@@ -811,12 +1059,21 @@ function updateLegend() {
         const driverData = driversData[driverId];
         const color = driverColor(driverId);
         const count = driverData.deliveries.length;
+        const cash = driverData.cash_summary || {};
+        const cashLine = (cash.cod_stop_count || 0) > 0
+            ? `<div class="legend-details">Cash: ${formatMoney(cash.cash_on_hand)} on hand · ${formatMoney(cash.turn_in_total)} turn-in</div>`
+            : '';
+        const soldLine = Number(cash.total_sold) > 0
+            ? `<div class="legend-details">Sold: ${formatMoney(cash.total_sold)}</div>`
+            : '';
         return `
             <div class="legend-item">
                 <div class="legend-color" style="background-color: ${color};"></div>
                 <div class="legend-info">
                     <strong>${escapeHtml(driverData.name)}</strong>
                     <div class="legend-details">${count} stop${count === 1 ? '' : 's'}</div>
+                    ${cashLine}
+                    ${soldLine}
                 </div>
             </div>
         `;
@@ -849,6 +1106,11 @@ function updateDeliveryList() {
             const photoCount = d.photo_count || 0;
             const isFirst = stopIndex === 0;
             const isLast = stopIndex === stops.length - 1;
+            const isCod = (d.payment_collection || 'cod') === 'cod';
+            const cashAmount = stopPaymentAmount(d);
+            const paymentBadge = isCod
+                ? `<span class="payment-badge payment-badge--cod">${isDelivered ? 'COD cash ' + formatMoney(cashAmount) : 'COD expected ' + formatMoney(cashAmount)}</span>`
+                : `<span class="payment-badge payment-badge--signature">Signature</span>`;
             const mapsLink = d.address
                 ? `<a class="stop-external-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(d.address)}" target="_blank" rel="noopener">Map</a>`
                 : '';
@@ -867,12 +1129,14 @@ function updateDeliveryList() {
                     data-status="${escapeHtml(d.delivery_status)}"
                     draggable="true"
                     tabindex="0"
-                    title="${isDelivered ? 'Move with ↑ ↓ · Tap to view photos' : 'Move with ↑ ↓ · Tap to focus on map'}">
+                    title="Move with ↑ ↓ · Tap to view stop details">
                     <span class="drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
                     <div class="stop-order">${d.route_order > 0 ? d.route_order : '—'}</div>
                     <div class="stop-body">
                         <div class="stop-name">
-                            ${escapeHtml(d.customer_name)}
+                            <button type="button" class="customer-hub-link stop-detail-trigger">${escapeHtml(d.customer_name)}</button>
+                            <a class="stop-external-link customer-record-link" href="customer_record.php?customer_id=${encodeURIComponent(d.customer_id)}&amp;date=${encodeURIComponent(document.getElementById('tracking-date').value || '')}" title="Open Customer Record" aria-label="Open Customer Record">↗</a>
+                            ${paymentBadge}
                             ${photosHint}
                         </div>
                         <div class="stop-meta">${escapeHtml(d.address || 'No address')}</div>
@@ -882,7 +1146,7 @@ function updateDeliveryList() {
                             · ${escapeHtml(formatTime(d.scheduled_delivery_time))}
                             ${d.item_count ? ' · ' + d.item_count + ' items' : ''}
                             ${mapsLink ? ' · ' + mapsLink : ''}
-                            ${isDelivered ? ' · <span class="photos-action-hint">View photos</span>' : ''}
+                            · <span class="photos-action-hint">View details</span>
                         </div>
                     </div>
                     <div class="stop-move-controls" role="group" aria-label="Reorder stop">
@@ -899,12 +1163,33 @@ function updateDeliveryList() {
             `;
         }).join('');
 
+        const cash = driverData.cash_summary || {};
+        const cashBits = [];
+        if ((cash.cod_stop_count || 0) > 0) {
+            cashBits.push(`Cash on hand: <strong>${formatMoney(cash.cash_on_hand)}</strong>`);
+            cashBits.push(`Turn-in: <strong>${formatMoney(cash.turn_in_total)}</strong>`);
+        }
+        if (Number(cash.total_sold) > 0 || (cash.cod_stop_count || 0) > 0) {
+            cashBits.push(`Sold: <strong>${formatMoney(cash.total_sold)}</strong>`);
+        }
+        const cashHeader = cashBits.length
+            ? `<span class="driver-cash-summary">
+                    ${cashBits.join(' · ')}
+                    ${(cash.cod_stop_count || 0) > 0
+                        ? `<span class="driver-cash-meta">(${cash.cod_delivered_count || 0}/${cash.cod_stop_count || 0} COD/Pan Dulce stop${(cash.cod_stop_count || 0) === 1 ? '' : 's'} delivered)</span>`
+                        : ''}
+               </span>`
+            : '';
+
         return `
             <section class="driver-delivery-group" data-driver-id="${driverId}">
                 <header class="driver-delivery-header">
                     <span class="legend-color" style="background-color: ${color};"></span>
-                    <strong>${escapeHtml(driverData.name)}</strong>
-                    <span class="stop-count">${stops.length} stop${stops.length === 1 ? '' : 's'}</span>
+                    <div class="driver-delivery-title">
+                        <strong>${escapeHtml(driverData.name)}</strong>
+                        <span class="stop-count">${stops.length} stop${stops.length === 1 ? '' : 's'}</span>
+                        ${cashHeader}
+                    </div>
                 </header>
                 <ol class="delivery-stops" data-driver-id="${driverId}">${stopRows}</ol>
             </section>
@@ -913,6 +1198,16 @@ function updateDeliveryList() {
 
     listEl.querySelectorAll('.stop-external-link').forEach(link => {
         link.addEventListener('click', (e) => e.stopPropagation());
+    });
+
+    listEl.querySelectorAll('.stop-detail-trigger').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const item = btn.closest('.delivery-stop');
+            if (!item) return;
+            viewStopDetail(item.dataset.driverId, item.dataset.orderId);
+        });
     });
 
     listEl.querySelectorAll('.stop-move-btn').forEach(btn => {
@@ -937,10 +1232,7 @@ function updateDeliveryList() {
             }
             const driverId = item.dataset.driverId;
             const orderId = item.dataset.orderId;
-            focusDelivery(driverId, orderId);
-            if (item.dataset.status === 'delivered') {
-                viewDeliveryPhotos(driverId, orderId);
-            }
+            viewStopDetail(driverId, orderId);
         };
         item.addEventListener('click', activate);
         item.addEventListener('keydown', (e) => {
@@ -1189,7 +1481,98 @@ function findDelivery(driverId, orderId) {
     return { driverData, delivery };
 }
 
-function viewDeliveryPhotos(driverId, orderId) {
+function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
+function formatReceivingWindow(deliverAfter, deliverBy) {
+    if (!deliverAfter && !deliverBy) return '—';
+    if (deliverAfter && deliverBy) {
+        return formatTime(deliverAfter) + ' – ' + formatTime(deliverBy);
+    }
+    if (deliverAfter) return 'After ' + formatTime(deliverAfter);
+    return 'By ' + formatTime(deliverBy);
+}
+
+function renderDetailGrid(items) {
+    return items.map(([label, value]) => `
+        <div class="stop-detail-item">
+            <dt>${escapeHtml(label)}</dt>
+            <dd>${value}</dd>
+        </div>
+    `).join('');
+}
+
+function renderStopDetailInvoiceItems(items) {
+    if (!items || items.length === 0) {
+        return '<p class="text-muted stop-detail-empty">No priced items for this order.</p>';
+    }
+    return `
+        <div class="stop-detail-invoice-list">
+            <div class="stop-detail-invoice-heading">
+                <span>Item</span>
+                <span>Amount</span>
+            </div>
+            ${items.map(item => `
+                <div class="stop-detail-invoice-row">
+                    <span>
+                        <strong>${escapeHtml(item.product_name || 'Product')}</strong>
+                        <small>${escapeHtml(String(item.quantity || 0))} × ${formatMoney(item.unit_price || 0)}</small>
+                    </span>
+                    <strong>${formatMoney(item.line_total || 0)}</strong>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderStopDetailPhotos(photos, gridEl) {
+    if (!photos || photos.length === 0) {
+        return;
+    }
+    gridEl.innerHTML = photos.map(photo => `
+        <div class="photo-thumb" tabindex="0" role="button"
+             data-url="${escapeHtml(photo.url)}"
+             data-fallback="${escapeHtml(photo.fallback_url || '')}"
+             title="${escapeHtml(photo.photo_type || 'Photo')}">
+            <img src="${escapeHtml(photo.url)}"
+                 alt="${escapeHtml(photo.photo_type || 'Delivery photo')}"
+                 loading="lazy"
+                 onerror="if (this.dataset.fallbackTried) return; this.dataset.fallbackTried='1'; this.src=this.parentNode.dataset.fallback;">
+            <div class="photo-info">
+                <span class="photo-type">${escapeHtml(photo.photo_type || 'Photo')}</span>
+                ${photo.created_at ? `<span class="customer-name">${escapeHtml(photo.created_at)}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+
+    gridEl.querySelectorAll('.photo-thumb').forEach(thumb => {
+        const open = () => openPhotoLightbox(thumb.dataset.url, thumb.dataset.fallback);
+        thumb.addEventListener('click', open);
+        thumb.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                open();
+            }
+        });
+    });
+}
+
+function closeStopDetailModal() {
+    const modal = document.getElementById('stopDetailModal');
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function viewStopDetail(driverId, orderId) {
     const found = findDelivery(driverId, orderId);
     if (!found) {
         showError('Delivery not found');
@@ -1198,25 +1581,99 @@ function viewDeliveryPhotos(driverId, orderId) {
 
     const { driverData, delivery } = found;
     const selectedDate = document.getElementById('tracking-date').value;
-    const modal = document.getElementById('deliveryPhotosModal');
-    const title = document.getElementById('deliveryPhotosModalTitle');
-    const meta = document.getElementById('deliveryPhotosMeta');
-    const status = document.getElementById('deliveryPhotosStatus');
-    const grid = document.getElementById('deliveryPhotosGrid');
+    const modal = document.getElementById('stopDetailModal');
+    const title = document.getElementById('stopDetailModalTitle');
+    const kicker = document.getElementById('stopDetailKicker');
+    const actions = document.getElementById('stopDetailActions');
+    const timing = document.getElementById('stopDetailTiming');
+    const statusEl = document.getElementById('stopDetailStatus');
+    const invoiceStatus = document.getElementById('stopDetailInvoiceStatus');
+    const invoiceEl = document.getElementById('stopDetailInvoice');
+    const photosStatus = document.getElementById('stopDetailPhotosStatus');
+    const photosGrid = document.getElementById('stopDetailPhotos');
 
-    title.textContent = 'Delivery photos';
-    meta.innerHTML = `
-        <strong>${escapeHtml(delivery.customer_name)}</strong>
-        · ${escapeHtml(driverData.name)}
-        · stop #${delivery.route_order || '—'}
-        · ${escapeHtml(selectedDate)}
-        <div class="stop-meta">${escapeHtml(delivery.address || '')}</div>
+    const status = statusLabels[delivery.delivery_status] || delivery.delivery_status;
+    const paymentType = paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature';
+    const paymentAmount = stopPaymentAmount(delivery);
+    const customerRecordUrl = `customer_record.php?customer_id=${encodeURIComponent(delivery.customer_id)}&date=${encodeURIComponent(selectedDate)}`;
+    const mapsUrl = delivery.address
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(delivery.address)}`
+        : '';
+
+    kicker.textContent = `${driverData.name} · Stop #${delivery.route_order || '—'} · ${selectedDate}`;
+    title.textContent = delivery.customer_name;
+
+    actions.innerHTML = `
+        <a class="btn btn-primary stop-detail-action" href="${escapeHtml(customerRecordUrl)}">Customer Record</a>
+        ${mapsUrl ? `<a class="btn btn-secondary stop-detail-action" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener">Open in Maps</a>` : ''}
+        ${delivery.phone ? `<a class="btn btn-secondary stop-detail-action" href="tel:${escapeHtml(String(delivery.phone).replace(/[^\d+]/g, ''))}">${escapeHtml(delivery.phone)}</a>` : ''}
     `;
-    status.textContent = 'Loading photos…';
-    status.style.display = 'block';
-    grid.innerHTML = '';
+
+    timing.innerHTML = renderDetailGrid([
+        ['Scheduled', escapeHtml(formatTime(delivery.scheduled_delivery_time))],
+        ['Actual delivery', escapeHtml(formatDateTime(delivery.actual_delivery_time))],
+        ['Receiving window', escapeHtml(formatReceivingWindow(delivery.deliver_after, delivery.deliver_by))],
+        ['Confirmed at', escapeHtml(formatDateTime(delivery.delivery_confirmed_at))],
+    ]);
+
+    statusEl.innerHTML = renderDetailGrid([
+        ['Status', `<span class="stop-detail-status status-${escapeHtml(delivery.delivery_status)}">${escapeHtml(status)}</span>`],
+        ['Zone', escapeHtml(delivery.zone || '—')],
+        ['Address', escapeHtml(delivery.address || 'No address')],
+        ['Payment', escapeHtml(paymentType)],
+        ['Amount', paymentAmount != null ? formatMoney(paymentAmount) : '—'],
+        ['Collected', delivery.amount_collected != null ? formatMoney(delivery.amount_collected) : '—'],
+        ['Items ordered', delivery.item_count ? String(delivery.item_count) : '—'],
+    ]);
+
+    invoiceStatus.textContent = 'Loading order details…';
+    invoiceStatus.style.display = 'block';
+    invoiceEl.innerHTML = '';
+    photosStatus.textContent = 'Loading photos…';
+    photosStatus.style.display = 'block';
+    photosGrid.innerHTML = '';
+
     modal.style.display = 'flex';
     modal.setAttribute('aria-hidden', 'false');
+    document.getElementById('stopDetailModalClose').focus();
+
+    focusDelivery(driverId, orderId);
+
+    const summaryBody = 'action=get_delivery_summary&daily_order_id=' + encodeURIComponent(String(orderId));
+    fetch('complete_delivery.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: summaryBody
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            invoiceStatus.textContent = 'Could not load order details: ' + (data.error || 'Unknown error');
+            return;
+        }
+
+        invoiceStatus.style.display = 'none';
+        const billable = Math.max(0, Number(data.delivered_pieces || 0) - Number(data.credits_taken_back || 0));
+        const summaryBits = [
+            `<div class="stop-detail-invoice-summary">
+                <span><strong>Ordered:</strong> ${Number(data.ordered_pieces || 0)} pcs</span>
+                <span><strong>Delivered:</strong> ${Number(data.delivered_pieces || 0)} pcs</span>
+                <span><strong>Credits:</strong> ${Number(data.credits_taken_back || 0)}</span>
+                <span><strong>Billable:</strong> ${billable} pcs</span>
+            </div>`,
+            `<div class="stop-detail-invoice-totals">
+                <span>Order total: <strong>${formatMoney(data.order_total || 0)}</strong></span>
+                <span>Saved total: <strong>${formatMoney(data.saved_total || 0)}</strong></span>
+                ${data.pricing_label ? `<span class="stop-detail-pricing-label">${escapeHtml(data.pricing_label)}</span>` : ''}
+            </div>`,
+            renderStopDetailInvoiceItems(data.items || [])
+        ].join('');
+        invoiceEl.innerHTML = summaryBits;
+    })
+    .catch(err => {
+        console.error(err);
+        invoiceStatus.textContent = 'Network error loading order details';
+    });
 
     const formData = new FormData();
     formData.append('action', 'get_delivery_photos');
@@ -1231,48 +1688,27 @@ function viewDeliveryPhotos(driverId, orderId) {
     .then(response => response.json())
     .then(data => {
         if (!data.success) {
-            status.textContent = 'Failed to load photos: ' + (data.error || 'Unknown error');
+            photosStatus.textContent = 'Failed to load photos: ' + (data.error || 'Unknown error');
             return;
         }
 
         const photos = data.photos || [];
         if (photos.length === 0) {
-            status.textContent = 'No photos uploaded for this delivery.';
+            photosStatus.textContent = 'No photos uploaded for this stop yet.';
             return;
         }
 
-        status.style.display = 'none';
-        grid.innerHTML = photos.map(photo => `
-            <div class="photo-thumb" tabindex="0" role="button"
-                 data-url="${escapeHtml(photo.url)}"
-                 data-fallback="${escapeHtml(photo.fallback_url || '')}"
-                 title="${escapeHtml(photo.photo_type || 'Photo')}">
-                <img src="${escapeHtml(photo.url)}"
-                     alt="${escapeHtml(photo.photo_type || 'Delivery photo')}"
-                     loading="lazy"
-                     onerror="if (this.dataset.fallbackTried) return; this.dataset.fallbackTried='1'; this.src=this.parentNode.dataset.fallback;">
-                <div class="photo-info">
-                    <span class="photo-type">${escapeHtml(photo.photo_type || 'Photo')}</span>
-                    ${photo.created_at ? `<span class="customer-name">${escapeHtml(photo.created_at)}</span>` : ''}
-                </div>
-            </div>
-        `).join('');
-
-        grid.querySelectorAll('.photo-thumb').forEach(thumb => {
-            const open = () => openPhotoLightbox(thumb.dataset.url, thumb.dataset.fallback);
-            thumb.addEventListener('click', open);
-            thumb.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    open();
-                }
-            });
-        });
+        photosStatus.style.display = 'none';
+        renderStopDetailPhotos(photos, photosGrid);
     })
     .catch(err => {
         console.error(err);
-        status.textContent = 'Network error loading photos';
+        photosStatus.textContent = 'Network error loading photos';
     });
+}
+
+function viewDeliveryPhotos(driverId, orderId) {
+    viewStopDetail(driverId, orderId);
 }
 
 function closeDeliveryPhotosModal() {
@@ -1302,6 +1738,7 @@ function closePhotoLightbox() {
 }
 
 window.viewDeliveryPhotos = viewDeliveryPhotos;
+window.viewStopDetail = viewStopDetail;
 
 function updateLastRefreshTime() {
     document.getElementById('last-update-time').textContent = new Date().toLocaleTimeString();
@@ -1353,6 +1790,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('refresh-data').addEventListener('click', loadDeliveries);
 
+    // Load route/cash data immediately — do not wait for Google Maps.
+    // Previously totals stayed at $0.00 whenever Maps failed to call initMap.
+    loadDeliveries();
+
     document.getElementById('show-tracking').addEventListener('change', function() {
         if (this.checked) {
             loadTrackingOverlay();
@@ -1360,6 +1801,11 @@ document.addEventListener('DOMContentLoaded', function() {
             clearTrackingPaths();
         }
     });
+
+    // Keep the manager's activity feed current without interrupting route planning.
+    window.setInterval(function() {
+        if (!document.hidden) loadTrackingOverlay();
+    }, 60000);
 
     const photosClose = document.getElementById('deliveryPhotosModalClose');
     const photosModal = document.getElementById('deliveryPhotosModal');
@@ -1381,10 +1827,23 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    const stopDetailClose = document.getElementById('stopDetailModalClose');
+    const stopDetailBackdrop = document.getElementById('stopDetailBackdrop');
+    const stopDetailModal = document.getElementById('stopDetailModal');
+    stopDetailClose.addEventListener('click', closeStopDetailModal);
+    stopDetailBackdrop.addEventListener('click', closeStopDetailModal);
+    stopDetailModal.addEventListener('click', (e) => {
+        if (e.target === stopDetailModal) closeStopDetailModal();
+    });
+
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
         if (document.getElementById('photoLightbox').style.display === 'flex') {
             closePhotoLightbox();
+            return;
+        }
+        if (document.getElementById('stopDetailModal').style.display === 'flex') {
+            closeStopDetailModal();
             return;
         }
         if (document.getElementById('deliveryPhotosModal').style.display === 'flex') {
@@ -1396,9 +1855,22 @@ document.addEventListener('DOMContentLoaded', function() {
 window.initMap = initMap;
 </script>
 
+<?php
+$mapsReady = defined('MAPS_ENABLED') && MAPS_ENABLED && defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== '';
+if ($mapsReady):
+?>
 <script async defer
     src="<?php echo GOOGLE_MAPS_JS_API_URL; ?>?key=<?php echo htmlspecialchars(GOOGLE_MAPS_API_KEY); ?>&callback=initMap">
 </script>
+<?php else: ?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const mapEl = document.getElementById('route-map');
+    if (!mapEl) return;
+    mapEl.innerHTML = '<div class="map-fallback">Map unavailable — cash and delivery totals still load from the selected routes. Enable maps (MAPS_ENABLED + API key) to show the map.</div>';
+});
+</script>
+<?php endif; ?>
 
 <style>
 .container {
@@ -1528,12 +2000,139 @@ window.initMap = initMap;
     margin-bottom: 20px;
 }
 
+.gps-activity-panel {
+    margin: 0 0 20px;
+    padding: 18px;
+    border: 1px solid #d9e7e2;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+}
+
+.gps-activity-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.gps-activity-kicker {
+    margin: 0 0 3px;
+    color: #39705a;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.gps-activity-heading h3 {
+    margin: 0;
+    color: #234638;
+}
+
+.gps-activity-status {
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #eef8f2;
+    color: #236143;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.gps-activity-help {
+    margin: 8px 0 12px;
+    color: #667085;
+    font-size: 13px;
+}
+
+.gps-activity-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+    gap: 8px;
+    max-height: 310px;
+    overflow: auto;
+}
+
+.gps-activity-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 58px;
+    padding: 9px 10px;
+    border: 1px solid #e2ebe7;
+    border-radius: 7px;
+    background: #fbfdfc;
+    color: #243b31;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.gps-activity-item:hover,
+.gps-activity-item:focus-visible {
+    border-color: #4d9871;
+    background: #f1faf4;
+    outline: none;
+}
+
+.gps-activity-time {
+    color: #1f6f4a;
+    font-size: 12px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.gps-activity-detail {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    font-size: 12px;
+}
+
+.gps-activity-detail strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gps-activity-detail span,
+.gps-activity-map {
+    color: #667085;
+}
+
+.gps-activity-map {
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.gps-activity-empty {
+    grid-column: 1 / -1;
+    margin: 4px 0;
+    color: #667085;
+    font-size: 13px;
+}
+
 .map-container {
     height: 620px;
     width: 100%;
     border: 2px solid #dee2e6;
     border-radius: 8px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.map-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 24px;
+    text-align: center;
+    color: #5a6b63;
+    background: linear-gradient(180deg, #f7faf8 0%, #eef3f0 100%);
+    font-size: 14px;
+    line-height: 1.45;
 }
 
 .delivery-list-panel {
@@ -1594,17 +2193,95 @@ window.initMap = initMap;
 
 .driver-delivery-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     margin-bottom: 8px;
     padding-bottom: 6px;
     border-bottom: 1px solid #e9ecef;
 }
 
+.driver-delivery-title {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+}
+
 .driver-delivery-header .stop-count {
-    margin-left: auto;
     color: #6c757d;
     font-size: 13px;
+}
+
+.driver-cash-summary {
+    flex-basis: 100%;
+    font-size: 13px;
+    color: #1f6f4a;
+    margin-top: 2px;
+}
+
+.driver-cash-summary strong {
+    font-weight: 700;
+}
+
+.driver-cash-meta {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+.status-item--cash .status-value {
+    font-size: 20px;
+}
+
+.route-manager-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.route-manager-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cash-help-banner {
+    margin: 0 0 20px;
+    padding: 12px 14px;
+    border: 1px solid #c3e6cb;
+    border-radius: 8px;
+    background: #f4fbf6;
+    color: #1f4d33;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.cash-help-banner a {
+    color: #145c3a;
+    font-weight: 600;
+}
+
+.payment-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.payment-badge--cod {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.payment-badge--signature {
+    background: #e9ecef;
+    color: #495057;
 }
 
 .delivery-stops {
@@ -1796,6 +2473,241 @@ window.initMap = initMap;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.stop-name .customer-hub-link {
+    color: inherit;
+    text-decoration: none;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+}
+
+.stop-name .customer-hub-link:hover {
+    color: #0d6efd;
+    text-decoration: underline;
+}
+
+.customer-record-link {
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+}
+
+.stop-detail-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.stop-detail-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.stop-detail-sheet {
+    position: relative;
+    width: min(720px, 100%);
+    max-height: min(88vh, 900px);
+    background: #fff;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.stop-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 10px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.stop-detail-kicker {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stop-detail-header h3 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.2;
+}
+
+.stop-detail-close {
+    background: transparent;
+    border: none;
+    font-size: 28px;
+    line-height: 1;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.stop-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 18px 12px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.stop-detail-action {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-secondary {
+    background-color: #f8f9fa;
+    color: #343a40;
+    border: 1px solid #ced4da;
+}
+
+.btn-secondary:hover {
+    background-color: #e9ecef;
+}
+
+.stop-detail-body {
+    overflow: auto;
+    padding: 12px 18px 20px;
+}
+
+.stop-detail-section + .stop-detail-section {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #eef1f4;
+}
+
+.stop-detail-section h4 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+}
+
+.stop-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 16px;
+    margin: 0;
+}
+
+.stop-detail-item dt {
+    margin: 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #868e96;
+}
+
+.stop-detail-item dd {
+    margin: 2px 0 0;
+    font-size: 14px;
+    color: #212529;
+}
+
+.stop-detail-status.status-delivered {
+    color: #1f6f4a;
+    font-weight: 600;
+}
+
+.stop-detail-status.status-pending,
+.stop-detail-status.status-in_transit {
+    color: #0d6efd;
+    font-weight: 600;
+}
+
+.stop-detail-status.status-failed,
+.stop-detail-status.status-cancelled {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+.stop-detail-invoice-summary,
+.stop-detail-invoice-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+
+.stop-detail-pricing-label {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.stop-detail-invoice-list {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.stop-detail-invoice-heading,
+.stop-detail-invoice-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+}
+
+.stop-detail-invoice-heading {
+    background: #f8f9fa;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6c757d;
+    text-transform: uppercase;
+}
+
+.stop-detail-invoice-row + .stop-detail-invoice-row {
+    border-top: 1px solid #eef1f4;
+}
+
+.stop-detail-invoice-row strong {
+    font-size: 14px;
+}
+
+.stop-detail-invoice-row small {
+    display: block;
+    color: #6c757d;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.stop-detail-empty {
+    margin: 0;
+}
+
+#stopDetailPhotos.photo-grid {
+    margin-top: 8px;
+}
+
+@media (min-width: 768px) {
+    .stop-detail-modal {
+        align-items: center;
+        padding: 24px;
+    }
+
+    .stop-detail-sheet {
+        border-radius: 16px;
+        max-height: min(84vh, 900px);
+    }
 }
 
 .stop-meta {

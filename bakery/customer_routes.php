@@ -3,7 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 
-$page_title = 'View by Customer';
+$page_title = bakery_t('page.customer_routes');
 
 $days = [
     1 => 'Monday',
@@ -104,6 +104,7 @@ try {
         FROM customers c
         LEFT JOIN standing_routes sr ON c.id = sr.customer_id
         LEFT JOIN drivers d ON sr.driver_id = d.id
+        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
         ORDER BY
             CASE WHEN c.zone IS NULL OR c.zone = '' THEN 'ZZZ_No Zone' ELSE c.zone END,
             c.name,
@@ -569,11 +570,26 @@ window.selectDriverInModal = async function(driverId) {
         localStorage.setItem('customerRoutesFilterDay', filteredDay);
     }
 
+    const csrfToken = (window.bakeryCsrfToken && window.bakeryCsrfToken())
+        || document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+        || '';
+
     try {
+        const body = new URLSearchParams({
+            action: 'save_route',
+            driver_id: String(driverId),
+            customer_id: String(currentCustomerId),
+            day_of_week: String(currentDayOfWeek),
+            csrf_token: csrfToken
+        });
         const response = await fetch('customer_routes.php', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=save_route&driver_id=' + driverId + '&customer_id=' + currentCustomerId + '&day_of_week=' + currentDayOfWeek
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: body.toString()
         });
         const result = await response.json();
         if (result.success) {
@@ -583,7 +599,7 @@ window.selectDriverInModal = async function(driverId) {
             alert('Error: ' + (result.error || 'Unknown error'));
         }
     } catch (err) {
-        alert('Error saving assignment');
+        alert('Error saving assignment: ' + (err.message || 'Unknown error'));
     }
 };
 

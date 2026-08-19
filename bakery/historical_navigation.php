@@ -8,7 +8,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/navigation_catalog.php';
 
 bakery_require_role(['administrator']);
-$page_title = 'Historical Navigation';
+$page_title = bakery_t('page.historical_navigation');
 $historicalGroups = bakery_historical_navigation_catalog();
 
 require_once __DIR__ . '/includes/header.php';

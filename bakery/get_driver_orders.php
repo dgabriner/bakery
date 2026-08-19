@@ -7,6 +7,7 @@ define('ACCESS_ALLOWED', true);
 
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
+require_once __DIR__ . '/includes/driver_assignments.php';
 
 header('Content-Type: application/json');
 
@@ -19,8 +20,8 @@ try {
         throw new Exception('driver_id and date are required');
     }
 
-    $driverId = (int)$_POST['driver_id'];
     $date = trim((string)$_POST['date']);
+    $driverId = (int)$_POST['driver_id'];
 
     if ($driverId <= 0) {
         throw new Exception('Invalid driver_id');
@@ -30,6 +31,7 @@ try {
     if (!$parsed || $parsed->format('Y-m-d') !== $date) {
         throw new Exception('Invalid date format; use YYYY-MM-DD');
     }
+    bakery_assert_driver_identity($db, $driverId, $date);
 
     $stmt = $db->prepare("
         SELECT
@@ -42,6 +44,7 @@ try {
             doa.scheduled_delivery_time
         FROM daily_orders do
         INNER JOIN customers c ON do.customer_id = c.id
+        " . bakery_sfb_ops_origin_clause('c', $db) . "
         INNER JOIN daily_order_assignments doa ON do.id = doa.daily_order_id
         INNER JOIN drivers d ON doa.driver_id = d.id
         WHERE doa.driver_id = ? AND do.order_date = ?

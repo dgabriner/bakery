@@ -13,7 +13,20 @@
     Require all denied
 </FilesMatch>
 
+<FilesMatch "^(health_prod|health_driver|health_deploy|driver_pages_probe|trace_driver_list|ping)\.php$">
+    Require all denied
+</FilesMatch>
+
 # Block raw SQL dumps and logs if present under docroot
 <FilesMatch "\.(sql|log|env)$">
     Require all denied
 </FilesMatch>
+
+# HTML/PHP must revalidate after each deploy. Static CSS/JS are fingerprinted with ?v=.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(php|html|htm)$">
+        Header set Cache-Control "private, no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </FilesMatch>
+</IfModule>

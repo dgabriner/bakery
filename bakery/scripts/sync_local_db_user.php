@@ -46,7 +46,9 @@ try {
 }
 
 $dbIdent = '`' . str_replace('`', '``', $name) . '`';
+$testIdent = '`bakerysf_test`';
 $rootDb->exec("CREATE DATABASE IF NOT EXISTS {$dbIdent} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+$rootDb->exec("CREATE DATABASE IF NOT EXISTS {$testIdent} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 
 $hosts = array_unique([$host, '127.0.0.1', 'localhost']);
 foreach ($hosts as $h) {
@@ -64,6 +66,7 @@ foreach ($hosts as $h) {
     $passLit = $rootDb->quote($pass);
     $rootDb->exec("CREATE USER '{$user}'@'{$h}' IDENTIFIED BY {$passLit}");
     $rootDb->exec("GRANT ALL PRIVILEGES ON {$dbIdent}.* TO '{$user}'@'{$h}'");
+    $rootDb->exec("GRANT ALL PRIVILEGES ON {$testIdent}.* TO '{$user}'@'{$h}'");
     $rootDb->exec("GRANT CREATE, DROP ON *.* TO '{$user}'@'{$h}'");
 }
 

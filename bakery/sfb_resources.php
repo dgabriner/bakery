@@ -1,0 +1,108 @@
+<?php
+declare(strict_types=1);
+
+define('ACCESS_ALLOWED', true);
+
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/database.php';
+require_once __DIR__ . '/includes/sf_baker.php';
+
+$customer = bakery_sfb_require_access($db);
+
+$canonicalPieces = bakery_sfb_library_kind('canonical');
+$troublePieces = bakery_sfb_library_kind('troubleshooting');
+
+$page_title = bakery_t('sfb.resources_title');
+$currentLocale = bakery_locale();
+$portalActivePage = 'sfb';
+$portalCustomerName = $customer['name'];
+
+function bakery_sfb_resources_render_card(array $piece): void {
+    $isTrouble = ($piece['kind'] ?? '') === 'troubleshooting';
+    ?>
+        <article class="card sfb-resource-card<?php echo $isTrouble ? ' sfb-resource-card--trouble' : ''; ?>" id="library-<?php echo htmlspecialchars($piece['slug'], ENT_QUOTES, 'UTF-8'); ?>">
+          <div class="card-body">
+            <p class="sfb-resource-card__circle"><?php bakery_te(bakery_sfb_community_category_key($piece['category'])); ?></p>
+            <h2><?php bakery_te($piece['title_key']); ?></h2>
+            <p class="sfb-resource-card__lead"><?php bakery_te($piece['lead_key']); ?></p>
+            <p class="sfb-resource-card__next"><strong><?php bakery_te('sfb.library_next_label'); ?>:</strong> <?php bakery_te($piece['action_key']); ?></p>
+            <ul>
+              <?php foreach ($piece['point_keys'] as $point): ?>
+                <li><?php bakery_te($point); ?></li>
+              <?php endforeach; ?>
+            </ul>
+            <div class="btn-row">
+              <a class="btn btn-block" href="<?php echo htmlspecialchars(bakery_sfb_library_ask_url($piece['slug']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.library_ask'); ?></a>
+            </div>
+          </div>
+        </article>
+    <?php
+}
+?>
+<!DOCTYPE html>
+<html lang="<?php echo htmlspecialchars($currentLocale, ENT_QUOTES, 'UTF-8'); ?>">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title><?php echo htmlspecialchars($page_title, ENT_QUOTES, 'UTF-8'); ?></title>
+  <?php require __DIR__ . '/includes/portal_styles.php'; ?>
+  <?php require __DIR__ . '/includes/sfb_styles.php'; ?>
+</head>
+<body class="sfb-body">
+  <?php require __DIR__ . '/includes/portal_header.php'; ?>
+
+  <main class="container sfb-app">
+    <?php $sfbActiveTab = 'resources'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
+
+    <section class="card sfb-resource-hero">
+      <div class="card-body">
+        <p class="hero-label"><?php bakery_te('sfb.resources_eyebrow'); ?></p>
+        <h2><?php bakery_te('sfb.resources_title'); ?></h2>
+        <p><?php bakery_te('sfb.resources_intro'); ?></p>
+        <p class="muted"><?php bakery_te('sfb.resources_method'); ?></p>
+        <div class="btn-row" style="margin-top:14px;">
+          <a class="btn btn-block" href="https://bakery.sourflour.org/breadeducation/" target="_blank" rel="noopener noreferrer"><?php bakery_te('sfb.open_learning_zone'); ?></a>
+          <a class="btn btn-block" href="https://bakery.sourflour.org/breadeducation/fresh-loaf.html" target="_blank" rel="noopener noreferrer"><?php bakery_te('sfb.open_fresh_loaf_path'); ?></a>
+        </div>
+      </div>
+    </section>
+
+    <h2 class="section-title"><?php bakery_te('sfb.library_canonical_title'); ?></h2>
+    <section class="sfb-resource-grid" aria-label="<?php echo htmlspecialchars(bakery_t('sfb.library_canonical_title'), ENT_QUOTES, 'UTF-8'); ?>">
+      <?php foreach ($canonicalPieces as $piece) { bakery_sfb_resources_render_card($piece); } ?>
+    </section>
+
+    <h2 class="section-title"><?php bakery_te('sfb.library_trouble_title'); ?></h2>
+    <p class="muted" style="margin:0 0 10px;"><?php bakery_te('sfb.resources_trouble_intro'); ?></p>
+    <section class="sfb-resource-grid" aria-label="<?php echo htmlspecialchars(bakery_t('sfb.library_trouble_title'), ENT_QUOTES, 'UTF-8'); ?>">
+      <?php foreach ($troublePieces as $piece) { bakery_sfb_resources_render_card($piece); } ?>
+    </section>
+
+    <section class="card sfb-resource-sources">
+      <div class="card-header"><h2><?php bakery_te('sfb.debrief_sources_title'); ?></h2></div>
+      <div class="card-body">
+        <p><?php bakery_te('sfb.debrief_sources_intro'); ?></p>
+        <ul class="line-list">
+          <li><a href="https://www.thefreshloaf.com/lessons" target="_blank" rel="noopener noreferrer">The Fresh Loaf Lessons</a></li>
+          <li><a href="https://www.thefreshloaf.com/up/TheFreshLoafPocketBookofBreadBaking.20110609.pdf" target="_blank" rel="noopener noreferrer">The Fresh Loaf Pocket Book of Bread Baking</a></li>
+          <li><a href="https://www.thefreshloaf.com/forum" target="_blank" rel="noopener noreferrer">The Fresh Loaf Forums</a></li>
+          <li><a href="https://www.thefreshloaf.com/node/79935/50-whole-wheat-sourdough" target="_blank" rel="noopener noreferrer">50% Whole Wheat Sourdough - example bake log</a></li>
+          <li><a href="https://www.thefreshloaf.com/node/62957/sourdough-hydration-calculator" target="_blank" rel="noopener noreferrer">Sourdough Hydration Calculator - discussion</a></li>
+        </ul>
+        <p class="muted"><?php bakery_te('sfb.debrief_sources_note'); ?></p>
+      </div>
+    </section>
+
+    <section class="card sfb-resource-action">
+      <div class="card-body">
+        <h2><?php bakery_te('sfb.debrief_action_title'); ?></h2>
+        <p><?php bakery_te('sfb.debrief_action_copy'); ?></p>
+        <div class="btn-row">
+          <a class="btn btn-block" href="sfb_community.php"><?php bakery_te('sfb.go_to_community'); ?></a>
+        </div>
+      </div>
+    </section>
+  </main>
+  <?php require __DIR__ . '/includes/portal_nav.php'; ?>
+</body>
+</html>

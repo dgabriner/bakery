@@ -1,0 +1,100 @@
+{
+  "id": "driver-complete-stop",
+  "title": { "en": "Complete a stop", "es": "Completar una parada" },
+  "description": {
+    "en": "Arrival photo, confirm pieces, review the invoice. Do not save yet.",
+    "es": "Foto de llegada, confirma piezas y revisa la factura. No guardes todavía."
+  },
+  "prepare": "driver-route",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 400,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2800,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "driver.php" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "goto",
+      "path": "driver.php?date={{DATE}}",
+      "caption": {
+        "en": "Open the route. The map is above the next stop.",
+        "es": "Abre la ruta. El mapa está arriba de la siguiente parada."
+      }
+    },
+    { "action": "waitForSelector", "selector": "#nextStopCard:not([hidden])" },
+    {
+      "action": "scroll",
+      "selector": "#nextStopCard button.route-btn--photo.photo-complete-btn",
+      "caption": {
+        "en": "Scroll down to the next stop",
+        "es": "Baja hasta la siguiente parada"
+      },
+      "waitAfter": 900
+    },
+    {
+      "action": "click",
+      "selector": "#nextStopCard button.route-btn--photo.photo-complete-btn",
+      "dismissFileChooser": true,
+      "force": true,
+      "caption": {
+        "en": "Tap the arrival photo button",
+        "es": "Toca el botón de foto al llegar"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#deliveryPhotoModal", "waitAfter": 1000 },
+    {
+      "action": "caption",
+      "caption": {
+        "en": "On the phone this opens the camera. Here we skip the photo.",
+        "es": "En el teléfono aquí se abre la cámara. En este video omitimos la foto."
+      },
+      "captionHoldMs": 2000
+    },
+    {
+      "action": "click",
+      "selector": "#deliverySkipPhotoInlineBtn",
+      "force": true,
+      "caption": {
+        "en": "Tap Skip photo, then confirm the pieces",
+        "es": "Toca Omitir foto y luego confirma las piezas"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#deliveryPiecesInput:enabled", "waitAfter": 1100 },
+    {
+      "action": "caption",
+      "caption": {
+        "en": "Check the piece count, then review the invoice",
+        "es": "Revisa las piezas y luego la factura"
+      },
+      "captionHoldMs": 1600
+    },
+    {
+      "action": "click",
+      "selector": "#deliveryWizardPrimaryBtn",
+      "force": true,
+      "caption": {
+        "en": "Review the invoice. Do not save yet.",
+        "es": "Revisa la factura. No guardes todavía."
+      }
+    },
+    { "action": "waitForSelector", "selector": "#deliveryStepInvoice:not([hidden])" },
+    {
+      "action": "waitForSelector",
+      "selector": "#deliveryInvoiceConfirmBtn",
+      "caption": {
+        "en": "This is the invoice. Do not tap save.",
+        "es": "Esta es la factura. No pulses guardar."
+      },
+      "waitAfter": 2400
+    }
+  ]
+}

@@ -95,6 +95,7 @@ try {
             DATE_FORMAT(do.order_date, '%m/%d') as date_short
         FROM daily_orders do
         JOIN customers c ON do.customer_id = c.id
+        " . bakery_sfb_ops_origin_clause('c', $db) . "
         WHERE do.order_date BETWEEN ? AND ?
         ORDER BY c.name, do.order_date
     ");

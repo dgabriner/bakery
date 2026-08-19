@@ -1,0 +1,1739 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Learn to read your dough. Sour Flour's bread education zone — starter care, hydration, fermentation, baker's math, and the five factors that shape every loaf.">
+  <link rel="canonical" href="https://bakery.sourflour.org/breadeducation/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://bakery.sourflour.org/breadeducation/">
+  <meta property="og:title" content="Sour Flour Learning Zone">
+  <meta property="og:description" content="Learn to read your dough. Starter care, hydration, fermentation, and the five factors that shape every loaf.">
+  <title>Sour Flour Learning Zone</title>
+  <style>
+    :root {
+      --ink: #32241d;
+      --muted: #725f53;
+      --paper: #fffaf3;
+      --cream: #f5eadb;
+      --warm-white: #fffdf9;
+      --clay: #b95637;
+      --clay-dark: #8f3c29;
+      --ochre: #d59a50;
+      --moss: #617158;
+      --line: rgba(77, 48, 32, .14);
+      --line-strong: rgba(77, 48, 32, .22);
+      --shadow-sm: 0 4px 16px rgba(70, 43, 28, .06);
+      --shadow: 0 14px 36px rgba(70, 43, 28, .10);
+      --shadow-lift: 0 18px 42px rgba(70, 43, 28, .14);
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --serif: Georgia, "Times New Roman", Times, serif;
+      --radius: 12px;
+      --radius-lg: 20px;
+      --max: 1120px;
+      --header-h: 68px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: calc(var(--header-h) + 1.25rem);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      font-size: 1.05rem;
+      line-height: 1.65;
+      color: var(--ink);
+      background: var(--paper);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    img { max-width: 100%; height: auto; display: block; }
+
+    a { color: var(--clay-dark); text-underline-offset: 3px; }
+    a:hover { color: var(--clay); }
+
+    :focus-visible {
+      outline: 3px solid var(--ochre);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      z-index: 9999;
+      padding: .75rem 1rem;
+      background: var(--clay);
+      color: var(--warm-white);
+      text-decoration: none;
+      font-weight: 600;
+      border-radius: 0 0 8px 8px;
+    }
+    .skip-link:focus { left: 1rem; top: 0; }
+
+    /* Logo */
+    .logo-img {
+      mix-blend-mode: multiply;
+      height: auto;
+    }
+
+    .logo-header {
+      width: min(148px, 38vw);
+    }
+
+    .logo-footer {
+      width: min(120px, 34vw);
+      opacity: .92;
+    }
+
+    /* Header */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: var(--header-h);
+      background: rgba(255, 253, 249, .94);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .header-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 1.25rem;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      text-decoration: none;
+      color: var(--ink);
+      flex-shrink: 0;
+    }
+
+    .nav-toggle {
+      display: none;
+      background: var(--warm-white);
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      padding: .45rem .7rem;
+      cursor: pointer;
+      color: var(--ink);
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .site-nav ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      gap: .15rem 1rem;
+      flex-wrap: wrap;
+    }
+
+    .site-nav a {
+      text-decoration: none;
+      color: var(--muted);
+      font-size: .86rem;
+      font-weight: 500;
+      padding: .35rem .15rem;
+      white-space: nowrap;
+    }
+    .site-nav a:hover { color: var(--ink); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .4rem;
+      padding: .7rem 1.25rem;
+      border-radius: 999px;
+      font-family: var(--sans);
+      font-size: .95rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: background .2s, color .2s, transform .15s, box-shadow .2s;
+    }
+    .btn:active { transform: scale(.98); }
+
+    .btn-primary {
+      background: var(--clay);
+      color: var(--warm-white);
+    }
+    .btn-primary:hover {
+      background: var(--clay-dark);
+      color: var(--warm-white);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--clay-dark);
+      border: 1.5px solid var(--clay);
+    }
+    .btn-secondary:hover {
+      background: var(--cream);
+      color: var(--clay-dark);
+    }
+
+    .btn-sm { padding: .45rem .95rem; font-size: .84rem; }
+
+    @media (max-width: 960px) {
+      .nav-toggle { display: block; }
+      .site-nav {
+        position: absolute;
+        top: var(--header-h);
+        left: 0;
+        right: 0;
+        background: var(--warm-white);
+        border-bottom: 1px solid var(--line);
+        padding: 1rem 1.25rem 1.25rem;
+        display: none;
+        box-shadow: var(--shadow);
+      }
+      .site-nav.is-open { display: block; }
+      .site-nav ul { flex-direction: column; align-items: flex-start; gap: .35rem; }
+      .site-nav .btn { width: 100%; margin-top: .5rem; text-align: center; }
+    }
+
+    /* Layout */
+    .section {
+      padding: 4.75rem 1.25rem;
+    }
+
+    .section-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--moss);
+      margin-bottom: .75rem;
+    }
+
+    h1, h2, h3 {
+      font-family: var(--serif);
+      line-height: 1.18;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    h1 { font-size: clamp(2.1rem, 5vw, 3.35rem); margin: 0 0 1rem; letter-spacing: -.01em; }
+    h2 { font-size: clamp(1.65rem, 3.5vw, 2.35rem); margin: 0 0 .75rem; }
+    h3 { font-size: 1.12rem; margin: 0 0 .5rem; }
+
+    .lead {
+      font-size: 1.12rem;
+      color: var(--muted);
+      max-width: 40rem;
+      margin: 0 0 1.75rem;
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; }
+    .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; }
+    .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+
+    @media (max-width: 960px) {
+      .grid-2, .grid-3, .grid-4, .grid-5, .grid-6 { grid-template-columns: 1fr; }
+      .debrief-map { grid-template-columns: 1fr 1fr; }
+    }
+    @media (min-width: 640px) and (max-width: 960px) {
+      .grid-4 { grid-template-columns: 1fr 1fr; }
+      .grid-5 { grid-template-columns: 1fr 1fr; }
+      .grid-6 { grid-template-columns: 1fr 1fr; }
+    }
+
+    .bg-paper { background: var(--paper); }
+    .bg-cream { background: var(--cream); }
+
+    /* Hero */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 5.25rem 1.25rem 4.5rem;
+      background:
+        radial-gradient(ellipse 90% 70% at 85% 10%, rgba(213, 154, 80, .22), transparent 55%),
+        radial-gradient(ellipse 60% 50% at 10% 90%, rgba(185, 86, 55, .10), transparent 50%),
+        linear-gradient(165deg, var(--cream) 0%, var(--paper) 58%, var(--warm-white) 100%);
+    }
+
+    .hero-watermark {
+      position: absolute;
+      right: -2%;
+      top: 50%;
+      transform: translateY(-50%);
+      width: min(420px, 52vw);
+      opacity: .07;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      max-width: var(--max);
+      margin: 0 auto;
+    }
+
+    .hero-copy { max-width: 42rem; }
+
+    .stat-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .65rem 1.5rem;
+      margin: 1.75rem 0 1.5rem;
+      padding: 0;
+      list-style: none;
+    }
+
+    .stat-strip li {
+      font-size: .88rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: .02em;
+    }
+
+    .stat-strip strong {
+      color: var(--clay-dark);
+      font-family: var(--serif);
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem;
+      margin-top: 1.25rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: .42rem .85rem;
+      border-radius: 999px;
+      background: rgba(255, 253, 249, .75);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: .82rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background .2s, border-color .2s, color .2s, transform .15s;
+    }
+
+    .pill:hover {
+      background: var(--warm-white);
+      border-color: var(--ochre);
+      color: var(--ink);
+      transform: translateY(-1px);
+    }
+
+    .cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .25rem; }
+
+    /* Cards */
+    .card {
+      background: var(--warm-white);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.4rem;
+      box-shadow: var(--shadow-sm);
+      transition: transform .2s, box-shadow .2s, border-color .2s;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-lift);
+      border-color: var(--line-strong);
+    }
+
+    .card p { margin: 0; font-size: .94rem; color: var(--muted); }
+
+    .card-num {
+      display: inline-flex;
+      min-width: 2.1rem;
+      height: 2.1rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--cream);
+      color: var(--clay-dark);
+      font-weight: 700;
+      font-size: .82rem;
+      margin-bottom: .7rem;
+    }
+
+    .badge-label {
+      display: inline-block;
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--ochre);
+      margin-bottom: .55rem;
+    }
+
+    .factor-card .badge-label { color: var(--clay-dark); }
+
+    /* Fresh Loaf debrief */
+    .debrief-map {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .75rem;
+      margin-top: 1.75rem;
+    }
+
+    .debrief-map div {
+      display: flex;
+      flex-direction: column;
+      gap: .15rem;
+      padding: 1rem;
+      background: rgba(255, 253, 249, .72);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .debrief-map strong { color: var(--clay-dark); font-family: var(--serif); font-size: 1.05rem; }
+    .debrief-map span { color: var(--muted); font-size: .82rem; line-height: 1.35; }
+
+    .source-note {
+      margin-top: 1.5rem;
+      padding: 1rem 1.15rem;
+      background: rgba(255, 253, 249, .72);
+      border-left: 4px solid var(--ochre);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: var(--muted);
+      font-size: .84rem;
+      line-height: 1.55;
+    }
+
+    .source-note strong { color: var(--ink); }
+    .source-note span { display: block; margin-top: .35rem; font-style: italic; }
+
+    /* Starter */
+    .check-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.5rem;
+    }
+
+    .check-list li {
+      padding: .7rem 0 .7rem 1.85rem;
+      position: relative;
+      border-bottom: 1px solid var(--line);
+      font-size: .95rem;
+    }
+
+    .check-list li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: .95rem;
+      width: .55rem;
+      height: .55rem;
+      border-radius: 50%;
+      background: var(--moss);
+    }
+
+    .calc-box {
+      background: var(--cream);
+      border-radius: var(--radius-lg);
+      padding: 1.65rem;
+      border: 1px solid var(--line);
+    }
+
+    .calc-box h3 { margin-bottom: .35rem; }
+
+    .calc-box label {
+      display: block;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: .35rem;
+    }
+
+    .calc-box input, .calc-box select {
+      width: 100%;
+      padding: .58rem .78rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 1rem;
+      background: var(--warm-white);
+      color: var(--ink);
+      margin-bottom: 1rem;
+    }
+
+    .calc-outputs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .75rem;
+      margin-top: .5rem;
+    }
+
+    @media (max-width: 600px) {
+      .calc-outputs { grid-template-columns: repeat(2, 1fr); }
+      .debrief-map { grid-template-columns: 1fr; }
+    }
+
+    .output-cell {
+      background: var(--warm-white);
+      border-radius: 8px;
+      padding: .78rem;
+      text-align: center;
+      border: 1px solid var(--line);
+    }
+
+    .output-cell .val {
+      display: block;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--clay-dark);
+      font-family: var(--serif);
+    }
+
+    .output-cell .lbl {
+      font-size: .72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    #ratioNote {
+      margin-top: .85rem;
+      font-size: .9rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* Stages */
+    .stage-track {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    @media (max-width: 960px) {
+      .stage-track { grid-template-columns: 1fr 1fr; }
+    }
+
+    .stage { position: relative; padding-top: .35rem; }
+
+    .stage::before {
+      content: "";
+      display: block;
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--ochre), var(--clay));
+      margin-bottom: .8rem;
+    }
+
+    .stage:nth-child(1)::before { opacity: .35; }
+    .stage:nth-child(2)::before { opacity: .55; }
+    .stage:nth-child(3)::before { opacity: .75; }
+    .stage:nth-child(4)::before { opacity: 1; }
+
+    /* Hydration lab */
+    .slider-wrap {
+      background: var(--warm-white);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 2rem;
+      box-shadow: var(--shadow);
+      max-width: 680px;
+    }
+
+    .slider-wrap input[type="range"] {
+      width: 100%;
+      margin: 1rem 0;
+      accent-color: var(--clay);
+      height: 6px;
+    }
+
+    .hydration-val {
+      font-family: var(--serif);
+      font-size: 2.75rem;
+      font-weight: 700;
+      color: var(--clay-dark);
+      line-height: 1;
+    }
+
+    .hydration-val span { font-size: 1.2rem; color: var(--muted); }
+
+    #hydrationDesc {
+      font-size: 1rem;
+      color: var(--muted);
+      margin-top: .85rem;
+      min-height: 3rem;
+    }
+
+    /* Observe */
+    .observe-card { text-align: left; padding: 1.45rem 1.25rem; }
+
+    .state-marker {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 4px;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      margin-bottom: .65rem;
+      font-family: var(--serif);
+    }
+
+    .observe-quiet .state-marker { background: #e8e0d4; color: var(--muted); }
+    .observe-building .state-marker { background: rgba(213, 154, 80, .25); color: var(--clay-dark); }
+    .observe-lively .state-marker { background: rgba(185, 86, 55, .18); color: var(--clay-dark); }
+    .observe-fading .state-marker { background: rgba(97, 113, 88, .18); color: var(--moss); }
+
+    .observe-quiet { border-top: 3px solid #c4b8a8; }
+    .observe-building { border-top: 3px solid var(--ochre); }
+    .observe-lively { border-top: 3px solid var(--clay); }
+    .observe-fading { border-top: 3px solid var(--moss); }
+
+    /* Baker's math */
+    .formula-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1.25rem;
+      font-size: .94rem;
+    }
+
+    .formula-table th,
+    .formula-table td {
+      padding: .72rem .85rem;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .formula-table th {
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .formula-table td:last-child,
+    .formula-table th:last-child { text-align: right; }
+
+    .formula-table tbody tr:last-child td { border-bottom: none; }
+
+    .formula-table .ingredient { font-weight: 600; color: var(--ink); }
+
+    .formula-total {
+      margin-top: 1rem;
+      padding: .85rem 1rem;
+      background: var(--warm-white);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      font-size: .92rem;
+      color: var(--muted);
+    }
+
+    .formula-total strong { color: var(--clay-dark); font-family: var(--serif); }
+
+    /* Shape & bake */
+    .guide-card h3::before {
+      content: attr(data-step);
+      display: block;
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--ochre);
+      margin-bottom: .35rem;
+      font-family: var(--sans);
+    }
+
+    /* Practice callout */
+    .practice-callout {
+      background: linear-gradient(135deg, rgba(97, 113, 88, .12), rgba(213, 154, 80, .10));
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 1.85rem;
+      margin-top: 1.5rem;
+    }
+
+    .practice-callout p { margin: 0 0 .75rem; color: var(--muted); }
+    .practice-callout p:last-child { margin-bottom: 0; }
+
+    /* Accordion */
+    .accordion details {
+      background: var(--warm-white);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      margin-bottom: .6rem;
+      overflow: hidden;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    .accordion details[open] {
+      border-color: var(--line-strong);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .accordion summary {
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: .94rem;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .accordion summary::-webkit-details-marker { display: none; }
+
+    .accordion summary::after {
+      content: "+";
+      flex-shrink: 0;
+      width: 1.5rem;
+      height: 1.5rem;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--cream);
+      color: var(--clay);
+      font-size: 1rem;
+      font-weight: 400;
+      transition: background .2s, transform .2s;
+    }
+
+    .accordion details[open] summary::after {
+      content: "−";
+      background: var(--clay);
+      color: var(--warm-white);
+    }
+
+    .accordion .detail-body {
+      padding: 0 1.25rem 1.15rem;
+      font-size: .92rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    .accordion .detail-body p { margin: .85rem 0 0; }
+
+    /* Glossary */
+    .glossary-list { margin: 0; }
+
+    .glossary-list details { margin-bottom: .55rem; }
+
+    .glossary-list summary { font-size: .92rem; }
+
+    /* Experiment form */
+    .experiment-form {
+      background: var(--cream);
+      border-radius: var(--radius-lg);
+      padding: 1.85rem;
+      border: 1px solid var(--line);
+      margin-top: 2rem;
+    }
+
+    .experiment-form h3 { margin-bottom: .75rem; }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 600px) {
+      .form-row { grid-template-columns: 1fr; }
+    }
+
+    .experiment-form label {
+      display: block;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: .35rem;
+    }
+
+    .experiment-form select {
+      width: 100%;
+      padding: .58rem .78rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 1rem;
+      background: var(--warm-white);
+    }
+
+    #suggestionBox {
+      margin-top: 1rem;
+      padding: 1rem 1.15rem;
+      background: var(--warm-white);
+      border-radius: var(--radius);
+      border-left: 4px solid var(--ochre);
+      font-size: .95rem;
+      color: var(--ink);
+      display: none;
+    }
+
+    #suggestionBox.visible { display: block; }
+
+    /* Finish */
+    .finish { text-align: center; }
+
+    .finish-links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 1.75rem;
+    }
+
+    .finish-link-card {
+      flex: 1 1 220px;
+      max-width: 280px;
+      text-decoration: none;
+      color: inherit;
+      background: var(--warm-white);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      transition: box-shadow .2s, transform .15s, border-color .2s;
+      text-align: left;
+    }
+
+    .finish-link-card:hover {
+      box-shadow: var(--shadow);
+      transform: translateY(-3px);
+      border-color: var(--line-strong);
+      color: inherit;
+    }
+
+    .finish-link-card h3 { color: var(--clay-dark); margin-bottom: .35rem; }
+    .finish-link-card p { margin: 0; font-size: .9rem; color: var(--muted); }
+
+    /* Footer */
+    .site-footer {
+      padding: 2.75rem 1.25rem;
+      background: var(--ink);
+      color: rgba(255, 250, 243, .78);
+      font-size: .9rem;
+    }
+
+    .footer-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .footer-brand {
+      display: flex;
+      flex-direction: column;
+      gap: .65rem;
+    }
+
+    .footer-brand p { margin: 0; font-size: .85rem; }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.5rem;
+    }
+
+    .footer-links a {
+      color: rgba(255, 250, 243, .88);
+      text-decoration: none;
+    }
+    .footer-links a:hover { color: var(--ochre); }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="Sour Flour Learning Zone home">
+        <img class="logo-img logo-header" src="assets/logos/sour-flour-full.png" alt="Sour Flour" width="148" height="40">
+      </a>
+      <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="siteNav" aria-label="Toggle navigation">Menu</button>
+      <nav class="site-nav" id="siteNav" aria-label="Main">
+        <ul>
+          <li><a href="#top">Learning hub</a></li>
+          <li><a href="fresh-loaf.html">Fresh Loaf</a></li>
+          <li><a href="sourdough.html">Sourdough</a></li>
+          <li><a href="yeasted.html">Yeasted</a></li>
+          <li><a href="fermentation.html">Fermentation</a></li>
+          <li><a href="formula.html">Formula</a></li>
+          <li><a href="bake.html">Shape &amp; bake</a></li>
+          <li><a href="whole-grain.html">Whole grain</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          <li><a class="btn btn-primary btn-sm" href="#curriculum">Choose a path</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero" id="top">
+      <img class="logo-img hero-watermark" src="assets/logos/sour-flour-full.png" alt="" aria-hidden="true" width="420" height="114">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <p class="section-label">Sour Flour Bread Education</p>
+          <h1>Learn to read your dough.<br>Then let it teach you.</h1>
+          <p class="lead">Every loaf is a conversation between time, temperature, hydration, ratio, and food. This page helps you listen — and adjust with confidence, one bake at a time.</p>
+          <ul class="stat-strip" aria-label="Learning zone overview">
+            <li><strong>5</strong> factors</li>
+            <li><strong>12</strong> stages</li>
+            <li><strong>1</strong> practice</li>
+          </ul>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="#curriculum">Choose a learning path</a>
+            <a class="btn btn-secondary" href="#first-bake">Jump into the practice lab</a>
+          </div>
+          <div class="pill-row" aria-label="Quick links">
+            <a class="pill" href="fresh-loaf.html">Fresh Loaf debrief</a>
+            <a class="pill" href="sourdough.html">Sourdough</a>
+            <a class="pill" href="yeasted.html">Yeasted bread</a>
+            <a class="pill" href="fermentation.html">Read fermentation</a>
+            <a class="pill" href="formula.html">Baker's math</a>
+            <a class="pill" href="bake.html">Shape &amp; bake</a>
+            <a class="pill" href="whole-grain.html">Whole grain</a>
+            <a class="pill" href="troubleshooting.html">Troubleshooting</a>
+            <a class="pill" href="#guide">Experiment planner</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Curriculum -->
+    <section class="section bg-paper" id="curriculum">
+      <div class="section-inner">
+        <p class="section-label">A series, not a scroll</p>
+        <h2>Choose the question you are actually trying to answer</h2>
+        <p class="lead">Each page has its own reading path, practice prompt, and direct links into The Fresh Loaf. The original interactive lab remains below for when you want to experiment in one sitting.</p>
+        <div class="grid-3">
+          <a class="card finish-link-card" href="fresh-loaf.html"><span class="badge-label">Research map</span><h3>Fresh Loaf debrief</h3><p>Curated lessons, handbook chapters, forums, and bake logs—the best way into the archive.</p></a>
+          <a class="card finish-link-card" href="sourdough.html"><span class="badge-label">Culture + levain</span><h3>Sourdough</h3><p>Starter care, levain timing, fermentation cues, and culture experiments.</p></a>
+          <a class="card finish-link-card" href="yeasted.html"><span class="badge-label">Commercial yeast</span><h3>Yeasted bread</h3><p>Direct doughs, poolish, biga, enrichment, and a useful sourdough control.</p></a>
+          <a class="card finish-link-card" href="fermentation.html"><span class="badge-label">Time + temperature</span><h3>Fermentation</h3><p>Bulk, proof, dough temperature, strength, and one-variable practice.</p></a>
+          <a class="card finish-link-card" href="formula.html"><span class="badge-label">Baker's math</span><h3>Formula</h3><p>Hydration, preferment accounting, scaling, and the math behind repeatable dough.</p></a>
+          <a class="card finish-link-card" href="bake.html"><span class="badge-label">Tension + heat</span><h3>Shape &amp; bake</h3><p>Shaping, scoring, steam, oven spring, cooling, and troubleshooting from the crust inward.</p></a>
+          <a class="card finish-link-card" href="whole-grain.html"><span class="badge-label">Wheat + rye</span><h3>Whole grain</h3><p>Bran, germ, water demand, rye structure, acidification, and a careful progression.</p></a>
+          <a class="card finish-link-card" href="troubleshooting.html"><span class="badge-label">Diagnosis</span><h3>Troubleshooting</h3><p>Read the timeline, crumb, and process together before changing a variable.</p></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fresh Loaf Debrief -->
+    <section class="section bg-cream" id="fresh-loaf-debrief">
+      <div class="section-inner">
+        <p class="section-label">Fresh Loaf debrief</p>
+        <h2>What a durable bread community keeps teaching</h2>
+        <p class="lead">The Fresh Loaf is more than a recipe archive. Its lessons, forum threads, blog bakes, and comments form a long-running record of how bakers learn: make a loaf, describe what happened, compare variables, and bake again.</p>
+        <div class="grid-3">
+          <article class="card factor-card">
+            <span class="badge-label">01 · Start simple</span>
+            <h3>Process before perfection</h3>
+            <p>The site's beginner lessons begin with a plain loaf and add complexity only after the fundamentals are visible. We preserve that order: mix, ferment, shape, bake, then vary.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">02 · Measure honestly</span>
+            <h3>Formula before anecdote</h3>
+            <p>A useful bake record names flour, water, salt, leaven, dough weight, and timing. Baker's percentages make a formula scalable; preferment flour and water must be counted when comparing hydration.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">03 · Read the dough</span>
+            <h3>Signs beat the clock</h3>
+            <p>Across beginner questions and advanced bake logs, rise, bubbles, elasticity, temperature, and jiggle are more portable than a fixed number of hours. Schedule is a plan; dough is the evidence.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">04 · Keep the feedback loop</span>
+            <h3>Show the whole bake</h3>
+            <p>The strongest community posts pair a formula with process notes and photos of the loaf and crumb. A question becomes answerable when another baker can see what changed.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">05 · Use your hands</span>
+            <h3>Tools support judgment</h3>
+            <p>A scale, thermometer, scraper, and simple bowl remove guesswork, but hand feel still teaches strength, extensibility, and readiness. Machines can speed a known process; they cannot replace observation.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">06 · Hold advice lightly</span>
+            <h3>Experience is not a guarantee</h3>
+            <p>Forum answers are valuable evidence, not universal law. Flour, room temperature, starter culture, oven, and desired bread all change the result. Test one variable and keep a record.</p>
+          </article>
+        </div>
+        <div class="debrief-map" aria-label="How the Fresh Loaf knowledge base is organized">
+          <div><strong>Lessons</strong><span>sequenced fundamentals</span></div>
+          <div><strong>Forums</strong><span>questions, troubleshooting, technique</span></div>
+          <div><strong>Blogs</strong><span>complete bake records and photos</span></div>
+          <div><strong>Comments</strong><span>peer review, alternatives, follow-up</span></div>
+        </div>
+        <div class="source-note">
+          <strong>Start reading:</strong>
+          <a href="https://www.thefreshloaf.com/lessons/yourfirstloaf" target="_blank" rel="noopener">Your First Loaf</a>,
+          <a href="https://www.thefreshloaf.com/handbook" target="_blank" rel="noopener">Baker's Handbook</a>,
+          <a href="https://www.thefreshloaf.com/handbook/baker039s-math" target="_blank" rel="noopener">Baker's Math</a>,
+          <a href="https://www.thefreshloaf.com/node/31887/scoring-bread-updated-tutorial" target="_blank" rel="noopener">scoring tutorial</a>,
+          <a href="https://www.thefreshloaf.com/forum" target="_blank" rel="noopener">forum index</a>, and
+          <a href="https://www.thefreshloaf.com/node/79935/50-whole-wheat-sourdough" target="_blank" rel="noopener">a representative bake log</a>.
+          <span>We summarize and adapt these ideas here; we do not reproduce the source text.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- First Bake -->
+    <section class="section bg-paper" id="first-bake">
+      <div class="section-inner">
+        <p class="section-label">Your path</p>
+        <h2>Five steps to your first loaf</h2>
+        <p class="lead">Follow this sequence once, then repeat it until the signs feel familiar. Each step builds on the last — there is no shortcut around watching the dough.</p>
+        <div class="grid-5">
+          <article class="card">
+            <span class="card-num">1</span>
+            <h3>Feed</h3>
+            <p>Refresh your starter 4–8 hours before mixing. It should at least double, smell pleasantly tangy, and pass the float test at peak.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">2</span>
+            <h3>Watch</h3>
+            <p>Notice peak activity — domed top, fine bubbles at the sides, a slight sour-sweet aroma. This is your fermentation window opening.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">3</span>
+            <h3>Mix</h3>
+            <p>Combine flour, water, and starter. Mix until no dry spots remain. Autolyse 20–40 minutes if your schedule allows — the dough will thank you.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">4</span>
+            <h3>Rest + fold</h3>
+            <p>Let the dough rest, then fold every 30–45 minutes for 2–3 rounds. Watch it gain strength, smoothness, and a gentle jiggle.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">5</span>
+            <h3>Shape + bake</h3>
+            <p>Pre-shape, rest 15 minutes, final shape, proof, score, and bake hot. Listen for the crackle — your dough is speaking.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Five Factors -->
+    <section class="section bg-cream" id="five-factors">
+      <div class="section-inner">
+        <p class="section-label">The framework</p>
+        <h2>Five factors that shape every loaf</h2>
+        <p class="lead">When something goes wrong — or wonderfully right — one of these five is usually responsible. Learn to name them and you can adjust on purpose instead of guessing.</p>
+        <div class="grid-5">
+          <article class="card factor-card">
+            <span class="badge-label">01</span>
+            <h3>Time</h3>
+            <p>Fermentation duration, rest intervals, and proof length. Too little = tight and bland; too much = slack and sour.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">02</span>
+            <h3>Temperature</h3>
+            <p>Dough temp and ambient warmth control yeast and bacteria speed. A few degrees changes everything — measure the dough, not just the room.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">03</span>
+            <h3>Hydration</h3>
+            <p>Water-to-flour ratio sets crumb openness, handling feel, and bake time. Higher hydration = more extensibility and a wetter bench.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">04</span>
+            <h3>Ratio</h3>
+            <p>Starter percentage, salt level, and inoculation rate. More starter = faster fermentation; less = longer, deeper flavor.</p>
+          </article>
+          <article class="card factor-card">
+            <span class="badge-label">05</span>
+            <h3>Food</h3>
+            <p>Flour type, freshness, and protein content feed the culture and structure. Whole grain accelerates fermentation and absorbs more water.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Starter -->
+    <section class="section bg-paper" id="starter">
+      <div class="section-inner">
+        <div class="grid-2">
+          <div>
+            <p class="section-label">Culture check</p>
+            <h2>Is your starter ready?</h2>
+            <p class="lead">Before every bake, run through these quick checks. A healthy starter makes everything downstream easier — mixing, folding, shaping, all of it.</p>
+            <ul class="check-list">
+              <li><strong>Rise:</strong> At least doubles (triples is great) within 4–8 hours at room temp after feeding.</li>
+              <li><strong>Smell:</strong> Pleasantly tangy and yeasty — not nail polish, not pure vinegar, not gym socks.</li>
+              <li><strong>Float test:</strong> A teaspoon of starter floats in water at peak. If it sinks, feed again and wait.</li>
+              <li><strong>Surface:</strong> Domed and bubbly at peak; flat or receding means it passed peak — feed and restart timing.</li>
+              <li><strong>Consistency:</strong> Thick batter or soft peak — adjust hydration at feeding if it's too stiff or soupy.</li>
+            </ul>
+          </div>
+          <div>
+            <div class="calc-box">
+              <h3>Starter build calculator</h3>
+              <p style="font-size:.9rem;color:var(--muted);margin:0 0 1rem;">Default ratio 1:5:5 (seed : flour : water). Enter how much starter you need for your recipe.</p>
+              <label for="starterNeed">Starter needed (g)</label>
+              <input type="number" id="starterNeed" value="100" min="10" step="5">
+              <label for="starterKeep">Extra to keep (g)</label>
+              <input type="number" id="starterKeep" value="50" min="0" step="5">
+              <label for="starterRatio">Feed ratio (seed:flour:water)</label>
+              <input type="text" id="starterRatio" value="1:5:5" placeholder="1:5:5" autocomplete="off">
+              <div class="calc-outputs">
+                <div class="output-cell">
+                  <span class="val" id="seedOut">10</span>
+                  <span class="lbl">Seed (g)</span>
+                </div>
+                <div class="output-cell">
+                  <span class="val" id="flourOut">50</span>
+                  <span class="lbl">Flour (g)</span>
+                </div>
+                <div class="output-cell">
+                  <span class="val" id="waterOut">50</span>
+                  <span class="lbl">Water (g)</span>
+                </div>
+                <div class="output-cell">
+                  <span class="val" id="totalOut">110</span>
+                  <span class="lbl">Total (g)</span>
+                </div>
+              </div>
+              <p id="ratioNote">Feed 10 g seed + 50 g flour + 50 g water to build 110 g starter (100 g for recipe + 50 g to keep).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Yeasted Bread -->
+    <section class="section bg-cream" id="yeast">
+      <div class="section-inner">
+        <p class="section-label">Commercial yeast + preferments</p>
+        <h2>Yeasted bread follows the same living logic</h2>
+        <p class="lead">Sourdough and commercial yeast are different tools, not different worlds. Both ferment flour, create gas, develop flavor, and respond to time and temperature. The main difference is how predictable the leavening is.</p>
+        <div class="grid-3">
+          <article class="card">
+            <span class="card-num">A</span>
+            <h3>Active dry vs. instant</h3>
+            <p>Active dry yeast is commonly dissolved in warm water first. Instant yeast can usually be mixed directly into the flour and is a little faster. Follow the package directions, then judge the dough rather than forcing a clock.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">B</span>
+            <h3>Preferments buy flavor</h3>
+            <p>A poolish (equal flour and water) or biga (stiffer preferment) lets a small amount of yeast work over time. Count its flour and water in the final formula, just as you count flour and water in a levain.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">C</span>
+            <h3>Enrichment changes behavior</h3>
+            <p>Sugar, milk, eggs, and butter soften crumb and add flavor, but they also slow yeast and brown the crust. Sweet, enriched doughs may need more time or yeast designed to tolerate higher sugar.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">D</span>
+            <h3>Salt is structure and control</h3>
+            <p>Salt seasons the loaf, strengthens gluten, and slows fermentation. Forgetting it can make dough race ahead and taste flat. Weigh it with the flour instead of treating it as an afterthought.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">E</span>
+            <h3>Proofing is the final rise</h3>
+            <p>After shaping, proof until the dough feels aerated and springs back slowly. Under-proofing gives a tight crumb; over-proofing gives weak structure and a loaf that deflates when scored.</p>
+          </article>
+          <article class="card">
+            <span class="card-num">F</span>
+            <h3>Same journal, different leaven</h3>
+            <p>Record yeast type or preferment, dough temperature, bulk time, proof time, and bake result. A commercial-yeast batch deserves the same careful record as a sourdough batch.</p>
+          </article>
+        </div>
+        <div class="practice-callout">
+          <p><strong>Practical bridge:</strong> If a sourdough dough is teaching you to read fermentation, a yeasted dough is a useful control. Keep flour, hydration, salt, and shaping similar; change only the leaven and compare the timing and flavor.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Development -->
+    <section class="section bg-cream" id="development">
+      <div class="section-inner">
+        <p class="section-label">Bulk fermentation</p>
+        <h2>The dough's story in four stages</h2>
+        <p class="lead">During bulk fermentation your dough transforms from a shaggy mix into a living, stretchy mass. Watch for these milestones — they tell you when to shape, not the clock alone.</p>
+        <div class="stage-track">
+          <article class="stage card">
+            <h3>1 · Shaggy mix</h3>
+            <p>Just combined. Weak, tears easily, sticky. No structure yet — this is normal. Do not rush to add flour.</p>
+          </article>
+          <article class="stage card">
+            <h3>2 · Smoothing</h3>
+            <p>After folds, surface gets smoother. Dough holds shape briefly. Bubbles forming at edges. Gluten is organizing.</p>
+          </article>
+          <article class="stage card">
+            <h3>3 · Jiggly &amp; airy</h3>
+            <p>Noticeable rise, wobble when shaken, visible gas pockets. Gluten is strong and extensible — handle gently.</p>
+          </article>
+          <article class="stage card">
+            <h3>4 · Ready to shape</h3>
+            <p>30–50% volume increase, domed profile, slight spring-back when gently pressed. Don't wait for it to collapse.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hydration Lab -->
+    <section class="section bg-paper" id="hydration-lab">
+      <div class="section-inner">
+        <p class="section-label">Interactive</p>
+        <h2>Hydration lab</h2>
+        <p class="lead">Drag the slider to explore how water percentage changes dough behavior. Most beginner sourdough recipes sit between 68–78% — but your flour and hands will have their own opinion.</p>
+        <div class="slider-wrap">
+          <div class="hydration-val"><span id="hydrationPct">72</span><span>%</span></div>
+          <label for="hydrationSlider">Dough hydration</label>
+          <input type="range" id="hydrationSlider" min="58" max="85" value="72" step="1" aria-describedby="hydrationDesc">
+          <p id="hydrationDesc">Moderate hydration — manageable for beginners. Expect a tacky dough that responds well to coil folds and produces an open, even crumb.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Observe -->
+    <section class="section bg-cream" id="observe">
+      <div class="section-inner">
+        <p class="section-label">Reading signs</p>
+        <h2>What fermentation looks like</h2>
+        <p class="lead">Your starter and dough move through recognizable phases. Match what you see to these four states — they are more reliable than any timer on the counter.</p>
+        <div class="grid-4">
+          <article class="card observe-card observe-quiet">
+            <span class="state-marker">Q</span>
+            <h3>Quiet</h3>
+            <p>Flat surface, few bubbles, mild smell. Just fed or still waking up. Wait — or warm the environment slightly.</p>
+          </article>
+          <article class="card observe-card observe-building">
+            <span class="state-marker">B</span>
+            <h3>Building</h3>
+            <p>Bubbles appearing, volume increasing, tangy aroma developing. Fermentation is active — good time to mix if peak is near.</p>
+          </article>
+          <article class="card observe-card observe-lively">
+            <span class="state-marker">P</span>
+            <h3>Lively (peak)</h3>
+            <p>Domed, doubled or tripled, fine bubbles throughout, pleasant sour-yeasty smell. Peak activity — use it now.</p>
+          </article>
+          <article class="card observe-card observe-fading">
+            <span class="state-marker">F</span>
+            <h3>Fading</h3>
+            <p>Surface flattening or sinking, sharper acidic smell, liquidity at edges. Past peak — feed again before baking.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Baker's Math -->
+    <section class="section bg-paper" id="bakers-math">
+      <div class="section-inner">
+        <div class="grid-2">
+          <div>
+            <p class="section-label">Formula scaling</p>
+            <h2>Baker's percentage dough calculator</h2>
+            <p class="lead">In baker's math, flour is always 100%. Every other ingredient is expressed as a percentage of that flour weight. Enter your target dough weight and the calculator finds each ingredient in grams.</p>
+            <p style="font-size:.94rem;color:var(--muted);margin:0;">This is how professional bakers scale recipes reliably — change one number, and the whole formula adjusts. Start with the preset below, then adapt percentages as you learn what your dough prefers.</p>
+          </div>
+          <div class="calc-box">
+            <h3>Scale this formula</h3>
+            <label for="doughWeight">Target dough weight (g)</label>
+            <input type="number" id="doughWeight" value="1000" min="100" step="50">
+            <table class="formula-table" aria-label="Baker's percentage formula">
+              <thead>
+                <tr>
+                  <th scope="col">Ingredient</th>
+                  <th scope="col">Baker's %</th>
+                  <th scope="col">Grams</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="ingredient">Flour</td>
+                  <td>100%</td>
+                  <td id="flourGrams">—</td>
+                </tr>
+                <tr>
+                  <td class="ingredient">Water</td>
+                  <td>75%</td>
+                  <td id="waterGrams">—</td>
+                </tr>
+                <tr>
+                  <td class="ingredient">Salt</td>
+                  <td>2%</td>
+                  <td id="saltGrams">—</td>
+                </tr>
+                <tr>
+                  <td class="ingredient">Starter (levain)</td>
+                  <td>20%</td>
+                  <td id="starterGrams">—</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="formula-total" id="formulaTotal" aria-live="polite">
+              Flour base: <strong id="flourBase">—</strong> g · Total formula: <strong id="totalPct">197</strong>%
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Shape & Bake -->
+    <section class="section bg-cream" id="shape-bake">
+      <div class="section-inner">
+        <p class="section-label">Hands-on</p>
+        <h2>Shape, score, steam, and bake</h2>
+        <p class="lead">Bulk fermentation tells you when the dough is ready. These steps turn that readiness into a finished loaf — tense on the outside, open on the inside.</p>
+        <div class="grid-6">
+          <article class="card guide-card">
+            <h3 data-step="Step 01">Pre-shape</h3>
+            <p>Turn dough out gently. Round or oval into a loose bundle to begin building surface tension. Rest 15–20 minutes uncovered on the bench — the gluten will relax just enough for final shaping.</p>
+          </article>
+          <article class="card guide-card">
+            <h3 data-step="Step 02">Bench rest</h3>
+            <p>Short pause between pre-shape and final shape. Dough spreads slightly and becomes easier to stretch. If it springs back aggressively, rest a few minutes longer.</p>
+          </article>
+          <article class="card guide-card">
+            <h3 data-step="Step 03">Final shape</h3>
+            <p>Stitch and tighten into a batard or boule. The goal is a smooth, taut skin without degassing the interior. A well-shaped loaf holds its form in the banneton.</p>
+          </article>
+          <article class="card guide-card">
+            <h3 data-step="Step 04">Scoring</h3>
+            <p>One confident slash ¼–½ inch deep at a shallow angle. Scoring controls expansion — too shallow and the loaf may burst; too deep and it can flatten. A lame or sharp razor works best.</p>
+          </article>
+          <article class="card guide-card">
+            <h3 data-step="Step 05">Steam</h3>
+            <p>Steam in the first 15–20 minutes keeps the crust elastic so the loaf can spring. Use a Dutch oven lid, tray of hot water, or ice cubes in a preheated pan — pick one method and stay consistent.</p>
+          </article>
+          <article class="card guide-card">
+            <h3 data-step="Step 06">Bake</h3>
+            <p>475°F (245°C) for 20 minutes covered or with steam, then 425°F (220°C) for 20–25 minutes until deeply colored. Internal temp around 206–210°F (96–99°C). Cool completely before slicing.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guide -->
+    <section class="section bg-paper" id="guide">
+      <div class="section-inner">
+        <p class="section-label">Deep reference</p>
+        <h2>Baker's guide</h2>
+        <p class="lead">Expand any topic below for practical notes. Then use the experiment planner to connect a problem to a specific adjustment — one variable at a time.</p>
+
+        <div class="accordion">
+          <details>
+            <summary>Time — fermentation windows</summary>
+            <div class="detail-body">
+              <p>Bulk fermentation at 75°F (24°C) typically runs 3–5 hours for a standard loaf. Cold retard in the fridge adds 8–18 hours of flavor development. If your dough is ready before your schedule, refrigerate to pause. If it's slow, extend time before adding more starter.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Temperature — the invisible accelerator</summary>
+            <div class="detail-body">
+              <p>Every 8°F (4°C) change roughly doubles or halves fermentation speed. Use a probe thermometer on the dough itself — ambient room temp is misleading. Target 75–78°F for predictable bulk. Below 68°F, expect long ferments; above 82°F, watch for over-proofing.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Hydration — feel and crumb</summary>
+            <div class="detail-body">
+              <p>Lower hydration (58–65%) yields tighter crumb and easier handling — great for rolls and sandwich loaves. Mid range (68–75%) is the sourdough sweet spot. High hydration (78–85%) gives open crumb and ciabatta-like texture but demands confident handling.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Ratio — starter, salt, inoculation</summary>
+            <div class="detail-body">
+              <p>Starter at 15–25% of total flour is common. Higher inoculation speeds fermentation; lower gives more flavor complexity over longer times. Salt at 2% of flour weight strengthens gluten and slows fermentation — never skip it or add it directly to your starter.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Food — flour choices</summary>
+            <div class="detail-body">
+              <p>Bread flour (12–13% protein) gives strength. All-purpose works for softer crumb. Whole wheat and rye ferment faster and absorb more water — increase hydration or reduce starter when adding them. Freshly milled flour is thirsty; autolyse longer.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Folds — when and how</summary>
+            <div class="detail-body">
+              <p>Stretch-and-folds or coil folds every 30–45 minutes during the first 2 hours of bulk build strength without degassing. Stop when the dough feels smooth, holds tension, and jiggles as a unit — usually 3–4 sets. Over-folding can tear gluten.</p>
+            </div>
+          </details>
+          <details>
+            <summary>12-stage fermentation map</summary>
+            <div class="detail-body">
+              <p><strong>1–3:</strong> Mix, autolyse, first fold. <strong>4–6:</strong> Active rise, regular folds, warming aroma. <strong>7–9:</strong> Volume gain, jiggle test passes, gas visible. <strong>10:</strong> Pre-shape. <strong>11:</strong> Bench rest + final shape. <strong>12:</strong> Final proof, poke test, bake. Track where you are on this map each bake to build intuition.</p>
+            </div>
+          </details>
+        </div>
+
+        <div class="experiment-form">
+          <h3>Experiment planner</h3>
+          <p style="font-size:.9rem;color:var(--muted);margin:0 0 1rem;">Pick the issue you're seeing and what you want to improve. We'll suggest a focused adjustment using the five factors.</p>
+          <div class="form-row">
+            <div>
+              <label for="issueSelect">What's happening?</label>
+              <select id="issueSelect">
+                <option value="">Choose an issue…</option>
+                <option value="slow">Slow fermentation / no rise</option>
+                <option value="sticky">Too sticky / hard to handle</option>
+                <option value="flat">Flat loaf / no oven spring</option>
+                <option value="tight">Tight, dense crumb</option>
+                <option value="sour">Too sour / harsh flavor</option>
+              </select>
+            </div>
+            <div>
+              <label for="goalSelect">What do you want?</label>
+              <select id="goalSelect">
+                <option value="">Choose a goal…</option>
+                <option value="ease">Easier handling</option>
+                <option value="open">More open crumb</option>
+                <option value="flavor">Better flavor balance</option>
+                <option value="predictable">More predictable timing</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="suggestBtn" type="button">Get suggestion</button>
+          <div id="suggestionBox" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Practice -->
+    <section class="section bg-cream" id="practice">
+      <div class="section-inner">
+        <p class="section-label">Build the habit</p>
+        <h2>Keep a bake journal</h2>
+        <p class="lead">The bakers who improve fastest are the ones who write things down — even a few lines per bake. Note your starter peak time, dough temp at mix, bulk duration, and how the crumb looked. Patterns emerge quickly.</p>
+        <div class="practice-callout">
+          <p><strong>For SF Baker wholesale customers:</strong> track starters, formulas, and batches in the <a href="https://bakery.sourflour.org/bake/sfb_dashboard.php" target="_blank" rel="noopener">SF Baker portal</a>. It is built for the path toward 1,000 loaves — logging each bake helps you see what changed when results shift.</p>
+          <p>Whether you use a notebook, a notes app, or the portal, the practice is the same: observe, record, adjust one factor, bake again.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Glossary -->
+    <section class="section bg-paper" id="glossary">
+      <div class="section-inner">
+        <p class="section-label">Terms</p>
+        <h2>Glossary</h2>
+        <p class="lead">Quick definitions for language you'll hear in the bakery and see throughout this page.</p>
+        <div class="accordion glossary-list">
+          <details>
+            <summary>Baker's percentage</summary>
+            <div class="detail-body">
+              <p>A way to express recipes where flour always equals 100% and every other ingredient is a percentage of that flour weight — not of total dough. It makes scaling and comparison straightforward.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Bulk fermentation</summary>
+            <div class="detail-body">
+              <p>The first rise after mixing, before shaping. The dough ferments as one mass in a bowl or tub. Most flavor development and gas production happen here.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Levain</summary>
+            <div class="detail-body">
+              <p>Another word for the portion of starter that goes into your dough — your leavening culture. Often built at a specific ratio a few hours before mixing.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Autolyse</summary>
+            <div class="detail-body">
+              <p>A rest period after combining flour and water (before salt and starter). It lets flour hydrate and gluten begin organizing, which can reduce mix time and improve extensibility.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Oven spring</summary>
+            <div class="detail-body">
+              <p>The final burst of rise in the hot oven as gas expands and steam pushes the loaf upward. Good oven spring depends on adequate fermentation and strong surface tension from shaping.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Proof</summary>
+            <div class="detail-body">
+              <p>The final rise after shaping, before baking. Also called final fermentation. The poke test — a gentle finger indent that springs back slowly — helps judge readiness.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Retard</summary>
+            <div class="detail-body">
+              <p>Slow fermentation in a cold environment, usually the refrigerator. Extends flavor development and lets you bake on your schedule rather than the dough's.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Finish -->
+    <section class="section finish bg-cream" id="finish">
+      <div class="section-inner">
+        <p class="section-label">Keep learning</p>
+        <h2>You're building a practice, not chasing perfection</h2>
+        <p class="lead" style="margin-left:auto;margin-right:auto;">Every bake teaches something. When you're ready to go deeper, these resources are here for you.</p>
+        <div class="finish-links">
+          <a class="finish-link-card" href="https://sourflour.org/blog" target="_blank" rel="noopener">
+            <h3>Sour Flour Blog</h3>
+            <p>Recipes, stories, and seasonal baking notes from the kitchen.</p>
+          </a>
+          <a class="finish-link-card" href="https://sourflour.org/sour-flour-hotline" target="_blank" rel="noopener">
+            <h3>Sour Flour Hotline</h3>
+            <p>Stuck on a bake? Reach out — we're here to help you troubleshoot.</p>
+          </a>
+          <a class="finish-link-card" href="https://sourflour.org/workshops/bread-tips-and-resources" target="_blank" rel="noopener">
+            <h3>Bread tips &amp; resources</h3>
+            <p>Workshop notes, handouts, and practical guides from Sour Flour classes.</p>
+          </a>
+          <a class="finish-link-card" href="https://sourflour.org/baking-courses" target="_blank" rel="noopener">
+            <h3>Baking courses</h3>
+            <p>Hands-on classes for every level — from first loaf to production rhythm.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="#top" aria-label="Back to top">
+          <img class="logo-img logo-footer" src="assets/logos/sour-flour-full.png" alt="Sour Flour" width="120" height="32">
+        </a>
+        <p>© Sour Flour · Bread education for every baker</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://sourflour.org/workshops/bread-tips-and-resources" target="_blank" rel="noopener">Bread tips &amp; resources</a>
+        <a href="https://sourflour.org/baking-courses" target="_blank" rel="noopener">Baking courses</a>
+        <a href="https://sourflour.org/blog" target="_blank" rel="noopener">Blog</a>
+        <a href="https://sourflour.org" target="_blank" rel="noopener">sourflour.org</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      'use strict';
+
+      /* ── Mobile nav toggle ── */
+      var navToggle = document.getElementById('navToggle');
+      var siteNav = document.getElementById('siteNav');
+
+      navToggle.addEventListener('click', function () {
+        var open = siteNav.classList.toggle('is-open');
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+
+      siteNav.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function () {
+          siteNav.classList.remove('is-open');
+          navToggle.setAttribute('aria-expanded', 'false');
+        });
+      });
+
+      /* ── Starter calculator (1:5:5 default) ── */
+      var needEl = document.getElementById('starterNeed');
+      var keepEl = document.getElementById('starterKeep');
+      var ratioEl = document.getElementById('starterRatio');
+      var seedOut = document.getElementById('seedOut');
+      var flourOut = document.getElementById('flourOut');
+      var waterOut = document.getElementById('waterOut');
+      var totalOut = document.getElementById('totalOut');
+      var ratioNote = document.getElementById('ratioNote');
+
+      function parseRatio(str) {
+        var parts = str.split(':').map(function (p) { return parseFloat(p.trim()); });
+        if (parts.length !== 3 || parts.some(function (n) { return isNaN(n) || n <= 0; })) {
+          return [1, 5, 5];
+        }
+        return parts;
+      }
+
+      function calcStarter() {
+        var need = Math.max(0, parseFloat(needEl.value) || 0);
+        var keep = Math.max(0, parseFloat(keepEl.value) || 0);
+        var target = need + keep;
+        var ratio = parseRatio(ratioEl.value);
+        var seedPart = ratio[0];
+        var flourPart = ratio[1];
+        var waterPart = ratio[2];
+        var totalParts = seedPart + flourPart + waterPart;
+        var seed = Math.ceil(target * seedPart / totalParts);
+        var flour = Math.ceil(target * flourPart / totalParts);
+        var water = Math.ceil(target * waterPart / totalParts);
+        var total = seed + flour + water;
+
+        seedOut.textContent = seed;
+        flourOut.textContent = flour;
+        waterOut.textContent = water;
+        totalOut.textContent = total;
+
+        ratioNote.textContent =
+          'Feed ' + seed + ' g seed + ' + flour + ' g flour + ' + water + ' g water to build ' +
+          total + ' g starter (' + need + ' g for recipe' +
+          (keep > 0 ? ' + ' + keep + ' g to keep' : '') + ').';
+      }
+
+      [needEl, keepEl, ratioEl].forEach(function (el) {
+        el.addEventListener('input', calcStarter);
+      });
+      calcStarter();
+
+      /* ── Hydration slider ── */
+      var slider = document.getElementById('hydrationSlider');
+      var pctEl = document.getElementById('hydrationPct');
+      var descEl = document.getElementById('hydrationDesc');
+
+      function hydrationMessage(pct) {
+        if (pct < 63) {
+          return 'Low hydration — stiff, easy to handle. Great for beginners, rolls, and tight sandwich crumb. Expect less extensibility and shorter bulk times.';
+        }
+        if (pct < 72) {
+          return 'Moderate-low hydration — slightly tacky, good structure. Works well for batards and beginners transitioning to wetter doughs.';
+        }
+        if (pct < 79) {
+          return 'Moderate hydration — manageable for beginners. Expect a tacky dough that responds well to coil folds and produces an open, even crumb.';
+        }
+        if (pct < 85) {
+          return 'High hydration — very extensible and sticky. Demands confident slap-and-fold or coil fold technique. Rewards you with an open, glossy crumb.';
+        }
+        return 'Very high hydration — ciabatta territory. Requires gentle handling and well-developed gluten. Best attempted after several successful mid-hydration bakes.';
+      }
+
+      function updateHydration() {
+        var pct = parseInt(slider.value, 10);
+        pctEl.textContent = pct;
+        descEl.textContent = hydrationMessage(pct);
+      }
+
+      slider.addEventListener('input', updateHydration);
+      updateHydration();
+
+      /* ── Baker's math calculator ── */
+      var doughWeightEl = document.getElementById('doughWeight');
+      var flourGramsEl = document.getElementById('flourGrams');
+      var waterGramsEl = document.getElementById('waterGrams');
+      var saltGramsEl = document.getElementById('saltGrams');
+      var starterGramsEl = document.getElementById('starterGrams');
+      var flourBaseEl = document.getElementById('flourBase');
+      var totalPctEl = document.getElementById('totalPct');
+
+      var formula = {
+        flour: 100,
+        water: 75,
+        salt: 2,
+        starter: 20
+      };
+
+      function roundGrams(n) {
+        return Math.round(n * 10) / 10;
+      }
+
+      function calcBakersMath() {
+        var target = Math.max(0, parseFloat(doughWeightEl.value) || 0);
+        var totalPct = formula.flour + formula.water + formula.salt + formula.starter;
+        var flourBase = target * (formula.flour / totalPct);
+        var flourGrams = roundGrams(flourBase);
+        var waterGrams = roundGrams(flourBase * (formula.water / formula.flour));
+        var saltGrams = roundGrams(flourBase * (formula.salt / formula.flour));
+        var starterGrams = roundGrams(flourBase * (formula.starter / formula.flour));
+
+        flourGramsEl.textContent = flourGrams + ' g';
+        waterGramsEl.textContent = waterGrams + ' g';
+        saltGramsEl.textContent = saltGrams + ' g';
+        starterGramsEl.textContent = starterGrams + ' g';
+        flourBaseEl.textContent = flourGrams;
+        totalPctEl.textContent = totalPct;
+      }
+
+      doughWeightEl.addEventListener('input', calcBakersMath);
+      calcBakersMath();
+
+      /* ── Experiment suggestions ── */
+      var suggestions = {
+        slow: {
+          ease: 'Warm the dough environment to 75–78°F and extend bulk by 30–60 minutes before changing anything else. A slightly wetter dough (add 2–3% hydration) also softens gluten for easier folding.',
+          open: 'Slow fermentation often means under-proofing. Extend bulk until the dough jiggles and passes the poke test — more time lets gas build for better oven spring and openness.',
+          flavor: 'Longer, slower fermentation develops flavor. Keep the temp moderate (72–76°F) and reduce starter to 15% so the culture works gradually.',
+          predictable: 'Use a dough thermometer and note your room temp each bake. At 75°F, track time-to-jiggle over 3 bakes — patterns will emerge quickly.'
+        },
+        sticky: {
+          ease: 'Drop hydration by 3–5% and flour your hands lightly during folds. Reduce water in the starter feed to stiffen the culture slightly.',
+          open: 'Sticky dough can still open up — use coil folds instead of stretch-and-folds and handle gently. Avoid adding bench flour; extend bulk instead.',
+          flavor: 'A stickier dough often ferments faster. Shorten bulk by 30 minutes and use a well-fed, peak starter to balance flavor without over-proofing.',
+          predictable: 'Hold hydration steady for three bakes and only change one variable. Sticky issues often trace to inconsistent starter peak timing.'
+        },
+        flat: {
+          ease: 'Under-proofed dough is stiff and hard to shape — extend final proof by 30–60 minutes at room temp until the poke test leaves a slow spring-back.',
+          open: 'Flat loaves usually need more fermentation time or a stronger starter. Extend bulk 45 minutes and ensure your starter at least doubles before mixing.',
+          flavor: 'A flat loaf may be over-proofed (collapsing) or under-salted. Check salt at 2% and shorten final proof if the dough smells sharp and looks slack.',
+          predictable: 'Mark your dough volume at mix, after bulk, and before bake. A 30–50% rise during bulk is the target — write it down each time.'
+        },
+        tight: {
+          ease: 'Increase hydration 3–5% and add one extra fold set. Tight crumb often means the dough was too stiff to expand — wetter dough relaxes more easily.',
+          open: 'Boost hydration to 74–78%, extend bulk until jiggly, and reduce starter to 18% for a longer, more expressive ferment.',
+          flavor: 'Tight crumb from under-fermentation tastes bland. Extend bulk and consider 5–10% whole wheat for deeper flavor and faster fermentation.',
+          predictable: 'Record dough temp at mix. Below 74°F, bulk takes longer — a consistent 76°F dough temp tightens your timeline and crumb results.'
+        },
+        sour: {
+          ease: 'Use starter at peak (not past) and shorten bulk by 30 minutes. Sourness from over-fermentation makes dough slack and harder to shape.',
+          open: 'Excess acidity can tighten gluten. Refresh starter more frequently (every 12 h), use 20% starter, and bake before the dough smells sharply acidic.',
+          flavor: 'For milder flavor: use starter at peak, reduce whole grain, and cold-retard 8–12 h instead of long room-temp bulk. Less time past peak = less acetic bite.',
+          predictable: 'Feed starter on a strict 1:5:5 schedule twice daily. Predictable culture activity is the foundation for balanced, repeatable flavor.'
+        }
+      };
+
+      var issueSelect = document.getElementById('issueSelect');
+      var goalSelect = document.getElementById('goalSelect');
+      var suggestBtn = document.getElementById('suggestBtn');
+      var suggestionBox = document.getElementById('suggestionBox');
+
+      suggestBtn.addEventListener('click', function () {
+        var issue = issueSelect.value;
+        var goal = goalSelect.value;
+
+        if (!issue || !goal) {
+          suggestionBox.textContent = 'Please select both an issue and a goal to get a suggestion.';
+          suggestionBox.classList.add('visible');
+          return;
+        }
+
+        var text = (suggestions[issue] && suggestions[issue][goal]) || 'No specific suggestion for this combination — try adjusting time and temperature first.';
+        suggestionBox.textContent = text;
+        suggestionBox.classList.add('visible');
+      });
+    })();
+  </script>
+</body>
+</html>

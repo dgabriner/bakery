@@ -71,10 +71,20 @@ try {
             if (!$result['ok']) {
                 http_response_code(500);
             }
+            $output = (string)($result['output'] ?? '');
+            $failDetail = '';
+            if (!$result['ok']) {
+                $lines = preg_split("/\r\n|\n|\r/", trim($output)) ?: [];
+                $lines = array_values(array_filter($lines, function ($line) {
+                    return trim((string)$line) !== '';
+                }));
+                $failDetail = implode("\n", array_slice($lines, -8));
+            }
             echo json_encode([
                 'ok' => $result['ok'],
                 'exit_code' => $result['exit_code'],
-                'output' => $result['output'],
+                'output' => $output,
+                'error' => $result['ok'] ? null : ($failDetail !== '' ? $failDetail : 'Sync failed (no output)'),
                 'message' => $result['ok'] ? 'Sync finished' : 'Sync failed',
                 'enabled' => $result['status']['enabled'],
                 'last' => $result['status']['last'],

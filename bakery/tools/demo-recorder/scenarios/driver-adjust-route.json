@@ -1,0 +1,71 @@
+{
+  "id": "driver-adjust-route",
+  "title": { "en": "Adjust the route", "es": "Ajustar la ruta" },
+  "description": {
+    "en": "Change which remaining stop is next, then save.",
+    "es": "Cambia cuál parada pendiente va después y guarda."
+  },
+  "prepare": "adjust-route",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 400,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2400,
+  "steps": [
+    {
+      "action": "goto",
+      "path": "login.php",
+      "caption": { "en": "Sign in as a driver", "es": "Entra como repartidor" }
+    },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "driver.php" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "goto",
+      "path": "driver.php?date={{DATE}}",
+      "caption": {
+        "en": "Open My Route with remaining stops",
+        "es": "Abre Mi ruta con paradas pendientes"
+      }
+    },
+    { "action": "waitForSelector", "selector": "button.route-btn--adjust.change-next-btn" },
+    {
+      "action": "scroll",
+      "selector": "button.route-btn--adjust.change-next-btn",
+      "waitAfter": 600
+    },
+    {
+      "action": "click",
+      "selector": "button.route-btn--adjust.change-next-btn",
+      "force": true,
+      "caption": { "en": "Tap Adjust route", "es": "Toca Ajustar ruta" }
+    },
+    { "action": "waitForSelector", "selector": "body.route-adjust-open" },
+    {
+      "action": "click",
+      "selector": "#stopList .stop-item--upcoming .stop-item-name",
+      "nth": 0,
+      "caption": {
+        "en": "Tap a later stop to make it next",
+        "es": "Toca una parada posterior para ponerla de siguiente"
+      }
+    },
+    {
+      "action": "click",
+      "selector": "#routeAdjustSave",
+      "force": true,
+      "caption": { "en": "Save the new stop order", "es": "Guarda el nuevo orden" }
+    },
+    {
+      "action": "waitForSelector",
+      "selector": "#routeSuccessToast.is-visible",
+      "waitAfter": 1600
+    }
+  ]
+}

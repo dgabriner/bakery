@@ -13,6 +13,7 @@ define('ACCESS_ALLOWED', true);
 $root = dirname(__DIR__);
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
+require_once $root . '/includes/test_target_guard.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: characterization tests must run with APP_ENV=local\n");
@@ -20,6 +21,7 @@ if (!IS_LOCAL) {
 }
 
 $db = check_mysql_connection();
+bakery_assert_local_test_target($db);
 
 $GLOBALS['TEST_PASS'] = 0;
 $GLOBALS['TEST_FAIL'] = 0;
@@ -82,86 +84,23 @@ function standing_qty(PDO $db, $customerId, $productId, $dayOfWeek) {
 }
 
 /**
- * Generate daily orders using CURRENT daily_orders.php day conversion + join rules.
+ * Generate daily orders using the shared production generator.
  */
 function generate_from_standing(PDO $db, $date) {
+    require_once dirname(__DIR__) . '/includes/daily_order_generation.php';
     $phpDayOfWeek = (int)date('N', strtotime($date));
-    $dbDayOfWeek = daily_orders_php_n_to_db_day($phpDayOfWeek);
-    $dayClause = bakery_standing_day_in_clause($dbDayOfWeek);
-
-    $stmt = $db->prepare("
-        SELECT so.customer_id, so.product_id, so.quantity,
-               COALESCE(p.price, 0) as price,
-               c.default_pan_dulce_price,
-               pl.name as product_line_name
-        FROM standing_orders so
-        JOIN customers c ON so.customer_id = c.id
-        JOIN products p ON so.product_id = p.id
-        JOIN dough_types dt ON p.dough_type_id = dt.id
-        JOIN product_lines pl ON dt.product_line_id = pl.id
-        WHERE so.day_of_week {$dayClause['sql']}
-        ORDER BY so.customer_id, so.product_id
-    ");
-    $stmt->execute($dayClause['values']);
-    $standingOrders = $stmt->fetchAll();
-
-    $ordersCreated = 0;
-    $itemsCreated = 0;
-    $db->beginTransaction();
-    try {
-        $customerOrders = [];
-        foreach ($standingOrders as $order) {
-            $customerOrders[$order['customer_id']][] = $order;
-        }
-        foreach ($customerOrders as $customerId => $orders) {
-            $ins = $db->prepare(
-                "INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
-                 VALUES (?, ?, 'pending', 0)"
-            );
-            $ins->execute([$customerId, $date]);
-            if ($ins->rowCount() > 0) {
-                $ordersCreated++;
-            }
-            $oidStmt = $db->prepare(
-                "SELECT id FROM daily_orders WHERE customer_id=? AND order_date=?"
-            );
-            $oidStmt->execute([$customerId, $date]);
-            $dailyOrderId = (int)$oidStmt->fetchColumn();
-
-            foreach ($orders as $order) {
-                $unit = (float)$order['price'];
-                if (($order['product_line_name'] ?? '') === 'Pan Dulce' && $order['default_pan_dulce_price'] !== null) {
-                    $unit = (float)$order['default_pan_dulce_price'];
-                }
-                $line = $unit * (int)$order['quantity'];
-                $item = $db->prepare("
-                    INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE quantity = VALUES(quantity),
-                        unit_price = VALUES(unit_price), line_total = VALUES(line_total)
-                ");
-                $item->execute([$dailyOrderId, $order['product_id'], $order['quantity'], $unit, $line]);
-                $itemsCreated++;
-            }
-            $sum = $db->prepare(
-                "SELECT COALESCE(SUM(line_total),0) FROM daily_order_items WHERE daily_order_id=?"
-            );
-            $sum->execute([$dailyOrderId]);
-            $tot = $db->prepare("UPDATE daily_orders SET total_amount=? WHERE id=?");
-            $tot->execute([$sum->fetchColumn(), $dailyOrderId]);
-        }
-        $db->commit();
-    } catch (Exception $e) {
-        $db->rollBack();
-        throw $e;
-    }
-
+    $result = bakery_generate_daily_orders_from_standing($db, $date, [
+        'overwrite_changed' => true,
+        'record_event' => false,
+        // The QA suite inserts its own dated assignments after generation.
+        'assign_routes' => false,
+    ]);
     return [
         'php_n' => $phpDayOfWeek,
-        'db_day' => $dbDayOfWeek,
-        'standing_rows' => count($standingOrders),
-        'orders_created' => $ordersCreated,
-        'items_created' => $itemsCreated,
+        'db_day' => (int)$result['db_day'],
+        'standing_rows' => (int)$result['standing_rows'],
+        'orders_created' => (int)$result['orders_created'],
+        'items_created' => (int)$result['items_created'] + (int)$result['items_updated'],
     ];
 }
 

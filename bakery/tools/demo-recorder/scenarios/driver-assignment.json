@@ -1,0 +1,46 @@
+{
+  "id": "driver-assignment",
+  "title": { "en": "Driver Assignment", "es": "Asignación de repartidores" },
+  "description": {
+    "en": "Open Driver Assignment and review dated route work.",
+    "es": "Abre la asignación de repartidores y revisa el trabajo fechado."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1280, "height": 720 },
+  "slowMo": 260,
+  "captionHoldMs": 750,
+  "endHoldMs": 1800,
+  "steps": [
+    {
+      "action": "goto",
+      "path": "login.php",
+      "caption": { "en": "Sign in as staff", "es": "Entra como personal" }
+    },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{ADMIN_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "index.php" },
+    {
+      "action": "goto",
+      "path": "driver_assignment.php?date={{DATE}}",
+      "caption": {
+        "en": "Open Driver Assignment — the canonical dated route",
+        "es": "Abre la asignación de repartidores: la ruta fechada canónica"
+      }
+    },
+    { "action": "waitForSelector", "selector": ".driver-section" },
+    {
+      "action": "scroll",
+      "selector": ".driver-section[data-driver-id='{{DRIVER_ID}}']",
+      "caption": {
+        "en": "Stops sit on a driver for this date",
+        "es": "Las paradas quedan en un repartidor para esta fecha"
+      },
+      "waitAfter": 1600
+    }
+  ]
+}

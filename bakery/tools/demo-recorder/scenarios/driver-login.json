@@ -1,0 +1,74 @@
+{
+  "id": "driver-login",
+  "title": { "en": "Driver sign-in", "es": "Entrar como repartidor" },
+  "description": {
+    "en": "Enter your driver code and land on My Route.",
+    "es": "Escribe tu código y llega a Mi ruta."
+  },
+  "prepare": "driver-login",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 380,
+  "captionHoldMs": 1100,
+  "endHoldMs": 2400,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    {
+      "action": "waitForSelector",
+      "selector": "#code",
+      "caption": {
+        "en": "Open the sign-in screen",
+        "es": "Abre la pantalla para entrar"
+      },
+      "narration": {
+        "en": "Open the sign-in screen on your phone.",
+        "es": "Abre la pantalla para entrar en el teléfono."
+      }
+    },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{DRIVER_CODE}}",
+      "delay": 220,
+      "caption": {
+        "en": "Type your 4-digit code — it submits itself",
+        "es": "Escribe tu código de 4 dígitos; se envía solo"
+      },
+      "narration": {
+        "en": "Type your four-digit code. It submits by itself.",
+        "es": "Escribe tu código de cuatro dígitos. Se envía solo."
+      }
+    },
+    {
+      "action": "waitForURL",
+      "includes": "driver.php",
+      "caption": {
+        "en": "You land on My Route",
+        "es": "Llegas a Mi ruta"
+      }
+    },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    {
+      "action": "goto",
+      "path": "driver.php?date={{DATE}}",
+      "caption": {
+        "en": "Open a day that has stops. The next stop is below the map.",
+        "es": "Abre un día con paradas. La siguiente parada está debajo del mapa."
+      }
+    },
+    {
+      "action": "waitForSelector",
+      "selector": "#nextStopCard:not([hidden])",
+      "waitAfter": 400
+    },
+    {
+      "action": "scroll",
+      "selector": "#nextStopCard",
+      "caption": {
+        "en": "Scroll down to the next stop to take the photo or get directions.",
+        "es": "Baja hasta la siguiente parada para la foto o cómo llegar."
+      },
+      "waitAfter": 1800
+    }
+  ]
+}

@@ -11,7 +11,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $driver_id = intval($_POST['driver_id']);
     $latitude = floatval($_POST['latitude']);
     $longitude = floatval($_POST['longitude']);
-    $timestamp = $_POST['timestamp'];
+    $timestampRaw = trim((string)($_POST['timestamp'] ?? ''));
+    try {
+        $timestamp = $timestampRaw !== ''
+            ? (new DateTimeImmutable($timestampRaw))->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s')
+            : date('Y-m-d H:i:s');
+    } catch (Exception $e) {
+        $timestamp = date('Y-m-d H:i:s');
+    }
     
     // Validate inputs
     if ($driver_id > 0 && $latitude !== 0.0 && $longitude !== 0.0) {
@@ -51,4 +58,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         'source' => 'global_handler'
     ]);
 }
-?> 
+?>

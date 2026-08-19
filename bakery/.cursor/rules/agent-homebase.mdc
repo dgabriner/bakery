@@ -1,0 +1,12 @@
+---
+description: Check in with the Agent Homebase at the start and end of every bakery coding session.
+alwaysApply: true
+---
+
+# Agent Homebase
+
+Before coding in `bakery/`, run `php scripts/agent_homebase.php brief --agent=<mission> --json` and follow `.cursor/skills/agent-homebase/SKILL.md`.
+
+During work, pin decisions (`--column=decided` for lasting ones) and log durable bugs. Do not leave those only in chat.
+
+End every session with a §10 handoff via `php scripts/agent_homebase.php handoff`. Completing exception *work* never hides a still-true operational fact. Local DB only; do not deploy; do not enable auto-push.

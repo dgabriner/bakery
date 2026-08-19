@@ -123,11 +123,8 @@ while ($true) {
                 & (Join-Path $scriptsDir "record_deploy.ps1")
             }
             '14' {
-                Invoke-BakeryPhp @((Join-Path $bakeryRoot "tests\run_characterization.php"))
-                Invoke-BakeryPhp @((Join-Path $bakeryRoot "tests\run_auth_tests.php"))
-                Invoke-BakeryPhp @((Join-Path $bakeryRoot "tests\run_integrity_tests.php"))
-                Write-Host ""
-                Write-Host "All test suites finished."
+                & (Join-Path $scriptsDir "run_local_test_gate.ps1")
+                if ($LASTEXITCODE -ne 0) { throw "Local test gate failed (exit $LASTEXITCODE)." }
             }
             '0' { exit 0 }
             default {

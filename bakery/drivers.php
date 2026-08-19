@@ -2,8 +2,9 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/google_maps_config.php';
 
-$page_title = 'Driver Management';
+$page_title = bakery_t('page.drivers');
 bakery_ensure_standing_routes_order_column($db);
 
 $driverColors = [
@@ -143,11 +144,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 if ($driverId > 0) {
-                    $stmt = $db->prepare('INSERT INTO standing_routes (driver_id, customer_id, day_of_week) VALUES (?, ?, ?)');
-                    $stmt->execute([$driverId, $customerId, $dayOfWeek]);
+                    $maxDaySql = $dayOfWeek === 7 ? 'day_of_week IN (0, 7)' : 'day_of_week = ?';
+                    $maxOrder = $db->prepare("SELECT COALESCE(MAX(route_order), 0) FROM standing_routes WHERE driver_id = ? AND $maxDaySql");
+                    $maxOrder->execute($dayOfWeek === 7 ? [$driverId] : [$driverId, $dayOfWeek]);
+                    $routeOrder = (int)$maxOrder->fetchColumn() + 1;
+                    $stmt = $db->prepare('INSERT INTO standing_routes (driver_id, customer_id, day_of_week, route_order) VALUES (?, ?, ?, ?)');
+                    $stmt->execute([$driverId, $customerId, $dayOfWeek, $routeOrder]);
                 }
 
                 echo json_encode(['success' => true]);
+                exit;
+
+            case 'save_route_order':
+                $driverId = (int)($_POST['driver_id'] ?? 0);
+                $dayOfWeek = (int)($_POST['day_of_week'] ?? 0);
+                $customerIds = json_decode((string)($_POST['customer_ids'] ?? '[]'), true);
+                if ($dayOfWeek === 0) {
+                    $dayOfWeek = 7;
+                }
+                if ($driverId <= 0 || $dayOfWeek < 1 || $dayOfWeek > 7 || !is_array($customerIds)) {
+                    throw new Exception('Invalid route order request');
+                }
+
+                $customerIds = array_values(array_unique(array_filter(array_map('intval', $customerIds), function ($id) {
+                    return $id > 0;
+                })));
+                $daySql = $dayOfWeek === 7 ? 'day_of_week IN (0, 7)' : 'day_of_week = ?';
+                $params = $dayOfWeek === 7 ? [$driverId] : [$driverId, $dayOfWeek];
+                $check = $db->prepare("SELECT customer_id FROM standing_routes WHERE driver_id = ? AND $daySql");
+                $check->execute($params);
+                $existingIds = array_map('intval', $check->fetchAll(PDO::FETCH_COLUMN));
+                sort($existingIds);
+                $submittedIds = $customerIds;
+                sort($submittedIds);
+                if ($existingIds !== $submittedIds) {
+                    throw new Exception('The route changed while it was being reordered. Refresh and try again.');
+                }
+
+                $db->beginTransaction();
+                try {
+                    $offsetUpdate = $db->prepare("UPDATE standing_routes SET route_order = route_order + 10000 WHERE driver_id = ? AND $daySql");
+                    $offsetUpdate->execute($params);
+                    $update = $db->prepare("UPDATE standing_routes SET route_order = ? WHERE driver_id = ? AND customer_id = ? AND $daySql");
+                    foreach ($customerIds as $index => $id) {
+                        $updateParams = $dayOfWeek === 7
+                            ? [$index + 1, $driverId, $id]
+                            : [$index + 1, $driverId, $id, $dayOfWeek];
+                        $update->execute($updateParams);
+                    }
+                    $db->commit();
+                } catch (Exception $e) {
+                    $db->rollBack();
+                    throw $e;
+                }
+
+                echo json_encode(['success' => true, 'message' => 'Standing route order saved']);
                 exit;
         }
     } catch (Exception $e) {
@@ -199,7 +250,8 @@ try {
     }
 
     $customers = $db->query("
-        SELECT id, name, zone
+        SELECT id, name, zone, address, latitude, longitude, deliver_by, deliver_after,
+               COALESCE(delivery_time, 20) AS delivery_time
         FROM customers
         ORDER BY
             CASE WHEN zone IS NULL OR zone = '' THEN 'ZZZ_No Zone' ELSE zone END,
@@ -215,9 +267,13 @@ try {
     }
 
     $routesResult = $db->query('
-        SELECT r.driver_id, r.customer_id, r.day_of_week, r.route_order, c.name as customer_name, c.zone as customer_zone
+        SELECT r.driver_id, r.customer_id, r.day_of_week, r.route_order,
+               c.name as customer_name, c.zone as customer_zone, c.address,
+               c.latitude, c.longitude, c.deliver_by, c.deliver_after,
+               COALESCE(c.delivery_time, 20) AS delivery_time
         FROM standing_routes r
         JOIN customers c ON r.customer_id = c.id
+        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
         ORDER BY r.day_of_week, r.driver_id, COALESCE(r.route_order, 2147483647), c.name
     ')->fetchAll();
 
@@ -230,7 +286,14 @@ try {
         $routes[$dayOfWeek][$route['customer_id']] = [
             'driver_id' => $route['driver_id'],
             'customer_name' => $route['customer_name'],
-            'customer_zone' => $route['customer_zone']
+            'customer_zone' => $route['customer_zone'],
+            'route_order' => $route['route_order'] === null ? null : (int)$route['route_order'],
+            'address' => $route['address'],
+            'latitude' => $route['latitude'],
+            'longitude' => $route['longitude'],
+            'deliver_by' => $route['deliver_by'],
+            'deliver_after' => $route['deliver_after'],
+            'delivery_time' => (int)$route['delivery_time']
         ];
     }
 } catch (Exception $e) {
@@ -414,17 +477,25 @@ require_once 'includes/nav.php';
                     <div class="driver-route-row">
                         <?php foreach ($days as $dayNum => $dayName): ?>
                             <div class="day-cell" data-driver-id="<?php echo $selectedDriverId; ?>" data-day="<?php echo $dayNum; ?>">
-                                <div class="customer-list">
+                                <div class="route-day-tools">
+                                    <button type="button" class="btn btn-primary btn-sm optimize-route-btn"
+                                            data-day="<?php echo $dayNum; ?>"
+                                            <?php echo $viewingArchived ? 'disabled' : ''; ?>>Optimize</button>
+                                    <span class="route-start-time">Start 6:40 AM</span>
+                                    <span class="route-estimate" aria-live="polite">No stops</span>
+                                </div>
+                                <div class="customer-list" data-day="<?php echo $dayNum; ?>">
                                     <?php
                                     $driverRoutes = array_filter($routes[$dayNum] ?? [], function ($route) use ($selectedDriverId) {
                                         return $route['driver_id'] == $selectedDriverId;
                                     });
 
                                     uasort($driverRoutes, function ($a, $b) {
-                                        $zoneA = $a['customer_zone'] ?: 'ZZZ_No Zone';
-                                        $zoneB = $b['customer_zone'] ?: 'ZZZ_No Zone';
-                                        $zoneCompare = strcmp($zoneA, $zoneB);
-                                        return $zoneCompare !== 0 ? $zoneCompare : strcmp($a['customer_name'], $b['customer_name']);
+                                        $orderA = $a['route_order'] ?? PHP_INT_MAX;
+                                        $orderB = $b['route_order'] ?? PHP_INT_MAX;
+                                        return $orderA !== $orderB
+                                            ? $orderA <=> $orderB
+                                            : strcmp($a['customer_name'], $b['customer_name']);
                                     });
 
                                     foreach ($driverRoutes as $customerId => $route):
@@ -432,10 +503,26 @@ require_once 'includes/nav.php';
                                         $zoneClass = 'zone-' . strtolower(str_replace([' ', '/'], ['-', '-'], $zone));
                                     ?>
                                         <div class="assigned-customer <?php echo $zoneClass; ?>"
+                                             draggable="true"
                                              data-customer-id="<?php echo $customerId; ?>"
                                              data-customer-name="<?php echo htmlspecialchars($route['customer_name']); ?>"
-                                             data-customer-zone="<?php echo htmlspecialchars($zone); ?>">
+                                             data-customer-zone="<?php echo htmlspecialchars($zone); ?>"
+                                             data-address="<?php echo htmlspecialchars((string)$route['address']); ?>"
+                                             data-latitude="<?php echo htmlspecialchars((string)$route['latitude']); ?>"
+                                             data-longitude="<?php echo htmlspecialchars((string)$route['longitude']); ?>"
+                                             data-deliver-by="<?php echo htmlspecialchars((string)$route['deliver_by']); ?>"
+                                             data-deliver-after="<?php echo htmlspecialchars((string)$route['deliver_after']); ?>"
+                                             data-delivery-time="<?php echo (int)$route['delivery_time']; ?>">
+                                            <span class="route-stop-time route-arrival-time"><small>Arrive</small><strong>--:--</strong></span>
+                                            <button type="button" class="route-drag-handle" aria-label="Drag <?php echo htmlspecialchars($route['customer_name']); ?> to reorder" title="Drag to reorder">⋮⋮</button>
+                                            <span class="route-position" aria-hidden="true"></span>
                                             <span class="customer-name"><?php echo htmlspecialchars($route['customer_name']); ?></span>
+                                            <span class="stop-duration"><?php echo (int)$route['delivery_time']; ?>m</span>
+                                            <span class="route-stop-time route-departure-time"><small>Leave</small><strong>--:--</strong></span>
+                                            <span class="route-move-buttons">
+                                                <button type="button" class="route-move-btn" data-move="up" aria-label="Move up">↑</button>
+                                                <button type="button" class="route-move-btn" data-move="down" aria-label="Move down">↓</button>
+                                            </span>
                                             <span class="delete-customer" title="Remove from route">×</span>
                                         </div>
                                     <?php endforeach; ?>
@@ -448,7 +535,7 @@ require_once 'includes/nav.php';
                 <div class="customers-container">
                     <h3>Available Customers</h3>
                     <div id="customer-instruction" class="instruction-text">
-                        Click a customer to assign them to a day on <?php echo htmlspecialchars($selectedDriver['name']); ?>'s route, or drag them to a day column. Click assigned customers to move them to another day. Customers are color-coded by delivery zone.
+                        Click a customer to assign them to a driver and day, or drag them to a day column. Click assigned customers to move them to another driver or day. Customers are color-coded by delivery zone.
                     </div>
 
                     <?php foreach ($customersByZone as $zoneName => $zoneCustomers):
@@ -504,11 +591,26 @@ require_once 'includes/nav.php';
 <div id="assignment-modal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3>Assign Customer to Day</h3>
+            <h3>Assign Customer to Route</h3>
             <span class="close">&times;</span>
         </div>
         <div class="modal-body">
-            <p>Assign <strong id="modal-customer-name"></strong> to <strong><?php echo $selectedDriverId > 0 ? htmlspecialchars($drivers[$selectedDriverId]['name'] ?? '') : ''; ?></strong>:</p>
+            <p>Assign <strong id="modal-customer-name"></strong> to a driver and day:</p>
+            <?php if (!empty($drivers)): ?>
+            <div class="selection-section">
+                <h4>Select Driver:</h4>
+                <div class="driver-icons-grid" id="modal-driver-options">
+                    <?php foreach ($drivers as $driverId => $driverInfo): ?>
+                        <div class="driver-icon-option" onclick="selectDriverInModal('<?php echo $driverId; ?>')" data-driver-id="<?php echo $driverId; ?>">
+                            <div class="driver-avatar" style="background: <?php echo $driverInfo['color']; ?>">
+                                <?php echo strtoupper(substr($driverInfo['name'], 0, 1)); ?>
+                            </div>
+                            <span class="driver-icon-name"><?php echo htmlspecialchars($driverInfo['name']); ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="selection-section">
                 <h4>Select Day:</h4>
                 <div class="day-icons-grid">
@@ -649,17 +751,37 @@ require_once 'includes/nav.php';
 
 .routes-container { margin-bottom: 25px; overflow-x: auto; }
 .days-header, .driver-route-row { display: flex; border-bottom: 1px solid #dee2e6; }
-.day-header { flex: 1; min-width: 100px; padding: 10px; text-align: center; font-weight: bold; background: #e9ecef; border-right: 1px solid #dee2e6; transition: background 0.2s; }
+.day-header { flex: 1; min-width: 220px; padding: 10px; text-align: center; font-weight: bold; background: #e9ecef; border-right: 1px solid #dee2e6; transition: background 0.2s; }
 .day-header.clickable-day { cursor: pointer; user-select: none; }
 .day-header.clickable-day:hover { background: #dee2e6; }
 .day-header.active-filter { background: #4e73df; color: white; }
-.day-cell { flex: 1; min-width: 100px; min-height: 120px; padding: 8px; border-right: 1px solid #dee2e6; background: #fff; }
+.day-cell { flex: 1; min-width: 220px; min-height: 120px; padding: 8px; border-right: 1px solid #dee2e6; background: #fff; }
 .day-cell.drag-over { background: #e7f1ff; border: 2px dashed #007bff; }
 .customer-list { min-height: 100px; }
+.route-day-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.route-day-tools .btn { padding: 5px 8px; }
+.route-start-time { color: #2c3e50; font-size: 0.7rem; font-weight: 800; white-space: nowrap; }
+.route-estimate { color: #5f6b76; font-size: 0.72rem; font-weight: 700; line-height: 1.2; text-align: right; }
 
-.assigned-customer, .customer-item { position: relative; padding: 8px 25px 8px 8px; margin: 4px 0; border-radius: 4px; font-size: 0.9em; cursor: pointer; display: flex; align-items: center; color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.7); transition: all 0.2s; }
+.assigned-customer, .customer-item { position: relative; padding: 8px 25px 8px 8px; margin: 4px 0; border-radius: 4px; font-size: 0.9em; cursor: pointer; display: flex; align-items: center; color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.7); transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; }
 .assigned-customer:hover, .customer-item:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
 .assigned-customer .customer-name, .customer-item .customer-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-weight: 500; }
+.assigned-customer { gap: 5px; padding-left: 5px; }
+.assigned-customer.route-dragging { opacity: 0.45; transform: none; }
+.assigned-customer.route-drop-target { box-shadow: 0 -3px 0 #182433; }
+.route-drag-handle, .route-move-btn { border: 0; border-radius: 4px; background: rgba(255,255,255,0.22); color: #fff; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.7); cursor: grab; }
+.route-drag-handle { padding: 4px 3px; touch-action: none; user-select: none; flex: 0 0 auto; }
+.route-drag-handle:active { cursor: grabbing; }
+.route-position { min-width: 1.25em; font-weight: 800; text-align: center; }
+.stop-duration { font-size: 0.72rem; opacity: 0.9; white-space: nowrap; }
+.route-stop-time { min-width: 3.15rem; display: inline-flex; flex-direction: column; line-height: 1.05; white-space: nowrap; text-align: center; }
+.route-stop-time small { font-size: 0.56rem; font-weight: 700; opacity: 0.82; text-transform: uppercase; letter-spacing: 0.02em; }
+.route-stop-time strong { font-size: 0.7rem; }
+.route-arrival-time { text-align: left; }
+.route-departure-time { text-align: right; }
+.route-move-buttons { display: none; gap: 2px; }
+.route-move-btn { width: 24px; height: 24px; padding: 0; cursor: pointer; }
+.route-move-btn:disabled { opacity: 0.35; cursor: default; }
 .delete-customer { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 1.2em; color: #ffc107; opacity: 0.9; }
 .delete-customer:hover { opacity: 1; color: #fff; }
 
@@ -694,12 +816,16 @@ require_once 'includes/nav.php';
 .close { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
 .close:hover { color: #000; }
 
-.day-icons-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; margin-top: 10px; }
-.day-icon-option { display: flex; flex-direction: column; align-items: center; padding: 12px; border: 2px solid #dee2e6; border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; }
-.day-icon-option:hover { border-color: #007bff; background: #f8f9ff; }
-.day-icon-option.selected { border-color: #28a745; background: #f8fff9; }
+.selection-section { margin-bottom: 18px; }
+.selection-section h4 { margin: 0 0 8px; font-size: 0.95rem; color: #495057; }
+
+.day-icons-grid, .driver-icons-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; margin-top: 10px; }
+.day-icon-option, .driver-icon-option { display: flex; flex-direction: column; align-items: center; padding: 12px; border: 2px solid #dee2e6; border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; }
+.day-icon-option:hover, .driver-icon-option:hover { border-color: #007bff; background: #f8f9ff; }
+.day-icon-option.selected, .driver-icon-option.selected { border-color: #28a745; background: #f8fff9; }
 .day-icon-option.no-day { border-color: #dc3545; color: #dc3545; }
-.day-icon-name { font-size: 0.85rem; font-weight: 600; text-align: center; }
+.day-icon-name, .driver-icon-name { font-size: 0.85rem; font-weight: 600; text-align: center; }
+.driver-icon-option .driver-avatar { width: 32px; height: 32px; font-size: 14px; margin-bottom: 6px; }
 
 .form-group { margin-bottom: 15px; }
 .form-group label { display: block; font-weight: 600; margin-bottom: 6px; color: #495057; }
@@ -725,6 +851,9 @@ require_once 'includes/nav.php';
     .drivers-layout { grid-template-columns: 1fr; }
     .driver-sidebar { position: static; }
     .driver-list-actions { opacity: 1; }
+    .route-move-buttons { display: inline-flex; }
+    .day-cell.show-day { min-width: 100%; }
+    .route-day-tools { position: sticky; top: 0; z-index: 2; padding: 6px; margin: -8px -8px 8px; background: #fff; border-bottom: 1px solid #e4e8ed; }
 }
 </style>
 
@@ -734,8 +863,261 @@ const viewingArchived = <?php echo $viewingArchived ? 'true' : 'false'; ?>;
 const days = <?php echo json_encode($days); ?>;
 let filteredDay = null;
 let currentCustomerId = null;
+let currentModalDriverId = selectedDriverId;
 let draggedCustomer = null;
 let isEditDriverMode = false;
+let draggedRouteStop = null;
+let suppressRouteClick = false;
+const routeSaveQueues = new WeakMap();
+const bakeryAddress = '484 5th Street, San Francisco, CA';
+const routeStartMinutes = (6 * 60) + 40;
+
+function formatDuration(totalMinutes) {
+    const minutes = Math.max(0, Math.round(totalMinutes));
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return hours ? hours + 'h ' + remainder + 'm' : remainder + 'm';
+}
+
+function formatClock(totalMinutes) {
+    const minutesInDay = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+    const hours24 = Math.floor(minutesInDay / 60);
+    const minutes = minutesInDay % 60;
+    const suffix = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 || 12;
+    return hours12 + ':' + String(minutes).padStart(2, '0') + ' ' + suffix;
+}
+
+function timeToMinutes(value) {
+    if (!value) return null;
+    const parts = String(value).split(':').map(Number);
+    return Number.isFinite(parts[0]) ? (parts[0] * 60) + (parts[1] || 0) : null;
+}
+
+function routeStopData(element) {
+    return {
+        element,
+        id: Number(element.dataset.customerId),
+        name: element.dataset.customerName,
+        address: element.dataset.address,
+        latitude: Number(element.dataset.latitude),
+        longitude: Number(element.dataset.longitude),
+        deliverBy: timeToMinutes(element.dataset.deliverBy),
+        deliverAfter: timeToMinutes(element.dataset.deliverAfter),
+        deliveryMinutes: Number(element.dataset.deliveryTime) || 20
+    };
+}
+
+function getRouteStops(list) {
+    return Array.from(list.querySelectorAll('.assigned-customer')).map(routeStopData);
+}
+
+function updateRoutePresentation(list, exactSchedule) {
+    const stops = getRouteStops(list);
+    stops.forEach((stop, index) => {
+        stop.element.querySelector('.route-position').textContent = index + 1;
+        const up = stop.element.querySelector('[data-move="up"]');
+        const down = stop.element.querySelector('[data-move="down"]');
+        if (up) up.disabled = index === 0;
+        if (down) down.disabled = index === stops.length - 1;
+    });
+
+    const estimate = list.closest('.day-cell').querySelector('.route-estimate');
+    const optimizeButton = list.closest('.day-cell').querySelector('.optimize-route-btn');
+    if (!stops.length) {
+        estimate.textContent = 'No stops';
+        estimate.title = '';
+        if (optimizeButton) optimizeButton.disabled = true;
+        return;
+    }
+
+    if (optimizeButton && !viewingArchived) optimizeButton.disabled = false;
+    // The existing route logic uses customer service time plus travel. Until an exact
+    // Directions result is available, use its established 10-minute average per leg,
+    // including service duration, opening-window waits, and the return to the bakery.
+    let routineFinish = routeStartMinutes;
+    const routineArrivals = [];
+    const routineDepartures = [];
+    stops.forEach(stop => {
+        routineFinish += 10;
+        if (stop.deliverAfter !== null && routineFinish < stop.deliverAfter) {
+            routineFinish = stop.deliverAfter;
+        }
+        routineArrivals.push(routineFinish);
+        routineFinish += stop.deliveryMinutes;
+        routineDepartures.push(routineFinish);
+    });
+    routineFinish += 10;
+    const arrivals = exactSchedule ? exactSchedule.arrivals : routineArrivals;
+    const departures = exactSchedule ? exactSchedule.departures : routineDepartures;
+    stops.forEach((stop, index) => {
+        stop.element.querySelector('.route-arrival-time strong').textContent = formatClock(arrivals[index]);
+        stop.element.querySelector('.route-departure-time strong').textContent = formatClock(departures[index]);
+    });
+    const estimatedMinutes = exactSchedule ? exactSchedule.totalMinutes : routineFinish - routeStartMinutes;
+    estimate.textContent = (exactSchedule ? '' : '≈ ') + formatDuration(estimatedMinutes);
+    estimate.title = (exactSchedule ? 'Directions estimate' : 'Routine estimate')
+        + ' · starts 6:40 AM · finishes about ' + formatClock(routeStartMinutes + estimatedMinutes);
+}
+
+function saveRouteOrder(list) {
+    const day = list.dataset.day;
+    const customerIds = getRouteStops(list).map(stop => stop.id);
+    const estimate = list.closest('.day-cell').querySelector('.route-estimate');
+    const previous = routeSaveQueues.get(list) || Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+        estimate.classList.add('saving');
+        const body = new URLSearchParams({
+            action: 'save_route_order',
+            driver_id: String(selectedDriverId),
+            day_of_week: String(day),
+            customer_ids: JSON.stringify(customerIds)
+        });
+        const response = await fetch('drivers.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not save route order');
+    }).finally(() => {
+        estimate.classList.remove('saving');
+    });
+    routeSaveQueues.set(list, next);
+    return next;
+}
+
+function completeManualReorder(list) {
+    suppressRouteClick = true;
+    updateRoutePresentation(list, null);
+    saveRouteOrder(list).catch(error => showMessage(error.message, 'error'));
+    setTimeout(() => { suppressRouteClick = false; }, 250);
+}
+
+function directionsForStops(stops, optimizeWaypoints) {
+    return new Promise((resolve, reject) => {
+        if (typeof google === 'undefined' || !google.maps || !google.maps.DirectionsService) {
+            reject(new Error('Route optimization is still loading. Try again in a moment.'));
+            return;
+        }
+        const service = new google.maps.DirectionsService();
+        service.route({
+            origin: bakeryAddress,
+            destination: bakeryAddress,
+            waypoints: stops.map(stop => ({ location: stop.address, stopover: true })),
+            optimizeWaypoints,
+            travelMode: google.maps.TravelMode.DRIVING
+        }, (result, status) => {
+            if (status === 'OK') resolve(result);
+            else reject(new Error('Route optimization failed: ' + status));
+        });
+    });
+}
+
+function calculateRouteSchedule(result, stops) {
+    const legs = result.routes[0].legs;
+    let currentMinutes = routeStartMinutes;
+    const arrivals = [];
+    const departures = [];
+    stops.forEach((stop, index) => {
+        currentMinutes += legs[index].duration.value / 60;
+        if (stop.deliverAfter !== null && currentMinutes < stop.deliverAfter) {
+            currentMinutes = stop.deliverAfter;
+        }
+        arrivals.push(currentMinutes);
+        currentMinutes += stop.deliveryMinutes;
+        departures.push(currentMinutes);
+    });
+    if (legs[stops.length]) currentMinutes += legs[stops.length].duration.value / 60;
+    return {
+        totalMinutes: currentMinutes - routeStartMinutes,
+        arrivals,
+        departures,
+        violations: stops.map((stop, index) => ({ stop, index, arrival: arrivals[index] }))
+            .filter(item => item.stop.deliverBy !== null && item.arrival > item.stop.deliverBy)
+    };
+}
+
+async function optimizeStandingRoute(button) {
+    const cell = button.closest('.day-cell');
+    const list = cell.querySelector('.customer-list');
+    let stops = getRouteStops(list);
+    if (!stops.length) return;
+    if (stops.length > 25) {
+        showMessage('Google route optimization supports up to 25 stops at a time.', 'error');
+        return;
+    }
+    const missingAddress = stops.find(stop => !stop.address || stop.address.trim().length < 5);
+    if (missingAddress) {
+        showMessage('Add an address for ' + missingAddress.name + ' before optimizing this route.', 'error');
+        return;
+    }
+
+    const estimate = cell.querySelector('.route-estimate');
+    const oldLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Optimizing…';
+    estimate.textContent = 'Calculating…';
+    try {
+        let result = await directionsForStops(stops, true);
+        const optimizedIndexes = result.routes[0].waypoint_order || [];
+        if (optimizedIndexes.length === stops.length) {
+            stops = optimizedIndexes.map(index => stops[index]);
+        }
+
+        // Match the established route logic: start with shortest driving distance,
+        // then move late deadline stops earlier until constraints are met or stable.
+        const maxAdjustments = Math.min(20, stops.length * 2);
+        for (let adjustment = 0; adjustment < maxAdjustments; adjustment++) {
+            const schedule = calculateRouteSchedule(result, stops);
+            if (!schedule.violations.length) break;
+            const violation = schedule.violations
+                .filter(item => item.index > 0)
+                .sort((a, b) => (b.arrival - b.stop.deliverBy) - (a.arrival - a.stop.deliverBy))[0];
+            if (!violation) break;
+            const reordered = stops.slice();
+            const moved = reordered.splice(violation.index, 1)[0];
+            reordered.splice(violation.index - 1, 0, moved);
+            stops = reordered;
+            result = await directionsForStops(stops, false);
+        }
+
+        stops.forEach(stop => list.appendChild(stop.element));
+        const schedule = calculateRouteSchedule(result, stops);
+        updateRoutePresentation(list, schedule);
+        await saveRouteOrder(list);
+        const note = schedule.violations.length
+            ? ' Route saved; ' + schedule.violations.length + ' delivery window still needs attention.'
+            : ' Route saved with all delivery deadlines met.';
+        showMessage('Optimized ' + stops.length + ' stops in ' + formatDuration(schedule.totalMinutes) + '.' + note, 'success');
+    } catch (error) {
+        updateRoutePresentation(list, null);
+        showMessage(error.message, 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = oldLabel;
+    }
+}
+
+document.querySelectorAll('.customer-list').forEach(list => updateRoutePresentation(list, null));
+
+document.querySelectorAll('.optimize-route-btn').forEach(button => {
+    button.addEventListener('click', () => optimizeStandingRoute(button));
+});
+
+document.querySelectorAll('.route-move-btn').forEach(button => {
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const item = button.closest('.assigned-customer');
+        const list = item.closest('.customer-list');
+        const sibling = button.dataset.move === 'up' ? item.previousElementSibling : item.nextElementSibling;
+        if (!sibling) return;
+        if (button.dataset.move === 'up') list.insertBefore(item, sibling);
+        else list.insertBefore(sibling, item);
+        completeManualReorder(list);
+    });
+});
 
 // Driver CRUD
 function openDriverModal(id, name) {
@@ -883,7 +1265,7 @@ function filterByDay(day) {
     if (filterStatus) filterStatus.textContent = 'Showing: ' + days[day];
     if (clearFilterBtn) clearFilterBtn.style.display = 'inline-block';
     if (customerInstruction) {
-        customerInstruction.textContent = 'Click a customer to assign them to ' + days[day] + ', or drag them to the day column.';
+        customerInstruction.textContent = 'Click a customer to assign them to a driver and ' + days[day] + ', or drag them to the day column.';
     }
     updateAvailableCustomers();
 }
@@ -919,20 +1301,31 @@ function updateAvailableCustomers() {
 const modal = document.getElementById('assignment-modal');
 const modalCustomerName = document.getElementById('modal-customer-name');
 
-function openAssignmentModal(customerId, customerName, currentDay) {
+function openAssignmentModal(customerId, customerName, currentDay, currentDriverId) {
     currentCustomerId = customerId;
+    currentModalDriverId = currentDriverId || selectedDriverId;
     modalCustomerName.textContent = customerName;
+    document.querySelectorAll('.driver-icon-option').forEach(opt => {
+        opt.classList.toggle('selected', Number(opt.getAttribute('data-driver-id')) === Number(currentModalDriverId));
+    });
     document.querySelectorAll('.day-icon-option').forEach(opt => {
         opt.classList.toggle('selected', opt.getAttribute('data-day') === (currentDay || ''));
     });
     modal.style.display = 'block';
 }
 
+window.selectDriverInModal = function(driverId) {
+    currentModalDriverId = Number(driverId);
+    document.querySelectorAll('.driver-icon-option').forEach(opt => {
+        opt.classList.toggle('selected', Number(opt.getAttribute('data-driver-id')) === currentModalDriverId);
+    });
+};
+
 window.selectDayInModal = async function(dayOfWeek) {
     if (!currentCustomerId) return;
     if (filteredDay) localStorage.setItem('preserveFilterDay', filteredDay);
 
-    const driverId = dayOfWeek === '0' ? 0 : selectedDriverId;
+    const driverId = dayOfWeek === '0' ? 0 : currentModalDriverId;
     const day = dayOfWeek === '0' ? (filteredDay || findCustomerDay(currentCustomerId)) : dayOfWeek;
 
     try {
@@ -966,17 +1359,19 @@ document.addEventListener('click', function(e) {
         openAssignmentModal(
             customerItem.getAttribute('data-customer-id'),
             customerItem.getAttribute('data-customer-name'),
-            filteredDay
+            filteredDay,
+            selectedDriverId
         );
     }
 
     const assigned = e.target.closest('.assigned-customer');
-    if (assigned && !e.target.classList.contains('delete-customer')) {
+    if (assigned && !e.target.classList.contains('delete-customer') && !e.target.closest('.route-drag-handle, .route-move-buttons') && !suppressRouteClick) {
         e.preventDefault();
         openAssignmentModal(
             assigned.getAttribute('data-customer-id'),
             assigned.getAttribute('data-customer-name'),
-            assigned.closest('.day-cell').getAttribute('data-day')
+            assigned.closest('.day-cell').getAttribute('data-day'),
+            selectedDriverId
         );
     }
 
@@ -997,7 +1392,79 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Drag and drop
+// Reorder standing stops with desktop drag-and-drop.
+document.querySelectorAll('.assigned-customer').forEach(item => {
+    item.addEventListener('dragstart', function(e) {
+        draggedRouteStop = this;
+        this.classList.add('route-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', this.dataset.customerId);
+    });
+    item.addEventListener('dragend', function() {
+        const list = this.closest('.customer-list');
+        this.classList.remove('route-dragging');
+        document.querySelectorAll('.route-drop-target').forEach(el => el.classList.remove('route-drop-target'));
+        if (draggedRouteStop === this) completeManualReorder(list);
+        draggedRouteStop = null;
+    });
+});
+
+document.querySelectorAll('.customer-list').forEach(list => {
+    list.addEventListener('dragover', function(e) {
+        if (!draggedRouteStop || draggedRouteStop.closest('.customer-list') !== this) return;
+        e.preventDefault();
+        const target = e.target.closest('.assigned-customer');
+        if (!target || target === draggedRouteStop) return;
+        document.querySelectorAll('.route-drop-target').forEach(el => el.classList.remove('route-drop-target'));
+        target.classList.add('route-drop-target');
+        const rect = target.getBoundingClientRect();
+        this.insertBefore(draggedRouteStop, e.clientY > rect.top + rect.height / 2 ? target.nextSibling : target);
+    });
+    list.addEventListener('drop', function(e) {
+        if (!draggedRouteStop || draggedRouteStop.closest('.customer-list') !== this) return;
+        e.preventDefault();
+        completeManualReorder(this);
+        draggedRouteStop.classList.remove('route-dragging');
+        draggedRouteStop = null;
+    });
+});
+
+// Pointer events make the same drag handle work with a finger, mouse, or pen.
+document.querySelectorAll('.route-drag-handle').forEach(handle => {
+    handle.addEventListener('pointerdown', function(e) {
+        if (viewingArchived || e.button > 0) return;
+        const item = this.closest('.assigned-customer');
+        const list = item.closest('.customer-list');
+        let moved = false;
+        this.setPointerCapture(e.pointerId);
+        item.classList.add('route-dragging');
+        e.preventDefault();
+        e.stopPropagation();
+
+        const onMove = event => {
+            moved = true;
+            const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.assigned-customer');
+            if (!target || target === item || target.closest('.customer-list') !== list) return;
+            const rect = target.getBoundingClientRect();
+            list.insertBefore(item, event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target);
+            document.querySelectorAll('.route-drop-target').forEach(el => el.classList.remove('route-drop-target'));
+            target.classList.add('route-drop-target');
+        };
+        const onEnd = () => {
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', onEnd);
+            handle.removeEventListener('pointercancel', onEnd);
+            item.classList.remove('route-dragging');
+            document.querySelectorAll('.route-drop-target').forEach(el => el.classList.remove('route-drop-target'));
+            if (moved) completeManualReorder(list);
+        };
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', onEnd);
+        handle.addEventListener('pointercancel', onEnd);
+    });
+});
+
+// Drag available customers into a weekday.
 document.querySelectorAll('.customer-item').forEach(item => {
     item.addEventListener('dragstart', function(e) {
         draggedCustomer = { id: this.getAttribute('data-customer-id'), name: this.getAttribute('data-customer-name') };
@@ -1054,5 +1521,9 @@ if (preserved) {
     updateAvailableCustomers();
 }
 </script>
+
+<?php if (defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== ''): ?>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=<?php echo urlencode(GOOGLE_MAPS_API_KEY); ?>&loading=async"></script>
+<?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>

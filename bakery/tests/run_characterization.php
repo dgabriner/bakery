@@ -7,13 +7,8 @@
  *   C:\php\php.exe bakery\tests\run_characterization.php
  */
 $root = dirname(__DIR__);
-
-// Fresh fixtures before suite
-passthru('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset', $setupCode);
-if ($setupCode !== 0) {
-    fwrite(STDERR, "Fixture reset failed\n");
-    exit(1);
-}
+require_once $root . '/tests/isolate_test_db.php';
+bakery_reset_isolated_test_db($root);
 
 /** @var PDO $db */
 $db = require __DIR__ . '/harness.php';

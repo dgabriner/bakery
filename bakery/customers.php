@@ -5,9 +5,13 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/customer_portal.php';
+require_once 'includes/sf_baker.php';
+bakery_ensure_portal_schema($db);
+bakery_ensure_sfb_schema($db);
 
 // Set page title
-$page_title = 'Customers';
+$page_title = bakery_t('page.customers');
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -17,7 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
                     $zoneId = bakery_zone_id_for_name($db, $zoneName);
-                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price, portal_phone, portal_code, portal_enabled, sf_baker_enabled, pricing_tier, payment_collection) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
                     $stmt->execute([
                         $_POST['name'],
                         empty($_POST['email']) ? null : $_POST['email'],
@@ -27,9 +32,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $zoneId,
                         empty($_POST['deliver_by']) ? null : $_POST['deliver_by'],
                         empty($_POST['deliver_after']) ? null : $_POST['deliver_after'],
-                        empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price']
+                        empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price'],
+                        empty($_POST['portal_phone']) ? null : $_POST['portal_phone'],
+                        $portalCode !== '' ? $portalCode : null,
+                        !empty($_POST['portal_enabled']) ? 1 : 0,
+                        !empty($_POST['sf_baker_enabled']) ? 1 : 0,
+                        in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
+                        in_array($_POST['payment_collection'] ?? '', ['cod', 'signature'], true) ? $_POST['payment_collection'] : 'cod',
                     ]);
-                    header("Location: customers.php?success=created");
+                    $newId = (int)$db->lastInsertId();
+                    if ($newId > 0) {
+                        header('Location: customer_record.php?customer_id=' . $newId . '&created=1');
+                    } else {
+                        header('Location: customers.php?success=created');
+                    }
                     exit;
                 } catch (Exception $e) {
                     $error = "Failed to create customer: " . $e->getMessage();
@@ -40,7 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
                     $zoneId = bakery_zone_id_for_name($db, $zoneName);
-                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ? WHERE id = ?");
+                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ?, portal_phone = ?, portal_code = ?, portal_enabled = ?, sf_baker_enabled = ?, pricing_tier = ?, payment_collection = ? WHERE id = ?");
+                    $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
                     $stmt->execute([
                         $_POST['name'],
                         $_POST['email'],
@@ -51,6 +68,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         empty($_POST['deliver_by']) ? null : $_POST['deliver_by'],
                         empty($_POST['deliver_after']) ? null : $_POST['deliver_after'],
                         empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price'],
+                        empty($_POST['portal_phone']) ? null : $_POST['portal_phone'],
+                        $portalCode !== '' ? $portalCode : null,
+                        !empty($_POST['portal_enabled']) ? 1 : 0,
+                        !empty($_POST['sf_baker_enabled']) ? 1 : 0,
+                        in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
+                        in_array($_POST['payment_collection'] ?? '', ['cod', 'signature'], true) ? $_POST['payment_collection'] : 'cod',
                         $_POST['id']
                     ]);
                     header("Location: customers.php?success=updated");
@@ -97,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $id = $_POST['id'];
                     
                     // Validate field name for security
-                    $allowed_fields = ['name', 'email', 'phone', 'address', 'zone', 'deliver_by', 'deliver_after', 'default_pan_dulce_price'];
+                    $allowed_fields = ['name', 'email', 'phone', 'address', 'zone', 'deliver_by', 'deliver_after', 'default_pan_dulce_price', 'portal_phone', 'portal_code', 'portal_enabled', 'sf_baker_enabled', 'pricing_tier', 'payment_collection'];
                     if (!in_array($field, $allowed_fields)) {
                         throw new Exception("Invalid field");
                     }
@@ -169,7 +192,7 @@ if (empty($zones)) {
 }
 ?>
 
-<div class="container">
+<div class="container container--wide">
     <h1>👥 Customers Management</h1>
     
     <?php if (isset($error)): ?>
@@ -195,6 +218,13 @@ if (empty($zones)) {
         <button class="btn-info" onclick="toggleEditMode()">
             <i class="icon">✏️</i> <span id="editModeText">Enable Quick Edit</span>
         </button>
+        <input type="search" id="customerSearch" class="customer-search"
+               placeholder="Search by name, phone, email, zone, or address…"
+               autocomplete="off"
+               autofocus
+               value="<?php echo htmlspecialchars(trim((string)($_GET['q'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"
+               aria-label="Search customers">
+        <span id="customerSearchHint" class="customer-search-hint">Type to filter · Enter opens the first match</span>
     </div>
 
     <!-- Add/Edit Customer Form (Hidden by default) -->
@@ -203,6 +233,7 @@ if (empty($zones)) {
             <span class="close" onclick="hideCustomerForm()">&times;</span>
             <h2 id="formTitle">Add New Customer</h2>
             <form id="customerFormElement" method="POST" onsubmit="return validateForm()">
+                <?php echo bakery_csrf_field(); ?>
                 <input type="hidden" name="action" value="create">
                 <input type="hidden" name="id" value="">
                 
@@ -260,6 +291,55 @@ if (empty($zones)) {
                 </div>
 
                 <div class="pricing-constraints">
+                    <h3>Customer Portal</h3>
+                    <p class="help-text">Customers sign in at <a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php" target="_blank">customer portal</a> with their 4-digit passcode.</p>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="portal_phone">Portal phone (login)</label>
+                            <input type="tel" id="portal_phone" name="portal_phone" placeholder="Store admin phone">
+                            <small class="help-text">Leave blank to use the customer phone above.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="portal_code">4-digit passcode</label>
+                            <input type="tel" id="portal_code" name="portal_code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="1234">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pricing_tier">Catalog pricing tier</label>
+                            <select id="pricing_tier" name="pricing_tier">
+                                <option value="retail">Retail (standard product price)</option>
+                                <option value="wholesale">Wholesale (wholesale price when set)</option>
+                                <option value="custom">Custom (per-product overrides)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="payment_collection">Delivery payment</label>
+                            <select id="payment_collection" name="payment_collection">
+                                <option value="cod" selected>Cash on delivery (COD)</option>
+                                <option value="signature">Signature receipt (no cash)</option>
+                            </select>
+                            <small class="help-text">COD stops count toward the driver&apos;s cash turn-in total in Route Manager.</small>
+                        </div>
+                        <div class="form-group" style="display:flex;align-items:flex-end;">
+                            <label style="display:flex;align-items:center;gap:8px;margin:0;">
+                                <input type="checkbox" id="portal_enabled" name="portal_enabled" value="1">
+                                Enable customer portal access
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="display:flex;align-items:flex-end;">
+                            <label style="display:flex;align-items:center;gap:8px;margin:0;">
+                                <input type="checkbox" id="sf_baker_enabled" name="sf_baker_enabled" value="1">
+                                Enable SF Baker module (baking journal in the portal)
+                            </label>
+                            <small class="help-text">Adds the SF Baker section (starters, formulas, batches) to this customer's portal.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pricing-constraints">
                     <h3>💰 Pan Dulce Pricing</h3>
                     <div class="form-row">
                         <div class="form-group">
@@ -285,6 +365,7 @@ if (empty($zones)) {
             <h2>Add Multiple Customers</h2>
             <p class="help-text">Enter one customer name per line. Other details can be added later.</p>
             <form id="bulkAddForm" method="POST" onsubmit="return submitBulkAdd(event)">
+                <?php echo bakery_csrf_field(); ?>
                 <input type="hidden" name="action" value="bulk_create">
                 
                 <div class="form-group">
@@ -324,10 +405,20 @@ if (empty($zones)) {
                 <?php
                 try {
                     $customers = $db->query("SELECT * FROM customers ORDER BY zone, name")->fetchAll();
+                    $highlightId = max(0, (int)($_GET['highlight'] ?? 0));
                     foreach ($customers as $customer):
+                        $searchBlob = strtolower(trim(implode(' ', array_filter([
+                            (string)($customer['name'] ?? ''),
+                            (string)($customer['email'] ?? ''),
+                            (string)($customer['phone'] ?? ''),
+                            (string)($customer['portal_phone'] ?? ''),
+                            (string)($customer['address'] ?? ''),
+                            (string)($customer['zone'] ?? ''),
+                        ]))));
+                        $rowClass = ((int)$customer['id'] === $highlightId) ? ' is-highlighted' : '';
                 ?>
-                    <tr data-customer-id="<?php echo $customer['id']; ?>">
-                        <td class="editable" data-field="name"><?php echo htmlspecialchars($customer['name']); ?></td>
+                    <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>">
+                        <td class="editable" data-field="name"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
                         <td class="editable" data-field="email"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
                         <td class="editable" data-field="phone"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
                         <td class="editable" data-field="address"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>
@@ -376,6 +467,7 @@ if (empty($zones)) {
                             ?>
                         </td>
                         <td class="actions">
+                            <a class="btn-icon" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" title="Open customer hub">👤</a>
                             <button class="btn-icon" onclick="editCustomer(<?php echo htmlspecialchars(json_encode($customer)); ?>)" title="Edit Customer">
                                 ✏️
                             </button>
@@ -403,6 +495,7 @@ if (empty($zones)) {
             <h2>Confirm Deletion</h2>
             <p>Are you sure you want to delete customer: <strong id="deleteCustomerName"></strong>?</p>
             <form method="POST">
+                <?php echo bakery_csrf_field(); ?>
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="id" id="deleteCustomerId">
                 <div class="form-actions">
@@ -416,6 +509,62 @@ if (empty($zones)) {
     <script>
         let editMode = false;
         const zones = <?php echo json_encode($zones); ?>;
+
+        (function () {
+            const search = document.getElementById('customerSearch');
+            if (!search) return;
+            const rows = Array.prototype.slice.call(document.querySelectorAll('#customersTable tbody tr[data-customer-id]'));
+            const hint = document.getElementById('customerSearchHint');
+
+            function visibleRows() {
+                return rows.filter(function (row) {
+                    return row.style.display !== 'none';
+                });
+            }
+
+            function applyFilter() {
+                const q = search.value.trim().toLowerCase();
+                let shown = 0;
+                rows.forEach(function (row) {
+                    const blob = (row.getAttribute('data-search') || row.textContent || '').toLowerCase();
+                    const match = q === '' || blob.indexOf(q) !== -1;
+                    row.style.display = match ? '' : 'none';
+                    if (match) shown++;
+                });
+                if (hint) {
+                    if (q === '') {
+                        hint.textContent = 'Type to filter · Enter opens the first match';
+                    } else if (shown === 0) {
+                        hint.textContent = 'No customers match';
+                    } else if (shown === 1) {
+                        hint.textContent = '1 match · Enter opens their hub';
+                    } else {
+                        hint.textContent = shown + ' matches · Enter opens the first';
+                    }
+                }
+            }
+
+            search.addEventListener('input', applyFilter);
+            search.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                const first = visibleRows()[0];
+                if (!first) return;
+                const link = first.querySelector('a.customer-name-link');
+                if (link && link.href) {
+                    window.location.href = link.href;
+                }
+            });
+
+            if (search.value.trim() !== '') {
+                applyFilter();
+            }
+
+            const highlighted = document.querySelector('#customersTable tbody tr.is-highlighted');
+            if (highlighted) {
+                highlighted.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+        })();
 
         function showCustomerForm() {
             document.getElementById('customerForm').style.display = 'block';
@@ -441,6 +590,12 @@ if (empty($zones)) {
             document.getElementById('deliver_by').value = customer.deliver_by || '';
             document.getElementById('deliver_after').value = customer.deliver_after || '';
             document.getElementById('default_pan_dulce_price').value = customer.default_pan_dulce_price || '';
+            document.getElementById('portal_phone').value = customer.portal_phone || '';
+            document.getElementById('portal_code').value = customer.portal_code || '';
+            document.getElementById('portal_enabled').checked = customer.portal_enabled == 1;
+            document.getElementById('sf_baker_enabled').checked = customer.sf_baker_enabled == 1;
+            document.getElementById('pricing_tier').value = customer.pricing_tier || 'retail';
+            document.getElementById('payment_collection').value = customer.payment_collection || 'cod';
             document.getElementById('customerForm').style.display = 'block';
             document.getElementById('name').focus();
         }
@@ -457,6 +612,12 @@ if (empty($zones)) {
             document.getElementById('deliver_by').value = customer.deliver_by || '';
             document.getElementById('deliver_after').value = customer.deliver_after || '';
             document.getElementById('default_pan_dulce_price').value = customer.default_pan_dulce_price || '';
+            document.getElementById('portal_phone').value = '';
+            document.getElementById('portal_code').value = '';
+            document.getElementById('portal_enabled').checked = false;
+            document.getElementById('sf_baker_enabled').checked = false;
+            document.getElementById('pricing_tier').value = customer.pricing_tier || 'retail';
+            document.getElementById('payment_collection').value = customer.payment_collection || 'cod';
             document.getElementById('customerForm').style.display = 'block';
             document.getElementById('name').focus();
             document.getElementById('name').select();
@@ -989,46 +1150,7 @@ if (empty($zones)) {
     </script>
 
     <style>
-        /* Container and layout */
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        }
-
-        h1 {
-            color: #2c3e50;
-            margin-bottom: 30px;
-            font-size: 2.2rem;
-            font-weight: 700;
-        }
-
-        /* Messages */
-        .error, .success-message, .temp-message {
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-weight: 500;
-        }
-
-        .error, .temp-message.error {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-        }
-
-        .success-message, .temp-message.success {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-        }
-
-        .temp-message.info {
-            background: #d1ecf1;
-            border: 1px solid #bee5eb;
-            color: #0c5460;
-        }
+        /* Shared layout, buttons, alerts: css/base.css */
 
         /* Action Bar */
         .action-bar {
@@ -1036,60 +1158,40 @@ if (empty($zones)) {
             gap: 15px;
             margin-bottom: 25px;
             flex-wrap: wrap;
+            align-items: center;
         }
 
-        .btn-primary, .btn-secondary, .btn-info, .btn-danger {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
+        .customer-search {
+            flex: 1;
+            min-width: 220px;
+            max-width: 380px;
+            padding: 10px 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        .customer-search-hint {
+            font-size: 0.82rem;
+            color: #64748b;
+            white-space: nowrap;
+        }
+
+        .customer-name-link {
+            color: inherit;
             font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
             text-decoration: none;
         }
 
-        .btn-primary {
-            background: #007bff;
-            color: white;
+        .customer-name-link:hover {
+            color: #2c5aa0;
+            text-decoration: underline;
         }
 
-        .btn-primary:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
-        }
-
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background: #545b62;
-            transform: translateY(-2px);
-        }
-
-        .btn-info {
-            background: #17a2b8;
-            color: white;
-        }
-
-        .btn-info:hover {
-            background: #117a8b;
-            transform: translateY(-2px);
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #c82333;
-            transform: translateY(-2px);
+        #customersTable tbody tr.is-highlighted {
+            outline: 2px solid #3182ce;
+            outline-offset: -2px;
+            background: #ebf8ff;
         }
 
         .btn-icon {

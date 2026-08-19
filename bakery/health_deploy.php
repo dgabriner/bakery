@@ -68,6 +68,11 @@ try {
         'BUILD: driver-assignment-20260729',
         'pageLoadError',
     ]);
+    check_file($root, 'dough_types.php', 35000, [
+        'BUILD: dough-types-20260804',
+        'showDoughTypeModal',
+        "require_once 'includes/footer.php'",
+    ]);
     check_file($root, 'css/driver.css', 5000, ['.driver-list-container']);
     check_file($root, 'includes/csrf.js', 500, ['X-CSRF-Token']);
     line('');

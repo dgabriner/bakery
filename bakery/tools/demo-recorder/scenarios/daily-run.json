@@ -1,0 +1,55 @@
+{
+  "id": "daily-run",
+  "title": { "en": "Daily Run", "es": "Corrida del día" },
+  "description": {
+    "en": "Open Daily Run and walk the gated bakery-day stages.",
+    "es": "Abre la corrida del día y recorre las etapas de la jornada."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1280, "height": 720 },
+  "slowMo": 260,
+  "captionHoldMs": 750,
+  "endHoldMs": 1800,
+  "steps": [
+    {
+      "action": "goto",
+      "path": "login.php",
+      "caption": { "en": "Sign in as staff", "es": "Entra como personal" }
+    },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{ADMIN_CODE}}",
+      "delay": 180
+    },
+    { "action": "waitForURL", "includes": "index.php" },
+    {
+      "action": "goto",
+      "path": "daily_run.php?date={{DATE}}",
+      "caption": {
+        "en": "Open Daily Run — the operating checklist for one date",
+        "es": "Abre la corrida del día: la lista de la jornada"
+      }
+    },
+    { "action": "waitForSelector", "selector": ".dr-stage-list" },
+    {
+      "action": "scroll",
+      "selector": ".dr-stage-list",
+      "caption": {
+        "en": "Each stage shows what must happen next",
+        "es": "Cada etapa muestra qué sigue"
+      },
+      "waitAfter": 1400
+    },
+    {
+      "action": "scroll",
+      "selector": ".dr-stage:last-child",
+      "caption": {
+        "en": "Closeout waits until earlier stages can finish",
+        "es": "El cierre espera a que las etapas anteriores terminen"
+      },
+      "waitAfter": 1400
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 function Get-BakeryDeployRootFiles {
     return @(
         '.htaccess',
-        'index.php', 'login.php', 'logout.php', 'baker.php',
+        'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
         'zones.php', 'leads.php', 'pan_dulce_pricing.php',
         'products.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
@@ -17,18 +17,24 @@ function Get-BakeryDeployRootFiles {
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
         'upload_driver_photo.php',
         'generate_invoice.php', 'oauth_callback.php',
-        'driver_pages_probe.php', 'health_driver.php', 'health_deploy.php', 'trace_driver_list.php', 'ping.php'
+        'sfb_dashboard.php', 'sfb_starters.php', 'sfb_ingredients.php', 'sfb_formulas.php',
+        'sfb_batches.php', 'sfb_batch.php', 'sfb_resources.php', 'sfb_community.php',
+        'sfb_community_topic.php', 'sfb_shared_batch.php',
+        'sfb_admin_overview.php', 'sfb_admin_batch.php', 'sfb_admin_impersonate.php',
+        'sfb_admin_studio.php', 'sfb_admin_studio_baker.php',
+        'agent_homebase.php'
     )
 }
 
 function Get-BakeryDeployDirectories {
-    return @('includes', 'css', 'assets')
+    return @('includes', 'css', 'assets', 'lang')
 }
 
 function Get-BakeryDeployOptionalPaths {
     return @(
         @{ Path = 'vendor\phpmailer'; Required = $false },
-        @{ Path = 'uploads\driver_photos'; Required = $false; Files = @('.htaccess') }
+        @{ Path = 'uploads\driver_photos'; Required = $false; Files = @('.htaccess') },
+        @{ Path = 'uploads\product_photos\catalog'; Required = $false }
     )
 }
 
@@ -36,9 +42,11 @@ function Get-BakeryDeployExcludeNamePatterns {
     return @(
         '*_backup.php', '*backup.php', '*_fixed.php', '*_optimized.php', '*_working.php',
         '*Copy*.php', 'debug*.php', 'simple-debug.php', 'simple_performance_test.php',
-        'health_local.php', 'health_prod.php',
+        'health_local.php', 'health_prod.php', 'health_driver.php', 'health_deploy.php',
+        'driver_pages_probe.php', 'trace_driver_list.php', 'ping.php',
         'run_sql_setup.php', 'db_test.php', 'setup_directories.php', 'oauth_setup.php',
-        'auto_push_api.php', 'sourflour.html'
+        'auto_push_api.php', 'sourflour.html',
+        'tmp_*.php', 'tmp_*.js', 'tmp_*.txt'
     )
 }
 
@@ -125,10 +133,14 @@ function Get-BakeryDeployFileFingerprint {
     )
 
     $full = Join-Path $BakeryRoot ($RelativePath -replace '/', '\')
-    if (-not (Test-Path $full)) {
+    if (-not (Test-Path -LiteralPath $full)) {
         return $null
     }
-    $item = Get-Item $full
+    try {
+        $item = Get-Item -LiteralPath $full -ErrorAction Stop
+    } catch {
+        return $null
+    }
     return @{
         path = ($RelativePath -replace '\\', '/')
         size = $item.Length
@@ -144,6 +156,7 @@ function Get-BakeryDeploySnapshot {
 
     $snapshot = @{}
     foreach ($rel in (Get-BakeryDeployFileList -BakeryRoot $BakeryRoot -AlsoIncludeRootModifiedAfterUtc $AlsoIncludeRootModifiedAfterUtc)) {
+        if ($snapshot.ContainsKey($rel)) { continue }
         $fp = Get-BakeryDeployFileFingerprint -BakeryRoot $BakeryRoot -RelativePath $rel
         if ($null -ne $fp) {
             $snapshot[$rel] = $fp
@@ -173,8 +186,13 @@ function Get-BakeryPhpExecutable {
 
 function Read-BakeryDeployState {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return $null }
-    return Get-Content $Path -Raw | ConvertFrom-Json
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Host "Warning: could not parse deploy baseline at $Path - $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function ConvertTo-BakeryDeployBaselineMap {

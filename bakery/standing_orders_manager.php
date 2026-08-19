@@ -5,6 +5,8 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/pan_dulce_standards.php';
+require_once 'includes/sfb_origin.php';
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -17,6 +19,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $productId = (int)$_POST['product_id'];
                 $dayOfWeek = (int)$_POST['day_of_week'];
                 $quantity = (int)$_POST['quantity'];
+
+                if (!bakery_sfb_ops_customer_allowed($db, $customerId)) {
+                    throw new RuntimeException('Synthetic SF Bakers cannot have standing orders');
+                }
                 
                 if ($quantity > 0) {
                     $stmt = $db->prepare("
@@ -167,6 +173,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 ]);
                 break;
                 
+            case 'apply_pan_dulce_standard':
+                $customerId = (int)$_POST['customer_id'];
+                $multiplier = isset($_POST['multiplier']) ? (float)$_POST['multiplier'] : 1.0;
+                $dayOfWeek = isset($_POST['day_of_week']) && $_POST['day_of_week'] !== ''
+                    ? (int)$_POST['day_of_week']
+                    : null;
+                $routeDays = $dayOfWeek !== null ? [$dayOfWeek] : null;
+
+                $db->beginTransaction();
+                $result = bakery_apply_pan_dulce_standing_standard($db, $customerId, $multiplier, $routeDays);
+                $db->commit();
+
+                echo json_encode(['success' => true] + $result);
+                break;
+
             case 'copy_orders':
                 $sourceCustomerId = (int)$_POST['source_customer_id'];
                 $targetCustomerId = (int)$_POST['target_customer_id'];
@@ -240,6 +261,7 @@ try {
         FROM customers c
         LEFT JOIN standing_orders so ON c.id = so.customer_id
         LEFT JOIN standing_routes sr ON c.id = sr.customer_id
+        WHERE 1=1 " . bakery_sfb_ops_origin_clause('c', $db) . "
         GROUP BY c.id, c.name, c.address, c.zone
         ORDER BY 
             CASE WHEN c.zone IS NULL OR c.zone = '' THEN 'ZZZ' ELSE c.zone END,
@@ -420,14 +442,36 @@ try {
     exit;
 }
 
-$page_title = 'Standing Orders Manager';
+$page_title = bakery_t('page.standing_orders_manager');
 $days = [
     1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 
     5 => 'Fri', 6 => 'Sat', 7 => 'Sun'
 ];
+$allWeekDays = array_keys($days);
+// Full-week mode restores legacy standing_orders.php behavior: edit any weekday,
+// not only standing_routes days. Default remains route-focused for routed customers.
+$showFullWeek = isset($_GET['full_week']) && (string)$_GET['full_week'] === '1';
+
+/**
+ * Weekdays available for editing for one customer.
+ * No-route customers always get Mon–Sun (legacy parity).
+ *
+ * @param int[] $routeDays
+ * @param int[] $orderDays
+ * @param int[] $allWeekDays
+ * @return int[]
+ */
+$somEditDays = static function (array $routeDays, array $orderDays, array $allWeekDays, $showFullWeek) {
+    if ($showFullWeek || $routeDays === []) {
+        return $allWeekDays;
+    }
+    $days = array_values(array_unique(array_merge($routeDays, $orderDays)));
+    sort($days);
+    return $days !== [] ? $days : $allWeekDays;
+};
 ?>
 
-<div class="som-container">
+<div class="som-container" data-full-week="<?php echo $showFullWeek ? '1' : '0'; ?>">
     <div class="som-header">
         <h1>🗓️ Standing Orders Manager</h1>
         <div class="som-actions">
@@ -442,11 +486,19 @@ $days = [
             <button id="performance-check" class="btn btn-info">⚡ Check Performance</button>
             <button id="diagnostic-routes" class="btn btn-warning">🔍 Check Routes</button>
             <button id="bulk-save" class="btn btn-success" disabled>💾 Save Changes</button>
+            <button id="week-view-toggle" class="btn btn-secondary" title="Show every weekday for every customer, like the classic Standing Orders page">
+                <?php echo $showFullWeek ? '📅 Route Days' : '📅 Full Week'; ?>
+            </button>
             <button id="view-toggle" class="btn btn-secondary">👁️ Compact View</button>
             <button id="filter-toggle" class="btn btn-primary">🔍 Filters</button>
             <button id="changes-toggle" class="btn btn-info">📊 Changes</button>
         </div>
     </div>
+    <?php if ($showFullWeek): ?>
+        <div class="som-week-mode-banner" role="status">
+            Full week editing is on — every customer shows Monday–Sunday, matching the classic Standing Orders page. Route days stay marked for reference.
+        </div>
+    <?php endif; ?>
     
     <!-- Changes Summary Panel -->
     <div id="changes-panel" class="som-changes" style="display: none;">
@@ -473,11 +525,11 @@ $days = [
                         </option>
                     <?php endforeach; ?>
                 </optgroup>
-                <optgroup label="Customers without Routes">
+                <optgroup label="Customers without Routes (full week editable)">
                     <?php foreach ($customersWithoutOrders as $customer): ?>
                         <option value="<?php echo $customer['id']; ?>">
                             <?php echo htmlspecialchars($customer['name']); ?>
-                            (No delivery routes)
+                            (No routes — <?php echo (int)$customer['order_count']; ?> orders)
                         </option>
                     <?php endforeach; ?>
                 </optgroup>
@@ -560,7 +612,7 @@ $days = [
         <div class="coverage-header">
             <div>
                 <h2>Route &amp; Order Coverage</h2>
-                <p>Use the Day filter to find customers who need products added or changed, plus customers ordering without a standing route.</p>
+                <p>Use the Day filter to find customers who need products added or changed. Apply Pan Dulce from the Resolve column to set the standard standing order.</p>
             </div>
             <span id="coverage-day-label" class="coverage-day-label">All days</span>
             <label class="coverage-sort-control">Sort by
@@ -591,6 +643,7 @@ $days = [
                         <th>Status</th>
                         <th>Standing route</th>
                         <th>Orders</th>
+                        <th>Resolve</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -619,6 +672,7 @@ $days = [
                             <td class="coverage-status-cell"><span class="coverage-status">—</span></td>
                             <td class="coverage-route-cell">—</td>
                             <td class="coverage-orders-cell">—</td>
+                            <td class="coverage-actions-cell">—</td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -672,6 +726,7 @@ $days = [
                     <h2>🆕 Customers Without Delivery Routes</h2>
                     <span class="customer-count"><?php echo count($customersWithoutOrders); ?> customers</span>
                 </div>
+                <p class="no-orders-help">These customers have no standing routes yet, but you can still set standing orders for any day of the week — same as the classic Standing Orders page. Add routes later when delivery days are known.</p>
                 
                 <?php 
                 // Group customers without orders by zone
@@ -707,30 +762,36 @@ $days = [
                         <div class="zone-customers" data-zone="no-orders-<?php echo htmlspecialchars($zone); ?>"><?php 
                             // Show customer summary cards that can be expanded
                             foreach ($zoneCustomers as $customer):
-                                $customerActiveDays = $customerRoutes[$customer['id']] ?? [];
+                                $customerRouteDays = $customerRoutes[$customer['id']] ?? [];
+                                $customerOrderDays = array_map('intval', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? []));
+                                // No-route customers always get the full week (legacy Standing Orders parity).
+                                $customerActiveDays = $somEditDays($customerRouteDays, $customerOrderDays, $allWeekDays, true);
                         ?>
-                            <div class="customer-summary-card" data-customer-id="<?php echo $customer['id']; ?>"
+                            <div class="customer-summary-card no-route-customer" data-customer-id="<?php echo $customer['id']; ?>"
                                  data-customer-name="<?php echo htmlspecialchars($customer['name'], ENT_QUOTES, 'UTF-8'); ?>"
-                                 data-route-days="<?php echo htmlspecialchars(implode(',', $customerRoutes[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                                 data-route-days="<?php echo htmlspecialchars(implode(',', $customerRouteDays), ENT_QUOTES, 'UTF-8'); ?>"
                                  data-driver-ids="<?php echo htmlspecialchars(implode(',', $customerDrivers[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
-                                 data-order-days="<?php echo htmlspecialchars(implode(',', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? [])), ENT_QUOTES, 'UTF-8'); ?>">
+                                 data-order-days="<?php echo htmlspecialchars(implode(',', $customerOrderDays), ENT_QUOTES, 'UTF-8'); ?>"
+                                 data-edit-days="<?php echo htmlspecialchars(implode(',', $customerActiveDays), ENT_QUOTES, 'UTF-8'); ?>">
                                 <div class="customer-summary-header" onclick="toggleCustomerDetails(this)">
                                     <div class="customer-summary-info">
-                                        <h4><?php echo htmlspecialchars($customer['name']); ?></h4>
+                                        <h4><a class="customer-hub-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" onclick="event.stopPropagation()"><?php echo htmlspecialchars($customer['name']); ?></a></h4>
                                         <span class="customer-summary-details">
                                             <?php if ($customer['address']): ?>
                                                 📍 <?php echo htmlspecialchars($customer['address']); ?>
                                             <?php endif; ?>
                                             | 📦 <?php echo $customer['order_count']; ?> orders
-                                            <?php if (!empty($customerActiveDays)): ?>
-                                                | 📅 <?php echo implode(', ', array_map(function($d) use ($days) { return $days[$d]; }, $customerActiveDays)); ?>
-                                            <?php else: ?>
-                                                | 📅 No delivery routes
-                                            <?php endif; ?>
+                                            | 📅 No delivery routes — full week editable
                                             <span class="no-orders-badge">📋 Ready for Orders</span>
                                         </span>
                                     </div>
                                     <div class="customer-summary-actions">
+                                        <div class="standard-quantity-actions" onclick="event.stopPropagation()" title="Apply Pan Dulce standard quantities for this customer">
+                                            <span>Pan Dulce:</span>
+                                            <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="1">1×</button>
+                                            <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="1.5">1.5×</button>
+                                            <button type="button" class="btn btn-sm btn-outline apply-standard-btn" data-multiplier="2">2×</button>
+                                        </div>
                                         <button class="btn btn-sm btn-primary copy-all-btn" 
                                                 data-target-customer="<?php echo $customer['id']; ?>"
                                                 data-customer-name="<?php echo htmlspecialchars($customer['name']); ?>"
@@ -743,14 +804,10 @@ $days = [
                                 </div>
                                 
                                 <div class="customer-full-details" style="display: none;">
-                        <?php 
-                        // Only show full details if customer has route days
-                        if (!empty($customerActiveDays)): 
-                        ?>
                                     <div class="days-header">
                                         <div class="product-column">Product</div>
                                         <?php foreach ($customerActiveDays as $dayNum): ?>
-                                            <div class="day-column" data-day="<?php echo $dayNum; ?>">
+                                            <div class="day-column is-non-route-day" data-day="<?php echo $dayNum; ?>" data-is-route-day="0">
                                                 <?php echo $days[$dayNum]; ?>
                                                 <button class="day-copy-btn" 
                                                         data-target-customer="<?php echo $customer['id']; ?>"
@@ -831,7 +888,7 @@ $days = [
                                                                 $customerTotal += $quantity;
                                                             }
                                                         ?>
-                                                            <div class="quantity-cell" data-day="<?php echo $dayNum; ?>">
+                                                            <div class="quantity-cell is-non-route-day" data-day="<?php echo $dayNum; ?>" data-is-route-day="0">
                                                                 <input type="number" 
                                                                        class="quantity-input" 
                                                                        value="<?php echo $quantity; ?>"
@@ -865,11 +922,6 @@ $days = [
                                                             </div>
                                                         </div>
                                                     <?php endforeach; ?>
-                        <?php else: ?>
-                                    <div class="no-routes-message">
-                                        <p>⚠️ This customer has no delivery routes set up. Please configure delivery routes first to manage standing orders.</p>
-                                    </div>
-                        <?php endif; ?>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -922,26 +974,34 @@ $days = [
                 <div class="zone-customers" data-zone="with-orders-<?php echo htmlspecialchars($zone); ?>">
                 
                 <?php foreach ($zoneCustomers as $customer): 
-                    $customerActiveDays = $customerRoutes[$customer['id']] ?? [];
-                    if (empty($customerActiveDays)) continue; // Skip customers with no route days
+                    $customerRouteDays = $customerRoutes[$customer['id']] ?? [];
+                    if (empty($customerRouteDays)) continue; // Skip customers with no route days
+                    $customerOrderDays = array_map('intval', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? []));
+                    $customerActiveDays = $somEditDays($customerRouteDays, $customerOrderDays, $allWeekDays, $showFullWeek);
                 ?>
-                    <div class="customer-section" 
+                    <div class="customer-section has-route-customer" 
                          data-customer-id="<?php echo $customer['id']; ?>"
                          data-customer-name="<?php echo htmlspecialchars($customer['name']); ?>"
                          data-zone="<?php echo htmlspecialchars($zone); ?>"
-                         data-route-days="<?php echo htmlspecialchars(implode(',', $customerRoutes[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                         data-route-days="<?php echo htmlspecialchars(implode(',', $customerRouteDays), ENT_QUOTES, 'UTF-8'); ?>"
                          data-driver-ids="<?php echo htmlspecialchars(implode(',', $customerDrivers[$customer['id']] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
-                         data-order-days="<?php echo htmlspecialchars(implode(',', array_keys($customerDaySummary[$customer['id']]['order_days'] ?? [])), ENT_QUOTES, 'UTF-8'); ?>">
+                         data-order-days="<?php echo htmlspecialchars(implode(',', $customerOrderDays), ENT_QUOTES, 'UTF-8'); ?>"
+                         data-edit-days="<?php echo htmlspecialchars(implode(',', $customerActiveDays), ENT_QUOTES, 'UTF-8'); ?>">
                         
                         <div class="customer-header">
                             <div class="customer-info">
-                                <h3><?php echo htmlspecialchars($customer['name']); ?></h3>
+                                <h3><a class="customer-hub-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" onclick="event.stopPropagation()"><?php echo htmlspecialchars($customer['name']); ?></a></h3>
                                 <span class="customer-details">
                                     <?php if ($customer['address']): ?>
                                         📍 <?php echo htmlspecialchars($customer['address']); ?>
                                     <?php endif; ?>
                                     | 📦 <?php echo $customer['order_count']; ?> orders
-                                    | 📅 <?php echo implode(', ', array_map(function($d) use ($days) { return $days[$d]; }, $customerActiveDays)); ?>
+                                    | 📅 Route: <?php echo implode(', ', array_map(function($d) use ($days) { return $days[$d]; }, $customerRouteDays)); ?>
+                                    <?php if ($showFullWeek): ?>
+                                        | Editing: Full week
+                                    <?php elseif (array_diff($customerActiveDays, $customerRouteDays)): ?>
+                                        | + order days without route
+                                    <?php endif; ?>
                                 </span>
                             </div>
                             <div class="standard-quantity-actions" onclick="event.stopPropagation()" title="Apply Pan Dulce standard quantities for this customer">
@@ -958,9 +1018,11 @@ $days = [
                         <div class="customer-orders" data-customer-id="<?php echo $customer['id']; ?>">
                             <div class="days-header">
                                 <div class="product-column">Product</div>
-                                <?php foreach ($customerActiveDays as $dayNum): ?>
-                                    <div class="day-column" data-day="<?php echo $dayNum; ?>">
-                                        <?php echo $days[$dayNum]; ?>
+                                <?php foreach ($customerActiveDays as $dayNum): 
+                                    $isRouteDay = in_array($dayNum, $customerRouteDays, true);
+                                ?>
+                                    <div class="day-column <?php echo $isRouteDay ? 'is-route-day' : 'is-non-route-day'; ?>" data-day="<?php echo $dayNum; ?>" data-is-route-day="<?php echo $isRouteDay ? '1' : '0'; ?>" title="<?php echo $isRouteDay ? 'Route day' : 'No standing route on this day'; ?>">
+                                        <?php echo $days[$dayNum]; ?><?php echo $isRouteDay ? '' : ' *'; ?>
                                         <button class="day-copy-btn" 
                                                 data-target-customer="<?php echo $customer['id']; ?>"
                                                 data-target-day="<?php echo $dayNum; ?>"
@@ -1037,12 +1099,13 @@ $days = [
                                                             $customerTotal = 0;
                                                             foreach ($customerActiveDays as $dayNum): 
                                                                 $quantity = 0;
+                                                                $isRouteDay = in_array($dayNum, $customerRouteDays, true);
                                                                 if (isset($existingOrders[$customer['id']][$product['id']][$dayNum])) {
                                                                     $quantity = $existingOrders[$customer['id']][$product['id']][$dayNum]['quantity'];
                                                                     $customerTotal += $quantity;
                                                                 }
                                                             ?>
-                                                                <div class="quantity-cell" data-day="<?php echo $dayNum; ?>">
+                                                                <div class="quantity-cell <?php echo $isRouteDay ? 'is-route-day' : 'is-non-route-day'; ?>" data-day="<?php echo $dayNum; ?>" data-is-route-day="<?php echo $isRouteDay ? '1' : '0'; ?>">
                                                                     <input type="number" 
                                                                            class="quantity-input" 
                                                                            value="<?php echo $quantity; ?>"
@@ -1372,6 +1435,8 @@ $days = [
 .coverage-status.no-route-orders { color: #9c1c28; background: #f9d7da; }
 .coverage-status.no-route-empty { color: #59636d; background: #e9ecef; }
 .coverage-row.coverage-highlight { background: #fffaf0; }
+.coverage-actions-cell { white-space: nowrap; }
+.coverage-resolve-btn { font-size: .78rem; padding: 4px 10px; }
 
 @media (max-width: 800px) {
     .quick-standing-order-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1457,6 +1522,17 @@ $days = [
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
+}
+
+.customer-header .customer-hub-link,
+.customer-summary-info .customer-hub-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.customer-header .customer-hub-link:hover,
+.customer-summary-info .customer-hub-link:hover {
+    text-decoration: underline;
 }
 
 .customer-info h2 {
@@ -2389,6 +2465,33 @@ $days = [
     border-top: 1px solid #e9ecef;
 }
 
+.som-week-mode-banner {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #e8f4ff;
+    border: 1px solid #b6d4fe;
+    color: #084298;
+    font-size: 0.92rem;
+}
+
+.no-orders-help {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border-left: 4px solid #17a2b8;
+    color: #495057;
+    font-size: 0.9rem;
+}
+
+.day-column.is-route-day {
+    box-shadow: inset 0 -3px 0 #28a745;
+}
+
+.day-column.is-non-route-day {
+    color: #6c757d;
+}
+
 .no-routes-message {
     text-align: center;
     padding: 30px;
@@ -2707,7 +2810,8 @@ $days = [
     
     function updateCustomerOrdersUI(customerId, orders) {
         // Update quantity inputs with loaded order data
-        const customerSection = document.querySelector(`.customer-section[data-customer-id="${customerId}"]`);
+        const customerSection = document.querySelector(`.customer-section[data-customer-id="${customerId}"], .customer-summary-card[data-customer-id="${customerId}"]`);
+        if (!customerSection) return;
         const inputs = customerSection.querySelectorAll('.quantity-input');
         
         inputs.forEach(input => {
@@ -3110,8 +3214,47 @@ $days = [
         });
     }
     
+    const FILTER_STORAGE_KEY = 'preserveStandingOrdersManagerFilters';
+
+    function persistFilters() {
+        const payload = {
+            customer: customerFilter ? customerFilter.value : '',
+            drivers: driverFilter ? Array.from(driverFilter.selectedOptions).map(option => option.value) : [],
+            productLine: productLineFilter ? productLineFilter.value : '',
+            day: dayFilter ? dayFilter.value : '',
+        };
+        try {
+            localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            // Ignore quota / private-mode failures; filters still work for the session.
+        }
+    }
+
+    function restoreFiltersFromStorage() {
+        try {
+            const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+            if (!raw) return false;
+            const payload = JSON.parse(raw);
+            if (!payload || typeof payload !== 'object') return false;
+            if (customerFilter && payload.customer) customerFilter.value = payload.customer;
+            if (productLineFilter && payload.productLine) productLineFilter.value = payload.productLine;
+            if (dayFilter && payload.day) dayFilter.value = payload.day;
+            if (driverFilter && Array.isArray(payload.drivers)) {
+                Array.from(driverFilter.options).forEach(option => {
+                    option.selected = payload.drivers.includes(option.value);
+                });
+            }
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
     [customerFilter, driverFilter, productLineFilter, dayFilter].forEach(filter => {
-        filter.addEventListener('change', applyFilters);
+        filter.addEventListener('change', function () {
+            applyFilters();
+            persistFilters();
+        });
     });
     if (dayFilter && quickStandingOrderForm) {
         dayFilter.addEventListener('change', function () {
@@ -3126,6 +3269,27 @@ $days = [
         productLineFilter.value = '';
         dayFilter.value = '';
         applyFilters();
+        persistFilters();
+    });
+
+    document.getElementById('week-view-toggle')?.addEventListener('click', function () {
+        if (typeof changedInputs !== 'undefined' && changedInputs.size > 0) {
+            const proceed = window.confirm(
+                'You have unsaved quantity changes. Switching week view reloads the page and will discard them. Continue?'
+            );
+            if (!proceed) return;
+        }
+        const url = new URL(window.location.href);
+        const enablingFullWeek = url.searchParams.get('full_week') !== '1';
+        if (enablingFullWeek) {
+            url.searchParams.set('full_week', '1');
+            try { localStorage.setItem('somFullWeek', '1'); } catch (error) {}
+        } else {
+            url.searchParams.delete('full_week');
+            try { localStorage.setItem('somFullWeek', '0'); } catch (error) {}
+        }
+        persistFilters();
+        window.location.href = url.toString();
     });
 
     const dayLabels = {1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'};
@@ -3146,16 +3310,32 @@ $days = [
             event.preventDefault();
             event.stopPropagation();
 
-            const customerSection = button.closest('.customer-section');
+            const customerSection = button.closest('.customer-section, .customer-summary-card');
             if (!customerSection) return;
+
+            // Expand collapsed no-route cards so inputs exist in an open panel.
+            const details = customerSection.querySelector('.customer-full-details');
+            if (details && details.style.display === 'none') {
+                details.style.display = 'block';
+                const toggle = customerSection.querySelector('.expand-toggle');
+                if (toggle) toggle.textContent = '▲';
+            }
 
             const multiplier = Number(button.dataset.multiplier || 1);
             const rows = customerSection.querySelectorAll('.product-row[data-standard-enabled="1"]');
+            const routeDays = parseDayList(customerSection.dataset.routeDays);
+            const fullWeek = document.querySelector('.som-container')?.dataset.fullWeek === '1'
+                || customerSection.classList.contains('no-route-customer');
             let updated = 0;
             rows.forEach(function (row) {
                 const standard = Number(row.dataset.standardQuantity || 0);
                 const quantity = Math.round(standard * multiplier);
                 row.querySelectorAll('.quantity-input').forEach(function (input) {
+                    const day = Number(input.dataset.day);
+                    // Route-focused mode: only fill route days. Full week / no-route: fill visible edit days.
+                    if (!fullWeek && routeDays.length && !routeDays.includes(day)) {
+                        return;
+                    }
                     input.value = quantity;
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     updated++;
@@ -3226,8 +3406,10 @@ $days = [
             const status = row.querySelector('.coverage-status');
             const routeCell = row.querySelector('.coverage-route-cell');
             const ordersCell = row.querySelector('.coverage-orders-cell');
+            const actionsCell = row.querySelector('.coverage-actions-cell');
             status.className = 'coverage-status';
             row.classList.remove('coverage-highlight');
+            if (actionsCell) actionsCell.textContent = '—';
 
             if (hasRoute && hasOrders) {
                 counts.routeOrders++;
@@ -3240,6 +3422,18 @@ $days = [
                 status.classList.add('route-empty');
                 status.textContent = 'Route — add products';
                 row.classList.add('coverage-highlight');
+                if (actionsCell) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-sm btn-primary coverage-resolve-btn';
+                    btn.textContent = 'Apply Pan Dulce';
+                    btn.title = 'Set standard Pan Dulce standing order for this customer'
+                        + (selectedDay ? (' on ' + dayLabels[selectedDay]) : ' on all route days');
+                    btn.dataset.customerId = row.dataset.customerId;
+                    if (selectedDay) btn.dataset.dayOfWeek = String(selectedDay);
+                    actionsCell.textContent = '';
+                    actionsCell.appendChild(btn);
+                }
             } else if (hasOrders) {
                 counts.noRouteOrders++;
                 row.dataset.coverageStatus = 'no-route-orders';
@@ -3286,6 +3480,7 @@ $days = [
         const driverValues = Array.from(driverFilter.selectedOptions).map(option => option.value);
         const productLineValue = productLineFilter.value;
         const dayValue = dayFilter.value;
+        const fullWeek = document.querySelector('.som-container')?.dataset.fullWeek === '1';
         
         // Filter customer sections
         document.querySelectorAll('.customer-section, .customer-summary-card').forEach(section => {
@@ -3293,15 +3488,20 @@ $days = [
             const routeDays = parseDayList(section.dataset.routeDays);
             const driverIds = parseNumberList(section.dataset.driverIds);
             const orderDays = parseDayList(section.dataset.orderDays);
+            const editDays = parseDayList(section.dataset.editDays);
             const driverMatches = !driverValues.length || driverValues.some(driverId => driverIds.includes(Number(driverId)));
             let showCustomer = (!customerValue || customerId === customerValue) && driverMatches;
             if (showCustomer && dayValue) {
                 const selectedDay = Number(dayValue);
-                // Route customers need the selected route day; no-route cards remain
-                // visible when they have an order on that day so the mismatch is actionable.
-                showCustomer = section.classList.contains('customer-section')
-                    ? routeDays.includes(selectedDay)
-                    : (routeDays.includes(selectedDay) || orderDays.includes(selectedDay));
+                // No-route / full-week customers can edit any day. Otherwise show if the
+                // selected day is a route day, an existing order day, or an edit column.
+                if (!routeDays.length || fullWeek || section.classList.contains('no-route-customer')) {
+                    showCustomer = editDays.length ? editDays.includes(selectedDay) : true;
+                } else {
+                    showCustomer = routeDays.includes(selectedDay)
+                        || orderDays.includes(selectedDay)
+                        || editDays.includes(selectedDay);
+                }
             }
             section.style.display = showCustomer ? 'block' : 'none';
         });
@@ -3339,8 +3539,102 @@ $days = [
     });
     if (coverageStatusSort) coverageStatusSort.addEventListener('change', sortCoverageRows);
 
-    // Render the coverage table in its useful default state on first load.
-    applyFilters();
+    document.getElementById('day-coverage-table')?.addEventListener('click', async function (event) {
+        const button = event.target.closest('.coverage-resolve-btn');
+        if (!button || button.disabled) return;
+        event.preventDefault();
+
+        const customerId = button.dataset.customerId;
+        const dayOfWeek = button.dataset.dayOfWeek || '';
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Applying…';
+
+        try {
+            const body = new URLSearchParams({
+                action: 'apply_pan_dulce_standard',
+                customer_id: customerId,
+                multiplier: '1',
+            });
+            if (dayOfWeek) body.append('day_of_week', dayOfWeek);
+
+            const response = await fetch('standing_orders_manager.php', {
+                method: 'POST',
+                body: body.toString(),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Could not apply Pan Dulce standard');
+            }
+
+            showNotification(
+                'Applied standard Pan Dulce order (' + data.products + ' products, '
+                    + data.days.length + ' day' + (data.days.length === 1 ? '' : 's') + ').',
+                'success'
+            );
+            setTimeout(function () { window.location.reload(); }, 400);
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = originalText;
+            showNotification(error.message, 'error');
+        }
+    });
+
+    // Restore filters / full-week preference, then apply. Deep-link customer_id wins.
+    (function initStandingOrdersViewState() {
+        const params = new URLSearchParams(window.location.search);
+        const customerId = params.get('customer_id');
+        const hasFullWeekParam = params.has('full_week');
+
+        // Remember full-week preference across visits (legacy parity with classic page).
+        if (!hasFullWeekParam) {
+            try {
+                if (localStorage.getItem('somFullWeek') === '1') {
+                    params.set('full_week', '1');
+                    const next = window.location.pathname + '?' + params.toString() + window.location.hash;
+                    window.location.replace(next);
+                    return;
+                }
+            } catch (error) {}
+        }
+
+        let restored = false;
+        if (!customerId) {
+            restored = restoreFiltersFromStorage();
+        }
+
+        if (customerId && customerFilter) {
+            const option = Array.from(customerFilter.options).find(function (opt) {
+                return opt.value === String(customerId);
+            });
+            if (option) {
+                customerFilter.value = String(customerId);
+                const panel = document.getElementById('filters-panel');
+                if (panel) panel.style.display = 'flex';
+            }
+        } else if (restored) {
+            const panel = document.getElementById('filters-panel');
+            if (panel && (customerFilter.value || dayFilter.value || productLineFilter.value
+                || (driverFilter && Array.from(driverFilter.selectedOptions).length))) {
+                panel.style.display = 'flex';
+            }
+        }
+
+        applyFilters();
+
+        if (customerId) {
+            const section = document.querySelector(
+                '.customer-section[data-customer-id="' + customerId + '"], .customer-summary-card[data-customer-id="' + customerId + '"]'
+            );
+            if (section) {
+                section.classList.remove('collapsed');
+                const details = section.querySelector('.customer-full-details');
+                if (details) details.style.display = 'block';
+                section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+        }
+    })();
     
     // Notification system
     function showNotification(message, type = 'info') {
@@ -3393,8 +3687,8 @@ $days = [
             let html = '';
             changedInputs.forEach(input => {
                 const productRow = input.closest('.product-row');
-                const customerSection = input.closest('.customer-section');
-                const customerName = customerSection.dataset.customerName;
+                const customerSection = input.closest('.customer-section, .customer-summary-card');
+                const customerName = customerSection ? customerSection.dataset.customerName : 'Customer';
                 const productName = productRow.querySelector('.product-name').textContent;
                 const dayName = input.dataset.day;
                 const dayNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

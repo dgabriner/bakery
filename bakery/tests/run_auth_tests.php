@@ -11,8 +11,9 @@ if (PHP_SAPI !== 'cli') {
 ob_start();
 
 $root = dirname(__DIR__);
+require_once $root . '/tests/isolate_test_db.php';
 
-exec('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset', $setupOut, $setupCode);
+exec('"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php') . ' --reset --force-reset --database=bakerysf_test', $setupOut, $setupCode);
 if ($setupCode !== 0) {
     fwrite(STDERR, "setup_local_db failed\n" . implode("\n", $setupOut) . "\n");
     exit(1);
@@ -26,6 +27,7 @@ if ($seedCode !== 0) {
 define('ACCESS_ALLOWED', true);
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
+require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/auth.php';
 
 if (!IS_LOCAL) {
@@ -34,6 +36,7 @@ if (!IS_LOCAL) {
 }
 
 $db = check_mysql_connection();
+bakery_assert_local_test_target($db);
 $pass = 0;
 $fail = 0;
 
@@ -63,6 +66,10 @@ t_assert(bakery_login($db, '9001') === true, 'admin login succeeds');
 $user = bakery_current_user();
 t_assert($user && $user['role_slug'] === 'administrator', 'session has administrator role');
 t_assert(!empty($_SESSION['csrf_token']), 'csrf token set after login');
+t_assert(BAKERY_SESSION_IDLE_SECONDS >= 30 * 24 * 60 * 60, 'staff session allows a 30-day operational idle window');
+t_assert(BAKERY_SESSION_ABSOLUTE_SECONDS >= 90 * 24 * 60 * 60, 'staff session has a 90-day maximum lifetime');
+t_assert(BAKERY_DRIVER_SESSION_IDLE_SECONDS >= 60 * 24 * 60 * 60, 'driver session allows a 60-day operational idle window');
+t_assert(BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS >= 180 * 24 * 60 * 60, 'driver session has a 180-day maximum lifetime');
 
 bakery_logout();
 auth_test_reset_session();
@@ -77,6 +84,48 @@ t_assert(bakery_user_has_role(['driver']), 'driver has driver role');
 t_assert(!bakery_user_has_role(['administrator', 'manager']), 'driver is not manager/admin');
 t_assert(bakery_user_has_permission($db, 'delivery.execute'), 'driver has delivery.execute');
 t_assert(!bakery_user_has_permission($db, 'admin.access'), 'driver lacks admin.access');
+$_SESSION['auth_login_at'] = time() - BAKERY_SESSION_ABSOLUTE_SECONDS - 10;
+$_SESSION['auth_last_activity'] = time() - BAKERY_SESSION_IDLE_SECONDS - 10;
+bakery_touch_session();
+t_assert(bakery_current_user() !== null, 'driver route session remains valid through a full workday');
+
+echo "=== Driver Assistant pairing ===\n";
+$assistantCreated = bakery_upsert_code_user($db, [
+    'email' => 'juan.assistant@local.test',
+    'display_name' => 'Juan',
+    'role' => 'driver_assistant',
+    'code' => '2937',
+    'driver_id' => 1,
+]);
+t_assert($assistantCreated, 'Driver Assistant user can be created with a route driver');
+$assistantStmt = $db->prepare(
+    "SELECT u.id, u.driver_id, r.slug AS role_slug
+     FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?"
+);
+$assistantStmt->execute(['juan.assistant@local.test']);
+$assistant = $assistantStmt->fetch(PDO::FETCH_ASSOC);
+t_assert(($assistant['role_slug'] ?? '') === 'driver_assistant', 'Juan has the Driver Assistant role');
+t_assert(
+    bakery_route_worker_driver_id($db, $assistant ?: null, '2099-08-17') === 1,
+    'assistant defaults to the linked driver route'
+);
+$db->prepare(
+    'INSERT INTO driver_assistant_assignments (assistant_user_id, driver_id, delivery_date)
+     VALUES (?, 2, ?)'
+)->execute([(int)$assistant['id'], '2099-08-17']);
+t_assert(
+    bakery_route_worker_driver_id($db, $assistant ?: null, '2099-08-17') === 2,
+    'dated pairing overrides the default driver only for that day'
+);
+bakery_logout();
+auth_test_reset_session();
+t_assert(bakery_login($db, '2937') === true, 'Driver Assistant code login succeeds');
+t_assert(bakery_user_has_role(['driver_assistant']), 'assistant session has Driver Assistant role');
+t_assert(bakery_user_has_permission($db, 'delivery.execute'), 'assistant has delivery.execute');
+$_SESSION['auth_login_at'] = time() - BAKERY_SESSION_ABSOLUTE_SECONDS - 10;
+$_SESSION['auth_last_activity'] = time() - BAKERY_SESSION_IDLE_SECONDS - 10;
+bakery_touch_session();
+t_assert(bakery_current_user() !== null, 'assistant route session remains valid through a full workday');
 
 bakery_logout();
 auth_test_reset_session();
@@ -105,12 +154,16 @@ bakery_touch_session();
 t_assert(empty($_SESSION['user_id']), 'idle timeout clears auth session');
 
 echo "=== Public / protected script lists ===\n";
+t_assert(in_array('guias.php', bakery_public_scripts(), true), 'driver guides page is public');
 t_assert(in_array('login.php', bakery_public_scripts(), true), 'login is public');
-t_assert(in_array('baker.php', bakery_public_scripts(), true), 'baker.php is public');
+t_assert(in_array('customer_qr_login.php', bakery_public_scripts(), true), 'customer QR entry is public');
+t_assert(!in_array('baker.php', bakery_public_scripts(), true), 'baker.php is not public');
 t_assert(in_array('test.php', bakery_diagnostic_scripts(), true), 'test.php is diagnostic');
 t_assert(in_array('complete_delivery.php', bakery_driver_scripts(), true), 'complete_delivery is driver-accessible');
+t_assert(in_array('driver_session_ping.php', bakery_driver_scripts(), true), 'driver session ping is driver-accessible');
 t_assert(in_array('upload_driver_photo.php', bakery_driver_scripts(), true), 'upload_driver_photo is driver-accessible');
 t_assert(in_array('get_driver_orders.php', bakery_driver_scripts(), true), 'get_driver_orders is driver-accessible');
+t_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 'customer QR generator is driver-accessible');
 t_assert(in_array('production.php', bakery_baker_scripts(), true), 'production is baker-accessible');
 t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');
 t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not baker-accessible');
@@ -119,13 +172,15 @@ t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'prod
 echo "=== Baker role ===\n";
 bakery_logout();
 auth_test_reset_session();
-t_assert(bakery_ensure_baker_user($db) === true, 'ensure baker user succeeds');
-t_assert(bakery_login($db, BAKERY_BAKER_CODE) === true, 'baker login succeeds');
+ t_assert(bakery_ensure_baker_user($db) === false, 'baker account is not auto-provisioned without local env credentials');
+$_SESSION['user_id'] = 1;
+$_SESSION['user_email'] = 'baker-regression@example.test';
+$_SESSION['user_display_name'] = 'Baker Regression';
+$_SESSION['user_role_slug'] = 'baker';
 $bakerUser = bakery_current_user();
-t_assert($bakerUser && $bakerUser['role_slug'] === 'baker', 'session has baker role');
-t_assert($bakerUser && $bakerUser['display_name'] === BAKERY_BAKER_DISPLAY_NAME, 'baker display name is Juan Carlos Hernandez');
+t_assert($bakerUser && $bakerUser['role_slug'] === 'baker', 'baker role remains representable after secure seeding change');
 t_assert(bakery_user_has_permission($db, 'ops.manage'), 'baker has ops.manage');
-t_assert(!bakery_user_has_permission($db, 'admin.access'), 'baker lacks admin.access');
+t_assert(($bakerUser['role_slug'] ?? '') !== 'administrator', 'baker session is not administrator');
 
 function auth_test_http_request($method, $url, $options = []) {
     $headers = $options['headers'] ?? [];
@@ -284,13 +339,30 @@ try {
         );
         t_assert(strpos(auth_test_status_line($noCsrfPost['headers']), '403') !== false, 'authenticated POST without CSRF returns 403');
 
-        $driverListPage = auth_test_http_request(
+        $driverWorkspacePage = auth_test_http_request(
             'GET',
-            'http://127.0.0.1:8091/driver_list.php?driver_id=1&date=2026-08-03',
+            'http://127.0.0.1:8091/driver.php?driver_id=1&date=2026-08-03',
             ['cookie' => $cookieJar]
         );
-        $csrf = auth_test_extract_csrf($driverListPage['body']);
-        t_assert($csrf !== '', 'driver_list page exposes csrf token when logged in');
+        $csrf = auth_test_extract_csrf($driverWorkspacePage['body']);
+        t_assert($csrf !== '', 'driver workspace exposes csrf token when logged in');
+
+        $driverPing = auth_test_http_request(
+            'GET',
+            'http://127.0.0.1:8091/driver_session_ping.php',
+            ['cookie' => $cookieJar]
+        );
+        $driverPingPayload = json_decode($driverPing['body'], true);
+        t_assert(strpos(auth_test_status_line($driverPing['headers']), '200') !== false, 'driver session ping returns 200');
+        t_assert(is_array($driverPingPayload) && ($driverPingPayload['success'] ?? null) === true, 'driver session ping confirms authenticated route');
+        t_assert(
+            is_array($driverPingPayload) && !empty($driverPingPayload['csrf_token']),
+            'driver session ping returns a fresh CSRF token'
+        );
+        t_assert(
+            is_array($driverPingPayload) && hash_equals($csrf, (string)($driverPingPayload['csrf_token'] ?? '')),
+            'driver session ping CSRF matches the authenticated route session'
+        );
 
         $authedPost = auth_test_http_request(
             'POST',

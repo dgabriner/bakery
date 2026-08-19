@@ -8,6 +8,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/photo_handler.php';
+require_once __DIR__ . '/includes/driver_assignments.php';
 
 header('Content-Type: application/json');
 error_reporting(0);
@@ -66,6 +67,7 @@ function bakery_require_photo_ids() {
 
 function bakery_list_driver_photos(PDO $db, PhotoHandler $photoHandler) {
     list($driverId, $customerId, $date) = bakery_require_photo_ids();
+    bakery_assert_driver_identity($db, $driverId, $date);
     $rows = $photoHandler->getPhotos($db, $driverId, $date, $customerId);
     $photos = $photoHandler->formatPhotosForClient($rows);
     return [
@@ -81,6 +83,13 @@ function bakery_delete_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     if ($driverId <= 0 || $photoId <= 0) {
         throw new Exception('driver_id and photo_id are required');
     }
+    $photoDate = $db->prepare('SELECT delivery_date FROM driver_photos WHERE id = ? AND driver_id = ? LIMIT 1');
+    $photoDate->execute([$photoId, $driverId]);
+    $deliveryDate = (string)$photoDate->fetchColumn();
+    if ($deliveryDate === '') {
+        throw new Exception('Photo not found');
+    }
+    bakery_assert_driver_identity($db, $driverId, $deliveryDate);
 
     $result = $photoHandler->deletePhoto($db, $photoId, $driverId);
     if (empty($result['success'])) {
@@ -107,10 +116,10 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     if ($driverId <= 0 || $customerId <= 0 || $dailyOrderId <= 0) {
         throw new Exception('driver_id, customer_id, and daily_order_id are required');
     }
-
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         throw new Exception('Invalid date format');
     }
+    bakery_assert_driver_identity($db, $driverId, $date);
 
     $allowedTypes = ['Before', 'After', 'Receipt'];
     if (!in_array($photoType, $allowedTypes, true)) {

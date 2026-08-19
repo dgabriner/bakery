@@ -3,9 +3,13 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/operational_exceptions.php';
 
 $selectedDate = $_GET['date'] ?? $_POST['delivery_date'] ?? date('Y-m-d', strtotime('+1 day'));
 try { $selectedDate = bakery_inventory_validate_date((string)$selectedDate); } catch (Throwable $e) { $selectedDate = date('Y-m-d', strtotime('+1 day')); }
+$attentionShortfall = (string)($_GET['attention'] ?? '') === 'shortfall';
+$returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
+$attentionLabel = $attentionShortfall ? 'Showing products with finished-goods shortfall' : '';
 $notice = '';
 $error = '';
 
@@ -22,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'set_c
     }
 }
 
-$page_title = 'Finished Goods Inventory';
+$page_title = bakery_t('page.inventory');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
@@ -49,6 +53,7 @@ if (bakery_inventory_ready($db)) {
 }
 ?>
 <main class="inventory-page container">
+    <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <div class="inventory-heading">
         <div><h1>Finished Goods Inventory</h1><p>Set what is available for a delivery day, then load drivers against it.</p></div>
         <a class="btn btn-primary" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>">Assign driver pickups</a>
@@ -65,7 +70,10 @@ if (bakery_inventory_ready($db)) {
         <tbody>
         <?php foreach ($products as $product):
             $stock = (int)$product['available_quantity'] + (int)$product['loaded_quantity'];
-            $gap = max(0, (int)$product['ordered_quantity'] - $stock); ?>
+            $gap = max(0, (int)$product['ordered_quantity'] - $stock);
+            if ($attentionShortfall && $gap === 0) {
+                continue;
+            } ?>
             <tr>
                 <td><strong><?php echo htmlspecialchars($product['name']); ?></strong></td>
                 <td><?php echo number_format($product['ordered_quantity']); ?></td>
