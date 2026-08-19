@@ -11,6 +11,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/dashboard_command_center.php';
+require_once 'includes/daily_order_generation.php';
 require_once 'includes/demand_confirmation.php';
 require_once 'includes/operational_exceptions.php';
 
@@ -43,6 +44,11 @@ $tomorrowDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 $tomorrowReadiness = null;
 
 try {
+    try {
+        bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => !$isBaker]);
+    } catch (Throwable $horizonEx) {
+        error_log('dashboard demand horizon: ' . $horizonEx->getMessage());
+    }
     if ($isBaker) {
         // Baker dashboard needs no ops metrics.
     } else {
@@ -204,6 +210,8 @@ require_once 'includes/nav.php';
                     <?php endforeach; ?>
                 </ol>
             </section>
+
+            <?php bakery_render_demand_cadence_strip($db, $today, 'dashboard'); ?>
 
             <?php if ($tomorrowReadiness !== null && $tomorrowReadiness['state'] !== 'unavailable'): ?>
                 <?php

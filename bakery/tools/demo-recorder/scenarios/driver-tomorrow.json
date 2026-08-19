@@ -2,8 +2,8 @@
   "id": "driver-tomorrow",
   "title": { "en": "Tomorrow's route", "es": "La ruta de mañana" },
   "description": {
-    "en": "From a day with stops, tap the next-day arrow to see the following day.",
-    "es": "Desde un día con paradas, toca SIG para ver el día siguiente."
+    "en": "Open tomorrow and review, add, or remove stops before the route begins.",
+    "es": "Abre mañana y revisa, agrega o quita paradas antes de que empiece la ruta."
   },
   "prepare": "driver-login",
   "viewport": { "width": 390, "height": 844 },
@@ -21,27 +21,27 @@
       "delay": 200
     },
     { "action": "waitForURL", "includes": "driver.php" },
-    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state, .route-prep-tomorrow-cta" },
     {
       "action": "goto",
       "path": "driver.php?date={{TODAY}}",
       "caption": {
-        "en": "This day has stops. ANT and SIG change the day at the top.",
-        "es": "Este día tiene paradas. ANT y SIG cambian el día arriba."
+        "en": "Today’s route stays for deliveries. Tomorrow is the yellow chip at the top.",
+        "es": "La ruta de hoy es para entregar. Mañana está en el chip amarillo de arriba."
       }
     },
-    { "action": "waitForSelector", "selector": "a.route-day-nav-next" },
+    { "action": "waitForSelector", "selector": "a.bakery-nav__tomorrow" },
     {
       "action": "click",
-      "selector": "a.route-day-nav-next",
+      "selector": "a.bakery-nav__tomorrow",
       "force": true,
       "caption": {
-        "en": "Tap Next to see the following day",
-        "es": "Toca SIG para ver el día siguiente"
+        "en": "Tap Tomorrow to review the next day’s stops",
+        "es": "Toca Mañana para revisar las paradas del día siguiente"
       },
       "narration": {
-        "en": "Tap the next-day arrow on the right. That is how you see the following day.",
-        "es": "Toca la flecha SIG a la derecha. Así ves el día siguiente."
+        "en": "Tap Tomorrow. That opens the night-before view, where you can add or remove stops.",
+        "es": "Toca Mañana. Ahí abres la vista de la noche anterior, para agregar o quitar paradas."
       }
     },
     {
@@ -50,18 +50,14 @@
     },
     {
       "action": "waitForSelector",
-      "selector": ".route-day-nav"
-    },
-    {
-      "action": "waitForSelector",
-      "selector": "#nextStopCard:not([hidden])"
+      "selector": "#routePrepRoot"
     },
     {
       "action": "scroll",
-      "selector": "#nextStopCard",
+      "selector": "#routePrepAddDockBtn",
       "caption": {
-        "en": "This is the next day. The next stop is below the map.",
-        "es": "Este es el día siguiente. La siguiente parada está debajo del mapa."
+        "en": "Add, remove, or reorder stops here before you leave.",
+        "es": "Aquí agregas, quitas o reordenas paradas antes de salir."
       },
       "captionHoldMs": 2200,
       "waitAfter": 1800

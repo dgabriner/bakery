@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/daily_order_generation.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
@@ -22,6 +23,11 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || strtotime($selectedDa
 }
 $selectedDay = bakery_standing_day_from_date($selectedDate);
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
+try {
+    bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => false]);
+} catch (Throwable $e) {
+    error_log('production demand horizon: ' . $e->getMessage());
+}
 $pageReturnKey = $returnTarget['key'] ?? null;
 $attentionShortfall = (string)($_GET['attention'] ?? '') === 'shortfall';
 $attentionLabel = $attentionShortfall

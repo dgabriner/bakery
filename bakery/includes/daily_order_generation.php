@@ -541,3 +541,207 @@ function bakery_ensure_daily_orders_for_date(PDO $db, string $date, array $optio
         'result' => $result,
     ];
 }
+
+/**
+ * Rolling days of dated demand to keep materialized from standing orders.
+ * Seven days covers Monday planning → Tuesday bake → Wednesday route
+ * and the rest of the operating week without a daily Generate click.
+ */
+function bakery_demand_horizon_days(): int
+{
+    return 7;
+}
+
+/**
+ * Sour Flour cadence: from calendar day D, Tuesday's bake (D+1) is for
+ * Wednesday's route (D+2). Production.php is keyed on the delivery date,
+ * so bakers opening the sheet on the bake day (default: tomorrow) see
+ * the route date's demand.
+ *
+ * @return array{from_date:string,bake_day:string,route_date:string,production_date:string,horizon_end:string}
+ */
+function bakery_demand_cadence_dates(string $fromDate): array
+{
+    $from = DateTime::createFromFormat('!Y-m-d', $fromDate);
+    if (!$from || $from->format('Y-m-d') !== $fromDate) {
+        $fromDate = date('Y-m-d');
+        $from = new DateTime($fromDate);
+    }
+    $bake = clone $from;
+    $bake->modify('+1 day');
+    $route = clone $from;
+    $route->modify('+2 days');
+    $horizonEnd = clone $from;
+    $horizonEnd->modify('+' . (bakery_demand_horizon_days() - 1) . ' days');
+
+    return [
+        'from_date' => $fromDate,
+        'bake_day' => $bake->format('Y-m-d'),
+        'route_date' => $route->format('Y-m-d'),
+        'production_date' => $route->format('Y-m-d'),
+        'horizon_end' => $horizonEnd->format('Y-m-d'),
+    ];
+}
+
+/**
+ * @return list<string>
+ */
+function bakery_demand_horizon_date_list(string $fromDate, ?int $days = null): array
+{
+    $from = DateTime::createFromFormat('!Y-m-d', $fromDate);
+    if (!$from || $from->format('Y-m-d') !== $fromDate) {
+        return [];
+    }
+    $days = $days ?? bakery_demand_horizon_days();
+    if ($days < 1) {
+        $days = 1;
+    }
+    if ($days > 14) {
+        $days = 14;
+    }
+    $dates = [];
+    for ($i = 0; $i < $days; $i++) {
+        $day = clone $from;
+        if ($i > 0) {
+            $day->modify('+' . $i . ' days');
+        }
+        $dates[] = $day->format('Y-m-d');
+    }
+    return $dates;
+}
+
+/**
+ * Fill dated orders from standing for a rolling horizon. Always preserves
+ * dated quantity and route edits. Closed days are skipped.
+ *
+ * @param array{record_event?:bool, assign_routes?:bool, skip_if_closed?:bool, days?:int} $options
+ * @return array{from_date:string, through_date:string, days:int, generated:list<array>, skipped:list<array>,
+ *               orders_created:int, items_created:int, items_updated:int, items_preserved:int,
+ *               drivers_assigned:int, ran_count:int}
+ */
+function bakery_ensure_daily_orders_horizon(PDO $db, string $fromDate, array $options = []): array
+{
+    $days = isset($options['days']) ? (int)$options['days'] : bakery_demand_horizon_days();
+    $dates = bakery_demand_horizon_date_list($fromDate, $days);
+    $empty = [
+        'from_date' => $fromDate,
+        'through_date' => $dates ? $dates[count($dates) - 1] : $fromDate,
+        'days' => count($dates),
+        'generated' => [],
+        'skipped' => [],
+        'orders_created' => 0,
+        'items_created' => 0,
+        'items_updated' => 0,
+        'items_preserved' => 0,
+        'drivers_assigned' => 0,
+        'ran_count' => 0,
+    ];
+    if ($dates === []) {
+        return $empty;
+    }
+
+    $ensureOptions = [
+        'record_event' => !array_key_exists('record_event', $options) || !empty($options['record_event']),
+        'assign_routes' => !array_key_exists('assign_routes', $options) || !empty($options['assign_routes']),
+        'skip_if_closed' => !array_key_exists('skip_if_closed', $options) || !empty($options['skip_if_closed']),
+    ];
+
+    foreach ($dates as $date) {
+        try {
+            $ensure = bakery_ensure_daily_orders_for_date($db, $date, $ensureOptions);
+        } catch (Throwable $e) {
+            error_log('demand horizon ' . $date . ': ' . $e->getMessage());
+            $empty['skipped'][] = ['date' => $date, 'reason' => 'error'];
+            continue;
+        }
+        if (!empty($ensure['ran']) && is_array($ensure['result'] ?? null)) {
+            $empty['generated'][] = ['date' => $date, 'result' => $ensure['result']];
+            $empty['ran_count']++;
+            $empty['orders_created'] += (int)($ensure['result']['orders_created'] ?? 0);
+            $empty['items_created'] += (int)($ensure['result']['items_created'] ?? 0);
+            $empty['items_updated'] += (int)($ensure['result']['items_updated'] ?? 0);
+            $empty['items_preserved'] += (int)($ensure['result']['items_preserved'] ?? 0);
+            $empty['drivers_assigned'] += (int)($ensure['result']['drivers_assigned'] ?? 0);
+        } else {
+            $empty['skipped'][] = [
+                'date' => $date,
+                'reason' => (string)($ensure['skipped_reason'] ?? 'unknown'),
+            ];
+        }
+    }
+
+    return $empty;
+}
+
+/**
+ * Keep the rolling horizon full from today, and also the date a screen is
+ * looking at when that date sits outside the window.
+ *
+ * @return array Horizon result (see bakery_ensure_daily_orders_horizon).
+ */
+function bakery_fill_demand_horizon(PDO $db, ?string $alsoDate = null, array $options = []): array
+{
+    $today = date('Y-m-d');
+    $horizon = bakery_ensure_daily_orders_horizon($db, $today, $options);
+    if ($alsoDate === null || $alsoDate === '') {
+        return $horizon;
+    }
+    $alsoObject = DateTime::createFromFormat('!Y-m-d', $alsoDate);
+    if (!$alsoObject || $alsoObject->format('Y-m-d') !== $alsoDate) {
+        return $horizon;
+    }
+    if ($alsoDate >= $horizon['from_date'] && $alsoDate <= $horizon['through_date']) {
+        return $horizon;
+    }
+    try {
+        $one = bakery_ensure_daily_orders_for_date($db, $alsoDate, $options);
+    } catch (Throwable $e) {
+        error_log('demand horizon extra date ' . $alsoDate . ': ' . $e->getMessage());
+        return $horizon;
+    }
+    if (!empty($one['ran']) && is_array($one['result'] ?? null)) {
+        $horizon['generated'][] = ['date' => $alsoDate, 'result' => $one['result']];
+        $horizon['ran_count']++;
+        $horizon['orders_created'] += (int)($one['result']['orders_created'] ?? 0);
+        $horizon['items_created'] += (int)($one['result']['items_created'] ?? 0);
+        $horizon['items_updated'] += (int)($one['result']['items_updated'] ?? 0);
+        $horizon['items_preserved'] += (int)($one['result']['items_preserved'] ?? 0);
+        $horizon['drivers_assigned'] += (int)($one['result']['drivers_assigned'] ?? 0);
+    }
+    return $horizon;
+}
+
+/**
+ * CLI cron guard. Unforced runs are DreamHost production (bakerysf) or
+ * DreamHost staging. Local one-shots need --force. Laptop-to-prod is refused.
+ */
+function bakery_demand_scheduler_assert_cli(PDO $db, bool $force = false): void
+{
+    $name = strtolower((string)$db->query('SELECT DATABASE()')->fetchColumn());
+    $isLocal = defined('IS_LOCAL') && IS_LOCAL;
+    $isStaging = defined('IS_STAGING') && IS_STAGING;
+    $useProdDb = defined('USE_PROD_DB') && USE_PROD_DB;
+
+    if ($isLocal && $useProdDb) {
+        throw new RuntimeException(
+            'Demand scheduler cron runs on DreamHost. Do not generate production demand from this machine.'
+        );
+    }
+
+    if ($isLocal) {
+        if (!$force) {
+            throw new RuntimeException(
+                'Demand scheduler cron is DreamHost-only. Opening Daily Run fills the horizon locally, or pass --force for a one-shot.'
+            );
+        }
+        return;
+    }
+
+    if ($isStaging && $name === 'bakerysoftware') {
+        return;
+    }
+
+    if ($name !== 'bakerysf') {
+        throw new RuntimeException('Demand scheduler cron requires database bakerysf, got ' . $name . '.');
+    }
+}

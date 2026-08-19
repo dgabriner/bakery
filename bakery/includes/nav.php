@@ -60,6 +60,12 @@ if ($navSelectedDriverName === '' && $navUser) {
   <div class="bakery-nav__driver-bar" aria-label="<?php bakery_te('nav.active_driver'); ?>">
     <span class="bakery-nav__live-dot" aria-hidden="true"></span>
     <span class="bakery-nav__driver-name"><?php echo htmlspecialchars($navSelectedDriverName, ENT_QUOTES, 'UTF-8'); ?></span>
+    <?php
+      $navTomorrowDate = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+      $navOnTomorrow = $currentPage === 'driver' && $navDriverDateObject->format('Y-m-d') === $navTomorrowDate;
+      $navTomorrowHref = BASE_URL . 'driver.php?date=' . rawurlencode($navTomorrowDate);
+    ?>
+    <a class="bakery-nav__tomorrow<?php echo $navOnTomorrow ? ' bakery-nav__tomorrow--active' : ''; ?>" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navOnTomorrow ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.tomorrow_route'); ?></a>
     <?php if ($navDriverShowDateToggle): ?>
     <span class="bakery-nav__date-hint"><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
     <?php endif; ?>

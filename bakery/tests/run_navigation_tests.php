@@ -129,7 +129,7 @@ $driverNav = navigation_test_render_nav('driver', 'driver');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--driver') !== false, 'driver navigation uses the compact mobile bar');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__logout') !== false, 'driver navigation includes logout in the focused bar');
 navigation_test_assert(strpos($navCss, 'position: fixed') !== false, 'focused navigation docks to the bottom on small screens');
-navigation_test_assert(strpos($driverNav, 'bakery-nav__driver-bar') !== false, 'driver navigation includes the driver status bar');
+navigation_test_assert(strpos($driverNav, 'bakery-nav__tomorrow') !== false, 'driver navigation includes a Tomorrow shortcut');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'driver navigation includes the live status dot');
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');

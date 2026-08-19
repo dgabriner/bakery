@@ -270,4 +270,43 @@ foreach ([
     );
 }
 
+foreach ([
+    'driver.prep_title',
+    'driver.prep_add',
+    'driver.prep_remove',
+    'driver.prep_edit_route',
+    'driver.prep_tomorrow_cta',
+    'nav.tomorrow_route',
+] as $key) {
+    driver_photo_assert(
+        "route prep translation exists in English and Spanish: {$key}",
+        isset($english[$key], $spanish[$key])
+            && trim((string)$english[$key]) !== ''
+            && trim((string)$spanish[$key]) !== ''
+    );
+}
+
+driver_photo_assert(
+    'My Route has a night-before prep workspace',
+    strpos($page, 'id="routePrepRoot"') !== false
+        && strpos($page, 'id="routePrepAddDockBtn"') !== false
+        && strpos($page, 'function bakery_render_driver_prep_stop') !== false
+        && strpos($page, "\$routeView === 'prep'") !== false
+);
+
+$prepHelpers = (string)file_get_contents($root . '/includes/driver_assignments.php');
+$prepSearch = (string)file_get_contents($root . '/includes/driver_route_prep.php');
+$prepScript = (string)file_get_contents($root . '/includes/driver_route_prep.js');
+driver_photo_assert(
+    'drivers can add and unassign dated stops without rewriting standing',
+    strpos($prepHelpers, 'function bakery_driver_plan_add_stop') !== false
+        && strpos($prepHelpers, 'function bakery_driver_assert_route_plan_edit') !== false
+        && strpos($prepHelpers, "'driver', 'driver_assistant'") !== false
+        && strpos($prepSearch, 'function bakery_driver_plan_search') !== false
+        && strpos($deliveryHandler, "case 'plan_add_stop':") !== false
+        && strpos($deliveryHandler, "case 'plan_remove_stop':") !== false
+        && strpos($prepScript, 'plan_add_stop') !== false
+        && strpos($prepScript, 'plan_remove_stop') !== false
+);
+
 exit($failures > 0 ? 1 : 0);

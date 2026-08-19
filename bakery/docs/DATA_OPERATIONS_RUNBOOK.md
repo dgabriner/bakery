@@ -20,6 +20,20 @@ Logs and state are gitignored under `storage/operations/`. Failed imports retain
 the prior target because refreshes use a verified temporary import and a local
 checkpoint.
 
+## DreamHost demand scheduler
+
+Dated orders fill from standing orders on a rolling 7-day horizon when someone
+opens Daily Run, Daily Orders, the dashboard, or Daily Production. Overnight
+coverage (so Monday already has Wednesday's route) is:
+
+```text
+/usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/demand_scheduler.php
+```
+
+Install that as a DreamHost cron once a day (early morning). Do not point it at
+staging unless `APP_ENV=staging`. Local machines should not run it against live
+`bakerysf`; opening the app fills the horizon, or `php scripts/demand_scheduler.php --force` for a one-shot local database.
+
 ## Backup locations
 
 - Nightly: `storage/dumps/nightly/` (minimum 14)

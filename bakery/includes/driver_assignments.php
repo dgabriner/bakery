@@ -298,8 +298,7 @@ function bakery_driver_remove_assignment(
     int $driverId,
     string $deliveryDate
 ): bool {
-    bakery_require_role(['administrator', 'manager']);
-    $deliveryDate = bakery_driver_validate_delivery_date($deliveryDate);
+    $deliveryDate = bakery_driver_assert_route_plan_edit($db, $driverId, $deliveryDate);
     if ($dailyOrderId <= 0 || $driverId <= 0) {
         throw new RuntimeException('Invalid route stop');
     }
@@ -1005,6 +1004,246 @@ function bakery_driver_add_customer_to_route(
 }
 
 /**
+ * Drivers (and managers in driver mode) may add one dated stop to their own
+ * route. This never rewrites standing routes or Pan Dulce standards.
+ *
+ * @return array{
+ *     ok:bool,
+ *     code:string,
+ *     message:string,
+ *     customer_id:int,
+ *     customer_name:string,
+ *     daily_order_id:int,
+ *     other_driver_name:string,
+ *     taken_from_other:bool
+ * }
+ */
+function bakery_driver_plan_add_stop(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    int $customerId,
+    bool $takeFromOther = false
+): array {
+    $deliveryDate = bakery_driver_assert_route_plan_edit($db, $driverId, $deliveryDate);
+    if ($customerId <= 0) {
+        throw new RuntimeException(
+            bakery_driver_plan_text('driver.prep_customer_missing', [], 'Customer not found or inactive')
+        );
+    }
+
+    $driverRow = bakery_get_driver_by_id($db, $driverId);
+    if (!$driverRow) {
+        throw new RuntimeException("Driver ID {$driverId} does not exist");
+    }
+    if ((int)($driverRow['archived'] ?? 0) === 1) {
+        throw new RuntimeException('Cannot assign stops to an archived driver');
+    }
+
+    $custStmt = $db->prepare(
+        'SELECT c.* FROM customers c
+         WHERE c.id = ? AND c.is_active = 1 '
+        . bakery_sfb_ops_origin_clause('c', $db) . '
+         LIMIT 1'
+    );
+    $custStmt->execute([$customerId]);
+    $customer = $custStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$customer) {
+        throw new RuntimeException(
+            bakery_driver_plan_text('driver.prep_customer_missing', [], 'Customer not found or inactive')
+        );
+    }
+    $customerName = (string)$customer['name'];
+
+    $empty = [
+        'ok' => false,
+        'code' => '',
+        'message' => '',
+        'customer_id' => $customerId,
+        'customer_name' => $customerName,
+        'daily_order_id' => 0,
+        'other_driver_name' => '',
+        'taken_from_other' => false,
+    ];
+
+    require_once __DIR__ . '/customer_order_mutations.php';
+
+    $db->beginTransaction();
+    try {
+        $existingStmt = $db->prepare(
+            'SELECT doa.id, doa.daily_order_id, doa.driver_id, doa.delivery_status, doa.scheduled_delivery_time, d.name AS driver_name
+             FROM daily_order_assignments doa
+             LEFT JOIN drivers d ON d.id = doa.driver_id
+             WHERE doa.delivery_date = ?
+               AND doa.daily_order_id IN (
+                   SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?
+               )
+             FOR UPDATE'
+        );
+        $existingStmt->execute([$deliveryDate, $customerId, $deliveryDate]);
+        $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($existing) {
+            $assignedDriverId = (int)$existing['driver_id'];
+            $status = (string)($existing['delivery_status'] ?? 'pending');
+            if ($assignedDriverId === $driverId) {
+                $db->rollBack();
+                $empty['code'] = 'already_on_route';
+                $empty['daily_order_id'] = (int)$existing['daily_order_id'];
+                $empty['message'] = bakery_driver_plan_text(
+                    'driver.prep_already',
+                    ['name' => $customerName],
+                    ':name is already on your route'
+                );
+                return $empty;
+            }
+            if (in_array($status, ['delivered', 'in_transit'], true)) {
+                throw new RuntimeException(
+                    bakery_driver_plan_text('driver.prep_locked', [], 'Completed or in-transit stops cannot be moved')
+                );
+            }
+            if (!$takeFromOther) {
+                $db->rollBack();
+                $empty['code'] = 'on_other_route';
+                $empty['other_driver_name'] = (string)($existing['driver_name'] ?: ('Driver #' . $assignedDriverId));
+                $empty['message'] = bakery_driver_plan_text(
+                    'driver.prep_on_other',
+                    ['name' => $customerName, 'driver' => $empty['other_driver_name']],
+                    ':name is on :driver\'s route'
+                );
+                return $empty;
+            }
+
+            $sourceDriverId = $assignedDriverId;
+            $scheduled = $existing['scheduled_delivery_time'] ?? null;
+            $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $deliveryDate);
+            $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$existing['id']]);
+            bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, $scheduled);
+            bakery_driver_renumber_route_orders($db, [$sourceDriverId, $driverId], $deliveryDate);
+            $db->commit();
+
+            bakery_driver_plan_record_add($db, $driverId, $deliveryDate, $customerId, $customerName, (string)($driverRow['name'] ?? ''), true);
+
+            return [
+                'ok' => true,
+                'code' => 'taken',
+                'message' => bakery_driver_plan_text(
+                    'driver.prep_taken',
+                    ['name' => $customerName],
+                    'Moved :name onto your route'
+                ),
+                'customer_id' => $customerId,
+                'customer_name' => $customerName,
+                'daily_order_id' => $dailyOrderId,
+                'other_driver_name' => (string)($existing['driver_name'] ?? ''),
+                'taken_from_other' => true,
+            ];
+        }
+
+        $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $deliveryDate);
+        bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, null);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    bakery_driver_plan_record_add($db, $driverId, $deliveryDate, $customerId, $customerName, (string)($driverRow['name'] ?? ''), false);
+
+    return [
+        'ok' => true,
+        'code' => 'added',
+        'message' => bakery_driver_plan_text(
+            'driver.prep_added',
+            ['name' => $customerName],
+            'Added :name'
+        ),
+        'customer_id' => $customerId,
+        'customer_name' => $customerName,
+        'daily_order_id' => $dailyOrderId,
+        'other_driver_name' => '',
+        'taken_from_other' => false,
+    ];
+}
+
+function bakery_driver_plan_insert_assignment(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    int $dailyOrderId,
+    $scheduledDeliveryTime
+): void {
+    $maxStmt = $db->prepare(
+        'SELECT COALESCE(MAX(route_order), 0)
+         FROM daily_order_assignments
+         WHERE driver_id = ? AND delivery_date = ?'
+    );
+    $maxStmt->execute([$driverId, $deliveryDate]);
+    $nextRouteOrder = (int)$maxStmt->fetchColumn() + 1;
+
+    $insert = $db->prepare(
+        'INSERT INTO daily_order_assignments (
+            daily_order_id, driver_id, delivery_date, route_order,
+            scheduled_delivery_time, delivery_status
+        ) VALUES (?, ?, ?, ?, ?, \'pending\')'
+    );
+    $insert->execute([
+        $dailyOrderId,
+        $driverId,
+        $deliveryDate,
+        $nextRouteOrder,
+        $scheduledDeliveryTime ?: null,
+    ]);
+    $db->prepare('UPDATE daily_orders SET driver_id = ? WHERE id = ?')->execute([$driverId, $dailyOrderId]);
+}
+
+function bakery_driver_plan_record_add(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    int $customerId,
+    string $customerName,
+    string $driverName,
+    bool $takenFromOther
+): void {
+    if (!function_exists('bakery_record_operational_event') || !defined('BAKERY_OP_DRIVER_ROUTE_ASSIGNED')) {
+        return;
+    }
+    $verb = $takenFromOther ? 'Moved' : 'Added';
+    bakery_record_operational_event(
+        $db,
+        BAKERY_OP_DRIVER_ROUTE_ASSIGNED,
+        $verb . ' ' . $customerName . ' onto ' . ($driverName !== '' ? $driverName : ('Driver #' . $driverId))
+            . ' on ' . date('M j, Y', strtotime($deliveryDate)),
+        [
+            'operational_date' => $deliveryDate,
+            'driver_id' => $driverId,
+            'customer_id' => $customerId,
+            'metadata' => [
+                'source' => 'driver_route_prep',
+                'taken_from_other' => $takenFromOther,
+            ],
+        ]
+    );
+}
+
+function bakery_driver_plan_text(string $key, array $params = [], string $fallback = ''): string
+{
+    if (function_exists('bakery_t')) {
+        $text = bakery_t($key, $params);
+        if ($text !== $key) {
+            return $text;
+        }
+    }
+    foreach ($params as $name => $value) {
+        $fallback = str_replace(':' . $name, (string)$value, $fallback);
+    }
+    return $fallback !== '' ? $fallback : $key;
+}
+
+/**
  * Count unassigned daily orders for a date.
  */
 function bakery_driver_unassigned_count(PDO $db, string $date): int
@@ -1023,6 +1262,23 @@ function bakery_driver_unassigned_count(PDO $db, string $date): int
     ');
     $stmt->execute([$date, $date]);
     return (int)$stmt->fetchColumn();
+}
+
+/**
+ * Drivers and assistants may edit their own today/future route.
+ * Managers may still edit any driver's dated assignments.
+ */
+function bakery_driver_assert_route_plan_edit(PDO $db, int $driverId, string $deliveryDate): string
+{
+    bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+    $deliveryDate = bakery_driver_validate_delivery_date($deliveryDate);
+    bakery_assert_driver_identity($db, $driverId, $deliveryDate);
+    if (!bakery_user_has_role(['administrator', 'manager']) && $deliveryDate < date('Y-m-d')) {
+        throw new RuntimeException(
+            bakery_driver_plan_text('driver.prep_past_blocked', [], 'Past routes cannot be edited')
+        );
+    }
+    return $deliveryDate;
 }
 
 /**

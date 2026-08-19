@@ -774,6 +774,23 @@
     white-space: nowrap;
   }
 
+  .bakery-nav__tomorrow {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #f3b23a;
+    color: #1b2e2c;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .bakery-nav__tomorrow--active {
+    background: #fff;
+  }
+
   .bakery-nav__date-toggle {
     appearance: none;
     background: transparent;

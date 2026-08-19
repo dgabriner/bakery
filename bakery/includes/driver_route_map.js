@@ -670,6 +670,11 @@
   function restoreViewMode() {
     if (scopeLoaded) return;
     scopeLoaded = true;
+    var fallback = 'next';
+    var root = $('driverRouteMap');
+    var preferred = root ? (root.getAttribute('data-default-map-scope') || '') : '';
+    if (['next', 'nearby', 'day'].indexOf(preferred) !== -1) fallback = preferred;
+    viewMode = fallback;
     try {
       var saved = window.sessionStorage.getItem(scopeStorageKey());
       if (['next', 'nearby', 'day'].indexOf(saved) !== -1) viewMode = saved;

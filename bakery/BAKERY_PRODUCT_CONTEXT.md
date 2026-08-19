@@ -72,8 +72,10 @@ keys — several nav items already show raw keys because this was skipped.
 - **Generation with edit preservation** (`includes/daily_order_generation.php` →
   `bakery_generate_daily_orders_from_standing($db, $date, $options)`; called from
   `daily_orders.php` single-date + "Generate week", `daily_run_api.php`
-  `generate_daily_orders` inline action, and lazy `bakery_ensure_daily_orders_for_date`
-  on first Daily Run / Daily Orders view). Re-generation preserves manually changed
+  `generate_daily_orders` inline action, lazy `bakery_ensure_daily_orders_for_date`
+  / rolling `bakery_fill_demand_horizon` on Daily Run, Daily Orders, dashboard,
+  and Daily Production, plus DreamHost cron `scripts/demand_scheduler.php`).
+  Re-generation preserves manually changed
   dated quantities unless `overwrite_changed` is set. It also preserves dated route
   transfers/reorders and one-time stops; newly discovered standing stops append instead
   of colliding with existing route positions. Losing either behavior would destroy staff
@@ -120,12 +122,16 @@ Violating these breaks operations even if the code "works."
 2. **Standing = template/forecast. Daily = commercial commitment.** Standing edits never
    rewrite past dated orders; dated edits never write standing. Shared semantics live in
    `includes/customer_order_mutations.php`.
-3. **Generation is on-demand** (no scheduler yet), via Daily Orders single-date or
-   "Generate week", the dashboard/Daily Run inline `generate_daily_orders` action,
-   lazy auto-generate on first Daily Run / Daily Orders view
-   (`bakery_ensure_daily_orders_for_date`), or route build (`assign_from_standing`).
-   Route build prepares dated demand first and then explicitly rebuilds the standing-route
-   stops. It respects week pauses, date-range pauses, and skip dates, and filters
+3. **Generation is automatic for a 7-day horizon**, plus on-demand via Daily Orders
+   single-date or "Generate week", the dashboard/Daily Run inline `generate_daily_orders`
+   action, first view of Daily Run / Daily Orders / dashboard / Daily Production
+   (`bakery_fill_demand_horizon` → `bakery_ensure_daily_orders_for_date`), route build
+   (`assign_from_standing`), or DreamHost cron `scripts/demand_scheduler.php`.
+   Cadence from calendar today: bake tomorrow (`today+1`) for the route the day after
+   (`today+2`). Daily Production is keyed on the delivery date, so the Tuesday bake
+   sheet is Wednesday's standing-derived orders. Route build prepares dated demand
+   first and then explicitly rebuilds the standing-route stops. It respects week
+   pauses, date-range pauses, and skip dates, and filters
    `is_active = 1` — inactive customers never generate. Re-generation preserves
    dated quantity edits unless `overwrite_changed` is set and never rewrites an existing
    dated route decision. New stops append; `(driver_id, delivery_date, route_order)` is unique.
@@ -206,13 +212,15 @@ Compact map — entry points only, not every file.
 
 ## 6. Known open loops
 
-1. **Trusted future demand (mostly closed).** Generation filters inactive customers and
-   can run per week or inline from dashboard/Daily Run; first Daily Run / Daily Orders
-   view lazy-auto-generates missing dated orders (preserves dated edits). A
-   `demand_confirmations` table (schema 031) records manager confirmation per date;
-   Daily Run stage 1 is complete only when confirmed (and reopens on post-confirm
-   demand drift from `operational_events`), which hard-gates closeout; the dashboard
-   shows a tomorrow-readiness strip. Still open: no background scheduler/cron.
+1. **Trusted future demand.** Generation filters inactive customers and
+   can run per week or inline from dashboard/Daily Run; Daily Run / Daily Orders /
+   dashboard / Daily Production lazy-fill a rolling 7-day horizon from standing
+   (preserves dated edits). DreamHost cron `scripts/demand_scheduler.php` does the
+   same overnight. A `demand_confirmations` table (schema 031) records manager
+   confirmation per date; Daily Run stage 1 is complete only when confirmed (and
+   reopens on post-confirm demand drift from `operational_events`), which
+   hard-gates closeout; the dashboard shows a tomorrow-readiness strip plus the
+   two-day bake→route cadence. Standing remains the template; dated edits win.
 2. **Plan → baker.** Production Center saves per-day targets and Daily Run checks coverage,
    but Daily Production bakes to demand; no commit/lock; "planned" on the bake sheet means
    demand. Late demand changes after planning surface nowhere.
@@ -240,11 +248,14 @@ Compact map — entry points only, not every file.
 Agreed direction after the audits, in rough order. Reconfirm with the owner before starting
 a later item.
 
-1. **"Tomorrow, Confirmed"** — mostly shipped: shared generation + `is_active`, Generate
-   week, dashboard/Daily Run inline Generate, lazy auto-generate on first Daily Run /
-   Daily Orders view, `demand_confirmations` + Confirm Demand hard-gating stage 1 /
-   closeout, "changed since confirmation", tomorrow-readiness strip. *Still open:
-   optional background scheduler.*
+1. **"Tomorrow, Confirmed"** — shipped: shared generation + `is_active`, Generate
+   week, dashboard/Daily Run inline Generate, rolling 7-day horizon
+   (`bakery_fill_demand_horizon`) on Daily Run / Daily Orders / dashboard / Daily
+   Production, DreamHost cron `scripts/demand_scheduler.php`, `demand_confirmations`
+   + Confirm Demand hard-gating stage 1 / closeout, "changed since confirmation",
+   tomorrow-readiness strip, two-day bake→route cadence. *Still open: optional
+   overnight cron must be installed on DreamHost (page load fills the horizon
+   even without it).*
 2. **Production-plan integration** — commit action in Production Center; Daily Production
    executes committed plan with demand alongside + drift flags; post-commit changes raise
    exceptions.

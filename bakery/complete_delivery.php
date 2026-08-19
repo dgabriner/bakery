@@ -17,6 +17,7 @@ require_once __DIR__ . '/includes/product_inventory.php';
 require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/customer_notifications.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
+require_once __DIR__ . '/includes/driver_route_prep.php';
 require_once __DIR__ . '/includes/delivery_recovery.php';
 
 if (PHP_SAPI !== 'cli') {
@@ -862,6 +863,52 @@ try {
                     : 'Route updated.',
                 'stops' => $result['stops'],
                 'next_daily_order_id' => $result['next_daily_order_id'],
+            ]);
+            break;
+
+        case 'plan_search':
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $deliveryDate = trim((string)($_POST['date'] ?? ''));
+            $query = (string)($_POST['q'] ?? $_POST['query'] ?? '');
+            $found = bakery_driver_plan_search($db, $driverId, $deliveryDate, $query);
+            echo json_encode([
+                'success' => true,
+                'query' => $found['query'],
+                'unassigned' => $found['unassigned'],
+                'usual' => $found['usual'],
+                'matches' => $found['matches'],
+            ]);
+            break;
+
+        case 'plan_add_stop':
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $deliveryDate = trim((string)($_POST['date'] ?? ''));
+            $customerId = (int)($_POST['customer_id'] ?? 0);
+            $takeFromOther = (string)($_POST['take'] ?? $_POST['take_from_other'] ?? '') === '1';
+            $added = bakery_driver_plan_add_stop($db, $driverId, $deliveryDate, $customerId, $takeFromOther);
+            echo json_encode([
+                'success' => !empty($added['ok']),
+                'code' => $added['code'],
+                'message' => $added['message'],
+                'error' => empty($added['ok']) ? $added['message'] : null,
+                'customer_id' => $added['customer_id'],
+                'customer_name' => $added['customer_name'],
+                'daily_order_id' => $added['daily_order_id'],
+                'other_driver_name' => $added['other_driver_name'],
+                'taken_from_other' => $added['taken_from_other'],
+            ]);
+            break;
+
+        case 'plan_remove_stop':
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $deliveryDate = trim((string)($_POST['date'] ?? ''));
+            $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
+            bakery_driver_remove_assignment($db, $dailyOrderId, $driverId, $deliveryDate);
+            echo json_encode([
+                'success' => true,
+                'message' => function_exists('bakery_t')
+                    ? bakery_t('driver.prep_removed')
+                    : 'Stop removed from your route.',
             ]);
             break;
 

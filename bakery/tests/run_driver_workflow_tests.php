@@ -387,6 +387,102 @@ $_SESSION['user_display_name'] = 'Driver Workflow Test';
 $_SESSION['user_role_slug'] = 'administrator';
 $_SESSION['user_driver_id'] = null;
 
+echo "\n=== Driver night-before add and remove ===\n";
+require_once $root . '/includes/driver_route_prep.php';
+require_once $root . '/includes/customer_order_mutations.php';
+
+$driverCode = '2941';
+$codeCheck = $db->prepare('SELECT COUNT(*) FROM users WHERE login_code = ?');
+for ($suffix = 0; $suffix < 100 && $codeCheck->execute([$driverCode]) && (int)$codeCheck->fetchColumn() > 0; $suffix++) {
+    $driverCode = str_pad((string)(7100 + $suffix), 4, '0', STR_PAD_LEFT);
+}
+assert_true(
+    bakery_upsert_code_user($db, [
+        'email' => 'route-driver@local.test',
+        'display_name' => 'Route Driver',
+        'role' => 'driver',
+        'code' => $driverCode,
+        'driver_id' => 1,
+    ]),
+    'driver login can be linked to driver 1'
+);
+$driverUserStmt = $db->prepare('SELECT id, email, display_name, driver_id FROM users WHERE email = ?');
+$driverUserStmt->execute(['route-driver@local.test']);
+$driverUser = $driverUserStmt->fetch(PDO::FETCH_ASSOC);
+$_SESSION['user_id'] = (int)$driverUser['id'];
+$_SESSION['user_email'] = (string)$driverUser['email'];
+$_SESSION['user_display_name'] = (string)$driverUser['display_name'];
+$_SESSION['user_role_slug'] = 'driver';
+$_SESSION['user_driver_id'] = (int)$driverUser['driver_id'];
+
+$prepDate = '2099-09-03';
+$prepCustomerA = (int)$snapshotCustomerIds[0];
+$prepCustomerB = (int)$snapshotCustomerIds[1];
+$added = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerA, false);
+assert_true(!empty($added['ok']), 'driver can add an unassigned dated stop');
+assert_true((int)$added['daily_order_id'] > 0, 'added stop has a dated order');
+
+$already = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerA, false);
+assert_eq('already_on_route', $already['code'], 'adding an existing stop is a no-op');
+
+$_SESSION['user_role_slug'] = 'administrator';
+$_SESSION['user_id'] = 1;
+$customerBStmt = $db->prepare('SELECT * FROM customers WHERE id = ?');
+$customerBStmt->execute([$prepCustomerB]);
+$customerBRow = $customerBStmt->fetch(PDO::FETCH_ASSOC);
+$otherOrderId = bakery_customer_ensure_daily_order($db, $customerBRow, $prepDate);
+bakery_driver_assign_orders($db, 2, $prepDate, [
+    ['daily_order_id' => $otherOrderId],
+], 'append');
+
+$_SESSION['user_id'] = (int)$driverUser['id'];
+$_SESSION['user_role_slug'] = 'driver';
+$_SESSION['user_driver_id'] = 1;
+$blockedTake = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerB, false);
+assert_eq('on_other_route', $blockedTake['code'], 'taking another driver stop needs confirm');
+$taken = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerB, true);
+assert_true(!empty($taken['ok']) && !empty($taken['taken_from_other']), 'driver can take a pending stop after confirm');
+
+assert_true(
+    bakery_driver_remove_assignment($db, (int)$added['daily_order_id'], 1, $prepDate),
+    'driver can unassign a pending stop from their route'
+);
+$stillThere = $db->prepare(
+    'SELECT COUNT(*) FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ?'
+);
+$stillThere->execute([(int)$added['daily_order_id'], $prepDate]);
+assert_eq(0, (int)$stillThere->fetchColumn(), 'unassign deletes the assignment');
+$demandKept = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE id = ?');
+$demandKept->execute([(int)$added['daily_order_id']]);
+assert_eq(1, (int)$demandKept->fetchColumn(), 'unassign keeps the dated order');
+
+$pastBlocked = false;
+try {
+    bakery_driver_plan_add_stop($db, 1, '2020-01-02', $prepCustomerA, false);
+} catch (RuntimeException $e) {
+    $pastBlocked = strpos($e->getMessage(), 'Past routes') !== false
+        || strpos($e->getMessage(), 'no se pueden editar') !== false
+        || $e->getMessage() === bakery_t('driver.prep_past_blocked');
+}
+assert_true($pastBlocked, 'drivers cannot edit past routes');
+
+$otherDriverBlocked = false;
+try {
+    bakery_driver_plan_add_stop($db, 2, $prepDate, $prepCustomerA, false);
+} catch (RuntimeException $e) {
+    $otherDriverBlocked = strpos($e->getMessage(), 'own driver route') !== false;
+}
+assert_true($otherDriverBlocked, 'driver cannot add stops to another identity');
+
+$search = bakery_driver_plan_search($db, 1, $prepDate, '');
+assert_true(isset($search['unassigned'], $search['usual'], $search['matches']), 'prep search returns candidate groups');
+
+$_SESSION['user_id'] = 1;
+$_SESSION['user_email'] = 'driver-workflow@example.test';
+$_SESSION['user_display_name'] = 'Driver Workflow Test';
+$_SESSION['user_role_slug'] = 'administrator';
+$_SESSION['user_driver_id'] = null;
+
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
 echo "Failed: {$GLOBALS['TEST_FAIL']}\n";

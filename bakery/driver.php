@@ -78,6 +78,12 @@ if ($routeDayDiff < -1) {
     $routeDateKind = 'future';
     $routeDateRelative = bakery_t('driver.route_upcoming');
 }
+$routeView = strtolower(trim((string)($_GET['view'] ?? '')));
+$routePrepMode = $routeDateKind !== 'past'
+    && (
+        $routeView === 'prep'
+        || ($routeDateKind === 'future' && $routeView !== 'drive')
+    );
 $routeDayChoices = [];
 for ($dayOffset = -3; $dayOffset <= 3; $dayOffset++) {
     $choiceDate = $selectedDateObject->modify(($dayOffset >= 0 ? '+' : '') . $dayOffset . ' days');
@@ -195,9 +201,9 @@ function bakery_driver_maps_url($address, $lat = null, $lng = null) {
 /**
  * Build a My Route URL for a specific delivery date.
  */
-function bakery_driver_route_day_url(int $driverId, string $date): string
+function bakery_driver_route_day_url(int $driverId, string $date, array $extra = []): string
 {
-    $query = ['date' => $date];
+    $query = array_merge(['date' => $date], $extra);
     if ($driverId > 0) {
         $query['driver_id'] = $driverId;
     }
@@ -357,6 +363,69 @@ function bakery_render_driver_stop_item(
     <?php
 }
 
+function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int $selectedDriverId, string $selectedDate, string $driverName): void
+{
+    $status = $stop['delivery_status'] ?? 'pending';
+    $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $status : 'pending';
+    $locked = in_array($status, ['delivered', 'in_transit'], true);
+    $skipped = $status === 'cancelled';
+    $movable = !$locked && !$skipped;
+    $receivingHours = bakery_driver_receiving_hours_label($stop);
+    $phoneHref = preg_replace('/\D+/', '', bakery_driver_stop_phone($stop));
+    $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
+    $displayPhone = bakery_driver_stop_phone($stop);
+    $itemClass = 'route-prep-stop';
+    if ($locked) {
+        $itemClass .= ' route-prep-stop--locked';
+    } elseif ($skipped) {
+        $itemClass .= ' route-prep-stop--skipped';
+    }
+    ?>
+    <article class="<?php echo $itemClass; ?>"
+        data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+        data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+        data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+        data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>"
+        data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <div class="route-prep-stop-top">
+            <span class="route-prep-stop-num" aria-hidden="true"><?php echo (int)$stop['route_order'] ?: ($index + 1); ?></span>
+            <div class="route-prep-stop-body">
+                <strong class="route-prep-stop-name"><?php echo htmlspecialchars($stop['customer_name']); ?></strong>
+                <p class="route-prep-stop-address"><?php echo htmlspecialchars($stop['customer_address'] ?: bakery_t('driver.no_address_short')); ?></p>
+                <p class="route-prep-stop-meta">
+                    <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
+                    <?php if ($receivingHours !== ''): ?><span><?php echo htmlspecialchars($receivingHours); ?></span><?php endif; ?>
+                    <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0): ?><span><?php echo htmlspecialchars(bakery_t('driver.prep_pieces', ['count' => number_format((int)$stop['ordered_pieces'])])); ?></span><?php endif; ?>
+                    <?php if ($skipped): ?><span><?php bakery_te('driver.prep_skipped'); ?></span><?php endif; ?>
+                </p>
+            </div>
+            <?php if ($movable): ?>
+            <div class="route-prep-move">
+                <button type="button" class="route-prep-move-btn route-prep-move-up" <?php echo $index === 0 ? 'disabled' : ''; ?> aria-label="<?php echo htmlspecialchars(bakery_t('driver.prep_move_up'), ENT_QUOTES, 'UTF-8'); ?>">▲</button>
+                <button type="button" class="route-prep-move-btn route-prep-move-down" <?php echo $index >= $total - 1 ? 'disabled' : ''; ?> aria-label="<?php echo htmlspecialchars(bakery_t('driver.prep_move_down'), ENT_QUOTES, 'UTF-8'); ?>">▼</button>
+            </div>
+            <?php endif; ?>
+        </div>
+        <div class="route-prep-stop-actions">
+            <?php if ($movable): ?>
+            <button type="button" class="route-prep-action stop-orders-btn" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.store_orders'); ?></button>
+            <?php if ($phoneHref): ?>
+            <a class="route-prep-action" href="<?php echo htmlspecialchars($phoneHref); ?>"><?php echo htmlspecialchars($displayPhone !== '' ? bakery_t('driver.call') : bakery_t('driver.call')); ?></a>
+            <?php endif; ?>
+            <button type="button" class="route-prep-action skip-stop-btn" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.skip_stop'); ?></button>
+            <button type="button" class="route-prep-action route-prep-action--danger route-prep-remove" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_remove'); ?></button>
+            <?php elseif ($skipped): ?>
+            <button type="button" class="route-prep-action unskip-stop-btn" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.unskip_stop'); ?></button>
+            <?php endif; ?>
+        </div>
+        <div class="order-details-container" style="display: none;">
+            <div class="order-details-loading"><?php bakery_te('driver.loading_order_details'); ?></div>
+            <div class="order-details-content" style="display: none;"></div>
+        </div>
+    </article>
+    <?php
+}
+
 if ($selectedDriverId > 0 && $driver) {
     try {
         $assignmentHasNotes = column_exists($db, 'daily_order_assignments', 'notes');
@@ -483,7 +552,29 @@ foreach ($orderedStops as $stop) {
 $showSelector = !$isAuthenticatedDriver && ($changeDriver || $selectedDriverId <= 0 || !$driver);
 $remainingStops = count($upcomingStops) + ($nextStop ? 1 : 0);
 $pastStopCount = count($pastStops);
-$page_title = $driver ? bakery_t('page.driver_route', ['name' => $driver['name']]) : bakery_t('page.driver');
+$prepPieceTotal = 0;
+foreach ($orderedStops as $stop) {
+    $prepPieceTotal += (int)($stop['ordered_pieces'] ?? 0);
+}
+$prepTomorrowDate = $todayDateObject->modify('+1 day')->format('Y-m-d');
+$prepTomorrowCount = 0;
+if ($selectedDriverId > 0) {
+    try {
+        $tomorrowCountStmt = $db->prepare(
+            'SELECT COUNT(*) FROM daily_order_assignments WHERE driver_id = ? AND delivery_date = ?'
+        );
+        $tomorrowCountStmt->execute([$selectedDriverId, $prepTomorrowDate]);
+        $prepTomorrowCount = (int)$tomorrowCountStmt->fetchColumn();
+    } catch (Throwable $e) {
+        $prepTomorrowCount = 0;
+    }
+}
+$prepEditUrl = bakery_driver_route_day_url((int)$selectedDriverId, $selectedDate, ['view' => 'prep']);
+$prepDriveUrl = bakery_driver_route_day_url((int)$selectedDriverId, $selectedDate, ['view' => 'drive']);
+$prepTomorrowUrl = bakery_driver_route_day_url((int)$selectedDriverId, $prepTomorrowDate);
+$page_title = $driver
+    ? bakery_t($routePrepMode ? 'page.driver_prep' : 'page.driver_route', ['name' => $driver['name']])
+    : bakery_t('page.driver');
 $mapsReady = defined('MAPS_ENABLED') && MAPS_ENABLED && defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== '';
 
 require_once 'includes/header.php';
@@ -497,10 +588,14 @@ $progressPct = $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 1
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
 <script src="<?php echo bakery_asset_href('includes/driver_delivery.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_map.js'); ?>" defer></script>
+<script src="<?php echo bakery_asset_href('includes/driver_route_prep.js'); ?>" defer></script>
 <script>
 document.body.classList.add('driver-workflow-page');
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
+<?php endif; ?>
+<?php if (!empty($routePrepMode) && $selectedDriverId > 0 && $driver && !$showSelector): ?>
+document.body.classList.add('driver-route-prep');
 <?php endif; ?>
 </script>
 <style>
@@ -634,20 +729,39 @@ document.body.classList.add('driver-field-mode');
     <?php if (!empty($driverDeskNotice)): ?>
     <p class="exception-desk__reported" role="status"><?php echo htmlspecialchars($driverDeskNotice, ENT_QUOTES, 'UTF-8'); ?></p>
     <?php endif; ?>
+    <?php if ($selectedDate === $todayDate && !$routePrepMode): ?>
+    <a class="route-prep-tomorrow-cta" href="<?php echo htmlspecialchars($prepTomorrowUrl, ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="route-prep-tomorrow-kicker"><?php bakery_te('driver.prep_tomorrow_cta'); ?></span>
+        <strong><?php echo $prepTomorrowCount > 0
+            ? htmlspecialchars(bakery_t('driver.prep_tomorrow_cta_body', ['count' => number_format($prepTomorrowCount)]))
+            : htmlspecialchars(bakery_t('driver.prep_tomorrow_cta_empty')); ?></strong>
+    </a>
+    <?php endif; ?>
     <?php if ($error): ?>
     <div class="empty-state"><p><?php echo $error; ?></p></div>
-    <?php elseif ($totalStops === 0): ?>
-    <div class="empty-state">
-        <h3><?php bakery_te($selectedDate === $todayDate ? 'driver.no_stops' : 'driver.no_stops_for_date'); ?></h3>
-        <p><?php echo htmlspecialchars(bakery_t('driver.nothing_assigned', [
-            'driver' => $driver['name'],
-            'date' => bakery_localized_date_label($selectedDateObject),
-        ])); ?></p>
-    </div>
-    <?php else: ?>
+    <?php elseif ($routePrepMode || $totalStops > 0): ?>
 
-    <div class="route-dashboard">
-        <div class="route-mobile-progress" aria-live="polite" <?php echo $totalStops > 0 ? '' : 'hidden'; ?>>
+    <div class="route-dashboard<?php echo $routePrepMode ? ' route-dashboard--prep' : ''; ?>">
+        <?php if ($routePrepMode): ?>
+        <section class="route-prep" id="routePrepRoot"
+            data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+            data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+            <p class="route-section-kicker"><?php bakery_te('driver.prep_kicker'); ?></p>
+            <h1><?php bakery_te($routeDayDiff === 1 ? 'driver.prep_title' : 'driver.prep_title_date'); ?></h1>
+            <p class="route-prep-intro"><?php bakery_te('driver.prep_intro'); ?></p>
+            <p class="route-prep-counts">
+                <strong><?php echo htmlspecialchars(bakery_t('driver.prep_stops', ['count' => number_format($totalStops)])); ?></strong>
+                <?php if ($prepPieceTotal > 0): ?>
+                <span><?php echo htmlspecialchars(bakery_t('driver.prep_pieces', ['count' => number_format($prepPieceTotal)])); ?></span>
+                <?php endif; ?>
+            </p>
+            <div class="route-prep-toolbar">
+                <button type="button" class="route-prep-add-btn" id="routePrepAddBtn"><?php bakery_te('driver.prep_add'); ?></button>
+                <a class="route-prep-preview-link" href="<?php echo htmlspecialchars($prepDriveUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_drive_preview'); ?></a>
+            </div>
+        </section>
+        <?php endif; ?>
+        <div class="route-mobile-progress" aria-live="polite" <?php echo $totalStops > 0 && !$routePrepMode ? '' : 'hidden'; ?>>
             <div class="route-mobile-progress-row">
                 <span class="route-mobile-progress-kind route-mobile-progress-kind--<?php echo htmlspecialchars($routeDateKind, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
                 <span class="route-mobile-progress-count" id="routeMobileProgressText"><?php echo htmlspecialchars(bakery_t('driver.done_count', ['done' => $driverCompletedStops, 'total' => $totalStops])); ?></span>
@@ -655,9 +769,11 @@ document.body.classList.add('driver-field-mode');
             <div class="route-progress-track"><div class="route-progress-fill" id="routeMobileProgressFill" style="width: <?php echo $progressPct; ?>%;"></div></div>
         </div>
 
-        <section class="route-map" id="driverRouteMap" data-map-mode="view"
+        <section class="route-map<?php echo $routePrepMode ? ' route-map--prep' : ''; ?>" id="driverRouteMap" data-map-mode="view"
+            data-default-map-scope="<?php echo $routePrepMode ? 'day' : 'next'; ?>"
             data-route-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
             data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+            <?php echo $totalStops === 0 ? 'hidden' : ''; ?>
             aria-label="<?php echo htmlspecialchars(bakery_t('driver.route_map_aria'), ENT_QUOTES, 'UTF-8'); ?>">
             <div class="route-map-toolbar">
                 <p class="route-map-live" id="routeMapLive"><?php bakery_te('driver.route_map'); ?></p>
@@ -709,6 +825,7 @@ document.body.classList.add('driver-field-mode');
             </div>
         </section>
 
+        <?php if (!$routePrepMode): ?>
         <div class="route-primary-column">
             <!-- Next stop (primary on-route view — first on mobile) -->
             <section class="next-stop route-section-next" id="nextStopCard" <?php echo $nextStop ? '' : 'hidden'; ?> aria-live="polite">
@@ -867,6 +984,9 @@ document.body.classList.add('driver-field-mode');
                 <h3 class="stop-list-heading"><?php bakery_te('driver.upcoming_stops'); ?></h3>
             </div>
             <div class="stop-list-heading-actions">
+                <?php if ($routeDateKind !== 'past'): ?>
+                <a class="route-prep-edit-link" href="<?php echo htmlspecialchars($prepEditUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_edit_route'); ?></a>
+                <?php endif; ?>
                 <button type="button"
                     class="route-adjust-toggle"
                     id="routeAdjustToggle"
@@ -902,8 +1022,64 @@ document.body.classList.add('driver-field-mode');
     </section>
 
         </div>
+        <?php else: ?>
+        <section class="route-prep-list-section" aria-label="<?php echo htmlspecialchars(bakery_t('driver.prep_title'), ENT_QUOTES, 'UTF-8'); ?>">
+            <div class="route-prep-list" id="routePrepList">
+                <?php
+                $prepIndex = 0;
+                $prepMovableStops = [];
+                foreach ($orderedStops as $stop) {
+                    $prepStatus = $stop['delivery_status'] ?? 'pending';
+                    if (!in_array($prepStatus, ['delivered', 'in_transit', 'cancelled'], true)) {
+                        $prepMovableStops[] = $stop;
+                    }
+                }
+                $prepMovableCount = count($prepMovableStops);
+                if ($orderedStops === []): ?>
+                <p class="route-prep-empty" id="routePrepEmpty"><?php bakery_te('driver.prep_empty'); ?></p>
+                <?php else:
+                    foreach ($orderedStops as $stop) {
+                        $prepStatus = $stop['delivery_status'] ?? 'pending';
+                        $isMovable = !in_array($prepStatus, ['delivered', 'in_transit', 'cancelled'], true);
+                        $moveIndex = $isMovable ? $prepIndex : 0;
+                        if ($isMovable) {
+                            $prepIndex++;
+                        }
+                        bakery_render_driver_prep_stop($stop, $isMovable ? $moveIndex : 0, $prepMovableCount, (int)$selectedDriverId, $selectedDate, $driver['name'] ?? '');
+                    }
+                endif; ?>
+            </div>
+        </section>
+        <div class="route-prep-sheet" id="routePrepSheet" hidden>
+            <div class="route-prep-sheet-inner">
+                <div class="route-prep-sheet-top">
+                    <h2><?php bakery_te('driver.prep_add_title'); ?></h2>
+                    <button type="button" class="route-prep-sheet-close" id="routePrepSheetClose"><?php bakery_te('driver.prep_close_add'); ?></button>
+                </div>
+                <label class="route-prep-search-label" for="routePrepSearch">
+                    <span><?php bakery_te('driver.prep_search'); ?></span>
+                    <input type="search" id="routePrepSearch" enterkeyhint="search" autocomplete="off" autocapitalize="off" placeholder="<?php echo htmlspecialchars(bakery_t('driver.prep_search_placeholder'), ENT_QUOTES, 'UTF-8'); ?>">
+                </label>
+                <div class="route-prep-results" id="routePrepResults"></div>
+            </div>
+        </div>
+        <div class="route-prep-add-dock" id="routePrepAddDock">
+            <button type="button" class="route-prep-add-btn route-prep-add-btn--dock" id="routePrepAddDockBtn"><?php bakery_te('driver.prep_add'); ?></button>
+        </div>
+        <?php endif; ?>
     </div>
 
+    <?php else: ?>
+    <div class="empty-state">
+        <h3><?php bakery_te($selectedDate === $todayDate ? 'driver.no_stops' : 'driver.no_stops_for_date'); ?></h3>
+        <p><?php echo htmlspecialchars(bakery_t('driver.nothing_assigned', [
+            'driver' => $driver['name'],
+            'date' => bakery_localized_date_label($selectedDateObject),
+        ])); ?></p>
+        <?php if ($routeDateKind !== 'past'): ?>
+        <p><a class="route-prep-empty-edit" href="<?php echo htmlspecialchars($prepEditUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_edit_route'); ?></a></p>
+        <?php endif; ?>
+    </div>
     <?php endif; ?>
 
     <?php else: ?>
@@ -915,7 +1091,7 @@ document.body.classList.add('driver-field-mode');
     <?php endif; ?>
 </div>
 
-<div class="route-sticky-dock" id="routeStickyDock" <?php echo $nextStop ? '' : 'hidden'; ?> aria-hidden="<?php echo $nextStop ? 'false' : 'true'; ?>">
+<div class="route-sticky-dock" id="routeStickyDock" <?php echo ($nextStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($nextStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
     <div class="route-sticky-dock-inner" id="routeStickyDockInner"></div>
 </div>
 
@@ -1209,6 +1385,20 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'route_order_saved' => bakery_t('driver.route_order_saved'),
     'route_order_error' => bakery_t('driver.route_order_error'),
     'change_next' => bakery_t('driver.change_next'),
+    'prep_add' => bakery_t('driver.prep_add'),
+    'prep_add_this' => bakery_t('driver.prep_add_this'),
+    'prep_take' => bakery_t('driver.prep_take'),
+    'prep_take_confirm' => bakery_t('driver.prep_take_confirm'),
+    'prep_remove_confirm' => bakery_t('driver.prep_remove_confirm'),
+    'prep_unassigned' => bakery_t('driver.prep_unassigned'),
+    'prep_usual' => bakery_t('driver.prep_usual'),
+    'prep_matches' => bakery_t('driver.prep_matches'),
+    'prep_no_matches' => bakery_t('driver.prep_no_matches'),
+    'prep_no_suggestions' => bakery_t('driver.prep_no_suggestions'),
+    'prep_already' => bakery_t('driver.prep_already'),
+    'prep_on_other' => bakery_t('driver.prep_on_other'),
+    'prep_pieces' => bakery_t('driver.prep_pieces', ['count' => '__COUNT__']),
+    'prep_saving' => bakery_t('driver.prep_saving'),
     'route_map' => bakery_t('driver.route_map'),
     'map_me' => bakery_t('driver.map_me'),
     'map_follow' => bakery_t('driver.map_follow'),
@@ -2197,6 +2387,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             showSuccessToast(message || di.delivery_saved_next);
         },
         afterStopSkipped: function (dailyOrderId, message) {
+            if (document.getElementById('routePrepRoot')) {
+                showSuccessToast(message || di.skip_success);
+                window.setTimeout(function () { window.location.reload(); }, 350);
+                return;
+            }
             var stop = findRouteStop(dailyOrderId);
             if (stop) {
                 stop.setAttribute('data-status', 'cancelled');
@@ -2208,6 +2403,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             showSuccessToast(message || di.skip_success);
         },
         afterStopUnskipped: function (dailyOrderId, message) {
+            if (document.getElementById('routePrepRoot')) {
+                showSuccessToast(message || di.unskip_success);
+                window.setTimeout(function () { window.location.reload(); }, 350);
+                return;
+            }
             var stop = findRouteStop(dailyOrderId);
             if (!stop) {
                 showSuccessToast(message || di.unskip_success);
@@ -2748,7 +2948,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             if (stopOrdersBtn) {
                 e.preventDefault();
                 e.stopPropagation();
-                var stopForOrders = stopOrdersBtn.closest('.stop-item');
+                var stopForOrders = stopOrdersBtn.closest('.stop-item, .route-prep-stop');
                 var ordersWrap = stopForOrders && stopForOrders.querySelector('.order-details-container');
                 var stopOrderId =
                     stopOrdersBtn.getAttribute('data-daily-order-id') ||

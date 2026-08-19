@@ -764,6 +764,88 @@
     border-left-color: var(--sf-link, #2563eb);
 }
 
+/* Two-day demand cadence: Tuesday bake → Wednesday route */
+.ops-cadence {
+    margin: 0 0 1.5rem;
+    padding: 0.85rem 1.1rem 0.7rem;
+    background: var(--sf-bg-elevated, #fff);
+    border: 1px solid var(--sf-border, #ccc);
+    border-left: 4px solid var(--sf-link, #2563eb);
+    border-radius: var(--sf-radius-sm, 4px);
+}
+
+.ops-cadence-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin-bottom: 0.7rem;
+}
+
+.ops-cadence-head strong {
+    font-size: 0.95rem;
+}
+
+.ops-cadence-head span {
+    color: var(--sf-text-secondary, #444);
+    font-size: 0.88rem;
+}
+
+.ops-cadence-legs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem 1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ops-cadence-leg {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.ops-cadence-kicker {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--sf-text-muted, #888);
+}
+
+.ops-cadence-leg a {
+    font-weight: 700;
+    color: var(--sf-text, #1a1a1a);
+    text-decoration: none;
+}
+
+.ops-cadence-leg a:hover {
+    text-decoration: underline;
+}
+
+.ops-cadence-meta {
+    font-size: 0.82rem;
+    color: var(--sf-text-secondary, #444);
+}
+
+.ops-cadence-meta a {
+    font-weight: 600;
+    color: var(--sf-link, #2563eb);
+}
+
+.ops-cadence-note {
+    margin: 0.65rem 0 0;
+    font-size: 0.8rem;
+    color: var(--sf-text-muted, #888);
+}
+
+@media (max-width: 720px) {
+    .ops-cadence-legs {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Daily Run stage 1: demand confirmation panel */
 .dr-demand-confirm {
     margin-top: 0.75rem;

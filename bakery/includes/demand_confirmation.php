@@ -283,3 +283,82 @@ function bakery_demand_readiness(PDO $db, string $date): array
 
     return $base;
 }
+
+/**
+ * Manager lookahead: Tuesday bake drives Wednesday's route.
+ * Dated demand is already filled by the rolling horizon; this strip only
+ * orients the next two operating dates.
+ *
+ * @param 'dashboard'|'daily_run' $returnKey
+ */
+function bakery_render_demand_cadence_strip(PDO $db, string $fromDate, string $returnKey = 'dashboard'): void
+{
+    if (!function_exists('bakery_demand_cadence_dates')) {
+        require_once __DIR__ . '/daily_order_generation.php';
+    }
+    if (!function_exists('bakery_ops_link_daily_orders')) {
+        require_once __DIR__ . '/operational_exceptions.php';
+    }
+
+    $cadence = bakery_demand_cadence_dates($fromDate);
+    $routeDate = $cadence['route_date'];
+    $bakeDay = $cadence['bake_day'];
+    $productionDate = $cadence['production_date'];
+    $readiness = bakery_demand_readiness($db, $routeDate);
+    $state = (string)($readiness['state'] ?? 'unavailable');
+    $bakeDt = new DateTime($bakeDay);
+    $routeDt = new DateTime($routeDate);
+    $dayNames = function_exists('bakery_day_names') ? bakery_day_names() : [];
+    $bakeDow = function_exists('bakery_standing_day_from_date') ? bakery_standing_day_from_date($bakeDay) : (int)$bakeDt->format('N');
+    $routeDow = function_exists('bakery_standing_day_from_date') ? bakery_standing_day_from_date($routeDate) : (int)$routeDt->format('N');
+    $bakeLabel = trim(($dayNames[$bakeDow] ?? $bakeDt->format('l')) . ', ' . (function_exists('bakery_localized_month_day') ? bakery_localized_month_day($bakeDt) : $bakeDt->format('M j')));
+    $routeLabel = trim(($dayNames[$routeDow] ?? $routeDt->format('l')) . ', ' . (function_exists('bakery_localized_month_day') ? bakery_localized_month_day($routeDt) : $routeDt->format('M j')));
+    $units = number_format((int)($readiness['daily_units'] ?? 0));
+    $customers = (int)($readiness['customers_with_daily'] ?? 0);
+
+    $confirmHref = bakery_ops_link_daily_orders($routeDate, ['review' => 'differences'], $returnKey);
+    $productionHref = bakery_ops_link_production($productionDate, [], $returnKey);
+    $routeHref = bakery_ops_link_driver_assignment($routeDate, [], $returnKey);
+    $runHref = (defined('BASE_URL') ? BASE_URL : '') . 'daily_run.php?date=' . rawurlencode($routeDate);
+
+    echo '<section class="ops-cadence" aria-label="' . htmlspecialchars(bakery_t('cadence.aria'), ENT_QUOTES, 'UTF-8') . '">';
+    echo '<div class="ops-cadence-head">';
+    echo '<strong>' . htmlspecialchars(bakery_t('cadence.title')) . '</strong>';
+    echo '<span>' . htmlspecialchars(bakery_t('cadence.lead', [
+        'bake_day' => $bakeLabel,
+        'route_day' => $routeLabel,
+    ])) . '</span>';
+    echo '</div>';
+    echo '<ol class="ops-cadence-legs">';
+
+    echo '<li class="ops-cadence-leg">';
+    echo '<span class="ops-cadence-kicker">' . htmlspecialchars(bakery_t('cadence.confirm_kicker')) . '</span>';
+    echo '<a href="' . htmlspecialchars($confirmHref, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($routeLabel) . '</a>';
+    echo '<span class="ops-cadence-meta">' . htmlspecialchars(bakery_t('cadence.confirm_meta', [
+        'customers' => $customers,
+        'units' => $units,
+        'state' => bakery_t('cadence.state.' . $state),
+    ])) . '</span>';
+    echo '</li>';
+
+    echo '<li class="ops-cadence-leg">';
+    echo '<span class="ops-cadence-kicker">' . htmlspecialchars(bakery_t('cadence.bake_kicker')) . '</span>';
+    echo '<a href="' . htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($bakeLabel) . '</a>';
+    echo '<span class="ops-cadence-meta">' . htmlspecialchars(bakery_t('cadence.bake_meta', [
+        'route_day' => $routeLabel,
+    ])) . '</span>';
+    echo '</li>';
+
+    echo '<li class="ops-cadence-leg">';
+    echo '<span class="ops-cadence-kicker">' . htmlspecialchars(bakery_t('cadence.route_kicker')) . '</span>';
+    echo '<a href="' . htmlspecialchars($routeHref, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($routeLabel) . '</a>';
+    echo '<span class="ops-cadence-meta"><a href="' . htmlspecialchars($runHref, ENT_QUOTES, 'UTF-8') . '">'
+        . htmlspecialchars(bakery_t('cadence.open_run')) . '</a></span>';
+    echo '</li>';
+
+    echo '</ol>';
+    echo '<p class="ops-cadence-note">' . htmlspecialchars(bakery_t('cadence.horizon_note', [
+        'days' => bakery_demand_horizon_days(),
+    ])) . '</p>';
+    echo '</section>';
+}
