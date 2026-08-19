@@ -2,7 +2,7 @@
 
 **Owner intent recorded:** 2026-08-18  
 **Execution owner:** an agent, with the bakery owner approving only the named production gates  
-**Current status:** Local data, backup, restore-drill, staging, and release-candidate infrastructure is implemented on `codex/infrastructure-stabilization-20260818`. Production remains unchanged and live promotion execution remains locked.
+**Current status:** Local data, backup, restore-drill, staging, and release-candidate infrastructure is implemented on `codex/infrastructure-stabilization-20260818`. Clean commit `4610f73` is deployed to staging and awaits phone acceptance. Production remains unchanged and live promotion execution remains locked.
 
 This is the authoritative plan for separating development, staging, production,
 backups, and Git without losing the current working tree or overwriting bakery
@@ -327,6 +327,9 @@ Phase 4 evidence (2026-08-18, production auto-push remains unreachable):
   `.\scripts\push_sftp.ps1` only.
 - Tests: `php tests/run_phase4_auto_deploy_tests.php` and
   `php tests/run_staging_env_tests.php`. Detail: `docs/PHASE4_STAGING_AUTO_DEPLOY.md`.
+- Clean post-stabilization staging baseline: 408/408 files from commit `4610f73`
+  in `release_20260818_211613.json`; PHP lint and the STAGING/`bakerysoftware`
+  smoke check passed. The staging watcher is enabled and target-locked.
 
 Exit gate: every staging deploy is target-checked, logged, and unable to reach
 the live remote root or live DB.
