@@ -95,6 +95,9 @@ try {
         case 'promote':
         case 'direct_live':
             @set_time_limit(900);
+            if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
+                bakery_auto_push_api_fail('Type confirm to authorize this Live promotion', 400);
+            }
             $result = bakery_auto_push_run_live_promotion($action === 'direct_live');
             if (!$result['ok']) http_response_code(500);
             echo json_encode($result + ['message' => $result['ok'] ? 'Live promotion complete' : 'Live promotion failed']);

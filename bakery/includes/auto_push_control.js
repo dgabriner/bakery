@@ -34,14 +34,17 @@
     }
   }
 
-  function api(action) {
+  function api(action, extra) {
+    extra = extra || {};
+    var form = 'action=' + encodeURIComponent(action);
+    Object.keys(extra).forEach(function (key) { form += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(extra[key]); });
     return fetch(apiUrl + '?action=' + encodeURIComponent(action), {
       method: action === 'status' ? 'GET' : 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       },
-      body: action === 'status' ? undefined : 'action=' + encodeURIComponent(action),
+      body: action === 'status' ? undefined : form,
       credentials: 'same-origin',
     }).then(function (res) {
       return res.text().then(function (text) {
@@ -146,7 +149,7 @@
     busy = true;
     button.disabled = true;
     setStatus('Promoting to Live…', 'busy');
-    api(action).then(function (data) {
+    api(action, { confirm_phrase: phrase }).then(function (data) {
       setStatus(data.message || 'Live promotion complete', data.ok ? 'ok' : 'error');
     }).catch(function (err) {
       setStatus(err.message || 'Live promotion failed', 'error');
