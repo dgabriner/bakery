@@ -25,4 +25,14 @@ if ($after.Count -eq 0 -or ($before.Count -gt 0 -and $after[0].FullName -eq $bef
 
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'push_sftp.ps1') -All -Confirm -ConfirmText YES
 if ($LASTEXITCODE -ne 0) { throw 'Live upload failed. The backup remains available.' }
+$promotionDir = Join-Path $bakeryRoot 'storage\deploy\promotions'
+New-Item -ItemType Directory -Force -Path $promotionDir | Out-Null
+[ordered]@{
+    release_id = "local-direct-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))"
+    git_commit = (& git -C $repoRoot rev-parse HEAD).Trim()
+    promoted_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+    backup_file = $after[0].FullName
+    live_changed = $true
+    method = 'promote_local_direct.ps1'
+} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $promotionDir "local-direct-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')).json") -Encoding UTF8
 Write-Host "Direct local -> Live promotion complete. Backup: $($after[0].FullName)"
