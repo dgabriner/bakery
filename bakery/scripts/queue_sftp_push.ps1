@@ -37,9 +37,25 @@ if (-not (Test-Path $stageEnvPath)) {
     exit 0
 }
 
-$stageEnvText = Get-Content -LiteralPath $stageEnvPath -Raw -ErrorAction SilentlyContinue
-if ($stageEnvText -match 'bakery\.sourflour\.org/bake') {
+$stageSettings = @{}
+Get-Content -LiteralPath $stageEnvPath -ErrorAction SilentlyContinue | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith('#')) { return }
+    $eq = $line.IndexOf('=')
+    if ($eq -lt 1) { return }
+    $name = $line.Substring(0, $eq).Trim()
+    $value = $line.Substring($eq + 1).Trim().Trim('"').Trim("'")
+    $stageSettings[$name] = $value
+}
+$stageRoot = [string]$stageSettings['SFTP_REMOTE_ROOT']
+$stageUser = [string]$stageSettings['SFTP_USER']
+$stageTarget = [string]$stageSettings['SFTP_TARGET']
+if ($stageRoot -match 'bakery\.sourflour\.org/bake') {
     Write-AutoPushLog "ERROR refusing live /bake in .env.sftp.stage ($Reason)"
+    exit 1
+}
+if ($stageRoot -notmatch '^staging\.sourflour\.org/?$' -or $stageUser -ne 'bakeryOS' -or $stageTarget -ne 'dreamhost-stage') {
+    Write-AutoPushLog "ERROR invalid staging target settings ($Reason)"
     exit 1
 }
 

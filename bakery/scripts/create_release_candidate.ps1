@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$StagingTestedBy,
-    [string]$StagingManifest = ""
+    [string]$StagingManifest = "",
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +39,12 @@ foreach ($entry in $manifestFiles) {
     if (-not (Test-Path -LiteralPath $full)) { throw "Candidate file missing locally: $($entry.path)" }
     $hash = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($hash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "Staging/local hash mismatch: $($entry.path)" }
+}
+
+if ($ValidateOnly) {
+    Write-Host "Release candidate validation passed. No candidate was created."
+    Write-Host "Staging commit: $stagingCommit; current commit: $head; files: $($manifestFiles.Count)"
+    exit 0
 }
 
 New-Item -ItemType Directory -Force -Path $candidateDir | Out-Null
