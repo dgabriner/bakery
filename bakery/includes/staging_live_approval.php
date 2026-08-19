@@ -45,6 +45,7 @@ function bakery_staging_live_approval_submit(string $releaseId, string $commit):
         'release_id' => $releaseId,
         'git_commit' => $commit,
         'approved_at' => gmdate('c'),
+        'approved_at_local' => date('c'),
         'approved_by' => (string)($user['email'] ?? $user['username'] ?? 'administrator'),
         'environment' => 'staging',
         'live_mutated' => false,

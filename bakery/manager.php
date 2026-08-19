@@ -92,8 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         bakery_require_csrf();
         $mutation = (string)($_POST['manager_mutation'] ?? '');
         if ($mutation === 'approve_live') {
-            if (!hash_equals('READY_FOR_LIVE', trim((string)($_POST['confirm_phrase'] ?? '')))) {
-                throw new RuntimeException('Type READY_FOR_LIVE to confirm this staging approval.');
+            if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
+                throw new RuntimeException('Type confirm to approve this staging release.');
             }
             bakery_staging_live_approval_submit((string)($_POST['release_id'] ?? ''), (string)($_POST['git_commit'] ?? ''));
             $managerNotice = 'Staging approved for live. Live has not been changed.';
@@ -472,7 +472,7 @@ require_once 'includes/nav.php';
             <input type="hidden" name="manager_mutation" value="approve_live">
             <label>Release ID <input name="release_id" required pattern="[A-Za-z0-9._:-]{3,160}" placeholder="release_YYYYMMDD_HHMMSS"></label>
             <label>Git commit (optional) <input name="git_commit" pattern="[0-9a-fA-F]{7,64}"></label>
-            <label>Type <code>READY_FOR_LIVE</code> <input name="confirm_phrase" required autocomplete="off"></label>
+            <label>Type <code>confirm</code> <input name="confirm_phrase" required autocomplete="off"></label>
             <button type="submit" class="sf-btn sf-btn--outline">Record approval</button>
             <?php if (is_array($approval)): ?><small>Last approval: <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?> — <?php echo htmlspecialchars((string)($approval['approved_at'] ?? '')); ?></small><?php endif; ?>
           </form>
