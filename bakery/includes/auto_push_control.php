@@ -117,6 +117,13 @@ function bakery_auto_push_run_live_promotion($direct = false) {
     } else {
         $candidateDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'releases';
         $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
+        $repoRoot = dirname(__DIR__, 2);
+        $head = trim((string)@shell_exec('git -C ' . escapeshellarg($repoRoot) . ' rev-parse HEAD 2>NUL'));
+        $candidate = array_values(array_filter($candidate, static function ($path) use ($head) {
+            $json = preg_replace('/^\xEF\xBB\xBF/', '', (string)@file_get_contents($path));
+            $data = json_decode($json, true);
+            return is_array($data) && $head !== '' && (string)($data['git_commit'] ?? '') === $head;
+        }));
         if (!$candidate) {
             $createScript = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'create_release_candidate.ps1';
             if (!is_file($createScript)) throw new RuntimeException('Release candidate tool is missing.');
