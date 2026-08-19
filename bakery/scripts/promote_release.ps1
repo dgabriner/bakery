@@ -64,7 +64,7 @@ if ($statusAfter.Count -eq 0 -or ($statusBefore.Count -gt 0 -and $statusAfter[0]
 
 Write-Host 'Step 2/2: Uploading the approved candidate files to Live...'
 $pushScript = Join-Path $bakeryRoot 'scripts\push_sftp.ps1'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $pushScript -Confirm
+& powershell -NoProfile -ExecutionPolicy Bypass -File $pushScript -Confirm -ConfirmText YES
 if ($LASTEXITCODE -ne 0) { throw "Live file upload failed (exit $LASTEXITCODE). Keep the backup and investigate before retrying." }
 
 $promotionDir = Join-Path $bakeryRoot 'storage\deploy\promotions'

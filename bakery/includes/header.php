@@ -111,6 +111,8 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
         <span class="auto-push-slider"></span>
       </label>
       <button type="button" class="auto-push-sync<?php echo $autoPushEnabled ? '' : ' auto-push-sync-emphasis'; ?>" id="auto-push-sync"><?php bakery_te('env.sync_live'); ?></button>
+      <button type="button" class="auto-push-sync" id="auto-push-promote">Promote approved to Live</button>
+      <button type="button" class="auto-push-sync" id="auto-push-direct">Local directly to Live</button>
       <span class="auto-push-status auto-push-status--muted" id="auto-push-status"></span>
     </div>
     <?php endif; ?>
@@ -158,6 +160,8 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
         <span class="auto-push-slider"></span>
       </label>
       <button type="button" class="auto-push-sync<?php echo $autoPushEnabled ? '' : ' auto-push-sync-emphasis'; ?>" id="auto-push-sync"><?php bakery_te('env.sync_live'); ?></button>
+      <button type="button" class="auto-push-sync" id="auto-push-promote-mobile">Promote approved to Live</button>
+      <button type="button" class="auto-push-sync" id="auto-push-direct-mobile">Local directly to Live</button>
       <span class="auto-push-status auto-push-status--muted" id="auto-push-status"></span>
     </div>
     <?php endif; ?>

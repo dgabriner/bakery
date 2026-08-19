@@ -9,6 +9,10 @@
   var apiUrl = base + 'auto_push_api.php';
   var toggle = document.getElementById('auto-push-toggle');
   var syncBtn = document.getElementById('auto-push-sync');
+  var promoteBtn = document.getElementById('auto-push-promote');
+  var directBtn = document.getElementById('auto-push-direct');
+  var promoteMobileBtn = document.getElementById('auto-push-promote-mobile');
+  var directMobileBtn = document.getElementById('auto-push-direct-mobile');
   var statusEl = document.getElementById('auto-push-status');
   var busy = false;
 
@@ -133,6 +137,24 @@
         });
     });
   }
+
+  function promote(action, button) {
+    if (busy) return;
+    if (!window.confirm('Type confirm on the next prompt only after verifying the release and backup plan. Continue?')) return;
+    var phrase = window.prompt('Type confirm to approve this Live promotion:');
+    if (!phrase || phrase.toLowerCase().trim() !== 'confirm') return;
+    busy = true;
+    button.disabled = true;
+    setStatus('Promoting to Live…', 'busy');
+    api(action).then(function (data) {
+      setStatus(data.message || 'Live promotion complete', data.ok ? 'ok' : 'error');
+    }).catch(function (err) {
+      setStatus(err.message || 'Live promotion failed', 'error');
+    }).then(function () { busy = false; button.disabled = false; });
+  }
+  [[promoteBtn, 'promote'], [directBtn, 'direct_live'], [promoteMobileBtn, 'promote'], [directMobileBtn, 'direct_live']].forEach(function (pair) {
+    if (pair[0]) pair[0].addEventListener('click', function () { promote(pair[1], pair[0]); });
+  });
 
   refresh().catch(function (err) {
     setStatus(err.message || 'Could not load sync status', 'error');

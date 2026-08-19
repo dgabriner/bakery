@@ -12,7 +12,8 @@
 param(
     [switch]$DryRun,
     [switch]$All,
-    [switch]$Confirm
+    [switch]$Confirm,
+    [string]$ConfirmText = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -278,7 +279,7 @@ if ($schemaChanges.Count -gt 0) {
 }
 
 if ($Confirm -and -not $DryRun) {
-    $answer = Read-Host "Continue? Type YES"
+    $answer = if ($ConfirmText -ne '') { $ConfirmText } else { Read-Host "Continue? Type YES" }
     if ($answer -ne "YES") {
         Write-Host "Cancelled."
         exit 1

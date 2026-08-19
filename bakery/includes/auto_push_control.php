@@ -102,6 +102,40 @@ function bakery_auto_push_run_ctl($action) {
     return $data;
 }
 
+function bakery_auto_push_run_live_promotion($direct = false) {
+    if (!bakery_user_can_control_auto_push()) {
+        throw new RuntimeException('Only the local administrator can promote to Live.');
+    }
+    $ps = bakery_auto_push_powershell();
+    if ($ps === null) throw new RuntimeException('PowerShell not found');
+    $script = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR
+        . ($direct ? 'promote_local_direct.ps1' : 'promote_release.ps1');
+    if (!is_file($script)) throw new RuntimeException('Missing Live promotion script');
+    $args = [$ps, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script];
+    if ($direct) {
+        $args[] = '-Execute';
+    } else {
+        $candidateDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'releases';
+        $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
+        if (!$candidate) throw new RuntimeException('No immutable release candidate exists yet.');
+        usort($candidate, static function ($a, $b) { return filemtime($b) <=> filemtime($a); });
+        $data = json_decode((string)file_get_contents($candidate[0]), true);
+        $id = (string)($data['release_id'] ?? '');
+        if ($id === '') throw new RuntimeException('Latest release candidate is invalid.');
+        $args[] = '-Candidate'; $args[] = $candidate[0];
+        $args[] = '-Execute'; $args[] = '-ConfirmReleaseId'; $args[] = $id;
+    }
+    $env = $_ENV;
+    $env['BAKERY_ENABLE_LIVE_PROMOTION'] = 'YES';
+    $proc = proc_open($args, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $pipes, dirname(__DIR__), $env, ['bypass_shell'=>true]);
+    if (!is_resource($proc)) throw new RuntimeException('Failed to start Live promotion');
+    fclose($pipes[0]);
+    $out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]);
+    fclose($pipes[1]); fclose($pipes[2]);
+    $exit = proc_close($proc);
+    return ['ok'=>$exit === 0, 'exit_code'=>$exit, 'output'=>trim($out . "\n" . $err)];
+}
+
 function bakery_auto_push_watcher_running() {
     $pidPath = bakery_auto_push_deploy_dir() . DIRECTORY_SEPARATOR . '.watch_push.pid';
     if (!is_file($pidPath)) {

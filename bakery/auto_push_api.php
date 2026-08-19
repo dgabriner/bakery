@@ -1,7 +1,7 @@
 <?php
 /**
  * Local-only JSON API for staging auto-push toggle + manual sync.
- * POST actions: status (also GET), enable, disable, sync
+ * POST actions: status (also GET), enable, disable, sync, promote, direct_live
  */
 define('ACCESS_ALLOWED', true);
 
@@ -90,6 +90,14 @@ try {
                 'last' => $result['status']['last'],
                 'live_url' => $result['status']['live_url'],
             ]);
+            break;
+
+        case 'promote':
+        case 'direct_live':
+            @set_time_limit(900);
+            $result = bakery_auto_push_run_live_promotion($action === 'direct_live');
+            if (!$result['ok']) http_response_code(500);
+            echo json_encode($result + ['message' => $result['ok'] ? 'Live promotion complete' : 'Live promotion failed']);
             break;
 
         default:
