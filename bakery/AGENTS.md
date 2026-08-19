@@ -14,7 +14,9 @@ Skill: `.cursor/skills/agent-homebase/SKILL.md`.
 
 Data/Git stabilization: read `docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md` and
 `.cursor/rules/data-environment-safety.mdc` before database, backup, Git, sync,
-deploy, environment, hook, or DreamHost work. Live auto-push stays disabled.
+deploy, environment, hook, or DreamHost work. Live production auto-push stays
+disabled. After Phase 4, editor hooks may auto-deploy to
+`staging.sourflour.org` only; they must never target `bakery.sourflour.org/bake`.
 Full data copies flow production → staging/local only; staging/local never
 replace live operational data wholesale.
 

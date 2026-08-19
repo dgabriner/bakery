@@ -12,6 +12,9 @@ $squareEnv = strtolower((string)($_ENV['SQUARE_ENV'] ?? getenv('SQUARE_ENV') ?: 
 if (!in_array($squareEnv, ['sandbox', 'production'], true)) {
     $squareEnv = 'sandbox';
 }
+if (defined('IS_STAGING') && IS_STAGING) {
+    $squareEnv = 'sandbox';
+}
 
 define('SQUARE_ENV', $squareEnv);
 define('SQUARE_ACCESS_TOKEN', (string)($_ENV['SQUARE_ACCESS_TOKEN'] ?? getenv('SQUARE_ACCESS_TOKEN') ?: ''));

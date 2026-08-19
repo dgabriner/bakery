@@ -5,7 +5,9 @@
 #   .\scripts\push_sftp.ps1 -DryRun
 #   .\scripts\push_sftp.ps1 -All
 #
-# Credentials: .env.sftp (see .env.sftp.example)
+# Credentials: .env.sftp.live if present, else .env.sftp (see .env.sftp.live.example).
+# Requires SFTP_TARGET=dreamhost-live. Refuses bakeryOS and staging.sourflour.org.
+# Auto-push never calls this script; use push_sftp_stage.ps1 for staging.
 # Schema SQL is never uploaded; changed .sql files are noted in the history log.
 param(
     [switch]$DryRun,
@@ -20,7 +22,9 @@ $deployDir = Join-Path $bakeryRoot "storage\deploy"
 $historyDir = Join-Path $deployDir "pushes"
 $historyLog = Join-Path $deployDir "PUSH_HISTORY.jsonl"
 $lastDeployPath = Join-Path $deployDir "LAST_DEPLOY.json"
-$envSftpPath = Join-Path $bakeryRoot ".env.sftp"
+$liveEnvPreferred = Join-Path $bakeryRoot ".env.sftp.live"
+$legacyEnvPath = Join-Path $bakeryRoot ".env.sftp"
+$envSftpPath = if (Test-Path -LiteralPath $liveEnvPreferred) { $liveEnvPreferred } else { $legacyEnvPath }
 $uploader = Join-Path $PSScriptRoot "sftp_upload.py"
 $listFile = Join-Path $env:TEMP ("bakery_sftp_files_{0}.txt" -f [guid]::NewGuid().ToString("N"))
 
@@ -152,11 +156,14 @@ function Write-BakeryPushHistory {
     return $detailPath
 }
 
+foreach ($name in @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD", "SFTP_REMOTE_ROOT", "SFTP_TARGET")) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
 Import-BakerySftpEnv -Path $envSftpPath
 
 $missingCreds = @()
 foreach ($required in @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD", "SFTP_REMOTE_ROOT")) {
-    # Avoid Get-Item Env:... — on some Windows setups the Env: provider throws
+    # Avoid Get-Item Env:... - on some Windows setups the Env: provider throws
     # "An item with the same key has already been added" when PATH/Path collide.
     $val = [Environment]::GetEnvironmentVariable($required, 'Process')
     if ([string]::IsNullOrWhiteSpace($val)) {
@@ -166,9 +173,36 @@ foreach ($required in @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD", "SFTP_REMOTE_
 }
 if ($missingCreds.Count -gt 0) {
     Write-Host "Missing SFTP settings: $($missingCreds -join ', ')"
-    Write-Host "Copy .env.sftp.example to .env.sftp and fill in values."
+    Write-Host "Copy .env.sftp.live.example to .env.sftp.live and fill in values."
     exit 1
 }
+
+$liveRoot = [Environment]::GetEnvironmentVariable('SFTP_REMOTE_ROOT', 'Process')
+$liveUser = [Environment]::GetEnvironmentVariable('SFTP_USER', 'Process')
+$liveTarget = [Environment]::GetEnvironmentVariable('SFTP_TARGET', 'Process')
+if ([string]::IsNullOrWhiteSpace($liveTarget)) {
+    [Environment]::SetEnvironmentVariable('SFTP_TARGET', 'dreamhost-live', 'Process')
+    $liveTarget = 'dreamhost-live'
+}
+if ($liveTarget -ne 'dreamhost-live') {
+    throw "Refusing: live SFTP_TARGET must be dreamhost-live."
+}
+if ($liveUser -eq 'bakeryOS') {
+    throw "Refusing: live push cannot use bakeryOS (staging user)."
+}
+if ($liveRoot -match 'staging\.sourflour\.org') {
+    throw "Refusing: live push cannot use staging.sourflour.org."
+}
+if ($liveRoot -notmatch 'bakery\.sourflour\.org/bake') {
+    throw "Refusing: live remote root must be bakery.sourflour.org/bake."
+}
+
+$pythonCheck = Get-PythonLauncher
+$checkArgs = @()
+if ((Split-Path $pythonCheck -Leaf) -in @("py.exe", "py")) { $checkArgs += "-3" }
+$checkArgs += @($uploader, "--local-root", $bakeryRoot, "--check-target")
+& $pythonCheck @checkArgs
+if ($LASTEXITCODE -ne 0) { throw "Live SFTP target check failed (exit $LASTEXITCODE)." }
 
 # Serialize with the background worker so UI Sync and hooks cannot corrupt LAST_DEPLOY.json.
 $lockPath = Join-Path $deployDir ".push_lock"

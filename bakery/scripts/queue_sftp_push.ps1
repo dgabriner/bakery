@@ -31,9 +31,16 @@ if (Test-Path $disableFlag) {
     exit 0
 }
 
-if (-not (Test-Path (Join-Path $bakeryRoot ".env.sftp"))) {
-    Write-AutoPushLog "SKIP missing .env.sftp ($Reason)"
+$stageEnvPath = Join-Path $bakeryRoot ".env.sftp.stage"
+if (-not (Test-Path $stageEnvPath)) {
+    Write-AutoPushLog "SKIP missing .env.sftp.stage ($Reason)"
     exit 0
+}
+
+$stageEnvText = Get-Content -LiteralPath $stageEnvPath -Raw -ErrorAction SilentlyContinue
+if ($stageEnvText -match 'bakery\.sourflour\.org/bake') {
+    Write-AutoPushLog "ERROR refusing live /bake in .env.sftp.stage ($Reason)"
+    exit 1
 }
 
 New-Item -ItemType Directory -Force -Path $deployDir | Out-Null

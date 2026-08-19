@@ -2,7 +2,7 @@
 
 **Owner intent recorded:** 2026-08-18  
 **Execution owner:** an agent, with the bakery owner approving only the named production gates  
-**Current status:** Phase 1 complete; production/staging untouched; live auto-push disabled
+**Current status:** Local data, backup, restore-drill, staging, and release-candidate infrastructure is implemented on `codex/infrastructure-stabilization-20260818`. Production remains unchanged and live promotion execution remains locked.
 
 This is the authoritative plan for separating development, staging, production,
 backups, and Git without losing the current working tree or overwriting bakery
@@ -77,8 +77,8 @@ Goal: make every following step recoverable before changing Git or databases.
 
 - [x] Keep local runtime on `USE_PROD_DB=false`.
 - [x] Disable and stop the live SFTP auto-push watcher.
-- [ ] Remove/disable Cursor hook access to live credentials; keep the disable
-      flag until staging credentials and target checks exist.
+- [x] Remove/disable Cursor hook access to live credentials. Phase 4 hooks
+      require `.env.sftp.stage` and never load `.env.sftp` / `.env.sftp.live`.
 - [x] Capture a timestamped filesystem archive of the bakery source, excluding
       runtime PII dumps only when they are archived separately.
 - [x] Create a new verified production SQL backup and a separate local SQL dump.
@@ -244,6 +244,44 @@ The refresh path is one-way: live production dump → staging backup → staging
 import → staging-only migrations → health check. Staging refresh never writes
 to live.
 
+Phase 3 planning evidence (2026-08-18, no hosted mutation):
+
+- Planning branch: `codex/phase3-dreamhost-staging-plan-20260818` from Phase 2
+  `db0ecd1`. Detail: `docs/PHASE3_DREAMHOST_STAGING_PLAN.md`.
+- Production remains `https://bakery.sourflour.org/bake/` → MySQL `bakerysf` on
+  `mysql.sourflour.org`. Live auto-push stays disabled.
+- Owner named hosted staging: `https://staging.sourflour.org/` on Shared
+  Unlimited `iad1-shared-b7-08`, SFTP host `iad1-shared-b7-08.dreamhost.com`,
+  SFTP user `bakeryOS`, assumed remote root `staging.sourflour.org`. Do not
+  use production user `dh_dp755h` or path `bakery.sourflour.org/bake`.
+- Owner offered unused DreamHost database `bakerysoftware` as a candidate that
+  should be able to serve the same role as `bakerysf`. DreamHost cannot rename
+  databases, so that name would be permanent if adopted. No connection, import,
+  or deploy was performed.
+- Staging MySQL user must be associated only with the staging database. A user
+  that can also access `bakerysf` is not acceptable, even if the unused database
+  itself is the right name. `lavictoriasf` exclusivity is still an open owner
+  question.
+- Templates (no secrets): `storage/deploy/STAGING_ENV.example`,
+  `.env.sftp.stage.example`. Local gitignored `.env.sftp.stage` holds the
+  bakeryOS SFTP target for later Phase 4; auto-push stays disabled.
+- Still blocked on owner Gate 2 (use hosted staging: place `.env` / upload to
+  `bakeryOS` only) and later Gate 3 (first staging refresh from live).
+
+Phase 3 execution evidence (2026-08-18, production untouched):
+
+- Owner Gate 2: use `https://staging.sourflour.org/` / SFTP user `bakeryOS`.
+- Owner Gate 3: first refresh of `bakerysoftware` from the verified Phase 2
+  snapshot `storage/dumps/nightly/live_20260819_003445_phase2_baseline.sql.gz`.
+- Uploaded 383 deployable files plus 26 operational root pages and a staging
+  `.env` (`APP_ENV=staging`, `MAIL_DRIVER=log`, `DB_NAME=bakerysoftware`) to
+  `bakeryOS` / `staging.sourflour.org` only. Live `.env.sftp` was not used.
+- Login at `https://staging.sourflour.org/login.php` shows the Spanish STAGING
+  banner and `bakerysoftware @ mysql.sourflour.org`.
+- Staging import counts matched the snapshot: 107 customers, 54 products,
+  4,441 standing orders, 6 drivers, 11 users, 878 daily orders.
+- Phone acceptance on that URL remains the Phase 3 exit check.
+
 Exit gate: phone can complete a representative acceptance flow on the staging
 URL; production counts and files remain unchanged.
 
@@ -271,10 +309,30 @@ A staging deployment batch performs:
 Uncommitted edits may auto-deploy to staging for fast phone feedback, but only a
 committed, tested manifest can become a production release candidate.
 
+Phase 4 evidence (2026-08-18, production auto-push remains unreachable):
+
+- Auto-push queue, worker, Cursor hook, and local UI Sync call
+  `scripts/push_sftp_stage.ps1` only. They require `.env.sftp.stage` and never
+  load `.env.sftp` / `.env.sftp.live`.
+- Live `scripts/push_sftp.ps1` prefers `.env.sftp.live`, requires
+  `SFTP_TARGET=dreamhost-live`, and refuses `bakeryOS` plus
+  `staging.sourflour.org`. Auto-push never calls it.
+- Staging incremental pushes lint PHP, write
+  `storage/deploy/stage/releases/release_*.json`, skip remote `.env` unless
+  `-All` / `-EnvOnly`, snapshot `bakerysoftware` and run
+  `scripts/run_migrations.php --mode=dreamhost-stage` when schema SQL changed
+  after a prior baseline, and smoke `https://staging.sourflour.org/login.php`
+  for the STAGING banner and `bakerysoftware`.
+- `push.bat` now calls the staging push script. Explicit live `/bake` remains
+  `.\scripts\push_sftp.ps1` only.
+- Tests: `php tests/run_phase4_auto_deploy_tests.php` and
+  `php tests/run_staging_env_tests.php`. Detail: `docs/PHASE4_STAGING_AUTO_DEPLOY.md`.
+
 Exit gate: every staging deploy is target-checked, logged, and unable to reach
 the live remote root or live DB.
 
 Rollback: restore the prior staging code artifact and staging pre-deploy dump.
+Disable staging auto-push with `storage/deploy/.auto_push_disabled`.
 
 ## Phase 5 — one controlled production promotion
 
@@ -335,6 +393,27 @@ considered proven merely because `mysqldump` exited successfully.
 Exit gate: the agent can select a backup, verify it, restore it into a disposable
 database, and report expected core counts without touching live.
 
+Phase 6 implementation (2026-08-18 local time):
+
+- `run_nightly_data_cycle.ps1` creates one verified read-only snapshot and
+  refreshes `bakerysf_local` plus `bakerysf_test` from that identical source.
+  Local staging is preserved unless explicitly requested.
+- `run_weekly_backup.ps1` preserves an immutable weekly snapshot pair, retains
+  12, and supports `BAKERY_OFFSITE_BACKUP_DIR`.
+- `verify_backup_restore.php` proves a backup in disposable
+  `bakerysf_refresh_local`, checks captured core counts, records a receipt, and
+  drops the database.
+- `install_data_tasks.ps1` owns the nightly, weekly, and due-monthly Windows
+  tasks; runtime logs and dumps stay outside Git.
+
+Verification evidence (2026-08-18 local / 2026-08-19 UTC): all three Windows
+tasks are installed and Ready. An existing verified snapshot created immutable
+weekly backup `2026-W34_live_20260819_003445_phase2_baseline.sql.gz`; its restore
+drill matched 107 customers, 54 products, 4,441 standing orders, 6 drivers, 105
+default quantities, 11 users, and 878 daily orders, then dropped the disposable
+database. The same snapshot successfully refreshed the mirror and test database
+while preserving `bakerysf_stage_local`.
+
 ## Phase 7 — retire unsafe legacy paths and reconcile documentation
 
 After the new flow is proven:
@@ -351,6 +430,12 @@ After the new flow is proven:
 
 Exit gate: there is one documented route for snapshots, one for tests, one for
 staging deploy, and one for production promotion.
+
+Phase 7 implementation (2026-08-18 local time): direct local-to-production DB
+and live-file actions were removed from the normal developer menu. Canonical
+operator instructions are now `DEV_WORKFLOW.md`, `DATA_OPERATIONS_RUNBOOK.md`,
+and `PRODUCTION_DEPLOY.md`. Low-level legacy recovery tools remain quarantined
+and unlinked rather than being deleted during stabilization.
 
 ## Agent execution protocol
 
@@ -375,8 +460,8 @@ limited to approving these gates:
 
 ## Immediate next mission
 
-Begin Phase 3 resource preparation: obtain the DreamHost staging hostname,
-separate database/user, and isolated SFTP/document root. Keep auto-push disabled
-and local runtime selected. Do not refresh DreamHost staging, enable automatic
-deployment, or promote anything to production until those resources are named
-and the corresponding owner gates are approved.
+Finish local gates, install the scheduled data tasks, commit the infrastructure
+to the additive branch, then re-enable staging-only auto-push. A new clean,
+committed staging deploy and phone acceptance are required before an immutable
+candidate can exist. Production `bakery.sourflour.org/bake` remains untouched;
+live execution is a separate mission even if promotion was discussed earlier.

@@ -11,6 +11,7 @@ $isBakerUser = $authUser && $authRoleSlug === 'baker';
 $isDriverUser = $authUser && bakery_is_driver_route_role($authRoleSlug);
 $isFocusedWorkspaceUser = $isBakerUser || $isDriverUser;
 $showLocalDebugBanner = defined('IS_LOCAL') && IS_LOCAL && !$isBakerUser;
+$showStagingBanner = defined('IS_STAGING') && IS_STAGING;
 $workspaceBodyClass = $isDriverUser
     ? 'workspace-driver'
     : ($isBakerUser ? 'workspace-baker' : ($authUser ? 'workspace-ops' : ''));
@@ -89,6 +90,13 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <?php endif; ?>
 </head>
 <body<?php echo $workspaceBodyClass !== '' ? ' class="' . htmlspecialchars($workspaceBodyClass, ENT_QUOTES, 'UTF-8') . '"' : ''; ?>>
+<?php if ($showStagingBanner): ?>
+<div class="local-env-banner staging-env-banner" role="alert">
+  <div class="local-env-banner-row">
+    <span><?php echo htmlspecialchars(bakery_t('env.staging', ['db' => defined('DB_NAME') ? DB_NAME : 'unknown', 'host' => defined('DB_HOST') ? DB_HOST : 'unknown'])); ?></span>
+  </div>
+</div>
+<?php endif; ?>
 <?php if ($showLocalDebugBanner): ?>
 <?php if (defined('USE_PROD_DB') && USE_PROD_DB): ?>
 <div class="local-env-banner prod-db-banner" role="alert">

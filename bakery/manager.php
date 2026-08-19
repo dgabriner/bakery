@@ -886,6 +886,7 @@ require_once 'includes/nav.php';
         </div>
         <div class="manager-section__actions">
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_manager.php?date=<?php echo urlencode($selectedDate); ?>">Route manager</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_summary.php?date=<?php echo urlencode($selectedDate); ?>">Route summary</a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_route.php?date=<?php echo urlencode($selectedDate); ?>">Daily route</a>
         </div>
       </div>

@@ -1,7 +1,8 @@
 <?php
 /**
- * Local-only live-server auto-push controls (DreamHost SFTP).
+ * Local-only staging auto-push controls (DreamHost SFTP to staging.sourflour.org).
  * Used by header UI + auto_push_api.php. Safe no-op / refuse outside local.
+ * Never calls scripts/push_sftp.ps1 (live /bake).
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -168,7 +169,10 @@ function bakery_auto_push_set_enabled($enabled) {
 
 function bakery_auto_push_last_record() {
     $dir = bakery_auto_push_deploy_dir();
-    $last = $dir . DIRECTORY_SEPARATOR . 'LAST_DEPLOY.json';
+    $stageLast = $dir . DIRECTORY_SEPARATOR . 'stage' . DIRECTORY_SEPARATOR . 'LAST_DEPLOY.json';
+    $last = is_file($stageLast)
+        ? $stageLast
+        : $dir . DIRECTORY_SEPARATOR . 'LAST_DEPLOY.json';
     if (!is_file($last)) {
         return null;
     }
@@ -211,21 +215,23 @@ function bakery_auto_push_status($ensureWatcher = false) {
         'watching' => !empty($watcher['running']),
         'watcher' => $watcher,
         'last' => bakery_auto_push_last_record(),
-        'live_url' => 'https://bakery.sourflour.org/bake/',
+        'live_url' => 'https://staging.sourflour.org/',
+        'staging_url' => 'https://staging.sourflour.org/',
     ];
 }
 
 /**
- * Run push_sftp.ps1 and return structured result.
+ * Run push_sftp_stage.ps1 and return structured result.
+ * Auto-push never invokes the live /bake script.
  */
 function bakery_auto_push_run_sync() {
     if (!defined('IS_LOCAL') || !IS_LOCAL) {
         throw new RuntimeException('Sync is only available on the local app');
     }
 
-    $script = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'push_sftp.ps1';
+    $script = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'push_sftp_stage.ps1';
     if (!is_file($script)) {
-        throw new RuntimeException('Missing scripts/push_sftp.ps1');
+        throw new RuntimeException('Missing scripts/push_sftp_stage.ps1');
     }
 
     $ps = bakery_auto_push_powershell();
@@ -246,7 +252,7 @@ function bakery_auto_push_run_sync() {
         2 => ['pipe', 'w'],
     ];
 
-    // Inherit PHP's environment. Get-PythonLauncher in push_sftp.ps1 also
+    // Inherit PHP's environment. Get-PythonLauncher in push_sftp_stage.ps1 also
     // resolves absolute Python paths so a stripped PATH still works.
     $process = proc_open($cmd, $descriptors, $pipes, dirname(__DIR__), null, ['bypass_shell' => true]);
     if (!is_resource($process)) {
@@ -260,7 +266,7 @@ function bakery_auto_push_run_sync() {
     $stdout = '';
     $stderr = '';
     $start = time();
-    $timeout = 180;
+    $timeout = 360;
     $exit = null;
 
     while (true) {

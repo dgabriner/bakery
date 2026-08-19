@@ -122,6 +122,11 @@ $currentLocale = bakery_locale();
   </style>
 </head>
 <body>
+<?php if (defined('IS_STAGING') && IS_STAGING): ?>
+  <div class="local-env-banner staging-env-banner" role="alert" style="position:fixed;top:0;left:0;right:0;z-index:10000;background:#8a1c3c;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.85rem;font-weight:700;padding:8px 12px;text-align:center;">
+    <?php echo htmlspecialchars(bakery_t('env.staging', ['db' => defined('DB_NAME') ? DB_NAME : 'unknown', 'host' => defined('DB_HOST') ? DB_HOST : 'unknown'])); ?>
+  </div>
+<?php endif; ?>
   <div class="wrap">
     <div class="brands" aria-label="La Victoria y Sour Flour">
       <img class="la-victoria-logo" src="<?php echo bakery_asset_href('assets/logos/la-victoria.png'); ?>" alt="La Victoria San Francisco">

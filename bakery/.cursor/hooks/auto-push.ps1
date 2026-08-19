@@ -58,7 +58,8 @@ if (-not (Test-Path -LiteralPath $queue)) {
     exit 0
 }
 
-# Always queue. push_sftp.ps1 decides what (if anything) is deployable.
+# Always queue. push_sftp_stage.ps1 decides what (if anything) is deployable.
+# Auto-push never calls scripts/push_sftp.ps1 (live /bake).
 try {
     & $queue -Reason $reason -Path $path -DelaySeconds 15
     Write-HookLog "queued ok"

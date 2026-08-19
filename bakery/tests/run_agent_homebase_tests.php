@@ -79,7 +79,7 @@ assert_true(strpos(file_get_contents(dirname(__DIR__) . '/includes/agent_homebas
 
 $cli = file_get_contents(dirname(__DIR__) . '/scripts/agent_homebase.php');
 assert_true($cli !== false && strpos($cli, 'case \'brief\':') !== false, 'CLI exposes brief');
-assert_true(strpos($cli, 'bakery_assert_local_test_target') !== false, 'CLI refuses non-local targets by default');
+assert_true(strpos($cli, 'bakery_assert_homebase_target') !== false, 'CLI refuses non-local targets by default');
 
 // Cleanup synthetic rows (keep seeded curriculum/bugs).
 $db->prepare('DELETE FROM agent_lesson_progress WHERE agent_name = ?')->execute([$agent]);

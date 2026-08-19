@@ -1,6 +1,6 @@
 <?php
 /**
- * Local-only JSON API for live auto-push toggle + manual sync.
+ * Local-only JSON API for staging auto-push toggle + manual sync.
  * POST actions: status (also GET), enable, disable, sync
  */
 define('ACCESS_ALLOWED', true);
@@ -23,7 +23,7 @@ if (!defined('IS_LOCAL') || !IS_LOCAL) {
 
 $user = bakery_current_user();
 if (!bakery_user_can_control_auto_push($user)) {
-    bakery_auto_push_api_fail('Only the local admin (danny@sourflour.org) can control live sync', 403);
+    bakery_auto_push_api_fail('Only the local admin (danny@sourflour.org) can control staging sync', 403);
 }
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -61,12 +61,12 @@ try {
         case 'disable':
             bakery_auto_push_set_enabled(false);
             echo json_encode(array_merge(bakery_auto_push_status(false), [
-                'message' => 'Auto-push OFF — watcher stopped; use Sync to live when ready',
+                'message' => 'Auto-push OFF — watcher stopped; use Sync to staging when ready',
             ]));
             break;
 
         case 'sync':
-            @set_time_limit(200);
+            @set_time_limit(400);
             $result = bakery_auto_push_run_sync();
             if (!$result['ok']) {
                 http_response_code(500);

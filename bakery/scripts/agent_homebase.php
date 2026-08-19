@@ -10,7 +10,8 @@
  *   php scripts/agent_homebase.php note --kind=question --body=...
  *   php scripts/agent_homebase.php handoff --agent=... --summary="..." --files="a.php,b.php"
  *
- * Local/test database only unless --allow-production AND USE_PROD_DB=true.
+ * Everyday local staging (bakerysf_stage_local) or bakerysf_test unless
+ * --allow-production AND USE_PROD_DB=true. Never the nightly mirror.
  */
 define('ACCESS_ALLOWED', true);
 
@@ -28,7 +29,7 @@ require_once $root . '/includes/agent_homebase.php';
 function bakery_agent_cli_help(): void
 {
     echo <<<TXT
-Agent Homebase (local/test unless --allow-production AND USE_PROD_DB)
+Agent Homebase (local staging/test unless --allow-production AND USE_PROD_DB)
 
 Commands:
   brief       Opening briefing (unread lessons, bugs, board, recent handoffs)
@@ -108,7 +109,7 @@ function bakery_agent_cli_assert_target(PDO $db, bool $allowProduction): void
     if ($allowProduction && defined('USE_PROD_DB') && USE_PROD_DB) {
         return;
     }
-    bakery_assert_local_test_target($db);
+    bakery_assert_homebase_target($db);
 }
 
 $args = bakery_agent_cli_args($argv);

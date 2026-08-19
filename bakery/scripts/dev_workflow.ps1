@@ -47,19 +47,17 @@ while ($true) {
     Write-Host "  2) Start local PHP server"
     Write-Host "  3) Verify local environment"
     Write-Host ""
-    Write-Host "DATABASE SYNC"
-    Write-Host "  4) Pull production -> local  (safe, read-only on prod)"
+    Write-Host "PROTECTED DATA WORKFLOWS"
+    Write-Host "  4) Run verified production snapshot -> local mirror + test"
     Write-Host "  5) Compare production vs local"
-    Write-Host "  6) Backup production only"
-    Write-Host "  7) Push local -> production   (preview / dry-run)"
-    Write-Host "  8) Push local -> production   (EXECUTE - destructive)"
+    Write-Host "  6) Create verified weekly production backup"
+    Write-Host "  7) Run disposable backup restore drill"
     Write-Host ""
-    Write-Host "PRODUCTION FILES"
-    Write-Host "  9) Show changed files to deploy"
-    Write-Host " 10) Push changed files via SFTP (preview)"
-    Write-Host " 11) Push changed files via SFTP"
-    Write-Host " 12) Build production deploy ZIP (fallback)"
-    Write-Host " 13) Record deploy complete (after manual ZIP upload)"
+    Write-Host "STAGING FILES"
+    Write-Host "  8) Show staging auto-push status"
+    Write-Host "  9) Preview staging SFTP sync"
+    Write-Host " 10) Sync changed files to staging"
+    Write-Host " 11) Create immutable release candidate (after phone test)"
     Write-Host ""
     Write-Host "TESTS"
     Write-Host " 14) Run local test suite"
@@ -81,46 +79,32 @@ while ($true) {
             }
             '4' {
                 Write-Host ""
-                Write-Host "This replaces local bakerysf_local with a copy of production data."
+                Write-Host "This reads production once, verifies the snapshot, then refreshes bakerysf_local and bakerysf_test."
+                Write-Host "bakerysf_stage_local is deliberately preserved."
                 if (-not (Confirm-Action "Continue?")) { continue }
-                Invoke-BakeryPhp @((Join-Path $scriptsDir "pull_prod_to_local.php"))
+                & (Join-Path $scriptsDir "run_nightly_data_cycle.ps1") -Force
             }
             '5' {
                 Invoke-BakeryPhp @((Join-Path $scriptsDir "compare_prod_local.php"))
             }
             '6' {
-                Invoke-BakeryPhp @((Join-Path $scriptsDir "backup_production.php"))
+                & (Join-Path $scriptsDir "run_weekly_backup.ps1") -Force
             }
             '7' {
-                Invoke-BakeryPhp @((Join-Path $scriptsDir "push_local_to_prod.php"), '--dry-run')
+                & (Join-Path $scriptsDir "run_restore_drill.ps1") -Force
             }
             '8' {
-                Write-Host ""
-                Write-Host "WARNING: This OVERWRITES production database tables with local data."
-                Write-Host "A production backup is created first."
-                Write-Host "Login users are NOT overwritten unless you choose include-auth."
-                $includeAuth = Read-Host "Include auth tables too? (y/N)"
-                if (-not (Confirm-Action "Push local database to production?")) { continue }
-                $args = @((Join-Path $scriptsDir "push_local_to_prod.php"), '--confirm-push-to-production')
-                if ($includeAuth -match '^[yY]') {
-                    $args += '--include-auth'
-                }
-                Invoke-BakeryPhp $args
+                & (Join-Path $scriptsDir "auto_push_watcher_ctl.ps1") status
             }
             '9' {
-                & (Join-Path $scriptsDir "list_deploy_changes.ps1")
+                & (Join-Path $scriptsDir "push_sftp_stage.ps1") -DryRun
             }
             '10' {
-                & (Join-Path $scriptsDir "push_sftp.ps1") -DryRun
+                & (Join-Path $scriptsDir "push_sftp_stage.ps1")
             }
             '11' {
-                & (Join-Path $scriptsDir "push_sftp.ps1")
-            }
-            '12' {
-                & (Join-Path $scriptsDir "build_deploy_zip.ps1")
-            }
-            '13' {
-                & (Join-Path $scriptsDir "record_deploy.ps1")
+                $tester = Read-Host "Who completed the staging phone test?"
+                & (Join-Path $scriptsDir "create_release_candidate.ps1") -StagingTestedBy $tester
             }
             '14' {
                 & (Join-Path $scriptsDir "run_local_test_gate.ps1")

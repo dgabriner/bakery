@@ -36,6 +36,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Delivery | Driver Management | Driver records and recurring route maintenance. |
 | Delivery | Standing Routes | Recurring customer-to-driver route plan. |
 | Delivery | Route Manager | Assigned route-stop review and maintenance. |
+| Delivery | Route Summary | Photo-first review of the day's stops with customer, amount sold, and driver. |
 | Delivery | Customer Map | Customer locations and delivery zones. |
 | Products & Recipes | Products | Products that can be ordered and produced. |
 | Products & Recipes | Dough Types & Lines | Dough and product-line organization. |

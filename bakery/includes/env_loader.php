@@ -9,10 +9,24 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 /**
+ * Unset process environment keys so a later .env load is not blocked.
+ *
+ * @param array<int, string> $names
+ */
+function bakery_clear_env_keys(array $names): void
+{
+    foreach ($names as $name) {
+        putenv($name);
+        unset($_ENV[$name], $_SERVER[$name]);
+    }
+}
+
+/**
  * @param string $envPath Absolute path to .env file
+ * @param bool $override When true, replace keys already present in the process
  * @return bool True if file was loaded
  */
-function bakery_load_env_file($envPath) {
+function bakery_load_env_file($envPath, $override = false) {
     if (!is_readable($envPath)) {
         return false;
     }
@@ -48,9 +62,11 @@ function bakery_load_env_file($envPath) {
             $value = substr($value, 1, -1);
         }
 
-        $existing = getenv($name);
-        if ($existing !== false && $existing !== '') {
-            continue;
+        if (!$override) {
+            $existing = getenv($name);
+            if ($existing !== false && $existing !== '') {
+                continue;
+            }
         }
 
         putenv($name . '=' . $value);

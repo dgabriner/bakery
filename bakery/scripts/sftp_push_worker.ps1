@@ -11,7 +11,10 @@ $requestPath = Join-Path $deployDir ".push_request"
 $lockPath = Join-Path $deployDir ".push_lock"
 $workerFlag = Join-Path $deployDir ".push_worker"
 $logPath = Join-Path $deployDir "auto_push.log"
-$pushScript = Join-Path $BakeryRoot "scripts\push_sftp.ps1"
+$pushScript = Join-Path $BakeryRoot "scripts\push_sftp_stage.ps1"
+if ((Split-Path $pushScript -Leaf) -ne 'push_sftp_stage.ps1') {
+    throw "Worker refused a non-staging push script."
+}
 
 function Write-AutoPushLog([string]$Message) {
     $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
@@ -33,8 +36,8 @@ try {
 
     if (-not (Test-Path $requestPath)) { exit 0 }
 
-    # Wait until any in-flight push_sftp (UI Sync or prior worker) finishes.
-    # push_sftp.ps1 owns .push_lock — do not acquire it here or the child deadlocks.
+    # Wait until any in-flight staging push (UI Sync or prior worker) finishes.
+    # push_sftp_stage.ps1 owns .push_lock - do not acquire it here or the child deadlocks.
     $deadline = (Get-Date).AddMinutes(5)
     while (Test-Path -LiteralPath $lockPath) {
         try {

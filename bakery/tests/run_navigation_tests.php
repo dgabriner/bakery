@@ -66,6 +66,7 @@ navigation_test_assert(in_array('agent_homebase.php', $adminItems, true), 'admin
 navigation_test_assert(in_array('users.php', $adminItems, true), 'administrators receive User Management');
 navigation_test_assert(in_array('historical_navigation.php', $adminItems, true), 'administrators receive Historical Navigation');
 navigation_test_assert(in_array('manager.php', $adminItems, true), 'administrators receive Manager Mode');
+navigation_test_assert(in_array('route_summary.php', $adminItems, true), 'administrators receive Route Summary');
 navigation_test_assert(in_array('walkthroughs.php', $adminItems, true), 'administrators receive Walkthroughs');
 navigation_test_assert(in_array('driver.php?change_driver=1', $adminItems, true), 'administrators receive My Route');
 
@@ -113,7 +114,7 @@ foreach (bakery_navigation_groups_for_role('administrator') as $group) {
         $usageCounts[$usage]++;
     }
 }
-navigation_test_assert(($usageCounts['everyday'] + $usageCounts['moderate'] + $usageCounts['occasional']) === 49, 'all administrator items carry a usage level');
+navigation_test_assert(($usageCounts['everyday'] + $usageCounts['moderate'] + $usageCounts['occasional']) === 50, 'all administrator items carry a usage level');
 navigation_test_assert($usageCounts['everyday'] >= 10, 'everyday bucket includes the core operating tabs');
 navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket includes setup and admin tabs');
 

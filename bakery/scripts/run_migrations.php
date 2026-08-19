@@ -5,6 +5,7 @@
  *
  * Usage:
  *   C:\php\php.exe scripts/run_migrations.php
+ *   C:\php\php.exe scripts/run_migrations.php --mode=dreamhost-stage
  */
 define('ACCESS_ALLOWED', true);
 
@@ -17,20 +18,48 @@ $root = dirname(__DIR__);
 require_once $root . '/includes/env_loader.php';
 
 $requestedMigrationDb = '';
+$migrationMode = 'local';
 foreach ($argv as $arg) {
     if (strpos($arg, '--database=') === 0) {
         $requestedMigrationDb = strtolower(trim(substr($arg, 11)));
     }
+    if (strpos($arg, '--mode=') === 0) {
+        $migrationMode = strtolower(trim(substr($arg, 7)));
+    }
 }
 
-$envPath = $root . DIRECTORY_SEPARATOR . '.env';
-if (is_readable($envPath)) {
-    bakery_load_env_file($envPath);
-}
-if ($requestedMigrationDb !== '') {
-    putenv('DB_NAME=' . $requestedMigrationDb);
-    $_ENV['DB_NAME'] = $requestedMigrationDb;
-    $_SERVER['DB_NAME'] = $requestedMigrationDb;
+if ($migrationMode === 'dreamhost-stage') {
+    if ($requestedMigrationDb !== '' && $requestedMigrationDb !== 'bakerysoftware') {
+        fwrite(STDERR, "Refusing: --mode=dreamhost-stage only targets bakerysoftware.\n");
+        exit(1);
+    }
+    bakery_clear_env_keys(['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS', 'APP_ENV', 'USE_PROD_DB']);
+    $stagingEnv = $root . DIRECTORY_SEPARATOR . '.env.staging.dreamhost';
+    if (!is_readable($stagingEnv)) {
+        fwrite(STDERR, "Missing gitignored .env.staging.dreamhost\n");
+        exit(1);
+    }
+    bakery_load_env_file($stagingEnv, true);
+    putenv('APP_ENV=staging');
+    $_ENV['APP_ENV'] = 'staging';
+    $_SERVER['APP_ENV'] = 'staging';
+    putenv('USE_PROD_DB=false');
+    $_ENV['USE_PROD_DB'] = 'false';
+    $_SERVER['USE_PROD_DB'] = 'false';
+} else {
+    if ($migrationMode !== 'local' && $migrationMode !== '') {
+        fwrite(STDERR, "Unknown --mode={$migrationMode}. Use local (default) or dreamhost-stage.\n");
+        exit(1);
+    }
+    $envPath = $root . DIRECTORY_SEPARATOR . '.env';
+    if (is_readable($envPath)) {
+        bakery_load_env_file($envPath);
+    }
+    if ($requestedMigrationDb !== '') {
+        putenv('DB_NAME=' . $requestedMigrationDb);
+        $_ENV['DB_NAME'] = $requestedMigrationDb;
+        $_SERVER['DB_NAME'] = $requestedMigrationDb;
+    }
 }
 
 require_once $root . '/includes/config.php';
@@ -106,11 +135,15 @@ function bakery_mark_migration(PDO $db, $id) {
 
 try {
     $db = check_mysql_connection();
-    $migrationTarget = strtolower((string)(defined('DB_NAME') ? DB_NAME : ''));
-    if ($migrationTarget === 'bakerysf_refresh_local' || $migrationTarget === 'bakerysf_stage_local') {
-        bakery_assert_local_connection($db, [$migrationTarget]);
+    if ($migrationMode === 'dreamhost-stage') {
+        bakery_assert_dreamhost_staging_target($db);
     } else {
-        bakery_assert_local_test_target($db);
+        $migrationTarget = strtolower((string)(defined('DB_NAME') ? DB_NAME : ''));
+        if ($migrationTarget === 'bakerysf_refresh_local' || $migrationTarget === 'bakerysf_stage_local') {
+            bakery_assert_local_connection($db, [$migrationTarget]);
+        } else {
+            bakery_assert_local_test_target($db);
+        }
     }
     bakery_ensure_migrations_table($db);
 

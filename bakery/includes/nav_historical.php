@@ -268,7 +268,7 @@ endif;
 
                 <!-- Routes & Delivery Dropdown -->
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link dropdown-toggle <?php echo in_array($current_page, ['standing_routes', 'daily_route', 'driver', 'drivers', 'users', 'customer_routes', 'driver_overview', 'route_manager', 'map', 'route_tester', 'call_headquarters', 'driver_assignment']) ? 'active' : ''; ?>">
+                    <a href="#" class="nav-link dropdown-toggle <?php echo in_array($current_page, ['standing_routes', 'daily_route', 'driver', 'drivers', 'users', 'customer_routes', 'driver_overview', 'route_manager', 'route_summary', 'map', 'route_tester', 'call_headquarters', 'driver_assignment']) ? 'active' : ''; ?>">
                         <i class="nav-icon">🚚</i> <span class="nav-text">Routes</span>
                         <i class="dropdown-arrow">▼</i>
                     </a>
@@ -309,6 +309,9 @@ endif;
                         </a>
                         <a href="<?php echo BASE_URL; ?>route_manager.php" class="dropdown-link <?php echo $current_page === 'route_manager' ? 'active' : ''; ?>">
                             <i class="nav-icon">👁️</i> Route Manager
+                        </a>
+                        <a href="<?php echo BASE_URL; ?>route_summary.php" class="dropdown-link <?php echo $current_page === 'route_summary' ? 'active' : ''; ?>">
+                            <i class="nav-icon">📷</i> Route Summary
                         </a>
                         <a href="<?php echo BASE_URL; ?>map.php" class="dropdown-link <?php echo $current_page === 'map' ? 'active' : ''; ?>">
                             <i class="nav-icon">🗺️</i> Map
@@ -463,6 +466,9 @@ endif;
                         </a>
                         <a href="<?php echo BASE_URL; ?>route_manager.php" class="nav-link <?php echo $current_page === 'route_manager' ? 'active' : ''; ?>">
                             <i class="nav-icon">👁️</i> Route Manager
+                        </a>
+                        <a href="<?php echo BASE_URL; ?>route_summary.php" class="nav-link <?php echo $current_page === 'route_summary' ? 'active' : ''; ?>">
+                            <i class="nav-icon">📷</i> Route Summary
                         </a>
                         <a href="<?php echo BASE_URL; ?>map.php" class="nav-link <?php echo $current_page === 'map' ? 'active' : ''; ?>">
                             <i class="nav-icon">🗺️</i> Customer Map

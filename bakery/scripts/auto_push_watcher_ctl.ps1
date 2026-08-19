@@ -1,4 +1,4 @@
-# Start / stop / status for the background file watcher used when Live auto-push is ON.
+# Start / stop / status for the background file watcher used when staging auto-push is ON.
 #
 #   .\scripts\auto_push_watcher_ctl.ps1 status
 #   .\scripts\auto_push_watcher_ctl.ps1 start

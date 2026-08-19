@@ -111,7 +111,7 @@
       if (busy) return;
       busy = true;
       syncBtn.disabled = true;
-      setStatus('Syncing to live…', 'busy');
+      setStatus('Syncing to staging…', 'busy');
       api('sync')
         .then(function (data) {
           applyEnabled(!!data.enabled);
@@ -120,7 +120,7 @@
             msg = 'Already in sync — nothing new to upload';
           } else if (data.output && /Uploading\s+(\d+)/i.test(data.output)) {
             var m = data.output.match(/Uploading\s+(\d+)/i);
-            msg = 'Uploaded ' + m[1] + ' file(s) to live';
+            msg = 'Uploaded ' + m[1] + ' file(s) to staging';
           }
           setStatus(msg, data.ok ? 'ok' : 'error');
         })

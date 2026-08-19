@@ -105,8 +105,23 @@ function bakery_app_env() {
     return isDevelopment() ? 'local' : 'production';
 }
 
+function bakery_request_host() {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    return strtolower((string)preg_replace('/:\d+$/', '', $host));
+}
+
+function bakery_is_staging_host() {
+    return bakery_request_host() === 'staging.sourflour.org';
+}
+
+function bakery_is_live_bakery_host() {
+    $host = bakery_request_host();
+    return $host === 'bakery.sourflour.org' || $host === 'www.bakery.sourflour.org';
+}
+
 define('APP_ENV', bakery_app_env());
 define('IS_LOCAL', APP_ENV === 'local' || APP_ENV === 'development' || APP_ENV === 'dev');
+define('IS_STAGING', APP_ENV === 'staging' || bakery_is_staging_host());
 
 // Force HTTPS in production only (no debug exemptions)
 if (PHP_SAPI !== 'cli' && !isHTTPS() && !IS_LOCAL && !isDevelopment()) {
@@ -198,6 +213,31 @@ function bakery_assert_safe_database_target() {
     $host = strtolower(DB_HOST);
     $name = strtolower(DB_NAME);
 
+    if (defined('IS_STAGING') && IS_STAGING) {
+        if (USE_PROD_DB) {
+            throw new RuntimeException('USE_PROD_DB is not allowed on staging.');
+        }
+        if ($name === 'bakerysf') {
+            throw new RuntimeException('Refusing: staging cannot use production database bakerysf.');
+        }
+        if ($name !== 'bakerysoftware') {
+            throw new RuntimeException('Refusing: staging requires database bakerysoftware, got ' . DB_NAME);
+        }
+        $looksDreamhost = (strpos($host, 'sourflour') !== false || strpos($host, 'dreamhost') !== false);
+        if (!$looksDreamhost) {
+            throw new RuntimeException('Refusing: staging database host must be the DreamHost MySQL host.');
+        }
+        return;
+    }
+
+    if (bakery_is_live_bakery_host() && $name === 'bakerysoftware') {
+        throw new RuntimeException('Refusing: live bakery host cannot use staging database bakerysoftware.');
+    }
+
+    if (!IS_LOCAL && !isDevelopment() && APP_ENV === 'production' && $name === 'bakerysoftware') {
+        throw new RuntimeException('Refusing: production APP_ENV cannot use staging database bakerysoftware.');
+    }
+
     if (USE_PROD_DB) {
         $looksProd = (
             strpos($host, 'sourflour') !== false ||
@@ -229,10 +269,10 @@ function bakery_assert_safe_database_target() {
             }
         }
 
-        if ($name === 'bakerysf') {
+        if ($name === 'bakerysf' || $name === 'bakerysoftware') {
             throw new RuntimeException(
-                'Refusing to connect: local APP_ENV cannot use production database name bakerysf. ' .
-                'Use bakerysf_local, or set USE_PROD_DB=true (php scripts/switch_db.php prod).'
+                'Refusing to connect: local APP_ENV cannot use hosted database name ' . DB_NAME . '. ' .
+                'Use bakerysf_local / bakerysf_stage_local, or set USE_PROD_DB=true only for live bakerysf.'
             );
         }
         if (strpos($name, '_local') === false && strpos($name, 'test') === false && strpos($name, 'dev') === false) {
@@ -367,7 +407,10 @@ define('CACHE_ENABLED', !DEBUG_MODE);
 define('CACHE_TTL', 300);
 
 // Integration flags
-define('MAIL_DRIVER', strtolower(bakery_env('MAIL_DRIVER', IS_LOCAL ? 'log' : 'smtp')));
+define('MAIL_DRIVER', strtolower(bakery_env('MAIL_DRIVER', IS_LOCAL || (defined('IS_STAGING') && IS_STAGING) ? 'log' : 'smtp')));
+if (defined('IS_STAGING') && IS_STAGING && MAIL_DRIVER !== 'log') {
+    throw new RuntimeException('Staging must use MAIL_DRIVER=log so customer/driver mail is not sent.');
+}
 define('MAPS_ENABLED', filter_var(bakery_env('MAPS_ENABLED', IS_LOCAL ? 'false' : 'true'), FILTER_VALIDATE_BOOLEAN));
 
 function redirect($path) {

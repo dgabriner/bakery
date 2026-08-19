@@ -1,150 +1,36 @@
-# Production Deploy — Sour Flour OS / Bakery Manager
+# Production Release — Controlled and Fail-Closed
 
-**Status:** Ready for deploy after local verification and credential rotation.  
-**Target:** DreamHost shared hosting (`mysql.sourflour.org`, document root for bakery app)
+Production is not an extension of auto-push. Git commits and staging syncs never
+change `bakery.sourflour.org/bake` or the live `bakerysf` database.
 
----
+## Required release chain
 
-## Prerequisites (complete before deploy)
+1. A clean Git commit is deployed to DreamHost staging.
+2. Staging lint and smoke checks pass.
+3. The owner completes phone acceptance.
+4. `create_release_candidate.ps1` verifies the Git commit and every staged file
+   hash, then writes an immutable local candidate manifest.
+5. A separate production-promotion mission validates that candidate and obtains
+   exact owner authorization.
+6. Before any live mutation, that mission must create a verified production
+   database backup and a last-known-good code rollback artifact.
+7. Only the candidate files and reviewed forward migrations may be applied.
+8. Read-only health checks and a release record close the promotion.
 
-| Step | Status | Notes |
-|------|--------|-------|
-| Local test suite green | Required | `run_characterization.php` (57+), `run_auth_tests.php` (45), `run_integrity_tests.php` (11+) |
-| Canonical pages tracked in git | Done | Commit `b803b78` + post-0E commits |
-| Auth/CSRF on protected endpoints | Done | Checkpoint 0D/0E |
-| Migrations tested locally | Required | `scripts/run_migrations.php` after prod pull |
-| Credential rotation | **Required** | [CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md) |
-| DreamHost env vars configured | Required | See § Environment below |
-| Diagnostic scripts blocked | Done | `.htaccess` + auth administrator gate |
+Staging data is never copied wholesale to live. Live orders, invoices, users,
+and operational events remain authoritative.
 
----
+## Current safety lock
 
-## Deploy sequence
-
-### 1. Rotate credentials (if not done recently)
-
-Follow [CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md):
-
-- MySQL password for `bakerysf` user
-- SMTP / Gmail OAuth if email is live
-- Google Maps API key restriction
-
-### 2. Run migrations on production database
-
-Connect to production MySQL (DreamHost panel or whitelisted IP) and apply:
-
-```sql
--- Weekday normalize (003)
-UPDATE standing_orders SET day_of_week = 7 WHERE day_of_week = 0;
-UPDATE standing_routes SET day_of_week = 7 WHERE day_of_week = 0;
-```
-
-Then run zone migration via local pull workflow or manually:
-
-```bash
-# From local machine with prod pull configured:
-C:\php\php.exe scripts\pull_prod_to_local.php
-# Migrations run automatically after import; verify locally first
-```
-
-For **direct production migration**, run equivalent SQL from `database/schema/003_weekday_normalize.sql` and `004_zone_id.sql` (add `zone_id` column first if missing — see `scripts/run_migrations.php`).
-
-### 3. Deploy application files
-
-Deploy **tracked canonical files only** — never deploy quarantine/debug/backup variants.
+`scripts/promote_release.ps1` validates and previews a candidate, but live
+execution is intentionally disabled. This keeps infrastructure setup and live
+promotion as separate authorities. `scripts/push_sftp.ps1` remains a guarded
+low-level live transport and is not linked from the normal developer menu,
+editor hooks, or staging watcher.
 
 ```powershell
-# Example: rsync or git pull on DreamHost (adjust paths)
-# Exclude: .env, storage/dumps/, uploads/, quarantine files
+.\scripts\promote_release.ps1 -Candidate storage\deploy\releases\candidate_ID.json
 ```
 
-**Minimum deploy set:**
-
-- All tracked `*.php` canonical pages
-- `includes/` (auth, config, database, common_functions, nav, csrf.js)
-- `css/`, `assets/`
-- `.htaccess`
-- `database/schema/` (for reference; do not run baseline on prod)
-
-**Do NOT deploy:**
-
-- `.env` with local credentials
-- `storage/dumps/`
-- Files in [QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md)
-- `scripts/pull_prod_to_local.php`, `ensure_local_admin.php` (local-only tools)
-
-### 4. Configure production environment
-
-Set on DreamHost (Apache env or config outside docroot):
-
-| Variable | Production value |
-|----------|------------------|
-| `APP_ENV` | `production` |
-| `DB_HOST` | `mysql.sourflour.org` |
-| `DB_NAME` | `bakerysf` |
-| `DB_USER` | `bakerysf` |
-| `DB_PASS` | *(rotated secret — not in git)* |
-| `BASE_URL` | `/` or `/bakery/` per vhost |
-| `MAIL_DRIVER` | `smtp` or `oauth` |
-| `MAPS_ENABLED` | `true` (if Maps used) |
-
-Remove hardcoded production fallbacks from `includes/config.php` on prod — env vars must be set.
-
-### 5. Seed production auth users
-
-Production does **not** use `ensure_local_admin.php` (local-only). Create users via:
-
-```powershell
-C:\php\php.exe scripts/create_user_once.php --email=you@sourflour.org --password=... --role=administrator --name="Your Name"
-```
-
-Run against production DB only from a whitelisted IP with production `.env` — or insert via SQL after generating `password_hash` locally.
-
-### 6. Studio clock cron (DreamHost only)
-
-Do **not** run a Windows scheduled task or local cron. The Synthetic Studio clock ticks from DreamHost.
-
-In the DreamHost panel → Cron Jobs, add a job that runs **every minute**:
-
-```
-/usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/sfb_studio_tick.php
-```
-
-Replace `YOUR_USER` with the shell/SFTP user and confirm the PHP binary (panel → Manage Cron Jobs / PHP version). App root on this host is `bakery.sourflour.org/bake/`. Unforced ticks require production `APP_ENV` and database `bakerysf`. Local testing uses Synthetic Manager → **Run tick now**.
-
-### 7. Post-deploy verification
-
-- [ ] `login.php` loads over HTTPS
-- [ ] Unauthenticated access to `index.php` redirects to login
-- [ ] Driver can access `driver_list.php`; manager can access ops pages
-- [ ] `get_driver_orders.php` returns JSON with auth + CSRF
-- [ ] Diagnostic URLs return 403/denied (`test.php`, `debug.php`, etc.)
-- [ ] Sunday order generation works (day 7)
-- [ ] Zone filter on bread distribution works
-
----
-
-## Rollback
-
-1. Restore previous PHP files from git tag or backup
-2. Database migrations are **forward-only** — weekday/zone_id changes are safe to leave in place
-3. If auth breaks: use DreamHost MySQL panel to reset `users.password_hash` or run `create_user_once.php` locally against prod
-
----
-
-## Local vs production
-
-| Concern | Local | Production |
-|---------|-------|------------|
-| Database | `bakerysf_local` on 127.0.0.1 | `bakerysf` on mysql.sourflour.org |
-| Admin bootstrap | `ensure_local_admin.php` | `create_user_once.php` or manual |
-| Data sync | `pull_prod_to_local.php` (one-way) | Never push local → prod |
-| Mail | `MAIL_DRIVER=log` | SMTP/OAuth |
-
----
-
-## Next major step after deploy
-
-1. Monitor auth/login and driver workflow for one delivery cycle
-2. Human quarantine cleanup pass ([QUARANTINE_INVENTORY.md](QUARANTINE_INVENTORY.md))
-3. Feature backlog ([ideas-for-development.md](../ideas-for-development.md))
+Any destructive migration, database restore, or live execution requires its
+own named approval and rollback plan.

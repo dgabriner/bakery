@@ -18,6 +18,8 @@ $checks = [
     'actual selected database is checked' => strpos($source, 'SELECT DATABASE()') !== false,
     'loopback PDO connection status is checked' => strpos($source, 'ATTR_CONNECTION_STATUS') !== false,
     'exact disposable test database is required' => strpos($source, "['bakerysf_test']") !== false,
+    'homebase writes stay off the nightly mirror' => strpos($source, 'function bakery_assert_homebase_target') !== false
+        && strpos($source, "['bakerysf_stage_local', 'bakerysf_test']") !== false,
 ];
 $failed = 0;
 foreach ($checks as $label => $ok) {

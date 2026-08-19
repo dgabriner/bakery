@@ -9,6 +9,7 @@
  * Usage:
  *   php scripts/refresh_local_from_snapshot.php --snapshot=path --target=bakerysf_stage_local
  *   php scripts/refresh_local_from_snapshot.php --snapshot=path --target=bakerysf_test
+ *   php scripts/refresh_local_from_snapshot.php --snapshot=path --target=bakerysf_restore_drill
  */
 define('ACCESS_ALLOWED', true);
 
@@ -22,19 +23,23 @@ require_once __DIR__ . '/prod_db_cli.php';
 
 $snapshot = '';
 $target = '';
+$verifyOnly = false;
+$resultPath = '';
 foreach ($argv as $arg) {
     if (strpos($arg, '--snapshot=') === 0) $snapshot = substr($arg, 11);
     if (strpos($arg, '--target=') === 0) $target = substr($arg, 9);
+    if ($arg === '--verify-only') $verifyOnly = true;
+    if (strpos($arg, '--result=') === 0) $resultPath = substr($arg, 9);
 }
 
-if ($snapshot === '' || $target === '') {
-    fwrite(STDERR, "Usage: php scripts/refresh_local_from_snapshot.php --snapshot=path --target=bakerysf_stage_local|bakerysf_test\n");
+if ($snapshot === '' || (!$verifyOnly && $target === '')) {
+    fwrite(STDERR, "Usage: php scripts/refresh_local_from_snapshot.php --snapshot=path --target=bakerysf_local|bakerysf_stage_local|bakerysf_test|bakerysf_restore_drill\n");
     exit(1);
 }
 
 $allowedTargets = ['bakerysf_local', 'bakerysf_stage_local', 'bakerysf_test'];
-if (!in_array(strtolower($target), $allowedTargets, true)) {
-    fwrite(STDERR, "Refusing: target must be bakerysf_local, bakerysf_stage_local, or bakerysf_test.\n");
+if (!$verifyOnly && !in_array(strtolower($target), $allowedTargets, true)) {
+    fwrite(STDERR, "Refusing: target is not an approved local database.\n");
     exit(1);
 }
 $target = strtolower($target);
@@ -137,6 +142,29 @@ try {
     refresh_run_migrations($root, $tempName);
     $counts = prod_db_table_counts($tempDb, prod_db_spot_tables());
     echo "Temporary verification passed: " . json_encode($counts, JSON_UNESCAPED_SLASHES) . "\n";
+
+    if ($verifyOnly) {
+        if ($resultPath !== '') {
+            $resultDir = dirname($resultPath);
+            if (!is_dir($resultDir) && !mkdir($resultDir, 0775, true) && !is_dir($resultDir)) {
+                throw new RuntimeException("Cannot create verification result directory: {$resultDir}");
+            }
+            $result = [
+                'verified_at_utc' => gmdate('c'),
+                'snapshot' => $snapshotPath,
+                'disposable_database' => $tempName,
+                'spot_counts' => $counts,
+            ];
+            if (file_put_contents($resultPath, json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL, LOCK_EX) === false) {
+                throw new RuntimeException("Cannot write verification result: {$resultPath}");
+            }
+        }
+        $tempDb = null;
+        $server->exec('DROP DATABASE IF EXISTS ' . refresh_ident($tempName));
+        @unlink($sql);
+        echo "Verify-only complete; disposable {$tempName} dropped.\n";
+        exit(0);
+    }
 
     $checkpoint = $checkpointDir . DIRECTORY_SEPARATOR . $target . '_before_' . $stamp . '.sql';
     $targetExists = (bool)$server->query('SHOW DATABASES LIKE ' . $server->quote($target))->fetchColumn();

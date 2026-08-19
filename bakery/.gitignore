@@ -11,6 +11,8 @@
 !.env.sftp.example
 !.env.sftp.breadeducation.example
 !.env.sftp.domain_root.example
+!.env.sftp.stage.example
+!.env.sftp.live.example
 *.local.php
 local_config.php
 includes/local_*.php
@@ -53,6 +55,8 @@ storage/dumps/
 storage/dumps/nightly/
 storage/dumps/local-checkpoints/
 storage/dumps/refresh-work/
+storage/dumps/weekly/
+storage/dumps/restore-drills/
 storage/.prod_data_active
 storage/deploy/*.zip
 storage/deploy/manifest_*.txt
@@ -67,6 +71,8 @@ storage/deploy/.push_lock
 storage/deploy/.push_worker
 storage/deploy/.auto_push_disabled
 storage/deploy/.watch_push.pid
+storage/deploy/releases/
+storage/operations/
 # Per-target deploy state (history, locks, and generated manifests).
 storage/deploy/*/
 .env.production.pull
@@ -108,6 +114,7 @@ simple_performance_test.php
 table_debug.php
 test.php
 test_*.php
+!includes/test_target_guard.php
 test.html
 test_*.ps1
 db_test.php

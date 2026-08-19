@@ -192,7 +192,7 @@ Compact map — entry points only, not every file.
 | Finished Goods | `inventory.php`, `includes/product_inventory.php` | Counts, availability, movement ledger |
 | Ingredient Planner | `ingredient_requirements.php`, `includes/ingredient_requirements.php` | Plan/demand → formula grams, batches, purchase *hints* (no PO) |
 | Driver Assignment | `driver_assignment.php`, `includes/driver_assignments.php` | Canonical route board: prepare demand + build from standing, drag, transfer, unassign without deleting demand |
-| Route tools (overlapping) | `standing_routes.php`, `route_manager.php` (also COD cash), `daily_route.php`, `drivers.php`, `map.php`, `zones.php` | Template routes, live monitoring, views |
+| Route tools (overlapping) | `standing_routes.php`, `route_manager.php` (also COD cash), `route_summary.php` (photo-first day review), `daily_route.php`, `drivers.php`, `map.php`, `zones.php` | Template routes, live monitoring, views |
 | Driver app | `driver.php`, `complete_delivery.php`, `upload_driver_photo.php`, `includes/driver_route_map.js` | Stops, remaining-stop map + reorder, confirm wizard, photos, GPS |
 | Driver Loads | `driver_load.php` | Pickup quantities; reserves FG; sets orders out_for_delivery |
 | Billing | `billing_center.php`, `includes/billing*.php`, `billing_api.php`, `billing_export.php`, `customer_statement.php` | Reconcile, mark invoiced, statements, QuickBooks CSV |

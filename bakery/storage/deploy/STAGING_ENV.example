@@ -1,0 +1,29 @@
+# Copy this to the DreamHost staging document root as `.env` (next to login.php).
+# Do NOT upload the local development .env or the production `.env`.
+# Do NOT fill real passwords in git. Set secrets on the server or in a gitignored copy.
+
+APP_ENV=staging
+USE_PROD_DB=false
+APP_NAME=Sour Flour OS (STAGING)
+
+DB_HOST=mysql.sourflour.org
+DB_PORT=3306
+DB_NAME=bakerysoftware
+DB_USER=replace_with_staging_only_mysql_user
+DB_PASS=REPLACE_WITH_STAGING_ONLY_MYSQL_PASSWORD
+
+BASE_URL=/
+# Hosted URL: https://staging.sourflour.org/
+# Files go under SFTP user bakeryOS, remote root staging.sourflour.org
+# Never bakery.sourflour.org/bake.
+
+MAIL_DRIVER=log
+MAPS_ENABLED=false
+SQUARE_ENV=sandbox
+SQUARE_ACCESS_TOKEN=
+SQUARE_APPLICATION_ID=
+SQUARE_LOCATION_ID=
+SQUARE_WEBHOOK_SIGNATURE_KEY=
+
+# Staging must never send customer/driver mail or tick the production studio clock.
+BAKERY_SHOW_ERRORS=false

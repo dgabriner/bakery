@@ -1,6 +1,6 @@
 # Watch local bakery web files and queue SFTP pushes on change.
 # Run once and leave open (or use watch_push.bat).
-# Live auto-push ON starts this with -AsService in the background.
+# Staging auto-push ON starts this with -AsService in the background.
 #
 #   .\scripts\watch_and_push.ps1
 #   .\scripts\watch_and_push.ps1 -DelaySeconds 15

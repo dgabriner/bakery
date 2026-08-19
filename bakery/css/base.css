@@ -689,6 +689,12 @@ th.num {
   border-bottom-color: #6b2020;
 }
 
+.local-env-banner.staging-env-banner {
+  background: #8a1c3c;
+  color: #fff;
+  border-bottom-color: #4a0e1e;
+}
+
 .local-env-banner-row {
   display: flex;
   flex-wrap: wrap;
