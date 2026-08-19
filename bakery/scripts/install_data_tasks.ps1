@@ -16,6 +16,9 @@ $tasks = @(
     ) },
     [ordered]@{ Name="${taskPrefix}MonthlyRestoreDrill"; Script="run_restore_drill.ps1"; Triggers=@(
         (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "4:00 AM")
+    ) },
+    [ordered]@{ Name="${taskPrefix}StagingWatcher"; Script="auto_push_watcher_ctl.ps1"; Arguments="ensure"; Triggers=@(
+        (New-ScheduledTaskTrigger -AtLogOn -User $taskUser)
     ) }
 )
 
@@ -27,6 +30,7 @@ foreach ($task in $tasks) {
     }
     $scriptPath = Join-Path $PSScriptRoot $task.Script
     $arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
+    if ($task.Arguments) { $arguments += " $($task.Arguments)" }
     $action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments -WorkingDirectory $bakeryRoot
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3)
     if ($DryRun) {

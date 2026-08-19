@@ -14,6 +14,7 @@ Install or repair the current-user tasks with:
 | `SourFlour-NightlyDataCycle` | 2:00 AM + catch-up at logon | Read-only live snapshot; verify; refresh mirror and test |
 | `SourFlour-WeeklyBackup` | Sunday 3:00 AM | New immutable weekly live snapshot; keep 12 |
 | `SourFlour-MonthlyRestoreDrill` | Sunday 4:00 AM | Runs only when last proof is 28+ days old |
+| `SourFlour-StagingWatcher` | At local sign-in | Restarts staging-only auto-sync when its local toggle is on |
 
 Logs and state are gitignored under `storage/operations/`. Failed imports retain
 the prior target because refreshes use a verified temporary import and a local
