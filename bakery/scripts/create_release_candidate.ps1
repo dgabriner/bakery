@@ -19,9 +19,15 @@ $manifest = Get-Content -LiteralPath $StagingManifest -Raw -Encoding UTF8 | Conv
 if ($manifest.target -ne 'dreamhost-stage' -or $manifest.lint -ne 'ok') { throw "Staging manifest did not pass target/lint gates." }
 $head = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Cannot resolve Git HEAD." }
-if ([string]$manifest.git_commit -ne $head) { throw "Staging was not deployed from current Git commit. Commit, push to staging, retest, then retry." }
-
 $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot)
+$stagingCommit = [string]$manifest.git_commit
+if ($stagingCommit -ne $head) {
+    & git -C $repoRoot merge-base --is-ancestor $stagingCommit $head
+    if ($LASTEXITCODE -ne 0) { throw "Staging commit is not an ancestor of current HEAD." }
+    & git -C $repoRoot diff --quiet $stagingCommit $head -- @($deployFiles | ForEach-Object { "bakery/$_" })
+    if ($LASTEXITCODE -ne 0) { throw "Deployable files changed after the staging manifest. Push the new commit to staging and retest." }
+}
+
 $dirty = @(& git -C $repoRoot status --porcelain --untracked-files=all -- @($deployFiles | ForEach-Object { "bakery/$_" }))
 if ($dirty.Count -gt 0) { throw "Deployable working tree is dirty. No candidate can be created:`n$($dirty -join "`n")" }
 
@@ -43,6 +49,7 @@ $path = Join-Path $candidateDir "$id.json"
     release_id = $id
     created_at_utc = (Get-Date).ToUniversalTime().ToString('o')
     git_commit = $head
+    staging_git_commit = $stagingCommit
     staging_manifest = (Resolve-Path -LiteralPath $StagingManifest).Path
     staging_deployed_at_utc = $manifest.recorded_at
     staging_smoke_url = $manifest.smoke_url
