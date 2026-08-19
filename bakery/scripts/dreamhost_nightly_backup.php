@@ -16,7 +16,7 @@ $dump = trim((string)shell_exec('command -v mysqldump 2>/dev/null')) ?: trim((st
 if ($dump === '') { fwrite(STDERR, "mysqldump/mariadb-dump not found.\n"); exit(4); }
 if (!is_dir($outputDir) && !mkdir($outputDir, 0700, true) && !is_dir($outputDir)) { fwrite(STDERR, "Cannot create backup directory.\n"); exit(5); }
 $stamp = gmdate('Ymd_His'); $sql = rtrim($outputDir, '/\\') . "/live_{$stamp}.sql"; $gz = $sql . '.gz';
-$cmd = escapeshellarg($dump) . ' --single-transaction --quick --routines --triggers --hex-blob'
+$cmd = escapeshellarg($dump) . ' --single-transaction --quick --no-tablespaces --skip-routines --skip-triggers --hex-blob'
     . ' -h ' . escapeshellarg($env['DB_HOST']) . ' -P ' . escapeshellarg($env['DB_PORT'] ?? '3306')
     . ' -u ' . escapeshellarg($env['DB_USER']) . ' --password=' . escapeshellarg($env['DB_PASS']) . ' ' . escapeshellarg($env['DB_NAME']) . ' > ' . escapeshellarg($sql);
 passthru($cmd, $exit);
