@@ -49,15 +49,16 @@ while ($true) {
     Write-Host ""
     Write-Host "PROTECTED DATA WORKFLOWS"
     Write-Host "  4) Run verified production snapshot -> local mirror + test"
-    Write-Host "  5) Compare production vs local"
-    Write-Host "  6) Create verified weekly production backup"
-    Write-Host "  7) Run disposable backup restore drill"
+    Write-Host "  5) Refresh local staging from latest verified snapshot"
+    Write-Host "  6) Compare production vs local"
+    Write-Host "  7) Create verified weekly production backup"
+    Write-Host "  8) Run disposable backup restore drill"
     Write-Host ""
     Write-Host "STAGING FILES"
-    Write-Host "  8) Show staging auto-push status"
-    Write-Host "  9) Preview staging SFTP sync"
-    Write-Host " 10) Sync changed files to staging"
-    Write-Host " 11) Create immutable release candidate (after phone test)"
+    Write-Host "  9) Show staging auto-push status"
+    Write-Host " 10) Preview staging SFTP sync"
+    Write-Host " 11) Sync changed files to staging"
+    Write-Host " 12) Create immutable release candidate (after phone test)"
     Write-Host ""
     Write-Host "TESTS"
     Write-Host " 14) Run local test suite"
@@ -85,24 +86,34 @@ while ($true) {
                 & (Join-Path $scriptsDir "run_nightly_data_cycle.ps1") -Force
             }
             '5' {
-                Invoke-BakeryPhp @((Join-Path $scriptsDir "compare_prod_local.php"))
+                $snapshot = Get-ChildItem (Join-Path $bakeryRoot "storage\dumps\nightly") -Filter "live_*.sql.gz" -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+                if (-not $snapshot) { throw "No verified local snapshot found under storage\dumps\nightly." }
+                Write-Host ""
+                Write-Host "This replaces bakerysf_stage_local from $($snapshot.Name)."
+                Write-Host "A checkpoint is created first. It does not contact production or staging."
+                if (-not (Confirm-Action "Refresh local staging?")) { continue }
+                Invoke-BakeryPhp @((Join-Path $scriptsDir "refresh_local_from_snapshot.php"), "--snapshot=$($snapshot.FullName)", '--target=bakerysf_stage_local')
             }
             '6' {
-                & (Join-Path $scriptsDir "run_weekly_backup.ps1") -Force
+                Invoke-BakeryPhp @((Join-Path $scriptsDir "compare_prod_local.php"))
             }
             '7' {
-                & (Join-Path $scriptsDir "run_restore_drill.ps1") -Force
+                & (Join-Path $scriptsDir "run_weekly_backup.ps1") -Force
             }
             '8' {
-                & (Join-Path $scriptsDir "auto_push_watcher_ctl.ps1") status
+                & (Join-Path $scriptsDir "run_restore_drill.ps1") -Force
             }
             '9' {
-                & (Join-Path $scriptsDir "push_sftp_stage.ps1") -DryRun
+                & (Join-Path $scriptsDir "auto_push_watcher_ctl.ps1") status
             }
             '10' {
-                & (Join-Path $scriptsDir "push_sftp_stage.ps1")
+                & (Join-Path $scriptsDir "push_sftp_stage.ps1") -DryRun
             }
             '11' {
+                & (Join-Path $scriptsDir "push_sftp_stage.ps1")
+            }
+            '12' {
                 $tester = Read-Host "Who completed the staging phone test?"
                 & (Join-Path $scriptsDir "create_release_candidate.ps1") -StagingTestedBy $tester
             }
