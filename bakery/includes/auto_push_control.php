@@ -117,7 +117,19 @@ function bakery_auto_push_run_live_promotion($direct = false) {
     } else {
         $candidateDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'releases';
         $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
-        if (!$candidate) throw new RuntimeException('No immutable release candidate exists yet.');
+        if (!$candidate) {
+            $createScript = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'create_release_candidate.ps1';
+            if (!is_file($createScript)) throw new RuntimeException('Release candidate tool is missing.');
+            $createArgs = [$ps, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $createScript, '-StagingTestedBy', 'staging-web-approval'];
+            $createProc = proc_open($createArgs, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $createPipes, dirname(__DIR__), null, ['bypass_shell'=>true]);
+            if (!is_resource($createProc)) throw new RuntimeException('Could not create the release candidate.');
+            fclose($createPipes[0]);
+            $createOut = stream_get_contents($createPipes[1]); $createErr = stream_get_contents($createPipes[2]);
+            fclose($createPipes[1]); fclose($createPipes[2]);
+            if (proc_close($createProc) !== 0) throw new RuntimeException('Could not create the release candidate: ' . trim($createOut . ' ' . $createErr));
+            $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
+        }
+        if (!$candidate) throw new RuntimeException('No immutable release candidate could be created from the verified Staging release.');
         usort($candidate, static function ($a, $b) { return filemtime($b) <=> filemtime($a); });
         $data = json_decode((string)file_get_contents($candidate[0]), true);
         $id = (string)($data['release_id'] ?? '');
@@ -125,9 +137,10 @@ function bakery_auto_push_run_live_promotion($direct = false) {
         $args[] = '-Candidate'; $args[] = $candidate[0];
         $args[] = '-Execute'; $args[] = '-ConfirmReleaseId'; $args[] = $id;
     }
-    $env = $_ENV;
-    $env['BAKERY_ENABLE_LIVE_PROMOTION'] = 'YES';
-    $proc = proc_open($args, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $pipes, dirname(__DIR__), $env, ['bypass_shell'=>true]);
+    // Preserve the complete Windows process environment (SystemRoot, PATH,
+    // crypto providers, etc.). Replacing it breaks Windows PowerShell startup.
+    putenv('BAKERY_ENABLE_LIVE_PROMOTION=YES');
+    $proc = proc_open($args, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $pipes, dirname(__DIR__), null, ['bypass_shell'=>true]);
     if (!is_resource($proc)) throw new RuntimeException('Failed to start Live promotion');
     fclose($pipes[0]);
     $out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]);
