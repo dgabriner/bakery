@@ -1315,6 +1315,47 @@
     }
   }
 
+  function creditAllocationPreview(credits) {
+    var items = (state.invoiceItems || []).slice().sort(function (a, b) {
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
+    var mixed = items.length > 1;
+    var remaining = Math.max(0, credits);
+    var parts = [];
+    items.forEach(function (item) {
+      var delivered = item.delivered_quantity != null && item.delivered_quantity !== ''
+        ? Math.max(0, parseInt(item.delivered_quantity, 10) || 0)
+        : Math.max(0, parseInt(item.quantity, 10) || 0);
+      var take = Math.min(remaining, delivered);
+      if (take > 0) {
+        parts.push((item.product_name || i18n('product')) + ' (' + take + ')');
+        remaining -= take;
+      }
+    });
+    return {
+      mixed: mixed,
+      detail: parts.join(', ')
+    };
+  }
+
+  function updateCreditAllocationUi(credits) {
+    var allocEl = $('deliveryCreditAllocNote');
+    if (!allocEl) return;
+    var items = state.invoiceItems || [];
+    if (credits <= 0 || items.length <= 1) {
+      allocEl.hidden = true;
+      allocEl.textContent = '';
+      return;
+    }
+    var preview = creditAllocationPreview(credits);
+    var text = i18n('credits_allocation_rule');
+    if (preview.detail) {
+      text += ' ' + i18n('credits_allocation_preview').replace(':detail', preview.detail);
+    }
+    allocEl.textContent = text;
+    allocEl.hidden = false;
+  }
+
   function updateDeliveryPreview() {
     var piecesInput = $('deliveryPiecesInput');
     var creditsInput = $('deliveryCreditsInput');
@@ -1333,6 +1374,7 @@
       breakdown += ' · ' + i18n('signature_receipt');
     }
     if (breakdownEl) breakdownEl.textContent = breakdown;
+    updateCreditAllocationUi(credits);
     syncCashCollectedToTotal();
     updateVarianceUi();
     updatePricingUi();
@@ -1442,6 +1484,9 @@
     var noteEl = $('deliveryInvoicePricingNote');
     if (noteEl && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
       noteEl.textContent += ' · ' + i18n('adjusted_from_ordered').replace(':count', state.orderedPieces);
+    }
+    if (noteEl && credits > 0) {
+      noteEl.textContent += ' · ' + i18n('credits_return_stock');
     }
     var itemsEl = $('deliveryInvoiceItems');
     if (itemsEl) {

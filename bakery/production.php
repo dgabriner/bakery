@@ -7,6 +7,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/daily_order_generation.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/production_plan.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/header.php';
@@ -146,14 +147,24 @@ $progressMade = 0;
 $progressRemaining = 0;
 $progressCompleteProducts = 0;
 $progressProductCount = 0;
+$bakeList = [
+    'available' => false,
+    'committed' => false,
+    'commit' => null,
+    'changed_since' => ['count' => 0, 'latest' => null, 'examples' => []],
+    'has_daily' => false,
+    'items' => [],
+];
 try {
-    require_once __DIR__ . '/includes/demand_review.php';
-    $demand = bakery_operating_demand_by_product($db, $selectedDate);
-    $hasDailyOrders = $demand['has_daily'];
-    $demandByProduct = $demand['by_product'];
+    $bakeList = bakery_production_bake_list($db, $selectedDate);
+    $hasDailyOrders = !empty($bakeList['has_daily']);
+    $bakeByProduct = [];
+    foreach ($bakeList['items'] as $bakeItem) {
+        $bakeByProduct[(int)$bakeItem['product_id']] = $bakeItem;
+    }
 
-    if (!empty($demandByProduct)) {
-        $productIds = array_keys($demandByProduct);
+    if (!empty($bakeByProduct)) {
+        $productIds = array_keys($bakeByProduct);
         $placeholders = implode(',', array_fill(0, count($productIds), '?'));
         $bakerClause = $isBaker && !empty($bakerProductIds)
             ? ' AND p.id IN (' . implode(',', array_map('intval', $bakerProductIds)) . ')'
@@ -175,11 +186,18 @@ try {
         $productionData = [];
         foreach ($orders->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $pid = (int)$row['product_id'];
-            $qty = (int)($demandByProduct[$pid] ?? 0);
-            if ($qty <= 0) {
+            $bakeItem = $bakeByProduct[$pid] ?? null;
+            if ($bakeItem === null) {
+                continue;
+            }
+            $qty = (int)$bakeItem['bake_quantity'];
+            $demandQty = (int)$bakeItem['demand_quantity'];
+            if ($qty <= 0 && $demandQty <= 0) {
                 continue;
             }
             $row['total_quantity'] = $qty;
+            $row['demand_quantity'] = $demandQty;
+            $row['bake_source'] = (string)$bakeItem['source'];
             $row['total_weight_grams'] = $qty * (int)($row['weight_grams'] ?? 0);
             $productionData[] = $row;
         }
@@ -275,6 +293,8 @@ try {
         $madeQty = (int)($producedByProduct[$item['product_id']] ?? 0);
         $remainingQty = max(0, $plannedQty - $madeQty);
         $item['planned_quantity'] = $plannedQty;
+        $item['demand_quantity'] = (int)($item['demand_quantity'] ?? $plannedQty);
+        $item['bake_source'] = (string)($item['bake_source'] ?? 'demand');
         $item['made_quantity'] = $madeQty;
         $item['remaining_quantity'] = $remainingQty;
         if ($remainingQty === 0) {
@@ -404,6 +424,9 @@ $packListHref = 'pack_list.php?' . http_build_query(bakery_ops_workflow_query(['
 $progressPercent = $progressPlanned > 0 ? (int)round(($progressMade / $progressPlanned) * 100) : 0;
 $allProductionComplete = !empty($productionData) && $progressRemaining === 0;
 $orderSourceLabel = !empty($hasDailyOrders) ? bakery_t('production.from_daily_orders') : bakery_t('production.from_standing');
+$planCommitted = !empty($bakeList['committed']);
+$planDriftCount = (int)($bakeList['changed_since']['count'] ?? 0);
+$planAvailable = !empty($bakeList['available']);
 $bakerShortages = [];
 if ($isBaker && function_exists('bakery_exception_desk_product_shortages')) {
     $bakerShortages = bakery_exception_desk_product_shortages($db, $selectedDate, is_array($bakerProductIds) ? $bakerProductIds : null);
@@ -459,6 +482,16 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
             <p class="bp-date-context">
                 <strong><?php echo htmlspecialchars($days[$selectedDay], ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></strong>
                 <span class="bp-date-source"><?php echo htmlspecialchars($orderSourceLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php if ($planAvailable): ?>
+                    <?php if ($planCommitted): ?>
+                        <span class="bp-plan-chip bp-plan-chip--committed"><?php bakery_te('production.plan_committed'); ?></span>
+                        <?php if ($planDriftCount > 0): ?>
+                            <span class="bp-plan-chip bp-plan-chip--drift"><?php echo htmlspecialchars(bakery_t('production.plan_drift', ['count' => $planDriftCount]), ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <span class="bp-plan-chip bp-plan-chip--uncommitted"><?php bakery_te('production.plan_not_committed'); ?></span>
+                    <?php endif; ?>
+                <?php endif; ?>
             </p>
         </form>
         <?php if (!isset($error) && !empty($productionData)): ?>
@@ -681,7 +714,10 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                         <p class="bp-product__weight"><?php echo htmlspecialchars(bakery_t('production.each_weight', ['grams' => number_format((int)$product['weight_grams'])]), ENT_QUOTES, 'UTF-8'); ?></p>
                                     <?php endif; ?>
                                     <dl class="bp-qty-grid">
-                                        <div><dt><?php bakery_te('production.planned'); ?></dt><dd><?php echo number_format((int)$product['planned_quantity']); ?></dd></div>
+                                        <div><dt><?php bakery_te('production.demand'); ?></dt><dd><?php echo number_format((int)$product['demand_quantity']); ?></dd></div>
+                                        <?php if ($planCommitted): ?>
+                                            <div><dt><?php bakery_te('production.committed'); ?></dt><dd><?php echo number_format((int)$product['planned_quantity']); ?></dd></div>
+                                        <?php endif; ?>
                                         <div><dt><?php bakery_te('production.made'); ?></dt><dd class="bp-qty-made"><?php echo number_format((int)$product['made_quantity']); ?></dd></div>
                                         <div><dt><?php bakery_te('production.left'); ?></dt><dd class="bp-qty-left"><?php echo number_format((int)$product['remaining_quantity']); ?></dd></div>
                                     </dl>
@@ -741,6 +777,10 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-date-input { width: 100%; max-width: 280px; min-height: 48px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: #fff; color: #173f3c; font-size: 16px; }
 .bp-date-context { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .95rem; }
 .bp-date-source { background: rgba(255,255,255,.14); border-radius: 999px; padding: 4px 10px; font-size: .82rem; }
+.bp-plan-chip { border-radius: 999px; padding: 4px 10px; font-size: .82rem; font-weight: 700; }
+.bp-plan-chip--uncommitted { background: #fff3d3; color: #735412; }
+.bp-plan-chip--committed { background: #d8f0e2; color: #195f35; }
+.bp-plan-chip--drift { background: #fdeaea; color: #9f2727; }
 .bp-progress { margin-top: 14px; background: rgba(255,255,255,.08); border-radius: 10px; padding: 12px; }
 .bp-progress__labels { display: flex; justify-content: space-between; gap: 10px; font-size: .95rem; margin-bottom: 8px; }
 .bp-progress__bar { height: 12px; background: rgba(255,255,255,.18); border-radius: 999px; overflow: hidden; }
@@ -779,7 +819,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-status--complete { background: #d7f0df; color: #1f5f32; }
 .bp-status--partial { background: #ffe8c2; color: #8a4d00; }
 .bp-status--pending { background: #e8eef0; color: #42545a; }
-.bp-qty-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }
+.bp-qty-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; margin: 12px 0 0; }
 .bp-qty-grid div { background: #fff; border: 1px solid #e3ece7; border-radius: 10px; padding: 10px 8px; text-align: center; }
 .bp-qty-grid dt { margin: 0; font-size: .78rem; color: #607068; text-transform: uppercase; letter-spacing: .03em; }
 .bp-qty-grid dd { margin: 4px 0 0; font-size: 1.35rem; font-weight: 800; color: #173f3c; }

@@ -824,6 +824,19 @@ function bakery_enforce_request_security(PDO $db = null) {
         bakery_sfb_portal_scripts()
     )));
 
+    // Canonical invoice: portal customers or Billing Center staff (not drivers).
+    if ($script === 'customer_invoice.php') {
+        $staffOk = bakery_current_user() && bakery_user_has_role(['administrator', 'manager']);
+        if (!$staffOk) {
+            bakery_require_portal_login($db);
+        }
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            bakery_require_csrf();
+        }
+        return;
+    }
+
     // Customer portal uses phone + passcode session (not staff login).
     if (in_array($script, $portalScripts, true)) {
         bakery_require_portal_login($db);

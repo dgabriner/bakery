@@ -302,6 +302,9 @@ function bakery_historical_navigation_catalog() {
             ['bread_distribution.php', 'Bread Distribution'],
             ['product_distribution.php', 'Product Distribution'],
             ['invoice_center.php', 'Invoice Center'],
+            ['generate_invoice.php', 'Legacy invoice generator (retired)'],
+            ['generate_invoice_simple.php', 'Legacy simple invoice (retired)'],
+            ['simple_invoice.php', 'Legacy printable invoice (retired)'],
             ['orders.php', 'Orders'],
         ],
         'Production' => [

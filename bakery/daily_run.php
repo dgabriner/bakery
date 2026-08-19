@@ -293,6 +293,48 @@ require_once 'includes/nav.php';
                         </div>
                     <?php endif; ?>
 
+                    <?php if ($stage['key'] === 'production_plan' && !empty($stage['commit']['available'])): ?>
+                        <?php
+                        $planConf = $stage['commit'];
+                        $planRow = $planConf['commit'] ?? null;
+                        $planChanges = (int)($planConf['changed_since']['count'] ?? 0);
+                        ?>
+                        <div class="dr-demand-confirm">
+                            <?php if ($planRow !== null): ?>
+                                <p class="dr-demand-confirm-status is-confirmed">
+                                    <?php echo htmlspecialchars(bakery_t('daily_run.plan_committed_line', [
+                                        'at' => date('M j, Y g:i A', strtotime($planRow['committed_at'])),
+                                        'products' => (int)$planRow['products_count'],
+                                        'units' => number_format((int)$planRow['units_count']),
+                                    ])); ?>
+                                </p>
+                                <?php if ($planChanges > 0): ?>
+                                    <p class="dr-demand-confirm-drift">
+                                        <?php echo htmlspecialchars(bakery_t('daily_run.plan_changed_since', ['count' => $planChanges])); ?>
+                                        <a href="<?php echo htmlspecialchars(bakery_ops_link_production_center($dailyRun['week_start'], ['attention' => '1', 'date' => $selectedDate], 'daily_run')); ?>">
+                                            <?php bakery_te('daily_run.review_plan'); ?>
+                                        </a>
+                                    </p>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <p class="dr-demand-confirm-status"><?php bakery_te('daily_run.plan_uncommitted'); ?></p>
+                            <?php endif; ?>
+
+                            <?php if ($planRow === null || $planChanges > 0): ?>
+                                <form method="post" action="<?php echo htmlspecialchars(BASE_URL); ?>daily_run_api.php" class="dr-demand-confirm-form"
+                                      onsubmit="return confirm(<?php echo json_encode(bakery_t($planRow === null ? 'daily_run.commit_plan_prompt' : 'daily_run.commit_plan_again_prompt')); ?>);">
+                                    <?php echo bakery_csrf_field(); ?>
+                                    <input type="hidden" name="action" value="commit_production_plan">
+                                    <input type="hidden" name="operating_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                                    <input type="hidden" name="return" value="daily_run">
+                                    <button type="submit" class="dr-btn dr-btn-primary">
+                                        <?php bakery_te($planRow === null ? 'daily_run.commit_plan' : 'daily_run.commit_plan_again'); ?>
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+
                     <?php if ($isCloseout): ?>
                         <div class="dr-closeout-panel">
                             <?php if (!empty($dailyRun['is_closed'])): ?>

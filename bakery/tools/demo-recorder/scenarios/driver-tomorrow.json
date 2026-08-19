@@ -53,8 +53,12 @@
       "selector": "#routePrepRoot"
     },
     {
+      "action": "waitForSelector",
+      "selector": "#routePrepAddBtn, #routePrepAddListBtn"
+    },
+    {
       "action": "scroll",
-      "selector": "#routePrepAddDockBtn",
+      "selector": "#routePrepAddBtn",
       "caption": {
         "en": "Add, remove, or reorder stops here before you leave.",
         "es": "Aquí agregas, quitas o reordenas paradas antes de salir."

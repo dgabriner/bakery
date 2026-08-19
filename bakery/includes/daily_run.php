@@ -12,6 +12,7 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/dashboard_command_center.php';
 require_once __DIR__ . '/demand_review.php';
 require_once __DIR__ . '/demand_confirmation.php';
+require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/operational_exceptions.php';
 require_once __DIR__ . '/product_inventory.php';
 if (file_exists(__DIR__ . '/operational_timeline.php')) {
@@ -495,11 +496,26 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 ['label' => 'Target below demand', 'value' => $planShortProducts],
             ];
 
-            if ($missingPlanProducts > 0 || $planShortProducts > 0) {
-                $planStage['ui_state'] = 'needs_attention';
-                $bits = [];
+            $coverageBits = [];
+            if ($missingPlanProducts > 0) {
+                $coverageBits[] = $missingPlanProducts . ' without saved target';
+            }
+            if ($planShortProducts > 0) {
+                $coverageBits[] = $planShortProducts . ' under-planned';
+            }
+
+            $commitState = function_exists('bakery_production_plan_state')
+                ? bakery_production_plan_state($db, $date)
+                : ['available' => false, 'commit' => null, 'changed_since' => ['count' => 0, 'latest' => null, 'examples' => []]];
+            $planStage['commit'] = $commitState;
+
+            $warnMissingShort = static function () use (
+                &$blockers,
+                $missingPlanProducts,
+                $planShortProducts,
+                $weekStart
+            ): void {
                 if ($missingPlanProducts > 0) {
-                    $bits[] = $missingPlanProducts . ' without saved target';
                     $blockers[] = bakery_ops_exception([
                         'type' => 'production_plan_missing',
                         'severity' => 'warning',
@@ -515,7 +531,6 @@ function bakery_daily_run_build(PDO $db, string $date): array
                     ]);
                 }
                 if ($planShortProducts > 0) {
-                    $bits[] = $planShortProducts . ' under-planned';
                     $blockers[] = bakery_ops_exception([
                         'type' => 'production_plan_short',
                         'severity' => 'warning',
@@ -530,7 +545,74 @@ function bakery_daily_run_build(PDO $db, string $date): array
                         'action' => 'Finish Production Plan',
                     ]);
                 }
-                $planStage['summary'] = implode(' · ', $bits);
+            };
+
+            if (!empty($commitState['available'])) {
+                $commitRow = $commitState['commit'];
+                $driftCount = (int)($commitState['changed_since']['count'] ?? 0);
+                if ($commitRow === null) {
+                    $planStage['ui_state'] = 'needs_attention';
+                    $planStage['action_label'] = 'Commit Production Plan';
+                    $planStage['href'] = $links['daily_run'] . '#production_plan';
+                    $summaryBits = ['awaiting manager commit'];
+                    if ($coverageBits !== []) {
+                        $summaryBits = array_merge($coverageBits, $summaryBits);
+                    }
+                    $planStage['summary'] = implode(' · ', $summaryBits);
+                    $warnMissingShort();
+                    $blockers[] = bakery_ops_exception([
+                        'type' => 'production_plan_uncommitted',
+                        'severity' => 'critical',
+                        'stage' => 'production_plan',
+                        'category' => 'production',
+                        'title' => 'Production plan not committed',
+                        'detail' => 'Saved targets are a draft. Commit the plan so Daily Production bakes those numbers.',
+                        'href' => $links['daily_run'] . '#production_plan',
+                        'action' => 'Commit Production Plan',
+                        'inline_action' => [
+                            'action' => 'commit_production_plan',
+                            'label' => 'Commit plan',
+                            'confirm' => 'Commit the last saved production targets for this delivery date? The baker will bake these numbers until you commit again.',
+                        ],
+                    ]);
+                } elseif ($driftCount > 0) {
+                    $planStage['ui_state'] = 'needs_attention';
+                    $planStage['action_label'] = 'Commit again';
+                    $planStage['href'] = $links['daily_run'] . '#production_plan';
+                    $planStage['summary'] = 'Committed · ' . $driftCount . ' demand change'
+                        . ($driftCount === 1 ? '' : 's')
+                        . ' since commit — baker numbers are unchanged';
+                    $blockers[] = bakery_ops_exception([
+                        'type' => 'production_plan_drift',
+                        'severity' => 'warning',
+                        'stage' => 'production_plan',
+                        'category' => 'production',
+                        'title' => 'Demand changed after production plan commit',
+                        'detail' => $driftCount . ' demand-affecting change'
+                            . ($driftCount === 1 ? '' : 's')
+                            . ' recorded after commit. The bake sheet still uses the committed plan until you commit again.',
+                        'count' => $driftCount,
+                        'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date], 'daily_run'),
+                        'action' => 'Review and commit again',
+                        'inline_action' => [
+                            'action' => 'commit_production_plan',
+                            'label' => 'Commit again',
+                            'confirm' => 'Re-commit the last saved production targets? This updates the baker\'s numbers. Demand stays visible beside them.',
+                        ],
+                    ]);
+                } else {
+                    $planStage['ui_state'] = 'complete';
+                    $planStage['summary'] = (int)$commitRow['products_count'] . ' product'
+                        . ((int)$commitRow['products_count'] === 1 ? '' : 's')
+                        . ' · ' . number_format((int)$commitRow['units_count'])
+                        . ' units committed to the baker';
+                    $planStage['action_label'] = 'Open Production Center';
+                    $planStage['href'] = $links['production_center'];
+                }
+            } elseif ($missingPlanProducts > 0 || $planShortProducts > 0) {
+                $planStage['ui_state'] = 'needs_attention';
+                $planStage['summary'] = implode(' · ', $coverageBits);
+                $warnMissingShort();
             } elseif ($productsWithPlan === $productCount) {
                 $planStage['ui_state'] = 'complete';
                 $planStage['summary'] = $productCount . ' product'
@@ -948,12 +1030,23 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $uninvoiced = (int)($ccStages['invoice']['metrics']['uninvoiced']['value'] ?? 0);
     $invoiced = (int)($ccStages['invoice']['metrics']['invoiced']['value'] ?? 0);
     $deliveredOrders = (int)($ccStages['invoice']['metrics']['delivered_orders']['value'] ?? 0);
+    $sentInvoices = 0;
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
+        try {
+            $sentStmt = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE order_date = ? AND invoice_sent_at IS NOT NULL');
+            $sentStmt->execute([$date]);
+            $sentInvoices = (int)$sentStmt->fetchColumn();
+        } catch (Throwable $e) {
+            $sentInvoices = 0;
+        }
+    }
 
     $invoiceStage['metrics'] = [
         ['label' => 'Delivered orders', 'value' => $deliveredOrders],
         ['label' => 'Uninvoiced', 'value' => $uninvoiced],
         ['label' => 'Invoiced', 'value' => $invoiced],
         ['label' => 'Unconfirmed', 'value' => $unconfirmed],
+        ['label' => function_exists('bakery_t') ? bakery_t('daily_run.invoice_sent') : 'Sent', 'value' => $sentInvoices],
     ];
 
     if (($ccStages['invoice']['state'] ?? '') === 'unknown') {

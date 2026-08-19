@@ -756,7 +756,7 @@ document.body.classList.add('driver-route-prep');
                 <?php endif; ?>
             </p>
             <div class="route-prep-toolbar">
-                <button type="button" class="route-prep-add-btn" id="routePrepAddBtn"><?php bakery_te('driver.prep_add'); ?></button>
+                <button type="button" class="route-prep-add-btn js-route-prep-add" id="routePrepAddBtn"><?php bakery_te('driver.prep_add'); ?></button>
                 <a class="route-prep-preview-link" href="<?php echo htmlspecialchars($prepDriveUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_drive_preview'); ?></a>
             </div>
         </section>
@@ -1049,6 +1049,7 @@ document.body.classList.add('driver-route-prep');
                     }
                 endif; ?>
             </div>
+            <button type="button" class="route-prep-add-btn route-prep-add-btn--list js-route-prep-add" id="routePrepAddListBtn"><?php bakery_te('driver.prep_add'); ?></button>
         </section>
         <div class="route-prep-sheet" id="routePrepSheet" hidden>
             <div class="route-prep-sheet-inner">
@@ -1064,7 +1065,7 @@ document.body.classList.add('driver-route-prep');
             </div>
         </div>
         <div class="route-prep-add-dock" id="routePrepAddDock">
-            <button type="button" class="route-prep-add-btn route-prep-add-btn--dock" id="routePrepAddDockBtn"><?php bakery_te('driver.prep_add'); ?></button>
+            <button type="button" class="route-prep-add-btn route-prep-add-btn--dock js-route-prep-add" id="routePrepAddDockBtn"><?php bakery_te('driver.prep_add'); ?></button>
         </div>
         <?php endif; ?>
     </div>
@@ -1216,6 +1217,8 @@ document.body.classList.add('driver-route-prep');
                             </div>
                         </label>
                     </div>
+                    <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
+                    <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
                     <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
                         <div class="delivery-pricing-alert" role="alert">
                             <strong><?php bakery_te('driver.no_price_title'); ?></strong>
@@ -1510,6 +1513,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'collect_cash_cod' => bakery_t('driver.collect_cash_cod'),
     'signature_receipt' => bakery_t('driver.signature_receipt'),
     'credits_exceed_pieces' => bakery_t('driver.credits_exceed_pieces'),
+    'credits_return_stock' => bakery_t('driver.credits_return_stock'),
+    'credits_allocation_rule' => bakery_t('driver.credits_allocation_rule'),
+    'credits_allocation_preview' => bakery_t('driver.credits_allocation_preview'),
     'still_loading_pricing' => bakery_t('driver.still_loading_pricing'),
     'no_address_invoice' => bakery_t('driver.no_address_invoice'),
     'driver_entered_price' => bakery_t('driver.driver_entered_price'),

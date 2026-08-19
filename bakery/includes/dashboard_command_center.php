@@ -10,6 +10,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/operational_exceptions.php';
+require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/sfb_origin.php';
 
 /**
@@ -437,6 +438,49 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date]),
                     'action' => 'Open Production Center',
                 ]);
+            }
+
+            if (function_exists('bakery_production_plan_state')) {
+                $commitState = bakery_production_plan_state($db, $date);
+                if (!empty($commitState['available'])) {
+                    if ($commitState['commit'] === null) {
+                        $exceptions[] = bakery_ops_exception([
+                            'type' => 'production_plan_uncommitted',
+                            'severity' => 'critical',
+                            'category' => 'production',
+                            'stage' => 'production_plan',
+                            'title' => 'Production plan not committed',
+                            'detail' => 'Saved targets are a draft. Commit the plan so Daily Production bakes those numbers.',
+                            'href' => bakery_ops_link_production_center($weekStart, ['date' => $date]),
+                            'action' => 'Commit Production Plan',
+                            'inline_action' => [
+                                'action' => 'commit_production_plan',
+                                'label' => 'Commit plan',
+                                'confirm' => 'Commit the last saved production targets for this delivery date? The baker will bake these numbers until you commit again.',
+                            ],
+                        ]);
+                    } elseif ((int)($commitState['changed_since']['count'] ?? 0) > 0) {
+                        $driftCount = (int)$commitState['changed_since']['count'];
+                        $exceptions[] = bakery_ops_exception([
+                            'type' => 'production_plan_drift',
+                            'severity' => 'warning',
+                            'category' => 'production',
+                            'stage' => 'production_plan',
+                            'title' => 'Demand changed after production plan commit',
+                            'detail' => $driftCount . ' demand-affecting change'
+                                . ($driftCount === 1 ? '' : 's')
+                                . ' recorded after commit. The bake sheet still uses the committed plan.',
+                            'count' => $driftCount,
+                            'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date]),
+                            'action' => 'Review and commit again',
+                            'inline_action' => [
+                                'action' => 'commit_production_plan',
+                                'label' => 'Commit again',
+                                'confirm' => 'Re-commit the last saved production targets? This updates the baker\'s numbers. Demand stays visible beside them.',
+                            ],
+                        ]);
+                    }
+                }
             }
         } else {
             $production['metrics']['plan_short'] = bakery_dashboard_metric(

@@ -62,6 +62,45 @@ try {
             safe_redirect(($redirect ?: 'billing_center.php?panel=invoices') . $sep . 'bulk_msg=' . urlencode($msg), 'marked_invoiced');
             break;
 
+        case 'send_invoice':
+            $orderId = (int)($_POST['daily_order_id'] ?? 0);
+            $result = bakery_billing_send_invoice($db, $orderId, $userId);
+            if (empty($result['ok'])) {
+                $msg = 'Invoice marked invoiced but not sent: no billing email on file.';
+                if (($result['reason'] ?? '') !== 'no_email') {
+                    $msg = 'Invoice could not be sent.';
+                }
+            } elseif (($result['channel'] ?? '') === 'log') {
+                $msg = 'Invoice ' . $result['invoice_number'] . ' recorded, not emailed (MAIL_DRIVER=log or SMTP missing).';
+            } else {
+                $msg = 'Invoice ' . $result['invoice_number'] . ' emailed to ' . $result['recipient'] . '.';
+            }
+            $sep = strpos($redirect, '?') !== false ? '&' : '?';
+            safe_redirect(($redirect ?: 'billing_center.php?panel=invoices&invoice_id=' . $orderId) . $sep . 'bulk_msg=' . urlencode($msg), 'invoice_sent');
+            break;
+
+        case 'bulk_send_invoices':
+            $orderIds = $_POST['order_ids'] ?? [];
+            if (!is_array($orderIds)) {
+                $orderIds = [$orderIds];
+            }
+            $batch = bakery_billing_send_invoices($db, $orderIds, $userId);
+            if ($batch['sent'] === 0 && $batch['skipped'] === 0) {
+                throw new RuntimeException('No deliveries selected');
+            }
+            $channel = bakery_billing_email_ready() ? 'smtp' : 'log';
+            if ($channel === 'log') {
+                $msg = $batch['sent'] . ' invoice' . ($batch['sent'] === 1 ? '' : 's') . ' recorded, not emailed.';
+            } else {
+                $msg = $batch['sent'] . ' invoice' . ($batch['sent'] === 1 ? '' : 's') . ' emailed.';
+            }
+            if ($batch['skipped'] > 0) {
+                $msg .= ' ' . $batch['skipped'] . ' skipped (not confirmed, not sendable, or no billing email).';
+            }
+            $sep = strpos($redirect, '?') !== false ? '&' : '?';
+            safe_redirect(($redirect ?: 'billing_center.php?panel=invoices') . $sep . 'bulk_msg=' . urlencode($msg), 'invoice_sent');
+            break;
+
         case 'record_statement':
             $customerId = (int)($_POST['customer_id'] ?? 0);
             $startDate = trim((string)($_POST['start_date'] ?? ''));

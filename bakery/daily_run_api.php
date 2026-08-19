@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/operational_exceptions.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/daily_order_generation.php';
 require_once __DIR__ . '/includes/demand_confirmation.php';
+require_once __DIR__ . '/includes/production_plan.php';
 require_once __DIR__ . '/includes/billing.php';
 
 bakery_require_role(['administrator', 'manager']);
@@ -50,6 +51,14 @@ try {
             $result = bakery_demand_confirmation_confirm($db, $date, $userId);
             $msg = 'Demand confirmed for ' . date('l, F j', strtotime($date)) . ': '
                 . $result['customers_count'] . ' customers, '
+                . number_format($result['units_count']) . ' units.';
+            safe_redirect($redirect . '&flash=success&msg=' . urlencode($msg));
+            break;
+
+        case 'commit_production_plan':
+            $result = bakery_production_plan_commit($db, $date, $userId);
+            $msg = 'Production plan committed for ' . date('l, F j', strtotime($date)) . ': '
+                . $result['products_count'] . ' products, '
                 . number_format($result['units_count']) . ' units.';
             safe_redirect($redirect . '&flash=success&msg=' . urlencode($msg));
             break;

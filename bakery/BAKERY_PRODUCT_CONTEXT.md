@@ -7,7 +7,7 @@ disagree, the code wins — fix the doc.
 
 **Stack reality:** flat PHP server-rendered pages (page scripts + `includes/`), vanilla
 JS/CSS, MariaDB. No framework. Deploy target DreamHost. Migrations in `database/schema/`
-(001–047; note some schema files are placeholders and the real columns are added by
+(001–049; note some schema files are placeholders and the real columns are added by
 `scripts/run_migrations.php`). Tests are custom scripts under `tests/`.
 
 ---
@@ -40,9 +40,9 @@ individual stages do not fully close.* `includes/daily_run.php` implements an 8-
 gated checklist (Confirm Demand → Commit Production Plan → Produce → Pack →
 Assign/Load/Dispatch → Deliver & Reconcile → Invoice → Close the Day) whose closeout
 refuses to record while blockers exist. Dated demand now lazy-generates, route construction
-prepares demand first, and route closeout reconciles loads. The largest remaining gaps are
-that the "committed" production plan never reaches the baker's screen and invoicing is
-one-order-at-a-time. The product work is closing those loops — not adding modules.
+prepares demand first, and route closeout reconciles loads. Remaining loop-closes are
+mostly polish (bake-sheet waste, overnight cron on DreamHost). The product work is
+closing those loops — not adding modules.
 
 ## 2. Primary user roles
 
@@ -89,7 +89,10 @@ keys — several nav items already show raw keys because this was skipped.
   stale-closeout detection. This is the spine — strengthen stages rather than routing
   around it.
 - **Baker workflow** (`production.php`). Dough-type grouping, formula gram explode,
-  line-filtered per baker, progress from `produced_quantity`.
+  line-filtered per baker, progress from `produced_quantity`. After a manager commits
+  the date, bake quantities come from the committed plan snapshot; dated demand stays
+  visible beside them. Uncommitted dates show demand and say so — they do not silently
+  treat saved Production Center targets as the bake list.
 - **Driver workflow** (`driver.php` + `complete_delivery.php`). Transactional confirm
   writes assignment status, order status, delivered line quantities, and a pricing snapshot
   in one step; notifies the customer. My Route also shows a compact remaining-stop map
@@ -105,12 +108,14 @@ keys — several nav items already show raw keys because this was skipped.
 - **Finished-goods inventory** (`includes/product_inventory.php`). Per product/day
   quantities, immutable movement ledger (`production`, `count`, `load`, `load_correction`,
   `return`, `waste`, `delivery`), row locking, load corrections return stock, over-loading
-  prevented. Route closeout (`route_closeout.php`) reconciles per-driver loaded =
-  delivered + returned + waste and gates Daily Run day close.
+  prevented. Door credits at confirm post `return` movements (see §4.8–4.9). Route closeout
+  (`route_closeout.php`) reconciles per-driver loaded = net delivered + returned + waste
+  and gates Daily Run day close.
 - **Invoice snapshots** (migration 014 + `complete_delivery.php`). Confirmation freezes
   `delivery_order_total`, `delivery_pricing_label`, line prices, COD amount. Invoices are
   immune to later catalog price changes. Never price historical invoices from live
-  `products.price` (legacy `generate_invoice.php` does — that's a bug, not a pattern).
+  `products.price`. Legacy `generate_invoice.php` / `simple_invoice.php` /
+  `generate_invoice_simple.php` are quarantined and redirect to Billing Center.
 
 ## 4. Critical business rules and invariants
 
@@ -151,21 +156,36 @@ Violating these breaks operations even if the code "works."
    double-counts. Production waste is still not captured on the bake sheet; route waste
    is captured at closeout.
 8. **Loads move custody, not ownership:** saving a driver load moves FG `available → loaded`;
-   reducing a load returns stock. Delivery confirmation does **not** decrement loads —
-   end-of-route closeout does (`bakery_inventory_reconcile_driver_load`): posts `return`,
-   `waste`, and `delivery` movements, sets `driver_loads.status = reconciled`, and blocks
-   Daily Run closeout while any route remains open.
+   reducing a load returns stock. Delivery confirmation does **not** post the sale —
+   end-of-route closeout does (`bakery_inventory_reconcile_driver_load`): posts van
+   `return`, `waste`, and `delivery` movements, sets `driver_loads.status = reconciled`,
+   and blocks Daily Run closeout while any route remains open. Closeout **delivered** is
+   pieces that stayed with the customer: line `delivered_quantity` minus door credits.
+   Door credits (`credits_taken_back`) post `return` movements in the same confirm
+   transaction (`bakery_inventory_record_delivery_credit_returns`): those pieces leave
+   loaded custody and become `available_quantity` immediately. Closeout must not return
+   them again. Van math is **loaded = net delivered + van leftover + waste + door credits**.
+   Header credits are allocated to products by walking `daily_order_items`
+   in ascending `id`, taking `min(remaining credits, line delivered_quantity)` (ordered
+   `quantity` if delivered is still null). Mixed-stop confirm UI states this rule; it
+   does not silently dump every credit onto the first SKU. Notes on the ledger name the
+   order (`Order #{id} credit taken back`). Re-confirm deltas the movements rather than
+   double-returning.
 9. **Delivery confirmation creates the billable record.** `complete_delivery.php`
-   `confirm_delivery` sets delivered pieces, credits taken back, snapshot totals, COD
-   `amount_collected`, `delivery_confirmed_at`, and marks order + assignment delivered.
-   Legacy `mark_delivered` skips the snapshot — don't build on it.
+   `confirm_delivery` / `bakery_confirm_delivery` sets delivered pieces, credits taken back,
+   snapshot totals, COD `amount_collected`, `delivery_confirmed_at`, marks order +
+   assignment delivered, and posts FG credit returns. Billable math stays
+   `billable_pieces = delivered_pieces - credits_taken_back`. Legacy `mark_delivered`
+   skips the snapshot — don't build on it.
 10. **Invoice identity is computed, not stored:** `INV-YYYYMMDD-{orderId padded 5}`, one
     invoice per confirmed delivery. Legacy period generators (`simple_invoice.php`,
-    `generate_invoice_simple.php`, `generate_invoice.php`) use a different numbering scheme —
-    they are deprecated-by-intent; Billing Center is canonical.
-11. **Billing Center marks, it doesn't create.** "Generate invoice" = set `status='invoiced'`
-    on a confirmed delivery. Amounts are read-only there. No AR/payments ledger exists; COD
-    cash is tracked on the order and summarized per driver in Route Manager.
+    `generate_invoice_simple.php`, `generate_invoice.php`) redirect to Billing Center;
+    they must not mint a second numbering or live-catalog price universe.
+11. **Billing Center marks and sends; it doesn't invent amounts.** "Generate invoice" = set
+    `status='invoiced'` on a confirmed delivery. Staff send emails (or records, when
+    `MAIL_DRIVER=log`) the same portal document (`customer_invoice.php`) using snapshot
+    totals. Amounts are read-only there. No AR/payments ledger exists; COD cash is tracked
+    on the order and summarized per driver in Route Manager.
 12. **Pricing tiers:** zone pricing (Pan Dulce), per-customer overrides (`customer_pricing.php`,
     tier `custom`), per-customer default Pan Dulce price. Snapshot at delivery time wins forever.
 13. **Weekday encoding:** Sunday = `7` (legacy `0` readable via compat helpers). Use
@@ -192,7 +212,7 @@ Compact map — entry points only, not every file.
 | Daily Orders | `daily_orders.php`, `includes/demand_review.php` | The day's demand: generate, create one-time dated orders, review states, edit |
 | Standing Orders | `standing_orders_manager.php` (canonical; `standing_orders.php` legacy) | Recurring weekly template |
 | Customers | `customers.php` (searchable list), `customer_record.php` (Customer Hub — summaries + deep links), `customer_overview.php`, `customer_schedule.php`, `customer_pricing.php`, `leads.php` | Records, hub orientation, lifecycle, schedule, pricing, pipeline |
-| Production Center | `production_center.php` (schema 015) | Weekly saved FG targets vs demand/stock |
+| Production Center | `production_center.php` (schema 015 + 048) | Weekly saved FG targets vs demand/stock; explicit per-date commit to the baker |
 | Daily Production | `production.php` | Baker's bake list by dough; confirm → FG inventory |
 | Pack List | `pack_list.php` | Packing checklist by product / customer / route; shared check-offs; FG shortage uses on-hand + loaded |
 | Finished Goods | `inventory.php`, `includes/product_inventory.php` | Counts, availability, movement ledger |
@@ -201,8 +221,8 @@ Compact map — entry points only, not every file.
 | Route tools (overlapping) | `standing_routes.php`, `route_manager.php` (also COD cash), `route_summary.php` (photo-first day review), `daily_route.php`, `drivers.php`, `map.php`, `zones.php` | Template routes, live monitoring, views |
 | Driver app | `driver.php`, `complete_delivery.php`, `upload_driver_photo.php`, `includes/driver_route_map.js` | Stops, remaining-stop map + reorder, confirm wizard, photos, GPS |
 | Driver Loads | `driver_load.php` | Pickup quantities; reserves FG; sets orders out_for_delivery |
-| Billing | `billing_center.php`, `includes/billing*.php`, `billing_api.php`, `billing_export.php`, `customer_statement.php` | Reconcile, mark invoiced, statements, QuickBooks CSV |
-| Legacy invoicing (deprecated intent) | `invoice_center.php` (redirect), `simple_invoice.php`, `generate_invoice_simple.php`, `generate_invoice.php` | Period printables; do not extend |
+| Billing | `billing_center.php`, `includes/billing*.php`, `billing_api.php`, `billing_export.php`, `customer_statement.php`, `customer_invoice.php` | Reconcile, mark invoiced, send/record the portal invoice, statements, QuickBooks CSV |
+| Legacy invoicing (quarantined) | `invoice_center.php`, `simple_invoice.php`, `generate_invoice_simple.php`, `generate_invoice.php` | Redirect to Billing Center; historical nav only |
 | Service Issues | `service_issues.php`, `service_issues_api.php`, `includes/customer_delivery_issues.php` | Real queue for customer-reported problems |
 | Portal | `customer_portal*.php`, `customer_login.php`, `qr_login.php`, `includes/customer_portal.php`, `includes/portal_*` | Customer self-service |
 | Admin | `users.php`, `login_history.php`, `historical_navigation.php`, `module_guide.php`, `agent_homebase.php` | Identity, audit, retained legacy menu, Agent Learning Studio / Homebase (admin coaching view; agents use `scripts/agent_homebase.php`) |
@@ -221,15 +241,21 @@ Compact map — entry points only, not every file.
    reopens on post-confirm demand drift from `operational_events`), which
    hard-gates closeout; the dashboard shows a tomorrow-readiness strip plus the
    two-day bake→route cadence. Standing remains the template; dated edits win.
-2. **Plan → baker.** Production Center saves per-day targets and Daily Run checks coverage,
-   but Daily Production bakes to demand; no commit/lock; "planned" on the bake sheet means
-   demand. Late demand changes after planning surface nowhere.
-3. **Route closeout.** Closed via `route_closeout.php` (loaded = delivered + returned +
-   waste). Remaining gaps: production-side waste, credits taken back not auto-ledgered as
-   returns.
-4. **Canonical bulk invoicing.** Mark-invoiced is single-order; no real customer-facing send
-   (the email path mails a test address); legacy generators mint a second invoice-number
-   universe, one with live-catalog pricing.
+2. **Plan → baker.** Shipped: Production Center still saves per-day draft targets.
+   `production_plan_commits` + `production_plan_commit_items` (schema 048) record an
+   explicit manager commit per delivery date. Daily Production bakes the committed
+   snapshot (demand / committed / made). Daily Run stage 2 is complete only when
+   committed (when the table exists), not merely when saved targets cover demand.
+   Post-commit dated-demand changes raise `production_plan_drift`; the bake sheet
+   does not auto-rewrite. Re-commit updates baker numbers and does not zero
+   `produced_quantity`. Completing exception work never hides still-true drift.
+3. **Route closeout.** Closed via `route_closeout.php` (loaded = net delivered + returned +
+   waste + door credits). Door credits are FG `return` movements at confirm, not van leftover.
+   Remaining gap: production-side waste is still not captured on the bake sheet.
+4. **Canonical invoicing.** Billing Center bulk-marks invoiced and can send the portal
+   `customer_invoice.php` document (snapshot totals) to the customer billing email, or
+   record the send when `MAIL_DRIVER=log`. Legacy generators redirect to Billing Center.
+   Still deferred (Wave 2): AR aging, Square pay, weekly rollup invoices.
 5. **Customer fragmentation.** Contact, lifecycle, standing, schedule, pricing, billing, and
    issues still live on specialized screens; `customer_record.php` is now the staff hub
    (nav + search + jump links). Editing still happens on the specialized screens — do not
@@ -256,14 +282,16 @@ a later item.
    tomorrow-readiness strip, two-day bake→route cadence. *Still open: optional
    overnight cron must be installed on DreamHost (page load fills the horizon
    even without it).*
-2. **Production-plan integration** — commit action in Production Center; Daily Production
-   executes committed plan with demand alongside + drift flags; post-commit changes raise
-   exceptions.
+2. **Production-plan integration** — shipped: commit action in Production Center
+   (and Daily Run calling the same helper); Daily Production executes the committed
+   plan with demand alongside + drift flags; post-commit demand changes raise
+   `production_plan_drift`. *Bakers still do not open Production Center.*
 3. **Route closeout/reconciliation** — shipped (`route_closeout.php`): per-driver loaded vs
    delivered vs returned vs wasted; waste + delivery movement types; Daily Run closeout
    requires closed routes.
-4. **Canonical bulk invoicing** — bulk mark-invoiced + canonical per-delivery document
-   (reuse portal `customer_invoice.php`) + optional send; redirect legacy generators.
+4. **Canonical invoicing** — shipped: bulk mark-invoiced, send/record of the portal
+   per-delivery invoice from Billing Center, legacy generators quarantined. *Still
+   deferred (Wave 2): AR aging, Square pay, weekly rollup invoices.*
 5. **Customer hub + findability** — `customer_record.php` is the staff hub (nav item
    "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
    open; high-frequency name surfaces link to the hub. Sections remain summaries + deep

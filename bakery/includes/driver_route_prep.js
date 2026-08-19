@@ -264,7 +264,7 @@
     paintMoveButtons();
 
     document.addEventListener('click', function (e) {
-      if (e.target.closest('#routePrepAddBtn, #routePrepAddDockBtn')) {
+      if (e.target.closest('.js-route-prep-add')) {
         openSheet();
         return;
       }

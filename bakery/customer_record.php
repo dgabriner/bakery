@@ -753,9 +753,9 @@ require_once __DIR__ . '/includes/nav.php';
                 View in Billing Center
             </a>
             <a class="cr-btn cr-btn-secondary"
-               href="simple_invoice.php?customer_id=<?php echo $customerId; ?>&amp;start_date=<?php echo htmlspecialchars($selectedDate); ?>&amp;end_date=<?php echo htmlspecialchars($selectedDate); ?>"
+               href="customer_invoice.php?daily_order_id=<?php echo (int)$ctx['daily_order_id']; ?>"
                target="_blank" rel="noopener">
-                Printable receipt
+                <?php echo htmlspecialchars(bakery_t('billing.view_invoice')); ?>
             </a>
             <?php endif; ?>
             <a class="cr-btn cr-btn-ghost"

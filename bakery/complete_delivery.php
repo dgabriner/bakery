@@ -538,6 +538,159 @@ function bakery_delivery_gps_payload(array $post): array
     ];
 }
 
+/**
+ * Confirm a delivery: assignment + order status, line delivered quantities,
+ * frozen billable snapshot, and FG credit-return movements in one transaction.
+ *
+ * @param array{price_per_piece?:float|int|string, amount_collected?:float|int|string|null} $options
+ * @return array<string,mixed>
+ */
+function bakery_confirm_delivery(
+    PDO $db,
+    int $dailyOrderId,
+    int $deliveredPieces,
+    int $creditsTakenBack,
+    array $options = []
+): array {
+    if ($dailyOrderId <= 0) {
+        throw new Exception('Daily order ID is required');
+    }
+    if ($deliveredPieces < 0 || $creditsTakenBack < 0) {
+        throw new Exception('Enter whole numbers of pieces and credits');
+    }
+    if ($creditsTakenBack > $deliveredPieces) {
+        throw new Exception('Credits taken back cannot exceed pieces delivered');
+    }
+
+    $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    $summary = [
+        'ordered_pieces' => $invoice['ordered_pieces'],
+        'order_total' => $invoice['order_total'],
+        'average_price' => $invoice['average_price'],
+        'pricing_label' => $invoice['pricing_label'],
+        'pricing_missing' => bakery_delivery_pricing_missing($invoice),
+    ];
+    $billablePieces = $deliveredPieces - $creditsTakenBack;
+
+    $driverPrice = null;
+    if ($summary['pricing_missing']) {
+        if (!array_key_exists('price_per_piece', $options)) {
+            throw new Exception('Enter a price per piece for this customer');
+        }
+        $driverPrice = filter_var($options['price_per_piece'], FILTER_VALIDATE_FLOAT);
+        if ($driverPrice === false || $driverPrice <= 0) {
+            throw new Exception('Enter a valid price per piece greater than zero');
+        }
+    }
+
+    $custStmt = $db->prepare(
+        "SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM daily_order_items payment_doi
+                    INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
+                    INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
+                    INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
+                    WHERE payment_doi.daily_order_id = do.id
+                      AND payment_pl.name = 'Pan Dulce'
+                ) THEN 'cod' ELSE COALESCE(c.payment_collection, 'cod') END
+         FROM daily_orders do
+         JOIN customers c ON c.id = do.customer_id
+         WHERE do.id = ?"
+    );
+    $custStmt->execute([$dailyOrderId]);
+    $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
+    if (!in_array($paymentCollection, ['cod', 'signature'], true)) {
+        $paymentCollection = 'signature';
+    }
+
+    $amountCollected = null;
+    if ($paymentCollection === 'cod') {
+        if (!array_key_exists('amount_collected', $options)) {
+            throw new Exception('Cash collected amount is required for COD customers');
+        }
+        $amountCollected = filter_var($options['amount_collected'], FILTER_VALIDATE_FLOAT);
+        if ($amountCollected === false || $amountCollected < 0) {
+            throw new Exception('Enter a valid cash amount collected');
+        }
+        $amountCollected = round($amountCollected, 2);
+    }
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        bakery_delivery_repair_missing_item_prices($db, $dailyOrderId);
+        $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+        $summary = [
+            'ordered_pieces' => $invoice['ordered_pieces'],
+            'order_total' => $invoice['order_total'],
+            'average_price' => $invoice['average_price'],
+            'pricing_label' => $invoice['pricing_label'],
+            'pricing_missing' => bakery_delivery_pricing_missing($invoice),
+        ];
+
+        if ($summary['pricing_missing']) {
+            $summary = bakery_apply_driver_price($db, $dailyOrderId, (float)$driverPrice);
+        }
+
+        $pricePerPiece = $summary['average_price'];
+        $total = round($billablePieces * $pricePerPiece, 2);
+
+        $tot = $db->prepare(
+            'UPDATE daily_orders
+             SET delivered_pieces = ?, credits_taken_back = ?, total_amount = ?,
+                 delivery_order_total = ?,
+                 delivery_pricing_label = COALESCE(delivery_pricing_label, ?),
+                 amount_collected = ?,
+                 delivery_confirmed_at = NOW()
+             WHERE id = ?'
+        );
+        $tot->execute([
+            $deliveredPieces,
+            $creditsTakenBack,
+            $total,
+            $total,
+            $summary['pricing_label'],
+            $amountCollected,
+            $dailyOrderId,
+        ]);
+        $verify = $db->prepare('SELECT id FROM daily_orders WHERE id = ?');
+        $verify->execute([$dailyOrderId]);
+        if (!$verify->fetchColumn()) {
+            throw new Exception('Could not save the delivery invoice');
+        }
+        bakery_mark_delivery_delivered($db, $dailyOrderId);
+        bakery_inventory_record_delivery_credit_returns(
+            $db,
+            $dailyOrderId,
+            $creditsTakenBack
+        );
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    return [
+        'success' => true,
+        'message' => 'Delivery confirmed.',
+        'delivered_pieces' => $deliveredPieces,
+        'credits_taken_back' => $creditsTakenBack,
+        'billable_pieces' => $billablePieces,
+        'price_per_piece' => $pricePerPiece,
+        'total' => $total,
+        'amount_collected' => $amountCollected,
+        'payment_collection' => $paymentCollection,
+        'ordered_pieces' => (int)$invoice['ordered_pieces'],
+        'invoice' => $invoice,
+    ];
+}
+
 if (PHP_SAPI !== 'cli') {
 try {
     $db = check_mysql_connection();
@@ -631,99 +784,21 @@ try {
             if ($deliveredPieces === false || $creditsTakenBack === false) {
                 throw new Exception('Enter whole numbers of pieces and credits');
             }
-            if ($creditsTakenBack > $deliveredPieces) {
-                throw new Exception('Credits taken back cannot exceed pieces delivered');
+
+            $confirmOptions = [];
+            if (isset($_POST['price_per_piece'])) {
+                $confirmOptions['price_per_piece'] = $_POST['price_per_piece'];
             }
-
-            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
-            $summary = [
-                'ordered_pieces' => $invoice['ordered_pieces'],
-                'order_total' => $invoice['order_total'],
-                'average_price' => $invoice['average_price'],
-                'pricing_label' => $invoice['pricing_label'],
-                'pricing_missing' => bakery_delivery_pricing_missing($invoice),
-            ];
-            $billablePieces = $deliveredPieces - $creditsTakenBack;
-
-            if ($summary['pricing_missing']) {
-                if (!isset($_POST['price_per_piece'])) {
-                    throw new Exception('Enter a price per piece for this customer');
-                }
-                $driverPrice = filter_var($_POST['price_per_piece'], FILTER_VALIDATE_FLOAT);
-                if ($driverPrice === false || $driverPrice <= 0) {
-                    throw new Exception('Enter a valid price per piece greater than zero');
-                }
+            if (isset($_POST['amount_collected'])) {
+                $confirmOptions['amount_collected'] = $_POST['amount_collected'];
             }
-
-            $custStmt = $db->prepare(
-                "SELECT CASE WHEN EXISTS (
-                            SELECT 1
-                            FROM daily_order_items payment_doi
-                            INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-                            INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-                            INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-                            WHERE payment_doi.daily_order_id = do.id
-                              AND payment_pl.name = 'Pan Dulce'
-                        ) THEN 'cod' ELSE COALESCE(c.payment_collection, 'cod') END
-                 FROM daily_orders do
-                 JOIN customers c ON c.id = do.customer_id
-                 WHERE do.id = ?"
+            $confirmed = bakery_confirm_delivery(
+                $db,
+                $dailyOrderId,
+                (int)$deliveredPieces,
+                (int)$creditsTakenBack,
+                $confirmOptions
             );
-            $custStmt->execute([$dailyOrderId]);
-            $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
-            if (!in_array($paymentCollection, ['cod', 'signature'], true)) {
-                $paymentCollection = 'signature';
-            }
-
-            $amountCollected = null;
-            if ($paymentCollection === 'cod') {
-                if (!isset($_POST['amount_collected'])) {
-                    throw new Exception('Cash collected amount is required for COD customers');
-                }
-                $amountCollected = filter_var($_POST['amount_collected'], FILTER_VALIDATE_FLOAT);
-                if ($amountCollected === false || $amountCollected < 0) {
-                    throw new Exception('Enter a valid cash amount collected');
-                }
-                $amountCollected = round($amountCollected, 2);
-            }
-
-            $db->beginTransaction();
-
-            bakery_delivery_repair_missing_item_prices($db, $dailyOrderId);
-            // Reload after repairing historical zero-priced lines so the delivery
-            // total and the persisted invoice always agree.
-            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
-            $summary = [
-                'ordered_pieces' => $invoice['ordered_pieces'],
-                'order_total' => $invoice['order_total'],
-                'average_price' => $invoice['average_price'],
-                'pricing_label' => $invoice['pricing_label'],
-                'pricing_missing' => bakery_delivery_pricing_missing($invoice),
-            ];
-
-            if ($summary['pricing_missing']) {
-                $summary = bakery_apply_driver_price($db, $dailyOrderId, (float)$driverPrice);
-            }
-
-            $pricePerPiece = $summary['average_price'];
-            $total = round($billablePieces * $pricePerPiece, 2);
-
-            $tot = $db->prepare(
-                'UPDATE daily_orders
-                 SET delivered_pieces = ?, credits_taken_back = ?, total_amount = ?,
-                     delivery_order_total = ?,
-                     delivery_pricing_label = COALESCE(delivery_pricing_label, ?),
-                     amount_collected = ?,
-                     delivery_confirmed_at = NOW()
-                 WHERE id = ?'
-            );
-            // Snapshot the billable total (after credits), not the pre-delivery ordered total.
-            $tot->execute([$deliveredPieces, $creditsTakenBack, $total, $total, $summary['pricing_label'], $amountCollected, $dailyOrderId]);
-            if ($tot->rowCount() === 0) {
-                throw new Exception('Could not save the delivery invoice');
-            }
-            bakery_mark_delivery_delivered($db, $dailyOrderId);
-            $db->commit();
 
             $ctx = bakery_operational_order_context($db, $dailyOrderId);
             $customerLabel = $ctx['customer_name'] ?? 'customer';
@@ -735,12 +810,12 @@ try {
                 $dailyOrderId,
                 $actorName . ' completed delivery to ' . $customerLabel,
                 [
-                    'ordered_pieces' => $invoice['ordered_pieces'],
-                    'delivered_pieces' => $deliveredPieces,
-                    'credits_taken_back' => $creditsTakenBack,
-                    'total' => $total,
-                    'amount_collected' => $amountCollected,
-                    'payment_collection' => $paymentCollection,
+                    'ordered_pieces' => $confirmed['ordered_pieces'],
+                    'delivered_pieces' => $confirmed['delivered_pieces'],
+                    'credits_taken_back' => $confirmed['credits_taken_back'],
+                    'total' => $confirmed['total'],
+                    'amount_collected' => $confirmed['amount_collected'],
+                    'payment_collection' => $confirmed['payment_collection'],
                     'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
                 ],
                 bakery_delivery_gps_payload($_POST)
@@ -750,14 +825,14 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Delivery confirmed.',
-                'delivered_pieces' => $deliveredPieces,
-                'credits_taken_back' => $creditsTakenBack,
-                'billable_pieces' => $billablePieces,
-                'price_per_piece' => $pricePerPiece,
-                'total' => $total,
-                'amount_collected' => $amountCollected,
-                'payment_collection' => $paymentCollection,
+                'message' => $confirmed['message'],
+                'delivered_pieces' => $confirmed['delivered_pieces'],
+                'credits_taken_back' => $confirmed['credits_taken_back'],
+                'billable_pieces' => $confirmed['billable_pieces'],
+                'price_per_piece' => $confirmed['price_per_piece'],
+                'total' => $confirmed['total'],
+                'amount_collected' => $confirmed['amount_collected'],
+                'payment_collection' => $confirmed['payment_collection'],
             ]);
             break;
 

@@ -25,15 +25,14 @@ There is no separate `invoices` table. Each billable unit is a **`daily_orders` 
 
 **Do not recalculate** historical amounts from `products.price` or current customer tiers.
 
-## Legacy invoice paths (parallel, not canonical)
+## Legacy invoice paths (quarantined)
+
+`simple_invoice.php`, `generate_invoice.php`, and `generate_invoice_simple.php` redirect to Billing Center. They must not mint a second invoice-number sequence or price from live `products.price`. Staff send the portal document (`customer_invoice.php`) from Billing Center. `MAIL_DRIVER=log` records the send without SMTP.
 
 | Path | Invoice # format | Pricing source |
 |------|------------------|----------------|
-| Billing Center | Per-delivery `INV-YYYYMMDD-#####` | Item + delivery snapshots |
-| `simple_invoice.php` | Per-customer-period | **`products.price` (live catalog)** |
-| `generate_invoice.php` / `_simple.php` | Per-customer-period | Live catalog / mixed |
-
-Use Billing Center + CSV export for accounting handoff. Legacy printables remain for convenience but may disagree with snapshots.
+| Billing Center + `customer_invoice.php` | Per-delivery `INV-YYYYMMDD-#####` | Item + delivery snapshots |
+| Legacy generators | Redirect only | n/a |
 
 ## CSV export (`billing_export.php`)
 
@@ -73,4 +72,6 @@ Generated from confirmed deliveries in a date range. `billing_statements` record
 
 ## Audit
 
-`audit_log` records: `invoice_marked_invoiced`, `statement_generated`, `statement_sent`, `accounting_export_created`.
+`audit_log` records: `invoice_marked_invoiced`, `invoice_sent`, `invoice_send_recorded`, `statement_generated`, `statement_sent`, `accounting_export_created`.
+
+Invoice send also writes `billing_invoice_sends` (one row per attempt, including `MAIL_DRIVER=log`) and last-send columns on `daily_orders`.

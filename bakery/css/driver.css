@@ -4038,6 +4038,9 @@ body.photo-mode-open {
 #deliveryPhotoModal .delivery-confirmation-fields label { color:#334155; font-size:.78rem; font-weight:700; }
 #deliveryPhotoModal .delivery-confirmation-fields input { display:block; width:100%; margin-top:4px; padding:9px 10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; font:inherit; font-size:1rem; }
 #deliveryPhotoModal .delivery-confirmation-breakdown { margin:8px 0 0; color:#64748b; font-size:.75rem; }
+#deliveryPhotoModal .delivery-credit-stock-note,
+#deliveryPhotoModal .delivery-credit-alloc-note { margin:8px 0 0; color:#334155; font-size:.73rem; line-height:1.35; }
+#deliveryPhotoModal .delivery-credit-alloc-note { color:#0f766e; }
 #deliveryPhotoModal .delivery-cod-row { margin-top:10px; }
 #deliveryPhotoModal .delivery-cod-row label { display:block; color:#334155; font-size:.78rem; font-weight:700; }
 #deliveryPhotoModal .delivery-cod-row input { display:block; width:100%; margin-top:4px; padding:9px 10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; font:inherit; font-size:1rem; }
@@ -5838,7 +5841,7 @@ body.driver-route-prep .route-adjust-dock {
 }
 
 body.driver-route-prep.driver-field-mode.driver-workflow-page .driver-route {
-    padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(182px + env(safe-area-inset-bottom, 0px));
 }
 
 .route-prep-tomorrow-cta {
@@ -5894,7 +5897,11 @@ body.driver-route-prep.driver-field-mode.driver-workflow-page .driver-route {
 }
 
 .route-prep-toolbar {
-    display: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 8px;
+    margin: 0 0 12px;
+    align-items: stretch;
 }
 
 .route-prep-list-section {
@@ -6021,12 +6028,13 @@ body.driver-route-prep.driver-field-mode.driver-workflow-page .driver-route {
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: calc(78px + env(safe-area-inset-bottom, 0px));
-    z-index: 1040;
+    bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+    z-index: 1080;
 }
 
 .route-prep-add-btn,
-.route-prep-add-btn--dock {
+.route-prep-add-btn--dock,
+.route-prep-add-btn--list {
     width: 100%;
     min-height: 52px;
     border: 0;
@@ -6038,8 +6046,27 @@ body.driver-route-prep.driver-field-mode.driver-workflow-page .driver-route {
     cursor: pointer;
 }
 
+.route-prep-toolbar .route-prep-add-btn {
+    min-height: 48px;
+}
+
+.route-prep-toolbar .route-prep-preview-link {
+    min-height: 48px;
+    background: #fff;
+}
+
+.route-prep-add-btn--list {
+    margin: 4px 0 12px;
+}
+
 body.route-prep-sheet-open .route-prep-add-dock {
     display: none;
+}
+
+@media (min-width: 721px) {
+    .route-prep-add-dock {
+        display: none;
+    }
 }
 
 .route-prep-sheet {

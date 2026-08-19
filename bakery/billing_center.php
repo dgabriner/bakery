@@ -8,6 +8,8 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/billing.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 
+bakery_billing_ensure_invoice_send_schema($db);
+
 $page_title = bakery_t('page.billing_center');
 
 $orderStatuses = ['pending', 'confirmed', 'in_production', 'ready', 'out_for_delivery', 'delivered', 'invoiced'];
@@ -229,7 +231,7 @@ require_once __DIR__ . '/includes/nav.php';
                 </div>
 
                 <?php if (!$emailReady): ?>
-                    <p class="bc-note">Statement email: not configured (MAIL_DRIVER=log or SMTP missing). Use print/PDF from the statement page; sending will be enabled when mail is configured.</p>
+                    <p class="bc-note"><?php echo htmlspecialchars(bakery_t('billing.email_not_configured')); ?></p>
                 <?php endif; ?>
 
                 <table class="bc-table">

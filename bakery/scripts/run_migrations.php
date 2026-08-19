@@ -1048,6 +1048,69 @@ try {
         echo "Skip 047_unique_dated_route_positions (already applied)\n";
     }
 
+    // 048 — per-date production plan commits (plan → baker ritual)
+    if (!bakery_migration_applied($db, '048_production_plan_commits')) {
+        echo "Applying migration 048_production_plan_commits...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/048_production_plan_commits.sql');
+        bakery_mark_migration($db, '048_production_plan_commits');
+        echo "  OK\n";
+    } elseif ((!table_exists($db, 'production_plan_commits') || !table_exists($db, 'production_plan_commit_items'))
+        && is_readable($migrationsDir . '/048_production_plan_commits.sql')) {
+        echo "Applying migration 048_production_plan_commits (tables missing despite applied flag)...\n";
+        bakery_run_sql_file($db, $migrationsDir . '/048_production_plan_commits.sql');
+        echo "  OK\n";
+    } else {
+        echo "Skip 048_production_plan_commits (already applied)\n";
+    }
+
+    // 049 — canonical invoice send columns + outbox
+    $invoiceSendReady = table_exists($db, 'billing_invoice_sends')
+        && bakery_column_exists($db, 'daily_orders', 'invoice_sent_at');
+    if (!bakery_migration_applied($db, '049_invoice_send') || !$invoiceSendReady) {
+        echo "Applying migration 049_invoice_send...\n";
+        if (!table_exists($db, 'daily_orders')) {
+            throw new RuntimeException('daily_orders table is required for invoice send migration');
+        }
+        foreach ([
+            'invoice_sent_at' => 'DATETIME NULL DEFAULT NULL',
+            'invoice_sent_to_email' => 'VARCHAR(255) NULL DEFAULT NULL',
+            'invoice_sent_by_user_id' => 'INT NULL DEFAULT NULL',
+            'invoice_send_channel' => 'VARCHAR(16) NULL DEFAULT NULL',
+        ] as $column => $definition) {
+            if (!bakery_column_exists($db, 'daily_orders', $column)) {
+                $db->exec('ALTER TABLE daily_orders ADD COLUMN `' . $column . '` ' . $definition);
+                echo "  Added daily_orders.{$column}\n";
+            }
+        }
+        if (!table_exists($db, 'billing_invoice_sends')) {
+            if (is_readable($migrationsDir . '/049_invoice_send.sql')) {
+                bakery_run_sql_file($db, $migrationsDir . '/049_invoice_send.sql');
+            } else {
+                $db->exec(
+                    'CREATE TABLE billing_invoice_sends (
+                        id INT NOT NULL AUTO_INCREMENT,
+                        daily_order_id INT NOT NULL,
+                        invoice_number VARCHAR(40) NOT NULL,
+                        amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                        sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        sent_by_user_id INT NULL DEFAULT NULL,
+                        sent_to_email VARCHAR(255) NULL DEFAULT NULL,
+                        channel VARCHAR(16) NOT NULL DEFAULT \'log\',
+                        status VARCHAR(16) NOT NULL DEFAULT \'logged\',
+                        PRIMARY KEY (id),
+                        KEY idx_billing_invoice_sends_order (daily_order_id),
+                        KEY idx_billing_invoice_sends_sent (sent_at)
+                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+                );
+            }
+            echo "  Created billing_invoice_sends\n";
+        }
+        bakery_mark_migration($db, '049_invoice_send');
+        echo "  OK\n";
+    } else {
+        echo "Skip 049_invoice_send (already applied)\n";
+    }
+
     echo "Migrations complete.\n";
     exit(0);
 } catch (Throwable $e) {

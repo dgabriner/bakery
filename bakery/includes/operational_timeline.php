@@ -15,6 +15,7 @@ define('BAKERY_OP_DAILY_ORDER_STATUS_CHANGED', 'daily_order_status_changed');
 define('BAKERY_OP_DAILY_ORDER_CLEARED', 'daily_order_cleared');
 define('BAKERY_OP_DRIVER_ROUTE_ASSIGNED', 'driver_route_assigned');
 define('BAKERY_OP_PRODUCTION_PLAN_SAVED', 'production_plan_saved');
+define('BAKERY_OP_PRODUCTION_PLAN_COMMITTED', 'production_plan_committed');
 define('BAKERY_OP_DRIVER_LOAD_SAVED', 'driver_load_saved');
 define('BAKERY_OP_DRIVER_ROUTE_CLOSED', 'driver_route_closed');
 define('BAKERY_OP_DELIVERY_COMPLETED', 'delivery_completed');
@@ -265,6 +266,7 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_DAILY_ORDER_CLEARED => 'demand',
         BAKERY_OP_DRIVER_ROUTE_ASSIGNED => 'delivery',
         BAKERY_OP_PRODUCTION_PLAN_SAVED => 'production',
+        BAKERY_OP_PRODUCTION_PLAN_COMMITTED => 'production',
         BAKERY_OP_DRIVER_LOAD_SAVED => 'inventory',
         BAKERY_OP_DELIVERY_COMPLETED => 'delivery',
         BAKERY_OP_DELIVERY_MARKED => 'delivery',
@@ -774,6 +776,7 @@ function bakery_operational_timeline_links(array $entry): array
         $links['invoice'] = 'billing_center.php?panel=invoices';
     }
     if (($entry['event_type'] ?? '') === BAKERY_OP_PRODUCTION_PLAN_SAVED
+        || ($entry['event_type'] ?? '') === BAKERY_OP_PRODUCTION_PLAN_COMMITTED
         || strpos((string)($entry['event_type'] ?? ''), 'inventory_production') === 0) {
         $links['production'] = 'production.php?date=' . urlencode((string)($entry['operational_date'] ?? date('Y-m-d')));
     }

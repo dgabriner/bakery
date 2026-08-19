@@ -122,9 +122,9 @@ MD
 Highest-value open loops (verify against code; this list is also the Bugs board):
 
 - Production Center **saves** targets; Daily Production still bakes to **demand**. No commit/lock. Late demand changes after planning surface nowhere.
-- Production confirm is **additive** — re-entry double-counts. No bake-sheet waste. Credits taken back are not auto-ledgered as FG returns.
+- Production confirm is **additive** — re-entry double-counts. No bake-sheet waste. Door credits now post FG `return` movements at confirm (do not also return them at closeout).
 - Loading a van sets orders `out_for_delivery` but can leave assignments `pending`. Skip may cancel the assignment but not the order.
-- Billing Center bulk-marks invoiced; there is still no canonical customer send. Legacy generators (`simple_invoice.php`, `generate_invoice.php`) are a second numbering/pricing universe — do not extend them.
+- Billing Center bulk-marks invoiced and can send/record the portal invoice. Legacy generators (`simple_invoice.php`, `generate_invoice.php`) redirect to Billing Center — do not extend them.
 - `product_distribution.php` still flips demand all-or-nothing (violates dated-beats-standing per customer).
 - Exception ownership exists; staff are not pinged. Completing work must never hide a still-true operational fact.
 - Overlapping route screens. Driver Assignment is canonical.
@@ -205,9 +205,9 @@ function bakery_agent_homebase_seed_bugs(): array
         [
             'slug' => 'invoice-send-gap',
             'title' => 'Canonical invoice send is missing; legacy generators still exist',
-            'detail' => 'Billing Center bulk mark-invoiced is real. Customer-facing send of the portal invoice is not. simple_invoice.php / generate_invoice.php use a different numbering scheme and live catalog prices. Do not extend them.',
+            'detail' => 'Billing Center can send or record the portal invoice (snapshot totals; MAIL_DRIVER=log does not SMTP). Legacy generators redirect to Billing Center.',
             'severity' => 'watch',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'billing',
             'source' => 'product-context',
         ],
@@ -223,9 +223,9 @@ function bakery_agent_homebase_seed_bugs(): array
         [
             'slug' => 'credits-not-returned',
             'title' => 'Credits taken back are not FG returns',
-            'detail' => 'Delivery confirmation records credits_taken_back on the order. Route closeout reconciles loads, but credits are not auto-posted as inventory return movements.',
+            'detail' => 'Shipped: confirm posts return movements for credits_taken_back (allocated by daily_order_items.id ASC) and closeout uses net delivered so the same loaf is not returned twice. Bake-sheet production waste is still a separate gap.',
             'severity' => 'watch',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'inventory',
             'source' => 'product-context',
         ],
@@ -241,9 +241,9 @@ function bakery_agent_homebase_seed_bugs(): array
         [
             'slug' => 'legacy-invoice-live-price',
             'title' => 'Legacy invoice generators price from live catalog',
-            'detail' => 'generate_invoice.php uses products.price. Canonical path is delivery snapshots + Billing Center.',
+            'detail' => 'generate_invoice.php / simple_invoice.php / generate_invoice_simple.php now redirect to Billing Center. Canonical path is delivery snapshots + customer_invoice.php send.',
             'severity' => 'broken-window',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'billing',
             'source' => 'product-context',
         ],

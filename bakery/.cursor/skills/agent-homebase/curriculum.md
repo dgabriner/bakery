@@ -14,6 +14,6 @@ Improve existing workflows. Chips where decisions happen. Exception-driven. Extr
 
 ## Bugs to keep in mind
 
-Plan does not reach the bake sheet. Production confirm is additive. Order vs assignment status can diverge. Legacy invoice generators use live catalog prices. `product_distribution.php` demand-flip. Credits taken back are not FG returns. No staff pings.
+Plan does not reach the bake sheet. Production confirm is additive. Order vs assignment status can diverge. Legacy invoice generators use live catalog prices. `product_distribution.php` demand-flip. No staff pings. Bake-sheet production waste is still unlogged.
 
 Log new durable bugs on the Homebase watchlist rather than only in chat.

@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lines,
                 trim((string)($_POST['notes'] ?? ''))
             );
-            $notice = 'Route closed. Loaded units are reconciled as delivered, returned, and waste.';
+            $notice = 'Route closed. Loaded units are reconciled as delivered, returned, waste, and door credits.';
             $focusDriverId = $postDriverId;
         } elseif ($action === 'reopen_route') {
             if ($isDriverOnly) {
@@ -121,7 +121,7 @@ require_once 'includes/nav.php';
     <div class="closeout-heading">
         <div>
             <h1><?php bakery_te('page.route_closeout'); ?></h1>
-            <p>Per-driver closeout for the operating date: loaded = delivered + returned + waste. Writes the finished-goods ledger.</p>
+            <p>Per-driver closeout for the operating date: loaded = delivered + returned + waste + door credits. Writes the finished-goods ledger.</p>
         </div>
         <div class="closeout-heading-actions">
             <a class="btn btn-outline" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>">Pickup loads</a>
@@ -167,7 +167,7 @@ require_once 'includes/nav.php';
         <div class="closeout-day-summary">
             <div class="closeout-day-summary-main">
                 <strong><?php echo date('l, M j', strtotime($selectedDate)); ?></strong>
-                <span>Route closeout · loaded vs delivered vs returned vs waste</span>
+                <span>Route closeout · loaded vs delivered vs returned vs waste vs door credits</span>
             </div>
             <div class="closeout-day-pills">
                 <span class="closeout-pill"><?php echo (int)$stats['drivers']; ?> driver<?php echo $stats['drivers'] === 1 ? '' : 's'; ?></span>
@@ -190,7 +190,9 @@ require_once 'includes/nav.php';
             $hasLoad = !empty($sheet['load_id']);
             $hasShortLoad = false;
             foreach ($lines as $lineCheck) {
-                if ((int)$lineCheck['loaded_quantity'] < (int)$lineCheck['delivered_quantity']) {
+                $checkDelivered = (int)$lineCheck['delivered_quantity'];
+                $checkCredits = (int)($lineCheck['credits_quantity'] ?? 0);
+                if ((int)$lineCheck['loaded_quantity'] < ($checkDelivered + $checkCredits)) {
                     $hasShortLoad = true;
                     break;
                 }
@@ -247,6 +249,7 @@ require_once 'includes/nav.php';
                                     <th>Product</th>
                                     <th>Loaded</th>
                                     <th>Delivered</th>
+                                    <th><?php bakery_te('closeout.door_credits'); ?></th>
                                     <th>Returned</th>
                                     <th>Waste</th>
                                     <th>Balance</th>
@@ -257,14 +260,16 @@ require_once 'includes/nav.php';
                                 $pid = (int)$line['product_id'];
                                 $loaded = (int)$line['loaded_quantity'];
                                 $delivered = (int)$line['delivered_quantity'];
+                                $credits = (int)($line['credits_quantity'] ?? 0);
                                 $returned = (int)$line['returned_quantity'];
                                 $wasted = (int)$line['wasted_quantity'];
-                                $balance = $loaded - $delivered - $returned - $wasted;
-                                $shortLoaded = $loaded < $delivered;
+                                $balance = $loaded - $delivered - $credits - $returned - $wasted;
+                                $shortLoaded = $loaded < ($delivered + $credits);
                             ?>
                                 <tr data-closeout-row
                                     data-loaded="<?php echo $loaded; ?>"
                                     data-delivered="<?php echo $delivered; ?>"
+                                    data-credits="<?php echo $credits; ?>"
                                     class="<?php echo $shortLoaded ? 'is-short' : ''; ?>">
                                     <td>
                                         <strong><?php echo htmlspecialchars($line['product_name']); ?></strong>
@@ -274,6 +279,7 @@ require_once 'includes/nav.php';
                                     </td>
                                     <td><?php echo number_format($loaded); ?></td>
                                     <td><?php echo number_format($delivered); ?></td>
+                                    <td><?php echo number_format($credits); ?></td>
                                     <td>
                                         <?php if ($isClosed || $shortLoaded): ?>
                                             <?php echo number_format($returned); ?>
@@ -306,8 +312,7 @@ require_once 'includes/nav.php';
                     </div>
 
                     <p class="closeout-help">
-                        Balance must be zero on every line: <strong>loaded = delivered + returned + waste</strong>.
-                        Returned units go back to finished-goods available; waste leaves the ledger.
+                        <?php bakery_te('closeout.balance_help'); ?>
                     </p>
 
                     <?php if (!$isClosed): ?>
@@ -397,6 +402,7 @@ require_once 'includes/nav.php';
     function refreshRow(row) {
         var loaded = parseInt(row.getAttribute('data-loaded') || '0', 10) || 0;
         var delivered = parseInt(row.getAttribute('data-delivered') || '0', 10) || 0;
+        var credits = parseInt(row.getAttribute('data-credits') || '0', 10) || 0;
         var returnedInput = row.querySelector('[data-returned]');
         var wastedInput = row.querySelector('[data-wasted]');
         if (!returnedInput || !wastedInput) return;
@@ -404,7 +410,7 @@ require_once 'includes/nav.php';
         var wasted = parseInt(wastedInput.value || '0', 10);
         if (isNaN(returned)) returned = 0;
         if (isNaN(wasted)) wasted = 0;
-        var balance = loaded - delivered - returned - wasted;
+        var balance = loaded - delivered - credits - returned - wasted;
         var cell = row.querySelector('[data-balance]');
         if (!cell) return;
         cell.textContent = String(balance);

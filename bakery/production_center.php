@@ -6,6 +6,7 @@ require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/demand_review.php';
+require_once 'includes/production_plan.php';
 require_once 'includes/operational_exceptions.php';
 
 function production_center_week_start(string $value): string {
@@ -141,8 +142,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
             'metadata' => ['targets_saved' => $saved, 'week_start' => $weekStart],
         ]);
         $notice = "Saved {$saved} production target" . ($saved === 1 ? '' : 's') . ' for week of ' . date('M j', strtotime($weekStart)) . '.';
+        $notice .= ' ' . bakery_t('production_center.save_is_not_commit');
     } catch (Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
+        $error = $e->getMessage();
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'commit_plan') {
+    try {
+        if (production_center_week_start((string)($_POST['week'] ?? '')) !== $weekStart) {
+            throw new InvalidArgumentException('The production week changed. Reload the page and try again.');
+        }
+        $commitDate = trim((string)($_POST['delivery_date'] ?? ''));
+        if (!in_array($commitDate, $weekDates, true)) {
+            throw new InvalidArgumentException('A submitted commit date is outside the selected week.');
+        }
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $result = bakery_production_plan_commit($db, $commitDate, isset($user['id']) ? (int)$user['id'] : null);
+        $notice = bakery_t('production_center.commit_notice', [
+            'date' => date('l, M j', strtotime($commitDate)),
+            'products' => (int)$result['products_count'],
+            'units' => number_format((int)$result['units_count']),
+        ]);
+    } catch (Throwable $e) {
         $error = $e->getMessage();
     }
 }
@@ -252,6 +275,21 @@ $attentionCodes = ['no_plan', 'plan_below', 'fg_short', 'incomplete', 'config'];
 $operatingDemandByDate = [];
 foreach ($weekDates as $demandDate) {
     $operatingDemandByDate[$demandDate] = bakery_operating_demand_by_product($db, $demandDate);
+}
+
+$commitsByDate = [];
+$commitDriftByDate = [];
+$commitsReady = function_exists('bakery_production_plan_commits_ready') && bakery_production_plan_commits_ready($db);
+if ($commitsReady) {
+    $commitsByDate = bakery_production_plan_commits_for_dates($db, $weekDates);
+    foreach ($weekDates as $commitDate) {
+        $commitRow = $commitsByDate[$commitDate] ?? null;
+        $changed = ['count' => 0, 'latest' => null, 'examples' => []];
+        if ($commitRow !== null && !empty($commitRow['committed_at'])) {
+            $changed = bakery_production_plan_changes_since($db, $commitDate, (string)$commitRow['committed_at']);
+        }
+        $commitDriftByDate[$commitDate] = $changed;
+    }
 }
 
 foreach ($weekDates as $date) {
@@ -366,7 +404,14 @@ foreach ($weekDates as $date) {
         if ($needsAttention) $totals['attention']++;
     }
 
-    $days[] = compact('date', 'hasActualOrders', 'rows', 'summary');
+    $days[] = [
+        'date' => $date,
+        'hasActualOrders' => $hasActualOrders,
+        'rows' => $rows,
+        'summary' => $summary,
+        'commit' => $commitsByDate[$date] ?? null,
+        'commit_drift' => $commitDriftByDate[$date] ?? ['count' => 0, 'latest' => null, 'examples' => []],
+    ];
 }
 
 $pageExceptions = [];
@@ -429,7 +474,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         <br><strong>Demand:</strong> per customer, a committed daily order replaces that customer's standing forecast; customers without a dated order still contribute standing quantities for the weekday.
         <br><strong>Planned:</strong> a saved batch target is the desired finished-goods total for that delivery day — not a separate work-order table. <strong>Still to make</strong> = max(0, Planned − On hand).
         <br><strong>On hand:</strong> available + already loaded for that delivery day only. Stock is not borrowed from other dates.
-        <br><strong>Confirmed:</strong> units recorded via Daily Production for that same date (<code>produced_quantity</code>). Daily Production still builds its bake list from demand, not from these saved targets.
+        <br><strong>Confirmed:</strong> units recorded via Daily Production for that same date (<code>produced_quantity</code>). After a manager commits a day, Daily Production bakes the committed snapshot. Saving targets here does not change the baker's numbers until you commit (or commit again).
     </div>
 
     <form method="post" class="pc-plan-form" id="pc-plan-form" novalidate>
@@ -452,6 +497,22 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                 <?php echo $day['hasActualOrders'] ? 'Committed demand (real orders)' : 'Forecast demand (standing)'; ?>
                             </span>
                             <span class="pc-date-chip">Delivery day <?php echo htmlspecialchars($dayDate); ?></span>
+                            <?php if ($commitsReady): ?>
+                                <?php
+                                $dayCommit = $day['commit'] ?? null;
+                                $dayDrift = (int)(($day['commit_drift']['count'] ?? 0));
+                                ?>
+                                <?php if ($dayCommit): ?>
+                                    <span class="pc-source real"><?php echo htmlspecialchars(bakery_t('production_center.committed_badge', [
+                                        'at' => date('M j, g:i A', strtotime($dayCommit['committed_at'])),
+                                    ])); ?></span>
+                                    <?php if ($dayDrift > 0): ?>
+                                        <span class="pc-source standing"><?php echo htmlspecialchars(bakery_t('production_center.drift_badge', ['count' => $dayDrift])); ?></span>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <span class="pc-source standing"><?php bakery_te('production_center.not_committed_badge'); ?></span>
+                                <?php endif; ?>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="pc-day-metrics">
@@ -467,6 +528,12 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                         <?php endif; ?>
                         <a class="pc-day-link" href="<?php echo htmlspecialchars($dayHref); ?>">Daily Production →</a>
                         <a class="pc-day-link" href="ingredient_requirements.php?date=<?php echo urlencode($dayDate); ?>&amp;source=plan">Ingredient Planner →</a>
+                        <?php if ($commitsReady && $planTableReady): ?>
+                            <button type="submit" class="pc-day-link pc-commit-btn" form="pc-commit-<?php echo htmlspecialchars($dayDate); ?>"
+                                    onclick="return confirm(<?php echo json_encode(bakery_t($day['commit'] ? 'production_center.commit_again_prompt' : 'production_center.commit_prompt')); ?>);">
+                                <?php bakery_te(!empty($day['commit']) ? 'production_center.commit_again' : 'production_center.commit'); ?>
+                            </button>
+                        <?php endif; ?>
                     </div>
                 </header>
 
@@ -616,8 +683,8 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                     </div>
                     <p class="pc-day-foot">
                         Baker handoff uses Daily Production for <strong><?php echo htmlspecialchars(date('l, M j', strtotime($dayDate))); ?></strong>
-                        (<a href="<?php echo htmlspecialchars($dayHref); ?>">Open bake schedule for this delivery day</a>.
-                        Saved targets here are planning decisions; they do not automatically rewrite the baker’s demand list.
+                        (<a href="<?php echo htmlspecialchars($dayHref); ?>">Open bake schedule for this delivery day</a>).
+                        Saved targets are a draft until a manager commits this delivery day.
                     </p>
                 <?php else: ?>
                     <p class="pc-empty">
@@ -638,6 +705,16 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             </div>
         <?php endif; ?>
     </form>
+    <?php if (!empty($commitsReady) && $planTableReady): ?>
+        <?php foreach ($weekDates as $commitDate): ?>
+            <form method="post" id="pc-commit-<?php echo htmlspecialchars($commitDate); ?>" class="pc-commit-form">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="commit_plan">
+                <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
+                <input type="hidden" name="delivery_date" value="<?php echo htmlspecialchars($commitDate); ?>">
+            </form>
+        <?php endforeach; ?>
+    <?php endif; ?>
 </main>
 <style>
 .production-center{max-width:1480px;padding-bottom:56px}
@@ -672,6 +749,8 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 .pc-day-metrics{display:flex;gap:14px;flex-wrap:wrap;font-size:.86rem;color:#506257;align-items:center;justify-content:flex-end}
 .pc-day-link{font-weight:700;color:#1f6b35;text-decoration:none;border:1px solid #b7d4bf;background:#f3fbf5;padding:5px 10px;border-radius:6px}
 .pc-day-link:hover{background:#e5f5ea}
+.pc-commit-btn{cursor:pointer;font-family:inherit}
+.pc-commit-form{display:none}
 .pc-table-wrap{overflow:auto}
 .pc-table{width:100%;border-collapse:collapse;min-width:1100px}
 .pc-table th,.pc-table td{padding:10px 12px;text-align:left;border-bottom:1px solid #edf1ed;vertical-align:top}

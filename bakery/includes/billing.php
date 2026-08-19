@@ -434,6 +434,11 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['payment_status'] = bakery_billing_payment_status($order, [
             'payment_collection' => $order['payment_collection'] ?? 'signature',
         ]);
+        $order['invoice_sent_at'] = $order['invoice_sent_at'] ?? null;
+        $order['invoice_sent_to_email'] = $order['invoice_sent_to_email'] ?? null;
+        $order['invoice_sent_by_user_id'] = $order['invoice_sent_by_user_id'] ?? null;
+        $order['invoice_send_channel'] = $order['invoice_send_channel'] ?? null;
+        $order['invoice_was_sent'] = !empty($order['invoice_sent_at']);
 
         $enriched[] = $order;
     }
@@ -532,11 +537,16 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
             break;
     }
 
+    $sendCols = '';
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
+        $sendCols = ', do.invoice_sent_at, do.invoice_sent_to_email, do.invoice_sent_by_user_id, do.invoice_send_channel';
+    }
+
     $stmt = $db->prepare(
         'SELECT do.id, do.order_date, do.status, do.total_amount,
                 do.delivery_order_total, do.delivery_pricing_label,
                 do.delivered_pieces, do.credits_taken_back, do.delivery_confirmed_at,
-                do.amount_collected,
+                do.amount_collected' . $sendCols . ',
                 c.id AS customer_id, c.name AS customer_name, c.address AS customer_address,
                 c.email AS customer_email, c.phone AS customer_phone,
                 c.zone AS customer_zone, c.payment_collection,
@@ -945,4 +955,426 @@ function bakery_billing_email_ready() {
         return false;
     }
     return defined('SMTP_HOST') && SMTP_HOST !== '';
+}
+
+/**
+ * Idempotent last-send columns + outbox table for canonical invoice send.
+ */
+function bakery_billing_ensure_invoice_send_schema(PDO $db) {
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    if (!function_exists('bakery_runtime_schema_ddl_allowed') || !bakery_runtime_schema_ddl_allowed()) {
+        $done = true;
+        return;
+    }
+    if (!table_exists($db, 'daily_orders')) {
+        $done = true;
+        return;
+    }
+
+    $columns = [
+        'invoice_sent_at' => 'DATETIME NULL DEFAULT NULL',
+        'invoice_sent_to_email' => 'VARCHAR(255) NULL DEFAULT NULL',
+        'invoice_sent_by_user_id' => 'INT NULL DEFAULT NULL',
+        'invoice_send_channel' => 'VARCHAR(16) NULL DEFAULT NULL',
+    ];
+    foreach ($columns as $name => $definition) {
+        if (!column_exists($db, 'daily_orders', $name)) {
+            $db->exec('ALTER TABLE daily_orders ADD COLUMN `' . $name . '` ' . $definition);
+            if (function_exists('bakery_forget_column_exists')) {
+                bakery_forget_column_exists('daily_orders', $name);
+            }
+        }
+    }
+
+    if (!table_exists($db, 'billing_invoice_sends')) {
+        $db->exec(
+            'CREATE TABLE billing_invoice_sends (
+                id INT NOT NULL AUTO_INCREMENT,
+                daily_order_id INT NOT NULL,
+                invoice_number VARCHAR(40) NOT NULL,
+                amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                sent_by_user_id INT NULL DEFAULT NULL,
+                sent_to_email VARCHAR(255) NULL DEFAULT NULL,
+                channel VARCHAR(16) NOT NULL DEFAULT \'log\',
+                status VARCHAR(16) NOT NULL DEFAULT \'logged\',
+                PRIMARY KEY (id),
+                KEY idx_billing_invoice_sends_order (daily_order_id),
+                KEY idx_billing_invoice_sends_sent (sent_at)
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        if (function_exists('bakery_forget_table_exists')) {
+            bakery_forget_table_exists('billing_invoice_sends');
+        }
+        try {
+            $db->exec(
+                'ALTER TABLE billing_invoice_sends
+                 ADD CONSTRAINT fk_billing_invoice_sends_order
+                 FOREIGN KEY (daily_order_id) REFERENCES daily_orders(id) ON DELETE CASCADE'
+            );
+        } catch (Throwable $e) {
+            // Constraint may already exist on migrated databases.
+        }
+    }
+
+    $done = true;
+}
+
+function bakery_billing_invoice_send_schema_ready(PDO $db) {
+    return table_exists($db, 'daily_orders')
+        && column_exists($db, 'daily_orders', 'invoice_sent_at')
+        && table_exists($db, 'billing_invoice_sends');
+}
+
+/**
+ * Load the same snapshot invoice the customer portal shows.
+ *
+ * @return array<string, mixed>
+ */
+function bakery_billing_load_canonical_invoice(PDO $db, $orderId) {
+    $orderId = (int)$orderId;
+    if ($orderId <= 0) {
+        throw new RuntimeException('Order not found or delivery not confirmed');
+    }
+
+    $stmt = $db->prepare(
+        'SELECT id, customer_id, delivery_confirmed_at
+         FROM daily_orders
+         WHERE id = ?
+         LIMIT 1'
+    );
+    $stmt->execute([$orderId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        throw new RuntimeException('Order not found or delivery not confirmed');
+    }
+    if (empty($row['delivery_confirmed_at'])) {
+        throw new RuntimeException('Order not found or delivery not confirmed');
+    }
+
+    require_once __DIR__ . '/customer_billing.php';
+    $invoice = bakery_portal_billing_load_invoice($db, (int)$row['customer_id'], $orderId);
+    if (!$invoice) {
+        throw new RuntimeException('Invoice is not sendable from the delivery snapshot');
+    }
+    return $invoice;
+}
+
+function bakery_billing_customer_billing_email(array $customer) {
+    $email = trim((string)($customer['email'] ?? ''));
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return '';
+    }
+    return $email;
+}
+
+function bakery_billing_append_mail_log($line) {
+    $logDir = dirname(__DIR__) . '/logs';
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0755, true);
+    }
+    @file_put_contents($logDir . '/mail.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * Deliver the canonical invoice HTML. Never redirects to a hardcoded test inbox.
+ * MAIL_DRIVER=log or missing SMTP writes an outbox/log line and does not SMTP.
+ *
+ * @return string log|smtp
+ */
+function bakery_billing_deliver_invoice_mail($toEmail, $toName, $subject, $html, $text, array $meta = []) {
+    $GLOBALS['bakery_billing_smtp_attempted'] = false;
+    $toEmail = trim((string)$toEmail);
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('Customer has no billing email');
+    }
+
+    if (!bakery_billing_email_ready()) {
+        $line = sprintf(
+            "[%s] MAIL_DRIVER=log canonical_invoice=%s customer=%s to=%s total=%s daily_order_id=%s\n",
+            date('c'),
+            $meta['invoice_number'] ?? '',
+            $toName,
+            $toEmail,
+            $meta['amount'] ?? '',
+            $meta['daily_order_id'] ?? ''
+        );
+        bakery_billing_append_mail_log($line);
+        return 'log';
+    }
+
+    $GLOBALS['bakery_billing_smtp_attempted'] = true;
+
+    require_once __DIR__ . '/../vendor/phpmailer/src/PHPMailer.php';
+    require_once __DIR__ . '/../vendor/phpmailer/src/SMTP.php';
+    require_once __DIR__ . '/../vendor/phpmailer/src/Exception.php';
+    require_once __DIR__ . '/email_config.php';
+
+    $mailDriver = defined('MAIL_DRIVER') ? strtolower((string)MAIL_DRIVER) : 'smtp';
+    if ($mailDriver === 'oauth') {
+        $oauthBootstrap = __DIR__ . '/gmail_oauth.php';
+        $oauthInterface = __DIR__ . '/../vendor/phpmailer/src/OAuthTokenProvider.php';
+        if (is_readable($oauthBootstrap) && is_readable($oauthInterface)) {
+            require_once $oauthBootstrap;
+            if (class_exists('GmailOAuth', false) && GmailOAuth::isAuthorized()) {
+                return GmailOAuth::sendEmail($toEmail, $subject, $html, 'Sour Flour Bakery', [])
+                    ? 'smtp'
+                    : 'smtp';
+            }
+        }
+    }
+
+    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+    $mail->isSMTP();
+    $mail->Host = SMTP_HOST;
+    $mail->SMTPAuth = true;
+    $mail->Username = SMTP_USERNAME;
+    $mail->Password = SMTP_PASSWORD;
+    if (strtolower((string)SMTP_ENCRYPTION) === 'ssl') {
+        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+    } elseif (strtolower((string)SMTP_ENCRYPTION) === 'tls') {
+        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+    }
+    $mail->Port = SMTP_PORT;
+    $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
+    $mail->addAddress($toEmail, $toName);
+    $mail->addReplyTo(REPLY_TO_EMAIL, REPLY_TO_NAME);
+    $mail->isHTML(true);
+    $mail->Subject = $subject;
+    $mail->Body = $html;
+    $mail->AltBody = $text;
+    $mail->send();
+    return 'smtp';
+}
+
+function bakery_billing_record_invoice_send(PDO $db, array $data, $userId = null) {
+    bakery_billing_ensure_invoice_send_schema($db);
+    $orderId = (int)$data['daily_order_id'];
+    $sentAt = $data['sent_at'] ?? date('Y-m-d H:i:s');
+    $email = $data['sent_to_email'] ?? null;
+    $channel = (string)($data['channel'] ?? 'log');
+    $status = (string)($data['status'] ?? ($channel === 'smtp' ? 'sent' : 'logged'));
+    $userId = $userId !== null && (int)$userId > 0 ? (int)$userId : null;
+
+    if (column_exists($db, 'daily_orders', 'invoice_sent_at')) {
+        $upd = $db->prepare(
+            'UPDATE daily_orders
+             SET invoice_sent_at = ?, invoice_sent_to_email = ?, invoice_sent_by_user_id = ?, invoice_send_channel = ?
+             WHERE id = ?'
+        );
+        $upd->execute([$sentAt, $email, $userId, $channel, $orderId]);
+    }
+
+    if (table_exists($db, 'billing_invoice_sends')) {
+        $ins = $db->prepare(
+            'INSERT INTO billing_invoice_sends
+                (daily_order_id, invoice_number, amount, sent_at, sent_by_user_id, sent_to_email, channel, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute([
+            $orderId,
+            (string)$data['invoice_number'],
+            (float)$data['amount'],
+            $sentAt,
+            $userId,
+            $email,
+            $channel,
+            $status,
+        ]);
+    }
+
+    if (function_exists('log_user_action')) {
+        $details = json_encode([
+            'invoice_number' => $data['invoice_number'] ?? null,
+            'sent_to' => $email,
+            'channel' => $channel,
+            'status' => $status,
+            'amount' => $data['amount'] ?? null,
+        ]);
+        log_user_action($db, $channel === 'smtp' ? 'invoice_sent' : 'invoice_send_recorded', 'daily_order', $orderId, $details, $userId);
+    }
+}
+
+/**
+ * Mark invoiced if needed, then send (or record) the portal invoice document.
+ *
+ * @return array<string, mixed>
+ */
+function bakery_billing_send_invoice(PDO $db, $orderId, $userId = null) {
+    $orderId = (int)$orderId;
+    bakery_billing_ensure_invoice_send_schema($db);
+    $GLOBALS['bakery_billing_smtp_attempted'] = false;
+
+    $statusStmt = $db->prepare('SELECT status, delivery_confirmed_at FROM daily_orders WHERE id = ? LIMIT 1');
+    $statusStmt->execute([$orderId]);
+    $statusRow = $statusStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$statusRow) {
+        throw new RuntimeException('Order not found or delivery not confirmed');
+    }
+    if (empty($statusRow['delivery_confirmed_at'])) {
+        throw new RuntimeException('Order not found or delivery not confirmed');
+    }
+
+    $markedInvoiced = false;
+    if ((string)$statusRow['status'] !== 'invoiced') {
+        bakery_billing_mark_invoiced($db, $orderId, $userId);
+        $markedInvoiced = true;
+    }
+
+    $invoice = bakery_billing_load_canonical_invoice($db, $orderId);
+    $amount = (float)$invoice['invoice_total'];
+    $customer = $invoice['customer'] ?? [];
+    $recipient = bakery_billing_customer_billing_email($customer);
+    if ($recipient === '') {
+        return [
+            'ok' => false,
+            'skipped' => true,
+            'reason' => 'no_email',
+            'daily_order_id' => $orderId,
+            'invoice_number' => $invoice['invoice_number'],
+            'amount' => $amount,
+            'marked_invoiced' => $markedInvoiced,
+            'smtp_attempted' => false,
+        ];
+    }
+
+    require_once __DIR__ . '/invoice_document.php';
+    $html = bakery_billing_invoice_document_html($invoice, ['mode' => 'email']);
+    $subject = 'Invoice ' . $invoice['invoice_number'] . ' - ' . (string)($customer['name'] ?? '');
+    $text = 'Invoice ' . $invoice['invoice_number']
+        . ' for ' . (string)($customer['name'] ?? '')
+        . ' total $' . number_format($amount, 2)
+        . '. Amounts are from the delivery snapshot.';
+
+    $channel = bakery_billing_deliver_invoice_mail(
+        $recipient,
+        (string)($customer['name'] ?? ''),
+        $subject,
+        $html,
+        $text,
+        [
+            'invoice_number' => $invoice['invoice_number'],
+            'amount' => number_format($amount, 2, '.', ''),
+            'daily_order_id' => $orderId,
+        ]
+    );
+
+    $status = $channel === 'smtp' ? 'sent' : 'logged';
+    bakery_billing_record_invoice_send($db, [
+        'daily_order_id' => $orderId,
+        'invoice_number' => $invoice['invoice_number'],
+        'amount' => $amount,
+        'sent_to_email' => $recipient,
+        'channel' => $channel,
+        'status' => $status,
+    ], $userId);
+
+    if (function_exists('bakery_customer_notify_invoice_available') || is_readable(__DIR__ . '/customer_notifications.php')) {
+        require_once __DIR__ . '/customer_notifications.php';
+        if (function_exists('bakery_customer_notify_invoice_available')) {
+            bakery_customer_notify_invoice_available($db, $orderId);
+        }
+    }
+
+    return [
+        'ok' => true,
+        'skipped' => false,
+        'daily_order_id' => $orderId,
+        'invoice_number' => $invoice['invoice_number'],
+        'amount' => $amount,
+        'recipient' => $recipient,
+        'channel' => $channel,
+        'status' => $status,
+        'marked_invoiced' => $markedInvoiced,
+        'smtp_attempted' => !empty($GLOBALS['bakery_billing_smtp_attempted']),
+        'html' => $html,
+    ];
+}
+
+/**
+ * Bulk send. Only delivery-confirmed selected orders are included.
+ *
+ * @param int[] $orderIds
+ * @return array{sent:int,skipped:int,results:array<int,array>}
+ */
+function bakery_billing_send_invoices(PDO $db, array $orderIds, $userId = null) {
+    $sent = 0;
+    $skipped = 0;
+    $results = [];
+    foreach ($orderIds as $rawId) {
+        $orderId = (int)$rawId;
+        if ($orderId <= 0) {
+            continue;
+        }
+        try {
+            $result = bakery_billing_send_invoice($db, $orderId, $userId);
+            $results[] = $result;
+            if (!empty($result['ok'])) {
+                $sent++;
+            } else {
+                $skipped++;
+            }
+        } catch (Throwable $e) {
+            $skipped++;
+            $results[] = [
+                'ok' => false,
+                'skipped' => true,
+                'reason' => 'ineligible',
+                'daily_order_id' => $orderId,
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+    return [
+        'sent' => $sent,
+        'skipped' => $skipped,
+        'results' => $results,
+    ];
+}
+
+function bakery_billing_legacy_generator_redirect(array $query = null) {
+    $query = $query ?? $_GET;
+    $params = ['panel' => 'invoices'];
+    $customerId = (int)($query['customer_id'] ?? 0);
+    if ($customerId > 0) {
+        $params['customer_id'] = $customerId;
+    }
+    $start = trim((string)($query['start_date'] ?? ''));
+    $end = trim((string)($query['end_date'] ?? ''));
+    if ($start !== '' && $end !== '') {
+        $params['range'] = 'custom';
+        $params['start_date'] = $start;
+        $params['end_date'] = $end;
+    }
+    $dailyOrderId = (int)($query['daily_order_id'] ?? $query['invoice_id'] ?? 0);
+    if ($dailyOrderId > 0) {
+        $params['invoice_id'] = $dailyOrderId;
+    }
+    return 'billing_center.php?' . http_build_query($params);
+}
+
+function bakery_billing_legacy_generator_emit_quarantine(array $query = null) {
+    $query = $query ?? $_GET;
+    $url = bakery_billing_legacy_generator_redirect($query);
+    $action = strtolower((string)($query['action'] ?? ''));
+    $wantsJson = $action === 'email'
+        || (function_exists('bakery_wants_json') && bakery_wants_json());
+    $message = function_exists('bakery_t')
+        ? bakery_t('billing.legacy_redirect')
+        : 'Legacy invoice generators are retired. Use Billing Center to mark invoiced and send the portal invoice.';
+    if ($wantsJson) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => false,
+            'quarantined' => true,
+            'message' => $message,
+            'redirect' => $url,
+        ]);
+        exit;
+    }
+    header('Location: ' . $url);
+    exit;
 }

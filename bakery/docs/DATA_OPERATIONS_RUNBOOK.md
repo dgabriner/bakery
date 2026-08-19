@@ -54,3 +54,20 @@ Get-ScheduledTask -TaskName 'SourFlour-*'
 
 The disposable `bakerysf_refresh_local` database is always dropped after the
 check. It is never an application or test data source.
+
+## DreamHost production backup capture
+
+The Windows tasks are a local refresh/test fallback. For protection while the
+PC is off, install `scripts/dreamhost_nightly_backup.php` outside the public
+document root and create a locked DreamHost cron job:
+
+```text
+/usr/local/bin/php /home/YOUR_USER/bin/dreamhost_nightly_backup.php /home/YOUR_USER/.bakery-backup.env /home/YOUR_USER/bakery-backups
+```
+
+The mode-600 environment file must contain only `DB_HOST`, `DB_PORT`,
+`DB_NAME=bakerysf`, `DB_USER`, and `DB_PASS`. The runner is CLI-only, refuses
+any database other than `bakerysf`, writes compressed SHA-256 sidecars, and
+retains 14 snapshots. Keep the environment file and backup directory outside
+the web document root. Installing the cron/home-directory job remains a
+DreamHost panel or shell operation; SFTP alone cannot safely install it.

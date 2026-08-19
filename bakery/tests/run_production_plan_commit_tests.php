@@ -1,0 +1,257 @@
+<?php
+/**
+ * Production plan commit ritual: save is not bake-list truth; commit reaches the baker;
+ * post-commit demand drift is loud; re-commit preserves produced_quantity.
+ *
+ * CLI / local bakerysf_test only. Cleans up the synthetic future date it uses.
+ * Does not reset the disposable snapshot.
+ */
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "CLI only\n");
+    exit(1);
+}
+
+define('ACCESS_ALLOWED', true);
+$root = dirname(__DIR__);
+require_once $root . '/tests/isolate_test_db.php';
+require_once $root . '/includes/config.php';
+require_once $root . '/includes/database.php';
+require_once $root . '/includes/test_target_guard.php';
+require_once $root . '/includes/auth.php';
+require_once $root . '/includes/production_plan.php';
+require_once $root . '/includes/daily_run.php';
+require_once $root . '/includes/product_inventory.php';
+require_once $root . '/includes/operational_timeline.php';
+
+if (!IS_LOCAL) {
+    fwrite(STDERR, "Refusing: tests must run with APP_ENV=local\n");
+    exit(1);
+}
+
+$db = check_mysql_connection();
+bakery_assert_local_test_target($db);
+
+$pass = 0;
+$fail = 0;
+$assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
+    if ($ok) {
+        echo "PASS  $msg\n";
+        $pass++;
+    } else {
+        echo "FAIL  $msg\n";
+        $fail++;
+    }
+};
+
+$findBake = static function (array $bakeList, int $productId): ?array {
+    foreach ($bakeList['items'] as $item) {
+        if ((int)$item['product_id'] === $productId) {
+            return $item;
+        }
+    }
+    return null;
+};
+
+$date = date('Y-m-d', strtotime('+40 days'));
+echo "Test date: $date\n";
+
+$customerId = (int)$db->query(
+    "SELECT id FROM customers WHERE COALESCE(is_active, 1) = 1 ORDER BY id LIMIT 1"
+)->fetchColumn();
+$productId = (int)$db->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
+if ($customerId <= 0 || $productId <= 0) {
+    fwrite(STDERR, "Need at least one customer and product on bakerysf_test\n");
+    exit(1);
+}
+
+$cleanup = static function (PDO $db, string $date) use ($productId): void {
+    if (table_exists($db, 'production_plan_commit_items')) {
+        $db->prepare('DELETE FROM production_plan_commit_items WHERE delivery_date=?')->execute([$date]);
+    }
+    if (table_exists($db, 'production_plan_commits')) {
+        $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date=?')->execute([$date]);
+    }
+    if (table_exists($db, 'production_plan_items')) {
+        $db->prepare('DELETE FROM production_plan_items WHERE delivery_date=?')->execute([$date]);
+    }
+    if (table_exists($db, 'inventory_movements')) {
+        $db->prepare('DELETE FROM inventory_movements WHERE delivery_date=?')->execute([$date]);
+    }
+    if (table_exists($db, 'product_inventory_days')) {
+        $db->prepare('DELETE FROM product_inventory_days WHERE delivery_date=? AND product_id=?')
+            ->execute([$date, $productId]);
+    }
+    $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id IN (SELECT id FROM daily_orders WHERE order_date=?)')
+        ->execute([$date]);
+    if (table_exists($db, 'daily_order_assignments')) {
+        $db->prepare('DELETE FROM daily_order_assignments WHERE delivery_date=?')->execute([$date]);
+    }
+    $db->prepare('DELETE FROM daily_orders WHERE order_date=?')->execute([$date]);
+    if (function_exists('bakery_operational_events_ready') && bakery_operational_events_ready($db)) {
+        $db->prepare('DELETE FROM operational_events WHERE operational_date=?')->execute([$date]);
+    }
+};
+
+$cleanup($db, $date);
+bakery_production_plan_commits_ensure($db);
+$assert(bakery_production_plan_commits_ready($db), 'production_plan_commits table available');
+$assert(bakery_production_plan_commit_items_ready($db), 'production_plan_commit_items table available');
+
+$insertOrder = $db->prepare(
+    "INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, 'pending', 0)"
+);
+$insertOrder->execute([$customerId, $date]);
+$orderId = (int)$db->lastInsertId();
+$assert($orderId > 0, 'dated order created');
+
+$demandQtySeed = 5;
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+     VALUES (?, ?, ?, 1.00, ?)'
+)->execute([$orderId, $productId, $demandQtySeed, $demandQtySeed * 1.00]);
+$db->prepare('UPDATE daily_orders SET total_amount=? WHERE id=?')->execute([$demandQtySeed * 1.00, $orderId]);
+
+$demand = bakery_operating_demand_by_product($db, $date);
+$demandQty = (int)($demand['by_product'][$productId] ?? 0);
+$assert($demandQty >= $demandQtySeed, 'operating demand includes the dated line');
+
+$planQty = $demandQty + 17;
+$db->prepare(
+    'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id)
+     VALUES (?, ?, ?, NULL)
+     ON DUPLICATE KEY UPDATE planned_quantity = VALUES(planned_quantity)'
+)->execute([$date, $productId, $planQty]);
+
+$bakeUncommitted = bakery_production_bake_list($db, $date);
+$uncommittedItem = $findBake($bakeUncommitted, $productId);
+$assert($uncommittedItem !== null, 'uncommitted bake list still shows the demanded product');
+$assert((int)$uncommittedItem['demand_quantity'] === $demandQty, 'uncommitted demand is readable');
+$assert((int)$uncommittedItem['bake_quantity'] === $demandQty, 'save without commit does not become bake-list truth');
+$assert((int)$uncommittedItem['bake_quantity'] !== $planQty, 'saved target is not the uncommitted bake quantity');
+$assert(empty($bakeUncommitted['committed']), 'date is not committed after save');
+
+$runUncommitted = bakery_daily_run_build($db, $date);
+$planStage = null;
+foreach ($runUncommitted['stages'] as $stage) {
+    if (($stage['key'] ?? '') === 'production_plan') {
+        $planStage = $stage;
+        break;
+    }
+}
+$assert(is_array($planStage), 'Commit Production Plan stage present');
+$assert(($planStage['ui_state'] ?? '') !== 'complete', 'stage 2 is not complete without commit');
+$hasUncommitted = false;
+foreach ($runUncommitted['blockers'] as $blocker) {
+    if (($blocker['type'] ?? '') === 'production_plan_uncommitted') {
+        $hasUncommitted = true;
+        break;
+    }
+}
+$assert($hasUncommitted, 'critical production_plan_uncommitted blocker present');
+$assert(empty($runUncommitted['operational_complete']), 'day not operationally complete while uncommitted');
+
+$closeFailed = false;
+try {
+    bakery_daily_run_close_day($db, $date, null, 'premature commit-plan test');
+} catch (RuntimeException $e) {
+    $closeFailed = true;
+}
+$assert($closeFailed, 'closeout rejected without plan commit');
+
+bakery_production_plan_commit($db, $date, null);
+sleep(1);
+$bakeCommitted = bakery_production_bake_list($db, $date);
+$committedItem = $findBake($bakeCommitted, $productId);
+$assert(!empty($bakeCommitted['committed']), 'date is committed');
+$assert($committedItem !== null, 'committed bake list includes the product');
+$assert((int)$committedItem['bake_quantity'] === $planQty, 'baker quantity equals committed plan');
+$assert((int)$committedItem['demand_quantity'] === $demandQty, 'demand still readable after commit');
+$assert((string)$committedItem['source'] === 'committed_plan', 'bake source is committed_plan');
+
+$producedQty = 3;
+$producedStmt = $db->prepare(
+    'SELECT produced_quantity FROM product_inventory_days WHERE delivery_date=? AND product_id=?'
+);
+if (bakery_inventory_ready($db)) {
+    bakery_inventory_record_production($db, $date, $productId, $producedQty, 'commit-plan test');
+    $producedStmt->execute([$date, $productId]);
+    $assert((int)$producedStmt->fetchColumn() === $producedQty, 'produced_quantity recorded before drift');
+} else {
+    $assert(false, 'finished-goods inventory is required to prove produced_quantity is preserved');
+}
+
+$newLineQty = $demandQtySeed + 8;
+$db->prepare('UPDATE daily_order_items SET quantity=?, line_total=quantity*unit_price WHERE daily_order_id=? AND product_id=?')
+    ->execute([$newLineQty, $orderId, $productId]);
+bakery_record_operational_event(
+    $db,
+    BAKERY_OP_DAILY_ORDER_QUANTITY_CHANGED,
+    'Test: dated demand changed after plan commit',
+    ['operational_date' => $date, 'daily_order_id' => $orderId, 'product_id' => $productId]
+);
+
+$demandAfter = bakery_operating_demand_by_product($db, $date);
+$demandQtyAfter = (int)($demandAfter['by_product'][$productId] ?? 0);
+$assert($demandQtyAfter !== $demandQty, 'dated demand moved after commit');
+
+$bakeAfterDrift = bakery_production_bake_list($db, $date);
+$driftItem = $findBake($bakeAfterDrift, $productId);
+$assert($driftItem !== null, 'bake list still has the product after demand change');
+$assert((int)$driftItem['bake_quantity'] === $planQty, 'bake list stays on committed plan after demand change');
+$assert((int)$driftItem['demand_quantity'] === $demandQtyAfter, 'new demand is visible beside committed bake qty');
+$assert((int)($bakeAfterDrift['changed_since']['count'] ?? 0) > 0, 'changed_since count is non-zero after demand event');
+
+$runDrift = bakery_daily_run_build($db, $date);
+$hasDrift = false;
+foreach ($runDrift['blockers'] as $blocker) {
+    if (($blocker['type'] ?? '') === 'production_plan_drift') {
+        $hasDrift = true;
+        break;
+    }
+}
+$cc = bakery_dashboard_command_center($db, $date);
+foreach ($cc['exceptions'] as $ex) {
+    if (($ex['type'] ?? '') === 'production_plan_drift') {
+        $hasDrift = true;
+        break;
+    }
+}
+$assert($hasDrift, 'plan-drift exception exists on Daily Run or dashboard');
+$driftStage = null;
+foreach ($runDrift['stages'] as $stage) {
+    if (($stage['key'] ?? '') === 'production_plan') {
+        $driftStage = $stage;
+        break;
+    }
+}
+$assert(($driftStage['ui_state'] ?? '') !== 'complete', 'stage 2 reopens on post-commit demand drift');
+
+$recommitQty = $planQty + 4;
+$db->prepare(
+    'UPDATE production_plan_items SET planned_quantity=? WHERE delivery_date=? AND product_id=?'
+)->execute([$recommitQty, $date, $productId]);
+bakery_production_plan_commit($db, $date, null);
+
+$bakeRecommit = bakery_production_bake_list($db, $date);
+$recommitItem = $findBake($bakeRecommit, $productId);
+$assert($recommitItem !== null, 'bake list present after re-commit');
+$assert((int)$recommitItem['bake_quantity'] === $recommitQty, 'baker quantities update on re-commit');
+$producedStmt->execute([$date, $productId]);
+$assert((int)$producedStmt->fetchColumn() === $producedQty, 'produced_quantity is not zeroed on re-commit');
+
+$runAfterRecommit = bakery_daily_run_build($db, $date);
+$hasDriftAfter = false;
+foreach ($runAfterRecommit['blockers'] as $blocker) {
+    if (($blocker['type'] ?? '') === 'production_plan_drift') {
+        $hasDriftAfter = true;
+        break;
+    }
+}
+$assert(!$hasDriftAfter, 're-commit clears plan-drift until demand moves again');
+
+$assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'baker role still cannot open Production Center');
+$assert(in_array('production.php', bakery_baker_scripts(), true), 'baker role still opens Daily Production');
+
+$cleanup($db, $date);
+echo "\nPassed: $pass\nFailed: $fail\n";
+exit($fail > 0 ? 1 : 0);

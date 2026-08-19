@@ -286,17 +286,28 @@ foreach ([
     );
 }
 
+$prepToolbarCss = driver_photo_section($styles, '.route-prep-toolbar {', '.route-prep-list-section');
+$prepScript = (string)file_get_contents($root . '/includes/driver_route_prep.js');
 driver_photo_assert(
     'My Route has a night-before prep workspace',
     strpos($page, 'id="routePrepRoot"') !== false
+        && strpos($page, 'id="routePrepAddBtn"') !== false
+        && strpos($page, 'id="routePrepAddListBtn"') !== false
         && strpos($page, 'id="routePrepAddDockBtn"') !== false
+        && strpos($page, 'js-route-prep-add') !== false
         && strpos($page, 'function bakery_render_driver_prep_stop') !== false
         && strpos($page, "\$routeView === 'prep'") !== false
+);
+driver_photo_assert(
+    'Add a stop stays in the prep options instead of hiding behind the driver nav',
+    strpos($prepToolbarCss, 'display: none') === false
+        && strpos($prepToolbarCss, 'display: grid') !== false
+        && strpos($styles, 'bottom: calc(118px') !== false
+        && strpos($prepScript, '.js-route-prep-add') !== false
 );
 
 $prepHelpers = (string)file_get_contents($root . '/includes/driver_assignments.php');
 $prepSearch = (string)file_get_contents($root . '/includes/driver_route_prep.php');
-$prepScript = (string)file_get_contents($root . '/includes/driver_route_prep.js');
 driver_photo_assert(
     'drivers can add and unassign dated stops without rewriting standing',
     strpos($prepHelpers, 'function bakery_driver_plan_add_stop') !== false

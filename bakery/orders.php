@@ -295,10 +295,7 @@ try {
                             <div class="total-orders"><?= $customer['total_orders'] ?> orders</div>
                             <div class="invoice-actions">
                                 <button class="btn btn-invoice" onclick="generateInvoice(<?= $customerId ?>, '<?= $startDate ?>', '<?= $endDate ?>')">
-                                    📄 Create Invoice
-                                </button>
-                                <button class="btn btn-email" onclick="emailInvoice(this, <?= $customerId ?>, '<?= $startDate ?>', '<?= $endDate ?>')">
-                                    📧 Email Invoice
+                                    <?= htmlspecialchars(bakery_t('orders.open_billing_center')) ?>
                                 </button>
                             </div>
                         </div>
@@ -320,10 +317,7 @@ try {
                         </div>
                         <div class="invoice-actions">
                             <button class="btn btn-invoice" onclick="generateInvoice(<?= $customerId ?>, '<?= $startDate ?>', '<?= $endDate ?>')">
-                                📄 Create Invoice
-                            </button>
-                            <button class="btn btn-email" onclick="emailInvoice(this, <?= $customerId ?>, '<?= $startDate ?>', '<?= $endDate ?>')">
-                                📧 Email Invoice
+                                <?= htmlspecialchars(bakery_t('orders.open_billing_center')) ?>
                             </button>
                         </div>
                     </div>
@@ -932,63 +926,12 @@ document.addEventListener('click', function(event) {
 });
 
 function generateInvoice(customerId, startDate, endDate) {
-    // Use the simple working version
-    const url = `simple_invoice.php?customer_id=${customerId}&start_date=${startDate}&end_date=${endDate}`;
-    window.open(url, '_blank');
+    const url = `billing_center.php?panel=invoices&customer_id=${customerId}&range=custom&start_date=${startDate}&end_date=${endDate}`;
+    window.location.href = url;
 }
 
 function emailInvoice(button, customerId, startDate, endDate) {
-    const originalText = button.innerHTML;
-    const resetButton = (label, color) => {
-        button.innerHTML = label;
-        button.style.backgroundColor = color;
-        setTimeout(() => {
-            button.innerHTML = originalText;
-            button.style.backgroundColor = '#f6c23e';
-            button.disabled = false;
-        }, 4000);
-    };
-
-    button.innerHTML = '📧 Sending...';
-    button.disabled = true;
-
-    fetch(`generate_invoice_simple.php?customer_id=${customerId}&start_date=${startDate}&end_date=${endDate}&action=email`, {
-        headers: {
-            'Accept': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-        },
-        credentials: 'same-origin'
-    })
-        .then(async (response) => {
-            const raw = await response.text();
-            let data;
-            try {
-                data = JSON.parse(raw);
-            } catch (parseError) {
-                const snippet = (raw || '').replace(/\s+/g, ' ').trim().slice(0, 240);
-                throw new Error(snippet
-                    ? `Server returned non-JSON (HTTP ${response.status}): ${snippet}`
-                    : `Server returned empty/non-JSON response (HTTP ${response.status})`);
-            }
-            if (!response.ok && !data.message && !data.error) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            return data;
-        })
-        .then(data => {
-            if (data.success) {
-                resetButton('✅ Sent!', '#28a745');
-                showNotification('success', data.message);
-            } else {
-                resetButton('❌ Failed', '#dc3545');
-                showNotification('error', data.message || data.error || 'Failed to send email');
-            }
-        })
-        .catch(error => {
-            resetButton('❌ Error', '#dc3545');
-            showNotification('error', error.message || 'Network error occurred');
-            console.error('emailInvoice failed:', error);
-        });
+    generateInvoice(customerId, startDate, endDate);
 }
 
 function showNotification(type, message) {

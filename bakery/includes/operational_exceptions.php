@@ -309,7 +309,8 @@ function bakery_ops_enrich_exceptions(array $exceptions, string $date, ?string $
             }
         } elseif ($type === 'production_fg_shortfall' || $type === 'production_shortfall') {
             $fields['href'] = bakery_ops_link_inventory($date, ['attention' => 'shortfall'], $returnKey);
-        } elseif ($type === 'production_plan_short') {
+        } elseif ($type === 'production_plan_short' || $type === 'production_plan_missing'
+            || $type === 'production_plan_uncommitted' || $type === 'production_plan_drift') {
             $fields['href'] = bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date], $returnKey);
         } elseif ($type === 'load_incomplete') {
             $fields['href'] = bakery_ops_link_driver_load($date, ['attention' => 'incomplete'], $returnKey);
@@ -534,6 +535,9 @@ function bakery_ops_known_exception_types(): array
         'demand_no_orders',
         'production_fg_shortfall',
         'production_plan_short',
+        'production_plan_missing',
+        'production_plan_uncommitted',
+        'production_plan_drift',
         'load_incomplete',
         'route_unreconciled',
         'closeout_routes_open',
@@ -644,6 +648,20 @@ function bakery_ops_situation_catalog(): array
             'verb_key' => 'ops.chip.plan',
             'inline' => null,
         ],
+        'production_plan_missing' => [
+            'verb_key' => 'ops.chip.plan',
+            'inline' => null,
+        ],
+        'production_plan_uncommitted' => [
+            'verb_key' => 'ops.chip.commit',
+            'inline' => 'commit_production_plan',
+            'confirm' => 'Commit the last saved production targets for this delivery date? The baker will bake these numbers until you commit again.',
+        ],
+        'production_plan_drift' => [
+            'verb_key' => 'ops.chip.commit',
+            'inline' => 'commit_production_plan',
+            'confirm' => 'Re-commit the last saved production targets? This updates the baker\'s numbers. Demand stays visible beside them.',
+        ],
         'production_fg_shortfall' => [
             'verb_key' => 'ops.chip.bake',
             'inline' => null,
@@ -743,6 +761,8 @@ function bakery_ops_exception_matches_row(array $exception, array $row): bool
         'demand_empty_daily' => 'empty_daily',
         'demand_no_orders' => 'empty_daily',
         'production_plan_short' => 'plan_short',
+        'production_plan_missing' => 'plan_short',
+        'production_plan_drift' => 'plan_drift',
         'production_fg_shortfall' => 'fg_shortfall',
         'load_incomplete' => 'load_incomplete',
         'delivery_unassigned' => 'unassigned',

@@ -33,14 +33,47 @@ function bakery_inventory_ensure_day(PDO $db, string $date, int $productId): voi
     $stmt->execute([$date, $productId]);
 }
 
-function bakery_inventory_movement(PDO $db, string $date, int $productId, string $type, int $delta, ?int $driverId = null, ?string $notes = null): void {
+function bakery_inventory_movement(
+    PDO $db,
+    string $date,
+    int $productId,
+    string $type,
+    int $delta,
+    ?int $driverId = null,
+    ?string $notes = null,
+    ?int $dailyOrderId = null
+): void {
     $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    $hasOrderCol = function_exists('column_exists')
+        && column_exists($db, 'inventory_movements', 'daily_order_id');
+    if ($hasOrderCol) {
+        $stmt = $db->prepare(
+            'INSERT INTO inventory_movements
+             (delivery_date, product_id, movement_type, quantity_delta, driver_id, daily_order_id, notes, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $date,
+            $productId,
+            $type,
+            $delta,
+            $driverId,
+            $dailyOrderId && $dailyOrderId > 0 ? $dailyOrderId : null,
+            $notes,
+            $user['id'] ?? null,
+        ]);
+        return;
+    }
     $stmt = $db->prepare(
         'INSERT INTO inventory_movements
          (delivery_date, product_id, movement_type, quantity_delta, driver_id, notes, created_by_user_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([$date, $productId, $type, $delta, $driverId, $notes, $user['id'] ?? null]);
+}
+
+function bakery_inventory_credit_return_note(int $dailyOrderId): string {
+    return 'Order #' . $dailyOrderId . ' credit taken back';
 }
 
 function bakery_inventory_record_production(PDO $db, string $date, int $productId, int $quantity, ?string $notes = null): void {
@@ -163,10 +196,11 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
 }
 
 /**
- * Delivered units for one driver/product on an operating date.
- * Uses line delivered_quantity when set; otherwise ordered quantity for delivered stops.
+ * Delivered units still with the customer for one driver/product on an operating date.
+ * Line delivered_quantity is pieces handed over; door credits are subtracted so
+ * closeout does not treat credited loaves as sold or leftover on the van.
  *
- * @return array<int, int> product_id => delivered units
+ * @return array<int, int> product_id => net delivered units
  */
 function bakery_inventory_driver_delivered_by_product(PDO $db, string $date, int $driverId): array {
     bakery_inventory_validate_date($date);
@@ -193,7 +227,264 @@ function bakery_inventory_driver_delivered_by_product(PDO $db, string $date, int
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $out[(int)$row['product_id']] = (int)$row['delivered_quantity'];
     }
+
+    foreach (bakery_inventory_driver_credits_by_product($db, $date, $driverId) as $productId => $qty) {
+        $productId = (int)$productId;
+        $qty = (int)$qty;
+        if ($qty <= 0) {
+            continue;
+        }
+        $out[$productId] = max(0, (int)($out[$productId] ?? 0) - $qty);
+    }
     return $out;
+}
+
+/**
+ * Door credits already returned at confirm for one driver/date, by product.
+ *
+ * @return array<int, int> product_id => credited units
+ */
+function bakery_inventory_driver_credits_by_product(PDO $db, string $date, int $driverId): array {
+    bakery_inventory_validate_date($date);
+    if (!function_exists('column_exists') || !column_exists($db, 'daily_orders', 'credits_taken_back')) {
+        return [];
+    }
+
+    $creditStmt = $db->prepare(
+        "SELECT do.id, do.credits_taken_back
+         FROM daily_order_assignments doa
+         JOIN daily_orders do ON do.id = doa.daily_order_id
+         WHERE doa.driver_id = ?
+           AND doa.delivery_date = ?
+           AND do.order_date = doa.delivery_date
+           AND doa.delivery_status = 'delivered'
+           AND do.status IN ('delivered', 'invoiced')
+           AND do.credits_taken_back > 0"
+    );
+    $creditStmt->execute([$driverId, $date]);
+    $out = [];
+    foreach ($creditStmt->fetchAll(PDO::FETCH_ASSOC) as $order) {
+        $alloc = bakery_inventory_allocate_delivery_credits(
+            $db,
+            (int)$order['id'],
+            (int)$order['credits_taken_back']
+        );
+        foreach ($alloc['by_product'] as $productId => $qty) {
+            $productId = (int)$productId;
+            $qty = (int)$qty;
+            if ($qty <= 0) {
+                continue;
+            }
+            $out[$productId] = (int)($out[$productId] ?? 0) + $qty;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Allocate header credits_taken_back against delivered line units.
+ *
+ * Rule: walk daily_order_items in ascending id. Each line contributes
+ * min(remaining credits, delivered_quantity), using ordered quantity when
+ * delivered_quantity is still null. Credits never exceed a line's delivered
+ * units. Single-product orders allocate entirely to that product.
+ *
+ * @return array{credits:int, remaining:int, lines:list<array<string,mixed>>, by_product:array<int,int>}
+ */
+function bakery_inventory_allocate_delivery_credits(
+    PDO $db,
+    int $dailyOrderId,
+    ?int $creditsTakenBack = null
+): array {
+    if ($creditsTakenBack === null) {
+        $header = $db->prepare('SELECT credits_taken_back FROM daily_orders WHERE id = ?');
+        $header->execute([$dailyOrderId]);
+        $creditsTakenBack = (int)$header->fetchColumn();
+    }
+    $creditsTakenBack = max(0, (int)$creditsTakenBack);
+
+    $itemStmt = $db->prepare(
+        'SELECT doi.id, doi.product_id, doi.quantity, doi.delivered_quantity, p.name AS product_name
+         FROM daily_order_items doi
+         JOIN products p ON p.id = doi.product_id
+         WHERE doi.daily_order_id = ?
+         ORDER BY doi.id ASC'
+    );
+    $itemStmt->execute([$dailyOrderId]);
+    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $remaining = $creditsTakenBack;
+    $lines = [];
+    $byProduct = [];
+    foreach ($items as $item) {
+        $delivered = ($item['delivered_quantity'] !== null && $item['delivered_quantity'] !== '')
+            ? (int)$item['delivered_quantity']
+            : (int)$item['quantity'];
+        $delivered = max(0, $delivered);
+        $take = min($remaining, $delivered);
+        $remaining -= $take;
+        $productId = (int)$item['product_id'];
+        $lines[] = [
+            'item_id' => (int)$item['id'],
+            'product_id' => $productId,
+            'product_name' => (string)$item['product_name'],
+            'delivered_quantity' => $delivered,
+            'credit_quantity' => $take,
+        ];
+        if ($take > 0) {
+            $byProduct[$productId] = (int)($byProduct[$productId] ?? 0) + $take;
+        }
+    }
+
+    return [
+        'credits' => $creditsTakenBack,
+        'remaining' => $remaining,
+        'lines' => $lines,
+        'by_product' => $byProduct,
+    ];
+}
+
+/**
+ * Posted door-credit return quantities for one order (sum of ledger deltas).
+ *
+ * @return array<int, int> product_id => quantity_delta sum
+ */
+function bakery_inventory_posted_credit_returns_by_product(PDO $db, int $dailyOrderId, string $date): array {
+    if (!bakery_inventory_ready($db) || $dailyOrderId <= 0) {
+        return [];
+    }
+    $note = bakery_inventory_credit_return_note($dailyOrderId);
+    $hasOrderCol = function_exists('column_exists')
+        && column_exists($db, 'inventory_movements', 'daily_order_id');
+    if ($hasOrderCol) {
+        $stmt = $db->prepare(
+            "SELECT product_id, COALESCE(SUM(quantity_delta), 0) AS qty
+             FROM inventory_movements
+             WHERE delivery_date = ?
+               AND movement_type = 'return'
+               AND daily_order_id = ?
+               AND notes = ?
+             GROUP BY product_id"
+        );
+        $stmt->execute([$date, $dailyOrderId, $note]);
+    } else {
+        $stmt = $db->prepare(
+            "SELECT product_id, COALESCE(SUM(quantity_delta), 0) AS qty
+             FROM inventory_movements
+             WHERE delivery_date = ?
+               AND movement_type = 'return'
+               AND notes = ?
+             GROUP BY product_id"
+        );
+        $stmt->execute([$date, $note]);
+    }
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int)$row['product_id']] = (int)$row['qty'];
+    }
+    return $out;
+}
+
+/**
+ * Post (or delta-adjust) FG return movements for door credits on one order.
+ * Increases available_quantity and releases loaded custody for credited units.
+ * Safe to call again: additional returns match the current allocation.
+ *
+ * @return array{credits:int, by_product:array<int,int>, posted_delta:array<int,int>}
+ */
+function bakery_inventory_record_delivery_credit_returns(
+    PDO $db,
+    int $dailyOrderId,
+    int $creditsTakenBack,
+    ?int $driverId = null
+): array {
+    $creditsTakenBack = max(0, $creditsTakenBack);
+    $empty = [
+        'credits' => $creditsTakenBack,
+        'by_product' => [],
+        'posted_delta' => [],
+    ];
+    if (!bakery_inventory_ready($db) || $dailyOrderId <= 0) {
+        return $empty;
+    }
+
+    $orderStmt = $db->prepare('SELECT order_date FROM daily_orders WHERE id = ?');
+    $orderStmt->execute([$dailyOrderId]);
+    $orderDate = (string)$orderStmt->fetchColumn();
+    if ($orderDate === '') {
+        throw new RuntimeException('Order not found');
+    }
+    $date = bakery_inventory_validate_date($orderDate);
+
+    if ($driverId === null || $driverId <= 0) {
+        $drv = $db->prepare(
+            'SELECT driver_id FROM daily_order_assignments
+             WHERE daily_order_id = ? ORDER BY id DESC LIMIT 1'
+        );
+        $drv->execute([$dailyOrderId]);
+        $driverId = (int)$drv->fetchColumn();
+        if ($driverId <= 0) {
+            $driverId = null;
+        }
+    }
+
+    $alloc = bakery_inventory_allocate_delivery_credits($db, $dailyOrderId, $creditsTakenBack);
+    if ($alloc['remaining'] > 0) {
+        throw new RuntimeException(
+            'Credits taken back exceed delivered line quantities for this order.'
+        );
+    }
+
+    $desired = $alloc['by_product'];
+    $posted = bakery_inventory_posted_credit_returns_by_product($db, $dailyOrderId, $date);
+    $productIds = array_unique(array_merge(array_keys($desired), array_keys($posted)));
+    $deltas = [];
+    $note = bakery_inventory_credit_return_note($dailyOrderId);
+
+    $stockUpdate = $db->prepare(
+        'UPDATE product_inventory_days
+         SET available_quantity = available_quantity + ?,
+             loaded_quantity = loaded_quantity - ?
+         WHERE delivery_date = ? AND product_id = ?'
+    );
+    $lockStmt = $db->prepare(
+        'SELECT available_quantity, loaded_quantity
+         FROM product_inventory_days
+         WHERE delivery_date = ? AND product_id = ?
+         FOR UPDATE'
+    );
+
+    foreach ($productIds as $productId) {
+        $productId = (int)$productId;
+        if ($productId <= 0) {
+            continue;
+        }
+        $delta = (int)($desired[$productId] ?? 0) - (int)($posted[$productId] ?? 0);
+        if ($delta === 0) {
+            continue;
+        }
+        bakery_inventory_ensure_day($db, $date, $productId);
+        $lockStmt->execute([$date, $productId]);
+        $lockStmt->fetch(PDO::FETCH_ASSOC);
+        $stockUpdate->execute([$delta, $delta, $date, $productId]);
+        bakery_inventory_movement(
+            $db,
+            $date,
+            $productId,
+            'return',
+            $delta,
+            $driverId,
+            $note,
+            $dailyOrderId
+        );
+        $deltas[$productId] = $delta;
+    }
+
+    return [
+        'credits' => $creditsTakenBack,
+        'by_product' => $desired,
+        'posted_delta' => $deltas,
+    ];
 }
 
 /**
@@ -235,6 +526,7 @@ function bakery_inventory_driver_open_stops(PDO $db, string $date, int $driverId
 function bakery_inventory_closeout_lines(PDO $db, string $date, int $driverId): array {
     bakery_inventory_validate_date($date);
     $deliveredByProduct = bakery_inventory_driver_delivered_by_product($db, $date, $driverId);
+    $creditsByProduct = bakery_inventory_driver_credits_by_product($db, $date, $driverId);
     $hasWasteCol = bakery_inventory_closeout_ready($db);
 
     $stmt = $db->prepare(
@@ -256,19 +548,21 @@ function bakery_inventory_closeout_lines(PDO $db, string $date, int $driverId): 
         $seen[$productId] = true;
         $loaded = (int)$row['loaded_quantity'];
         $delivered = (int)($deliveredByProduct[$productId] ?? 0);
+        $credits = (int)($creditsByProduct[$productId] ?? 0);
         $returned = (int)$row['returned_quantity'];
         $wasted = (int)$row['wasted_quantity'];
         $isReconciled = (string)$row['load_status'] === 'reconciled';
-        $remaining = max(0, $loaded - $delivered);
+        $remaining = max(0, $loaded - $delivered - $credits);
         $lines[] = [
             'product_id' => $productId,
             'product_name' => (string)$row['product_name'],
             'loaded_quantity' => $loaded,
             'delivered_quantity' => $delivered,
+            'credits_quantity' => $credits,
             'returned_quantity' => $isReconciled ? $returned : $remaining,
             'wasted_quantity' => $isReconciled ? $wasted : 0,
             'suggested_returned' => $remaining,
-            'balance' => $loaded - $delivered - ($isReconciled ? $returned : $remaining) - ($isReconciled ? $wasted : 0),
+            'balance' => $loaded - $delivered - $credits - ($isReconciled ? $returned : $remaining) - ($isReconciled ? $wasted : 0),
         ];
     }
 
@@ -279,15 +573,17 @@ function bakery_inventory_closeout_lines(PDO $db, string $date, int $driverId): 
         }
         $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ?');
         $nameStmt->execute([$productId]);
+        $credits = (int)($creditsByProduct[$productId] ?? 0);
         $lines[] = [
             'product_id' => $productId,
             'product_name' => (string)($nameStmt->fetchColumn() ?: ('Product #' . $productId)),
             'loaded_quantity' => 0,
             'delivered_quantity' => $delivered,
+            'credits_quantity' => $credits,
             'returned_quantity' => 0,
             'wasted_quantity' => 0,
             'suggested_returned' => 0,
-            'balance' => 0 - $delivered,
+            'balance' => 0 - $delivered - $credits,
         ];
     }
 
@@ -420,8 +716,9 @@ function bakery_inventory_closeout_stats(PDO $db, string $date): array {
 }
 
 /**
- * Reconcile one driver's load: loaded = delivered + returned + wasted.
- * Posts return / waste / delivery movements on the FG ledger and marks the load reconciled.
+ * Reconcile one driver's load: loaded = delivered + returned + wasted + door credits.
+ * Posts van return / waste / delivery movements on the FG ledger and marks the load reconciled.
+ * Door credits were already posted at confirm and must not be returned again.
  *
  * @param array<int, array{returned?:int|string, wasted?:int|string}> $lines product_id => quantities
  */
@@ -477,8 +774,13 @@ function bakery_inventory_reconcile_driver_load(
         }
 
         $deliveredByProduct = bakery_inventory_driver_delivered_by_product($db, $date, $driverId);
+        $creditsByProduct = bakery_inventory_driver_credits_by_product($db, $date, $driverId);
         // Only reconcile products on the load (plus any explicit line overrides).
-        $productIds = array_unique(array_merge(array_keys($items), array_map('intval', array_keys($lines))));
+        $productIds = array_unique(array_merge(
+            array_keys($items),
+            array_map('intval', array_keys($lines)),
+            array_keys($creditsByProduct)
+        ));
 
         $stockUpdate = $db->prepare(
             'UPDATE product_inventory_days
@@ -507,6 +809,7 @@ function bakery_inventory_reconcile_driver_load(
             }
             $loaded = (int)($items[$productId]['loaded_quantity'] ?? 0);
             $delivered = (int)($deliveredByProduct[$productId] ?? 0);
+            $credits = (int)($creditsByProduct[$productId] ?? 0);
             $raw = $lines[$productId] ?? $lines[(string)$productId] ?? [];
             if (!is_array($raw)) {
                 $raw = [];
@@ -517,16 +820,16 @@ function bakery_inventory_reconcile_driver_load(
                 throw new InvalidArgumentException('Returned and waste quantities must be whole numbers of zero or more.');
             }
 
-            if ($loaded === 0 && $delivered === 0 && $returned === 0 && $wasted === 0) {
+            if ($loaded === 0 && $delivered === 0 && $returned === 0 && $wasted === 0 && $credits === 0) {
                 continue;
             }
 
-            if ($delivered + $returned + $wasted !== $loaded) {
+            if ($delivered + $returned + $wasted + $credits !== $loaded) {
                 $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ?');
                 $nameStmt->execute([$productId]);
                 $productName = (string)($nameStmt->fetchColumn() ?: ('Product #' . $productId));
                 throw new RuntimeException(
-                    "Closeout must balance for {$productName}: loaded {$loaded} ≠ delivered {$delivered} + returned {$returned} + waste {$wasted}."
+                    "Closeout must balance for {$productName}: loaded {$loaded} ≠ delivered {$delivered} + returned {$returned} + waste {$wasted} + door credits {$credits}."
                 );
             }
 
