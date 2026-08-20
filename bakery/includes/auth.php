@@ -18,6 +18,8 @@ define('BAKERY_SESSION_IDLE_SECONDS', 30 * 24 * 60 * 60); // 30 days idle
 define('BAKERY_SESSION_ABSOLUTE_SECONDS', 90 * 24 * 60 * 60); // 90 days maximum
 define('BAKERY_DRIVER_SESSION_IDLE_SECONDS', 60 * 24 * 60 * 60); // 60 days idle
 define('BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS', 180 * 24 * 60 * 60); // 180 days maximum
+define('BAKERY_DRIVER_TRUST_COOKIE', 'bakery_driver_trusted_device');
+define('BAKERY_DRIVER_TRUST_SECONDS', 400 * 24 * 60 * 60); // Browser-supported rolling maximum
 
 /** Fixed baker auto-login credentials (used by baker.php). */
 define('BAKERY_BAKER_EMAIL', trim((string)($_ENV['BAKERY_BAKER_EMAIL'] ?? getenv('BAKERY_BAKER_EMAIL') ?: '')));
@@ -535,15 +537,162 @@ function bakery_touch_session() {
     $absoluteSeconds = $isDriver ? BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS : BAKERY_SESSION_ABSOLUTE_SECONDS;
     $idleSeconds = $isDriver ? BAKERY_DRIVER_SESSION_IDLE_SECONDS : BAKERY_SESSION_IDLE_SECONDS;
     if (($now - (int)$_SESSION['auth_login_at']) > $absoluteSeconds) {
-        bakery_logout();
+        // A trusted driver phone can immediately rebuild a fresh PHP session.
+        bakery_logout(false);
         return;
     }
     if (isset($_SESSION['auth_last_activity']) &&
         ($now - (int)$_SESSION['auth_last_activity']) > $idleSeconds) {
-        bakery_logout();
+        bakery_logout(false);
         return;
     }
     $_SESSION['auth_last_activity'] = $now;
+}
+
+function bakery_driver_trusted_devices_ready(PDO $db): bool {
+    return function_exists('table_exists') && table_exists($db, 'driver_trusted_devices');
+}
+
+function bakery_driver_trust_cookie_options(int $expires): array {
+    $cookiePath = (defined('BASE_URL') && BASE_URL !== '') ? BASE_URL : '/';
+    $secure = function_exists('isHTTPS')
+        ? isHTTPS()
+        : (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    return [
+        'expires' => $expires,
+        'path' => $cookiePath,
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ];
+}
+
+function bakery_set_driver_trust_cookie(string $token): void {
+    if (PHP_SAPI === 'cli' || headers_sent()) {
+        return;
+    }
+    setcookie(BAKERY_DRIVER_TRUST_COOKIE, $token, bakery_driver_trust_cookie_options(
+        time() + BAKERY_DRIVER_TRUST_SECONDS
+    ));
+}
+
+function bakery_clear_driver_trust_cookie(): void {
+    unset($_COOKIE[BAKERY_DRIVER_TRUST_COOKIE]);
+    if (PHP_SAPI === 'cli' || headers_sent()) {
+        return;
+    }
+    setcookie(BAKERY_DRIVER_TRUST_COOKIE, '', bakery_driver_trust_cookie_options(time() - 3600));
+}
+
+function bakery_driver_trust_token_from_cookie(): string {
+    $token = trim((string)($_COOKIE[BAKERY_DRIVER_TRUST_COOKIE] ?? ''));
+    return preg_match('/^[A-Za-z0-9_-]{43}$/', $token) ? $token : '';
+}
+
+/** Create or replace the trusted-phone credential after a route-worker code login. */
+function bakery_issue_driver_trusted_device(PDO $db, array $user): string {
+    if (!bakery_is_driver_route_role($user['role_slug'] ?? '')
+        || (int)($user['id'] ?? 0) <= 0
+        || !bakery_driver_trusted_devices_ready($db)) {
+        return '';
+    }
+
+    $oldToken = bakery_driver_trust_token_from_cookie();
+    if ($oldToken !== '') {
+        $db->prepare('UPDATE driver_trusted_devices SET revoked_at = NOW() WHERE token_hash = ?')
+            ->execute([hash('sha256', $oldToken)]);
+    }
+
+    $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    $userAgent = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
+    $stmt = $db->prepare(
+        'INSERT INTO driver_trusted_devices
+         (user_id, token_hash, last_used_at, expires_at, user_agent)
+         VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), ?)'
+    );
+    $stmt->execute([(int)$user['id'], hash('sha256', $token), $userAgent !== '' ? $userAgent : null]);
+    bakery_set_driver_trust_cookie($token);
+    return $token;
+}
+
+function bakery_populate_staff_session(array $row): void {
+    if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
+        session_start();
+    }
+    if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+        session_regenerate_id(true);
+    }
+    $_SESSION['user_id'] = (int)$row['id'];
+    $_SESSION['user_email'] = (string)$row['email'];
+    $_SESSION['user_display_name'] = (string)$row['display_name'];
+    $_SESSION['user_role_slug'] = (string)$row['role_slug'];
+    $_SESSION['user_driver_id'] = $row['driver_id'] !== null ? (int)$row['driver_id'] : null;
+    $_SESSION['auth_login_at'] = time();
+    $_SESSION['auth_last_activity'] = time();
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+/** Rebuild a missing PHP session from a valid driver-only trusted-phone cookie. */
+function bakery_restore_driver_trusted_device(PDO $db): bool {
+    if (bakery_current_user() || !bakery_driver_trusted_devices_ready($db)) {
+        return bakery_current_user() !== null;
+    }
+    $token = bakery_driver_trust_token_from_cookie();
+    if ($token === '') {
+        return false;
+    }
+
+    $stmt = $db->prepare(
+        "SELECT u.*, r.slug AS role_slug
+         FROM driver_trusted_devices d
+         JOIN users u ON u.id = d.user_id
+         JOIN roles r ON r.id = u.role_id
+         WHERE d.token_hash = ?
+           AND d.revoked_at IS NULL
+           AND d.expires_at > NOW()
+           AND u.is_active = 1
+           AND u.driver_id IS NOT NULL
+           AND r.slug IN ('driver', 'driver_assistant')
+         LIMIT 1"
+    );
+    $tokenHash = hash('sha256', $token);
+    $stmt->execute([$tokenHash]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        bakery_clear_driver_trust_cookie();
+        return false;
+    }
+
+    bakery_populate_staff_session($row);
+    $db->prepare(
+        'UPDATE driver_trusted_devices
+         SET last_used_at = NOW(), expires_at = DATE_ADD(NOW(), INTERVAL 400 DAY)
+         WHERE token_hash = ? AND revoked_at IS NULL'
+    )->execute([$tokenHash]);
+    bakery_set_driver_trust_cookie($token);
+    $db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')->execute([(int)$row['id']]);
+
+    bakery_login_audit_start($db, 'staff', [
+        'user_id' => (int)$row['id'],
+        'principal' => (string)$row['email'],
+    ]);
+    if (function_exists('bakery_apply_locale_default_for_user')) {
+        bakery_apply_locale_default_for_user($row['role_slug'] ?? null, false);
+    }
+    $routeDriverId = bakery_route_worker_driver_id($db, bakery_current_user(), date('Y-m-d'));
+    $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ? LIMIT 1');
+    $nameStmt->execute([$routeDriverId]);
+    bakery_set_selected_driver($routeDriverId, (string)($nameStmt->fetchColumn() ?: $row['display_name']));
+    return true;
+}
+
+function bakery_revoke_current_driver_trusted_device(PDO $db): void {
+    $token = bakery_driver_trust_token_from_cookie();
+    if ($token !== '' && bakery_driver_trusted_devices_ready($db)) {
+        $db->prepare('UPDATE driver_trusted_devices SET revoked_at = NOW() WHERE token_hash = ?')
+            ->execute([hash('sha256', $token)]);
+    }
+    bakery_clear_driver_trust_cookie();
 }
 
 function bakery_login(PDO $db, $code) {
@@ -571,21 +720,7 @@ function bakery_login(PDO $db, $code) {
         return false;
     }
 
-    if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
-        session_start();
-    }
-    if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
-        session_regenerate_id(true);
-    }
-    $_SESSION['user_id'] = (int)$row['id'];
-    $_SESSION['user_email'] = $row['email'];
-    $_SESSION['user_display_name'] = $row['display_name'];
-    $_SESSION['user_role_slug'] = $row['role_slug'];
-    $_SESSION['user_driver_id'] = $row['driver_id'] !== null ? (int)$row['driver_id'] : null;
-    $_SESSION['auth_login_at'] = time();
-    $_SESSION['auth_last_activity'] = time();
-    // Refresh CSRF after login
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    bakery_populate_staff_session($row);
 
     $upd = $db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?');
     $upd->execute([(int)$row['id']]);
@@ -598,6 +733,14 @@ function bakery_login(PDO $db, $code) {
 
     if (function_exists('bakery_apply_locale_default_for_user')) {
         bakery_apply_locale_default_for_user($row['role_slug'] ?? null, false);
+    }
+
+    try {
+        bakery_issue_driver_trusted_device($db, $row);
+    } catch (Throwable $e) {
+        // A trust-record failure must never turn a valid driver code into a
+        // failed login. The normal PHP session remains available as fallback.
+        error_log('Trusted driver device issue error: ' . $e->getMessage());
     }
 
     // Route workers land on their own or paired route identity.
@@ -703,8 +846,18 @@ function bakery_set_selected_driver($driverId, $driverName = '') {
     }
 }
 
-function bakery_logout() {
+function bakery_logout($forgetTrustedDevice = true) {
     global $db;
+    if ($forgetTrustedDevice && $db instanceof PDO) {
+        try {
+            bakery_revoke_current_driver_trusted_device($db);
+        } catch (Throwable $e) {
+            error_log('Trusted driver logout error: ' . $e->getMessage());
+            bakery_clear_driver_trust_cookie();
+        }
+    } elseif ($forgetTrustedDevice) {
+        bakery_clear_driver_trust_cookie();
+    }
     if (bakery_login_audit_current_id()) {
         try {
             $auditDb = ($db instanceof PDO) ? $db : (function_exists('check_mysql_connection') ? check_mysql_connection() : null);
@@ -750,6 +903,10 @@ function bakery_logout() {
 function bakery_require_login() {
     bakery_touch_session();
     $user = bakery_current_user();
+    if (!$user && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO
+        && bakery_restore_driver_trusted_device($GLOBALS['db'])) {
+        $user = bakery_current_user();
+    }
     if ($user) {
         // Adopt sessions that were already open when login telemetry was deployed.
         if (!bakery_login_audit_current_id() && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO) {
@@ -799,6 +956,12 @@ function bakery_enforce_request_security(PDO $db = null) {
     require_once __DIR__ . '/sf_baker.php';
 
     $script = basename($_SERVER['PHP_SELF'] ?? '');
+
+    // A driver who opens the login bookmark after PHP session cleanup should
+    // still land directly on My Route from the trusted phone credential.
+    if ($script === 'login.php' && $db instanceof PDO && !bakery_current_user()) {
+        bakery_restore_driver_trusted_device($db);
+    }
 
     if (in_array($script, bakery_public_scripts(), true)) {
         return;

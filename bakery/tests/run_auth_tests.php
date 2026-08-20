@@ -72,6 +72,8 @@ t_assert(BAKERY_SESSION_IDLE_SECONDS >= 30 * 24 * 60 * 60, 'staff session allows
 t_assert(BAKERY_SESSION_ABSOLUTE_SECONDS >= 90 * 24 * 60 * 60, 'staff session has a 90-day maximum lifetime');
 t_assert(BAKERY_DRIVER_SESSION_IDLE_SECONDS >= 60 * 24 * 60 * 60, 'driver session allows a 60-day operational idle window');
 t_assert(BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS >= 180 * 24 * 60 * 60, 'driver session has a 180-day maximum lifetime');
+t_assert(BAKERY_DRIVER_TRUST_SECONDS >= 400 * 24 * 60 * 60, 'driver trusted phone uses the browser-supported rolling maximum');
+t_assert(table_exists($db, 'driver_trusted_devices'), 'driver trusted-device migration is installed');
 
 bakery_logout();
 auth_test_reset_session();
@@ -86,10 +88,36 @@ t_assert(bakery_user_has_role(['driver']), 'driver has driver role');
 t_assert(!bakery_user_has_role(['administrator', 'manager']), 'driver is not manager/admin');
 t_assert(bakery_user_has_permission($db, 'delivery.execute'), 'driver has delivery.execute');
 t_assert(!bakery_user_has_permission($db, 'admin.access'), 'driver lacks admin.access');
+$driverUser = bakery_current_user();
+$trustedToken = bakery_issue_driver_trusted_device($db, $driverUser);
+t_assert((bool)preg_match('/^[A-Za-z0-9_-]{43}$/', $trustedToken), 'driver code login issues an opaque trusted-phone token');
+$trustedHash = hash('sha256', $trustedToken);
+$trustedStmt = $db->prepare('SELECT user_id, revoked_at FROM driver_trusted_devices WHERE token_hash = ?');
+$trustedStmt->execute([$trustedHash]);
+$trustedRow = $trustedStmt->fetch(PDO::FETCH_ASSOC);
+t_assert((int)($trustedRow['user_id'] ?? 0) === (int)$driverUser['id'], 'trusted-phone database record links to the driver user');
+t_assert(empty($trustedRow['revoked_at']), 'new trusted-phone record is active');
+
+auth_test_reset_session();
+$_COOKIE[BAKERY_DRIVER_TRUST_COOKIE] = $trustedToken;
+t_assert(bakery_restore_driver_trusted_device($db) === true, 'trusted phone rebuilds a missing PHP session');
+t_assert((bakery_current_user()['role_slug'] ?? '') === 'driver', 'restored trusted-phone session keeps driver role');
+t_assert(!empty($_SESSION['csrf_token']), 'restored trusted-phone session receives a new CSRF token');
+$_SESSION['auth_login_at'] = time() - BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS - 10;
+$_SESSION['auth_last_activity'] = time() - BAKERY_DRIVER_SESSION_IDLE_SECONDS - 10;
+bakery_touch_session();
+t_assert(bakery_current_user() === null, 'expired PHP driver session is cleared without revoking phone trust');
+t_assert(bakery_restore_driver_trusted_device($db) === true, 'trusted phone silently replaces an expired PHP session');
 $_SESSION['auth_login_at'] = time() - BAKERY_SESSION_ABSOLUTE_SECONDS - 10;
 $_SESSION['auth_last_activity'] = time() - BAKERY_SESSION_IDLE_SECONDS - 10;
 bakery_touch_session();
 t_assert(bakery_current_user() !== null, 'driver route session remains valid through a full workday');
+
+bakery_logout();
+$trustedStmt->execute([$trustedHash]);
+$trustedRow = $trustedStmt->fetch(PDO::FETCH_ASSOC);
+t_assert(!empty($trustedRow['revoked_at']), 'explicit logout revokes the trusted phone');
+unset($_COOKIE[BAKERY_DRIVER_TRUST_COOKIE]);
 
 echo "=== Driver Assistant pairing ===\n";
 $assistantCode = '2937';
@@ -143,6 +171,7 @@ auth_test_reset_session();
 bakery_login($db, '9002');
 t_assert(bakery_user_has_permission($db, 'ops.manage'), 'manager has ops.manage');
 t_assert(!bakery_user_has_permission($db, 'admin.access'), 'manager lacks admin.access');
+t_assert(bakery_issue_driver_trusted_device($db, bakery_current_user()) === '', 'manager login never receives driver device trust');
 
 echo "=== CSRF ===\n";
 $token = bakery_csrf_token();
@@ -339,6 +368,18 @@ try {
         );
         $cookieJar = auth_test_collect_cookies($loginPost['headers'], $cookieJar);
         t_assert(strpos(auth_test_status_line($loginPost['headers']), '302') !== false, 'driver login succeeds');
+        t_assert(strpos($cookieJar, BAKERY_DRIVER_TRUST_COOKIE . '=') !== false, 'driver login sets a durable trusted-phone cookie');
+
+        $trustedOnlyJar = implode('; ', array_values(array_filter(explode('; ', $cookieJar), function ($pair) {
+            return stripos($pair, BAKERY_DRIVER_TRUST_COOKIE . '=') === 0;
+        })));
+        $trustedRestorePage = auth_test_http_request(
+            'GET',
+            'http://127.0.0.1:8091/driver.php?driver_id=1&date=2026-08-03',
+            ['cookie' => $trustedOnlyJar]
+        );
+        t_assert(strpos(auth_test_status_line($trustedRestorePage['headers']), '200') !== false, 'trusted phone opens My Route after PHP session loss');
+        t_assert(auth_test_extract_csrf($trustedRestorePage['body']) !== '', 'trusted-phone restore creates an authenticated CSRF session');
 
         $noCsrfPost = auth_test_http_request(
             'POST',
