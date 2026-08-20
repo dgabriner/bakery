@@ -695,6 +695,21 @@ function bakery_revoke_current_driver_trusted_device(PDO $db): void {
     bakery_clear_driver_trust_cookie();
 }
 
+/** Quietly enroll an already-authenticated route worker after this feature ships. */
+function bakery_ensure_current_driver_trusted_device(PDO $db): void {
+    $user = bakery_current_user();
+    if (!$user || !bakery_is_driver_route_role($user['role_slug'] ?? '')
+        || bakery_driver_trust_token_from_cookie() !== '') {
+        return;
+    }
+    try {
+        bakery_issue_driver_trusted_device($db, $user);
+    } catch (Throwable $e) {
+        // Route access must keep working even if durable trust cannot be saved.
+        error_log('Trusted driver auto-enrollment error: ' . $e->getMessage());
+    }
+}
+
 function bakery_login(PDO $db, $code) {
     bakery_ensure_login_code_column($db);
 
@@ -908,6 +923,9 @@ function bakery_require_login() {
         $user = bakery_current_user();
     }
     if ($user) {
+        if (PHP_SAPI !== 'cli' && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO) {
+            bakery_ensure_current_driver_trusted_device($GLOBALS['db']);
+        }
         // Adopt sessions that were already open when login telemetry was deployed.
         if (!bakery_login_audit_current_id() && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO) {
             bakery_login_audit_start($GLOBALS['db'], 'staff', [

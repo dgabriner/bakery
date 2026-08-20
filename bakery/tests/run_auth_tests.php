@@ -370,6 +370,20 @@ try {
         t_assert(strpos(auth_test_status_line($loginPost['headers']), '302') !== false, 'driver login succeeds');
         t_assert(strpos($cookieJar, BAKERY_DRIVER_TRUST_COOKIE . '=') !== false, 'driver login sets a durable trusted-phone cookie');
 
+        $sessionOnlyJar = implode('; ', array_values(array_filter(explode('; ', $cookieJar), function ($pair) {
+            return stripos($pair, session_name() . '=') === 0;
+        })));
+        $existingSessionPage = auth_test_http_request(
+            'GET',
+            'http://127.0.0.1:8091/driver.php?driver_id=1&date=2026-08-03',
+            ['cookie' => $sessionOnlyJar]
+        );
+        $existingSessionJar = auth_test_collect_cookies($existingSessionPage['headers'], $sessionOnlyJar);
+        t_assert(
+            strpos($existingSessionJar, BAKERY_DRIVER_TRUST_COOKIE . '=') !== false,
+            'already-signed-in driver phone auto-enrolls without another code login'
+        );
+
         $trustedOnlyJar = implode('; ', array_values(array_filter(explode('; ', $cookieJar), function ($pair) {
             return stripos($pair, BAKERY_DRIVER_TRUST_COOKIE . '=') === 0;
         })));
