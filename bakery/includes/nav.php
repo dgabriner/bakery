@@ -28,8 +28,9 @@ if (!function_exists('bakery_nav_is_active')) {
 <style>
   .bakery-nav { background: #173f3c; border-bottom: 1px solid #28615d; box-shadow: 0 2px 10px rgba(28, 48, 44, .14); color: #fff; font-family: "Segoe UI", system-ui, sans-serif; position: sticky; top: 0; z-index: 900; }
   .bakery-nav__inner { align-items: center; display: flex; gap: 16px; margin: 0 auto; max-width: 1500px; min-height: 58px; padding: 8px 18px; }
-  .bakery-nav__brand { color: #fff; flex: 0 0 auto; font-size: 1.03rem; font-weight: 760; letter-spacing: .01em; text-decoration: none; white-space: nowrap; }
+  .bakery-nav__brand { align-items: center; color: #fff; display: inline-flex; flex: 0 0 auto; font-size: 1.03rem; font-weight: 760; gap: 8px; letter-spacing: .01em; text-decoration: none; white-space: nowrap; }
   .bakery-nav__brand:hover { color: #ffe7b0; }
+  .sf20-badge { background: #ffe7b0; border-radius: 999px; color: #173f3c; font-size: .72rem; font-weight: 800; letter-spacing: .04em; line-height: 1; padding: 4px 8px; }
   .bakery-nav__groups { align-items: center; display: flex; flex: 1 1 auto; gap: 7px; justify-content: flex-end; min-width: 0; }
   .bakery-nav__group { position: relative; }
   .bakery-nav__group summary { align-items: center; border: 1px solid transparent; border-radius: 7px; color: #eff8f6; cursor: pointer; display: flex; font-size: .89rem; font-weight: 650; gap: 6px; list-style: none; padding: 9px 10px; user-select: none; white-space: nowrap; }
@@ -68,7 +69,7 @@ if (!function_exists('bakery_nav_is_active')) {
 <?php if ($navRole === 'driver'): ?>
 <nav class="bakery-nav bakery-nav--focused" aria-label="Driver workspace">
   <div class="bakery-nav__inner">
-    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars($navDriverRouteHref, ENT_QUOTES, 'UTF-8'); ?>">Driver workspace</a>
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars($navDriverRouteHref, ENT_QUOTES, 'UTF-8'); ?>">Driver workspace <span class="sf20-badge">SF 2.0</span></a>
     <div class="bakery-nav__groups">
       <a class="bakery-nav__direct <?php echo $currentPage === 'driver' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverRouteHref, ENT_QUOTES, 'UTF-8'); ?>">My route</a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'call_headquarters' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>call_headquarters.php">Call HQ</a>
@@ -78,7 +79,7 @@ if (!function_exists('bakery_nav_is_active')) {
 <?php elseif ($navRole === 'baker'): ?>
 <nav class="bakery-nav bakery-nav--focused" aria-label="Baker workspace">
   <div class="bakery-nav__inner">
-    <span class="bakery-nav__brand">Baker workspace</span>
+    <span class="bakery-nav__brand">Baker workspace <span class="sf20-badge">SF 2.0</span></span>
     <div class="bakery-nav__groups">
       <a class="bakery-nav__direct <?php echo $currentPage === 'production' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>production.php?date=<?php echo urlencode($navBakerDate); ?>">Daily production</a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'pack_list' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>pack_list.php?day=<?php echo (int)$navBakerWeekday; ?>">Pack list</a>
@@ -89,7 +90,7 @@ if (!function_exists('bakery_nav_is_active')) {
 <?php $navGroups = bakery_navigation_groups_for_role($navRole); ?>
 <nav class="bakery-nav" aria-label="Operations workspace">
   <div class="bakery-nav__inner">
-    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>index.php">Bakery workspace</a>
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>index.php">Bakery workspace <span class="sf20-badge">SF 2.0</span></a>
     <div class="bakery-nav__groups">
       <?php foreach ($navGroups as $group): ?>
       <?php $groupActive = false; foreach ($group['items'] as $item) { if (bakery_nav_is_active($item, $currentPage)) { $groupActive = true; break; } } ?>
