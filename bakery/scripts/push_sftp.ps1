@@ -4,23 +4,42 @@
 #   .\scripts\push_sftp.ps1
 #   .\scripts\push_sftp.ps1 -DryRun
 #   .\scripts\push_sftp.ps1 -All
+#   push_staging.bat
+#   .\scripts\push_sftp.ps1 -Staging -Files closeout_radar.php,includes/closeout_radar.php
 #
 # Credentials: .env.sftp (see .env.sftp.example)
 # Schema SQL is never uploaded; changed .sql files are noted in the history log.
+# Default target is production. -Staging never writes LAST_DEPLOY.json.
 param(
     [switch]$DryRun,
     [switch]$All,
-    [switch]$Confirm
+    [switch]$Confirm,
+    [switch]$Staging,
+    [ValidateSet('production', 'staging')]
+    [string]$Target = 'production',
+    [string[]]$Files = @()
 )
 
 $ErrorActionPreference = "Stop"
 
+if ($Staging) {
+    $Target = 'staging'
+}
+
 $bakeryRoot = Split-Path $PSScriptRoot -Parent
 $deployDir = Join-Path $bakeryRoot "storage\deploy"
-$historyDir = Join-Path $deployDir "pushes"
-$historyLog = Join-Path $deployDir "PUSH_HISTORY.jsonl"
-$lastDeployPath = Join-Path $deployDir "LAST_DEPLOY.json"
+$historyDir = Join-Path $deployDir $(if ($Target -eq 'staging') { 'staging_pushes' } else { 'pushes' })
+$historyLog = Join-Path $deployDir $(if ($Target -eq 'staging') { 'STAGING_PUSH_HISTORY.jsonl' } else { 'PUSH_HISTORY.jsonl' })
+$lastDeployPath = Join-Path $deployDir $(if ($Target -eq 'staging') { 'LAST_STAGING_DEPLOY.json' } else { 'LAST_DEPLOY.json' })
 $envSftpPath = Join-Path $bakeryRoot ".env.sftp"
+
+$explicitFiles = @()
+foreach ($item in $Files) {
+    foreach ($part in @($item -split ',')) {
+        $rel = $part.Trim().Replace('\', '/')
+        if ($rel -ne '') { $explicitFiles += $rel }
+    }
+}
 $uploader = Join-Path $PSScriptRoot "sftp_upload.py"
 $listFile = Join-Path $env:TEMP ("bakery_sftp_files_{0}.txt" -f [guid]::NewGuid().ToString("N"))
 
@@ -129,8 +148,14 @@ function Write-BakeryPushHistory {
 
 Import-BakerySftpEnv -Path $envSftpPath
 
+$requiredCreds = @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD")
+if ($Target -eq 'staging') {
+    $requiredCreds += "SFTP_STAGING_REMOTE_ROOT"
+} else {
+    $requiredCreds += "SFTP_REMOTE_ROOT"
+}
 $missingCreds = @()
-foreach ($required in @("SFTP_HOST", "SFTP_USER", "SFTP_PASSWORD", "SFTP_REMOTE_ROOT")) {
+foreach ($required in $requiredCreds) {
     $val = (Get-Item "Env:$required" -ErrorAction SilentlyContinue).Value
     if ([string]::IsNullOrWhiteSpace($val)) { $missingCreds += $required }
 }
@@ -138,6 +163,10 @@ if ($missingCreds.Count -gt 0) {
     Write-Host "Missing SFTP settings: $($missingCreds -join ', ')"
     Write-Host "Copy .env.sftp.example to .env.sftp and fill in values."
     exit 1
+}
+
+if ($Target -eq 'staging') {
+    $env:SFTP_REMOTE_ROOT = $env:SFTP_STAGING_REMOTE_ROOT.Trim().Trim('/').Replace('\', '/')
 }
 
 $baseline = Read-BakeryDeployState -Path $lastDeployPath
@@ -151,7 +180,26 @@ $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot -AlsoIncludeRo
 $currentSnapshot = Get-BakeryDeploySnapshot -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc
 $baselineMap = ConvertTo-BakeryDeployBaselineMap -BaselineFiles $(if ($baseline) { $baseline.files } else { $null })
 
-if ($All -or -not $baseline) {
+if ($explicitFiles.Count -gt 0) {
+    $toUpload = @()
+    foreach ($rel in $explicitFiles) {
+        $local = Join-Path $bakeryRoot ($rel.Replace('/', '\'))
+        if (-not (Test-Path -LiteralPath $local)) {
+            throw "File not found under bakery root: $rel"
+        }
+        $toUpload += $rel
+    }
+    $mode = "files"
+} elseif ($All -or -not $baseline) {
+    if ($Target -eq 'staging' -and -not $All) {
+        Write-Host "No staging baseline. Refusing a full-tree upload (that would overwrite SF 2.0)."
+        Write-Host "Use: push_staging.bat -Files closeout_radar.php,includes/closeout_radar.php,includes/navigation_catalog.php"
+        Write-Host "Or:  push_staging.bat -All -Confirm"
+        exit 1
+    }
+    if ($Target -eq 'staging' -and $All -and -not $DryRun) {
+        $Confirm = $true
+    }
     $toUpload = @($deployFiles)
     $mode = if ($All) { "all" } else { "all (first push / no baseline)" }
 } else {
@@ -215,7 +263,7 @@ $detailPath = Write-BakeryPushHistory `
     -HistoryDir $historyDir `
     -HistoryLog $historyLog `
     -LastDeployPath $lastDeployPath `
-    -Method "sftp" `
+    -Method $(if ($Target -eq 'staging') { 'sftp-staging' } else { 'sftp' }) `
     -Mode $mode `
     -UploadedFiles $toUpload `
     -SchemaChanges $schemaChanges
@@ -223,5 +271,9 @@ $detailPath = Write-BakeryPushHistory `
 Write-Host ""
 Write-Host "Recorded: $detailPath"
 Write-Host "History:  $historyLog"
-Write-Host "Live:     https://bakery.sourflour.org/bake/login.php"
+if ($Target -eq 'staging') {
+    Write-Host "Staging:  https://staging.sourflour.org/closeout_radar.php"
+} else {
+    Write-Host "Live:     https://bakery.sourflour.org/bake/login.php"
+}
 Write-Host ""

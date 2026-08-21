@@ -123,6 +123,23 @@ No confirmation prompt (use `-Confirm` if you want one).
 Never uploads `.env`, uploads, dumps, scripts, or tests.  
 Schema SQL changes are noted in the log but not applied.
 
+### Push to staging (local machine)
+
+`push.bat` stays production-only. Staging uses a separate one-click script and a separate remote root so a desk push cannot mix the two.
+
+1. In `.env.sftp` (same host/user/password as production) add:
+   `SFTP_STAGING_REMOTE_ROOT=staging.sourflour.org`
+2. From the `bakery/` folder on the Windows machine that already has `.env.sftp`:
+
+```
+push_staging.bat -Files closeout_radar.php,includes/closeout_radar.php,includes/navigation_catalog.php
+push_staging.bat -DryRun -Files closeout_radar.php,includes/closeout_radar.php,includes/navigation_catalog.php
+```
+
+Staging refuses a first full-tree upload unless you pass `-All -Confirm` (SF 2.0 already lives on that host). It records `storage/deploy/LAST_STAGING_DEPLOY.json` and does not touch production `LAST_DEPLOY.json`.
+
+The Cloud agent cannot run this script; it has to be double-clicked or run in a local terminal.
+
 ### Auto-push (keep server nearly mirrored)
 
 **Cursor agent edits:** project hooks in `.cursor/hooks.json` queue a debounced upload after file edits and when the agent stops (~20s quiet period). Requires a Trusted workspace.
@@ -169,6 +186,7 @@ Updates `LAST_DEPLOY.json` so option 9 / SFTP push only shows new changes next t
 | Push local DB | `php scripts/push_local_to_prod.php --dry-run` |
 | Changed deploy files | `.\scripts\list_deploy_changes.ps1` |
 | SFTP push changed files | `.\scripts\push_sftp.ps1` |
+| SFTP push to staging | `push_staging.bat` |
 | Build ZIP | `.\scripts\build_deploy_zip.bat` |
 | Record deploy | `.\scripts\record_deploy.ps1` |
 
