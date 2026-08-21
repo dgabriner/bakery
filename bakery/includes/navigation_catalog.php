@@ -96,6 +96,7 @@ function bakery_navigation_catalog() {
             'description' => 'Administrator-only access, identity, and retained legacy tools.',
             'roles' => ['administrator'],
             'items' => [
+                ['href' => 'closeout_radar.php', 'label' => 'Closeout Radar', 'description' => 'What will bite us today or on the next bake, with a link to fix each item.', 'roles' => ['administrator']],
                 ['href' => 'users.php', 'label' => 'User Management', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator']],
                 ['href' => 'historical_navigation.php', 'label' => 'Historical Navigation', 'description' => 'The prior full menu and retained legacy entry points.', 'roles' => ['administrator']],
             ],

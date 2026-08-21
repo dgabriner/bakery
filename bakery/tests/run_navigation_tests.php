@@ -44,6 +44,14 @@ foreach (bakery_navigation_groups_for_role('administrator') as $group) {
 }
 navigation_test_assert(in_array('users.php', $adminItems, true), 'administrators receive User Management');
 navigation_test_assert(in_array('historical_navigation.php', $adminItems, true), 'administrators receive Historical Navigation');
+navigation_test_assert(in_array('closeout_radar.php', $adminItems, true), 'administrators receive Closeout Radar');
+
+$managerItems = [];
+foreach (bakery_navigation_groups_for_role('manager') as $group) {
+    $managerItems = array_merge($managerItems, array_column($group['items'], 'href'));
+}
+navigation_test_assert(!in_array('closeout_radar.php', $managerItems, true), 'managers do not receive Closeout Radar');
+navigation_test_assert(!in_array('users.php', $managerItems, true), 'managers do not receive User Management');
 
 navigation_test_assert(in_array('production.php', bakery_baker_scripts(), true), 'bakers can access Daily Production');
 navigation_test_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'bakers can access Pack List');

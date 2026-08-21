@@ -64,6 +64,7 @@ ROOT_FILES = (
     "health_deploy.php",
     "trace_driver_list.php",
     "ping.php",
+    "closeout_radar.php",
 )
 
 DEPLOY_DIRECTORIES = ("includes", "css", "assets")

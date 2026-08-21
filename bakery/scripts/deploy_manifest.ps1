@@ -17,7 +17,8 @@ function Get-BakeryDeployRootFiles {
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
         'upload_driver_photo.php',
         'generate_invoice.php', 'oauth_callback.php',
-        'driver_pages_probe.php', 'health_driver.php', 'health_deploy.php', 'trace_driver_list.php', 'ping.php'
+        'driver_pages_probe.php', 'health_driver.php', 'health_deploy.php', 'trace_driver_list.php', 'ping.php',
+        'closeout_radar.php'
     )
 }
 
