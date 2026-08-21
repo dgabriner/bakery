@@ -84,6 +84,7 @@ $page_title = 'Código para entrar';
     label { display: block; font-size: .94rem; margin-bottom: 14px; }
     input[type=tel] { background: transparent; border: 0; border-bottom: 2px solid #c9b9a8; border-radius: 0; color: var(--ink); display: block; font-family: inherit; font-size: 2.5rem; letter-spacing: .55em; margin: 0 auto; max-width: 240px; outline: none; padding: 4px 0 9px 18px; text-align: center; width: 100%; }
     input[type=tel]:focus { border-bottom-color: var(--terracotta); }
+    .sf20-marker { color: var(--terracotta); font-family: inherit; font-size: 1.15rem; font-weight: 700; letter-spacing: .12em; margin: 0; }
     .error { color: #9b332c; font-size: .9rem; margin: 0 0 18px; }
     @media (max-width: 560px) {
       html { height: 100%; overflow: hidden; }
@@ -111,6 +112,7 @@ $page_title = 'Código para entrar';
     <div class="brands" aria-label="La Victoria y Sour Flour">
       <img class="la-victoria-logo" src="assets/logos/la-victoria.png" alt="La Victoria San Francisco">
       <img class="sour-flour-logo" src="assets/logos/sour-flour-full.png?v=20260802" alt="Sour Flour">
+      <p class="sf20-marker">SF 2.0</p>
     </div>
     <?php if ($error): ?>
       <div class="error" role="alert"><?php echo htmlspecialchars($error); ?></div>
