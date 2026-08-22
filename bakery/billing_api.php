@@ -6,6 +6,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/billing.php';
+require_once __DIR__ . '/includes/square_invoices.php';
 
 bakery_require_role(['administrator', 'manager']);
 
@@ -101,6 +102,31 @@ try {
             safe_redirect(($redirect ?: 'billing_center.php?panel=invoices') . $sep . 'bulk_msg=' . urlencode($msg), 'invoice_sent');
             break;
 
+        case 'send_square_invoice':
+            $orderId = (int)($_POST['daily_order_id'] ?? 0);
+            $result = bakery_square_send_invoice($db, $orderId, [
+                'user_id' => $userId,
+                'draft_only' => !empty($_POST['draft_only']),
+                'test_recipient' => (string)($_POST['test_recipient'] ?? ''),
+            ]);
+            $msg = 'Square invoice ' . ($result['square_status'] ?? '') . '.';
+            if (!empty($result['idempotent'])) {
+                $msg = 'Existing Square invoice reused (no duplicate). Status ' . ($result['square_status'] ?? '') . '.';
+            } elseif (!empty($result['square_public_url'])) {
+                $msg = 'Square invoice published. Pay link is on this delivery.';
+            }
+            $sep = strpos($redirect, '?') !== false ? '&' : '?';
+            safe_redirect(($redirect ?: 'billing_center.php?panel=invoices&invoice_id=' . $orderId) . $sep . 'bulk_msg=' . urlencode($msg), 'square_invoice_sent');
+            break;
+
+        case 'refresh_square_invoice':
+            $orderId = (int)($_POST['daily_order_id'] ?? 0);
+            $result = bakery_square_refresh_invoice($db, $orderId);
+            $msg = 'Square status is now ' . ($result['square_status'] ?? '') . '.';
+            $sep = strpos($redirect, '?') !== false ? '&' : '?';
+            safe_redirect(($redirect ?: 'billing_center.php?panel=invoices&invoice_id=' . $orderId) . $sep . 'bulk_msg=' . urlencode($msg), 'square_invoice_refreshed');
+            break;
+
         case 'record_statement':
             $customerId = (int)($_POST['customer_id'] ?? 0);
             $startDate = trim((string)($_POST['start_date'] ?? ''));
@@ -133,5 +159,7 @@ try {
     }
 } catch (Throwable $e) {
     error_log('billing_api: ' . $e->getMessage());
-    safe_redirect($redirect ?: 'billing_center.php', 'error');
+    $msg = $e->getMessage();
+    $sep = strpos($redirect, '?') !== false ? '&' : '?';
+    safe_redirect(($redirect ?: 'billing_center.php') . $sep . 'bulk_msg=' . urlencode($msg), 'error');
 }

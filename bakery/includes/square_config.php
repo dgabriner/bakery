@@ -8,11 +8,15 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
-$squareEnv = strtolower((string)($_ENV['SQUARE_ENV'] ?? getenv('SQUARE_ENV') ?: 'sandbox'));
+$squareEnvRaw = (string)($_ENV['SQUARE_ENV'] ?? getenv('SQUARE_ENV')
+    ?: $_ENV['SQUARE_ENVIRONMENT'] ?? getenv('SQUARE_ENVIRONMENT')
+    ?: '');
+$squareEnv = strtolower($squareEnvRaw);
 if (!in_array($squareEnv, ['sandbox', 'production'], true)) {
     $squareEnv = 'sandbox';
 }
-if (defined('IS_STAGING') && IS_STAGING) {
+// Staging defaults to sandbox unless the owner explicitly sets SQUARE_ENV=production.
+if (defined('IS_STAGING') && IS_STAGING && strtolower($squareEnvRaw) !== 'production') {
     $squareEnv = 'sandbox';
 }
 
@@ -47,6 +51,10 @@ function square_is_configured(): bool
  */
 function square_api_request(string $method, string $path, ?array $body = null): array
 {
+    if (isset($GLOBALS['bakery_square_api_handler']) && is_callable($GLOBALS['bakery_square_api_handler'])) {
+        return (array)call_user_func($GLOBALS['bakery_square_api_handler'], $method, $path, $body);
+    }
+
     if (!square_is_configured()) {
         throw new RuntimeException('Square is not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID in .env.');
     }

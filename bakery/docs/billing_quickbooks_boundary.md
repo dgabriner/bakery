@@ -65,6 +65,7 @@ Store external IDs in a future `accounting_customer_map` / `accounting_item_map`
 - **COD:** `amount_collected` on `daily_orders` when driver confirms — route cash, not full AR.
 - **Signature / invoice customers:** payment status **unknown externally** unless marked `invoiced` in OS.
 - No due dates, no overdue logic, no QuickBooks payment sync.
+- **Square (non-COD):** Billing Center can publish a Square invoice and store `square_invoice_id` / pay URL / status. Webhook or Refresh updates PAID. COD is not sent to Square.
 
 ## Statements
 

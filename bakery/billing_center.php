@@ -9,6 +9,8 @@ require_once __DIR__ . '/includes/billing.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 
 bakery_billing_ensure_invoice_send_schema($db);
+require_once __DIR__ . '/includes/square_invoices.php';
+bakery_square_ensure_schema($db);
 
 $page_title = bakery_t('page.billing_center');
 
@@ -77,6 +79,10 @@ $amountMaxRaw = trim((string)($_GET['amount_max'] ?? ''));
 $amountMin = $amountMinRaw !== '' && is_numeric($amountMinRaw) ? (float)$amountMinRaw : null;
 $amountMax = $amountMaxRaw !== '' && is_numeric($amountMaxRaw) ? (float)$amountMaxRaw : null;
 $deliveredOnly = isset($_GET['delivered_only']) && (string)$_GET['delivered_only'] === '1';
+$collectionFilter = (string)($_GET['collection'] ?? 'all');
+if (!in_array($collectionFilter, ['all', 'invoice', 'cod'], true)) {
+    $collectionFilter = 'all';
+}
 $viewMode = (string)($_GET['view'] ?? 'cards');
 $attentionFilter = (string)($_GET['attention'] ?? '');
 $returnDate = $startDate ?? $defaultEnd;

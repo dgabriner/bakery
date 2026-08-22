@@ -296,12 +296,13 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
  * @return array{key:string,label:string,detail:string}
  */
 function bakery_billing_payment_status(array $order, array $customer = []) {
-    $paymentCollection = (string)($customer['payment_collection'] ?? 'signature');
+    $paymentCollection = (string)($customer['payment_collection'] ?? $order['payment_collection'] ?? 'signature');
     $status = (string)($order['status'] ?? '');
     $confirmed = !empty($order['delivery_confirmed_at']);
     $amountCollected = isset($order['amount_collected']) && $order['amount_collected'] !== null
         ? (float)$order['amount_collected']
         : null;
+    $squareStatus = strtoupper(trim((string)($order['square_status'] ?? '')));
 
     if ($paymentCollection === 'cod' && $confirmed) {
         if ($amountCollected !== null && $amountCollected > 0) {
@@ -315,6 +316,35 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
             'key' => 'cod_expected',
             'label' => 'COD — collection not recorded',
             'detail' => 'Customer is COD; no amount_collected stored on this delivery.',
+        ];
+    }
+
+    if ($squareStatus === 'PAID') {
+        return [
+            'key' => 'square_paid',
+            'label' => 'Paid in Square',
+            'detail' => 'Square invoice status is PAID.',
+        ];
+    }
+    if ($squareStatus === 'UNPAID' || $squareStatus === 'PARTIALLY_PAID' || $squareStatus === 'PAYMENT_PENDING') {
+        return [
+            'key' => 'square_unpaid',
+            'label' => 'Square invoice ' . $squareStatus,
+            'detail' => 'Customer can pay at the Square link. Refresh status after payment.',
+        ];
+    }
+    if ($squareStatus === 'DRAFT') {
+        return [
+            'key' => 'square_draft',
+            'label' => 'Square draft',
+            'detail' => 'Square invoice is a draft and has not been published yet.',
+        ];
+    }
+    if ($squareStatus === 'CANCELED') {
+        return [
+            'key' => 'square_canceled',
+            'label' => 'Square canceled',
+            'detail' => 'The Square invoice was canceled.',
         ];
     }
 
@@ -434,6 +464,7 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['payment_status'] = bakery_billing_payment_status($order, [
             'payment_collection' => $order['payment_collection'] ?? 'signature',
         ]);
+        $order['is_cod'] = (($order['payment_collection'] ?? 'cod') === 'cod');
         $order['invoice_sent_at'] = $order['invoice_sent_at'] ?? null;
         $order['invoice_sent_to_email'] = $order['invoice_sent_to_email'] ?? null;
         $order['invoice_sent_by_user_id'] = $order['invoice_sent_by_user_id'] ?? null;
@@ -466,6 +497,7 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     $sortBy = (string)($filters['sort'] ?? 'date_desc');
     $confirmedOnly = !empty($filters['confirmed_only']);
     $invoicedOnly = !empty($filters['invoiced_only']);
+    $collectionFilter = (string)($filters['collection'] ?? 'all');
 
     $orderStatuses = ['pending', 'confirmed', 'in_production', 'ready', 'out_for_delivery', 'delivered', 'invoiced'];
 
@@ -517,6 +549,11 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     if ($invoicedOnly) {
         $where[] = "do.status = 'invoiced'";
     }
+    if ($collectionFilter === 'cod') {
+        $where[] = "c.payment_collection = 'cod'";
+    } elseif ($collectionFilter === 'invoice') {
+        $where[] = "c.payment_collection <> 'cod'";
+    }
 
     $orderSql = 'do.order_date DESC, c.name, do.id DESC';
     switch ($sortBy) {
@@ -540,6 +577,10 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     $sendCols = '';
     if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
         $sendCols = ', do.invoice_sent_at, do.invoice_sent_to_email, do.invoice_sent_by_user_id, do.invoice_send_channel';
+    }
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'square_invoice_id')) {
+        $sendCols .= ', do.square_invoice_id, do.square_order_id, do.square_public_url, do.square_status,
+                       do.square_recipient_email, do.square_published_at, do.square_paid_at, do.square_last_synced_at';
     }
 
     $stmt = $db->prepare(

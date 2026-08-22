@@ -255,7 +255,8 @@ Compact map — entry points only, not every file.
 4. **Canonical invoicing.** Billing Center bulk-marks invoiced and can send the portal
    `customer_invoice.php` document (snapshot totals) to the customer billing email, or
    record the send when `MAIL_DRIVER=log`. Legacy generators redirect to Billing Center.
-   Still deferred (Wave 2): AR aging, Square pay, weekly rollup invoices.
+   Non-COD Ready deliveries can be sent as a Square Invoice from Billing Center; COD stays
+   on Route Manager. Still deferred: AR aging, weekly rollup invoices, full QuickBooks sync.
 5. **Customer fragmentation.** Contact, lifecycle, standing, schedule, pricing, billing, and
    issues still live on specialized screens; `customer_record.php` is now the staff hub
    (nav + search + jump links). Editing still happens on the specialized screens — do not
@@ -290,8 +291,9 @@ a later item.
    delivered vs returned vs wasted; waste + delivery movement types; Daily Run closeout
    requires closed routes.
 4. **Canonical invoicing** — shipped: bulk mark-invoiced, send/record of the portal
-   per-delivery invoice from Billing Center, legacy generators quarantined. *Still
-   deferred (Wave 2): AR aging, Square pay, weekly rollup invoices.*
+   per-delivery invoice from Billing Center, legacy generators quarantined. Non-COD Square
+   invoice send plus webhook/poll status lives in Billing Center. *Still deferred: AR aging,
+   weekly rollup invoices, full QuickBooks sync.*
 5. **Customer hub + findability** — `customer_record.php` is the staff hub (nav item
    "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
    open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
