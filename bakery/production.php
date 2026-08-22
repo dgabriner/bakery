@@ -6,6 +6,8 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/i18n.php';
+require_once 'includes/formula_units.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
@@ -302,8 +304,22 @@ try {
         }
     }
     
+    $hasFormulaPanel = false;
+    if (!empty($groupedData)) {
+        foreach ($groupedData as $formulaCheck) {
+            if (!empty($formulaCheck['formula']) && (float)($formulaCheck['formula']['total_percentage'] ?? 0) > 0) {
+                $hasFormulaPanel = true;
+                break;
+            }
+        }
+    }
+
 } catch (Exception $e) {
     $error = 'Error loading production data: ' . $e->getMessage();
+}
+
+if (!isset($hasFormulaPanel)) {
+    $hasFormulaPanel = false;
 }
 
 // Set page title
@@ -420,6 +436,44 @@ $page_title = 'Production Schedule';
     <?php else: ?>
         <div class="production-summary">
             <h2>Production for <?php echo $days[$selectedDay]; ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></h2>
+
+            <?php if (!empty($hasFormulaPanel)): ?>
+                <div class="formula-unit-bar" data-formula-units data-unit-mode="all">
+                    <div class="formula-unit-bar-row">
+                        <span class="formula-unit-label" id="formula-unit-label"><?php echo htmlspecialchars(bakery_t('formula.show_mix_as'), ENT_QUOTES, 'UTF-8'); ?></span>
+                        <div class="formula-unit-switch" role="radiogroup" aria-labelledby="formula-unit-label">
+                            <?php foreach (bakery_formula_unit_modes() as $unitMode): ?>
+                                <button type="button"
+                                        role="radio"
+                                        class="formula-unit-btn<?php echo $unitMode === 'all' ? ' is-active' : ''; ?>"
+                                        data-unit="<?php echo htmlspecialchars($unitMode, ENT_QUOTES, 'UTF-8'); ?>"
+                                        aria-checked="<?php echo $unitMode === 'all' ? 'true' : 'false'; ?>"
+                                        aria-label="<?php echo htmlspecialchars(bakery_t('formula.units.' . $unitMode . '_aria'), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <?php echo htmlspecialchars(bakery_t('formula.units.' . $unitMode), ENT_QUOTES, 'UTF-8'); ?>
+                                </button>
+                            <?php endforeach; ?>
+                        </div>
+                        <nav class="formula-lang-switch" aria-label="<?php echo htmlspecialchars(bakery_t('formula.lang_label'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <a href="<?php echo htmlspecialchars(bakery_lang_switch_query('en'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo bakery_current_lang() === 'en' ? ' aria-current="true"' : ''; ?>><?php echo htmlspecialchars(bakery_t('formula.lang.en'), ENT_QUOTES, 'UTF-8'); ?></a>
+                            <a href="<?php echo htmlspecialchars(bakery_lang_switch_query('es'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo bakery_current_lang() === 'es' ? ' aria-current="true"' : ''; ?>><?php echo htmlspecialchars(bakery_t('formula.lang.es'), ENT_QUOTES, 'UTF-8'); ?></a>
+                        </nav>
+                    </div>
+                    <details class="formula-unit-help">
+                        <summary><?php echo htmlspecialchars(bakery_t('formula.help_title'), ENT_QUOTES, 'UTF-8'); ?></summary>
+                        <p><?php echo htmlspecialchars(bakery_t('formula.help_lead'), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <ul>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.water'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.milk'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.cream'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.oil'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.eggs'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.honey'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.starter_liquido'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.other'), ENT_QUOTES, 'UTF-8'); ?></li>
+                        </ul>
+                    </details>
+                </div>
+            <?php endif; ?>
             
     <?php if (!empty($productionData)): ?>
         <section class="production-confirmation production-confirmation-legacy">
@@ -463,6 +517,7 @@ $page_title = 'Production Schedule';
                                 $ingredientsStmt = $db->prepare("
                                     SELECT 
                                         i.name,
+                                        i.unit,
                                         fi.percentage
                                     FROM formula_ingredients fi
                                     JOIN ingredients i ON fi.ingredient_id = i.id
@@ -474,22 +529,29 @@ $page_title = 'Production Schedule';
                                 
                                 // Calculate total flour weight (100%)
                                 $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
+                                $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
                             ?>
                                 <div class="formula-info">
-                                    <div class="formula-details">
-                                        <h4>Ingredients Needed:</h4>
+                                    <div class="formula-details" data-formula-units data-unit-mode="all">
+                                        <h4><?php echo htmlspecialchars(bakery_t('formula.ingredients_needed'), ENT_QUOTES, 'UTF-8'); ?></h4>
                                         <div class="ingredients-grid">
                                             <?php foreach ($ingredients as $ingredient): 
                                                 $amount = $totalFlour * ($ingredient['percentage'] / 100);
+                                                $classification = bakery_formula_classify_ingredient($ingredient['name'], $ingredient['unit'] ?? '');
                                             ?>
-                                                <div class="ingredient-item">
+                                                <div class="ingredient-item<?php echo !empty($classification['liquid']) ? ' is-liquid' : ''; ?>"
+                                                     data-grams="<?php echo htmlspecialchars((string) $amount, ENT_QUOTES, 'UTF-8'); ?>"
+                                                     data-liquid="<?php echo !empty($classification['liquid']) ? '1' : '0'; ?>"
+                                                     <?php if (!empty($classification['density_lb_per_gal'])): ?>data-density="<?php echo htmlspecialchars((string) $classification['density_lb_per_gal'], ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
                                                     <span class="ingredient-name"><?php echo htmlspecialchars($ingredient['name']); ?></span>
-                                                    <span class="ingredient-amount"><?php echo number_format($amount, 0); ?>g</span>
+                                                    <span class="ingredient-amount"><?php echo bakery_formula_amount_markup($amount, $classification); ?></span>
                                                 </div>
                                             <?php endforeach; ?>
-                                            <div class="ingredient-item total">
-                                                <span class="ingredient-name"><strong>Total Dough</strong></span>
-                                                <span class="ingredient-amount"><strong><?php echo number_format($data['total_weight_grams'], 0); ?>g</strong></span>
+                                            <div class="ingredient-item total"
+                                                 data-grams="<?php echo htmlspecialchars((string) $data['total_weight_grams'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                 data-liquid="0">
+                                                <span class="ingredient-name"><strong><?php echo htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8'); ?></strong></span>
+                                                <span class="ingredient-amount"><strong><?php echo bakery_formula_amount_markup($data['total_weight_grams'], $doughClassification); ?></strong></span>
                                             </div>
                                         </div>
                                     </div>
@@ -961,6 +1023,115 @@ $page_title = 'Production Schedule';
         }
     }
     
+    /* Formula unit toggle — sticky, phone/tablet friendly */
+    .formula-unit-bar {
+        position: sticky;
+        top: 0;
+        z-index: 8;
+        margin: 0 0 16px 0;
+        padding: 12px;
+        background: #fff;
+        border: 1px solid #c5d4cc;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .formula-unit-bar-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+    }
+    .formula-unit-label {
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 0.95rem;
+    }
+    .formula-unit-switch {
+        display: flex;
+        flex: 1 1 220px;
+        min-width: 0;
+        border: 1px solid #8db59a;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #f3fbf5;
+    }
+    .formula-unit-btn {
+        flex: 1 1 0;
+        min-height: 44px;
+        min-width: 44px;
+        border: 0;
+        border-right: 1px solid #8db59a;
+        background: transparent;
+        color: #1f6637;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+    }
+    .formula-unit-btn:last-child { border-right: 0; }
+    .formula-unit-btn.is-active,
+    .formula-unit-btn[aria-checked="true"] {
+        background: #1f6b35;
+        color: #fff;
+    }
+    .formula-lang-switch {
+        display: flex;
+        gap: 8px;
+        margin-left: auto;
+        font-size: 0.9rem;
+    }
+    .formula-lang-switch a {
+        color: #1f6b35;
+        text-decoration: none;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 8px;
+        border-radius: 8px;
+    }
+    .formula-lang-switch a[aria-current="true"] {
+        font-weight: 700;
+        background: #e8f5e9;
+    }
+    .formula-unit-help {
+        margin-top: 10px;
+        font-size: 0.88rem;
+        color: #4b6351;
+    }
+    .formula-unit-help summary {
+        cursor: pointer;
+        font-weight: 600;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+    }
+    .formula-unit-help p { margin: 8px 0; }
+    .formula-unit-help ul {
+        margin: 0;
+        padding-left: 1.2em;
+    }
+    .ingredient-amount {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-items: baseline;
+        gap: 0;
+        text-align: right;
+        max-width: 70%;
+    }
+    [data-unit-mode="g"] .qty-lb,
+    [data-unit-mode="g"] .qty-gal,
+    [data-unit-mode="g"] .qty-sep { display: none; }
+    [data-unit-mode="lb"] .qty-g,
+    [data-unit-mode="lb"] .qty-gal,
+    [data-unit-mode="lb"] .qty-sep { display: none; }
+    [data-unit-mode="gal"] .qty-g,
+    [data-unit-mode="gal"] .qty-sep { display: none; }
+    [data-unit-mode="gal"] .qty-gal { display: inline; }
+    [data-unit-mode="gal"] .ingredient-item:not(.is-liquid) .qty-gal { display: none; }
+    [data-unit-mode="gal"] .ingredient-item:not(.is-liquid) .qty-lb { display: inline; }
+    [data-unit-mode="all"] .qty-sep { display: inline; }
+
     /* Landscape mobile */
     @media (max-width: 896px) and (orientation: landscape) {
         .ingredients-grid,
@@ -975,10 +1146,50 @@ $page_title = 'Production Schedule';
             padding: 6px 8px;
         }
     }
+
+    @media (max-width: 480px) {
+        [data-unit-mode="all"] .ingredient-amount {
+            flex-direction: column;
+            align-items: flex-end;
+            max-width: 48%;
+        }
+        [data-unit-mode="all"] .qty-sep { display: none; }
+        .formula-unit-bar-row { flex-direction: column; align-items: stretch; }
+        .formula-lang-switch { margin-left: 0; justify-content: flex-start; }
+    }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        var storageKey = 'bakery.formulaUnitMode';
+        var modes = ['g', 'lb', 'gal', 'all'];
+        var root = document;
+
+        function applyFormulaUnitMode(mode) {
+            if (modes.indexOf(mode) === -1) mode = 'all';
+            root.querySelectorAll('[data-formula-units]').forEach(function (el) {
+                el.setAttribute('data-unit-mode', mode);
+            });
+            root.querySelectorAll('.formula-unit-btn').forEach(function (btn) {
+                var on = btn.getAttribute('data-unit') === mode;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-checked', on ? 'true' : 'false');
+            });
+            try { localStorage.setItem(storageKey, mode); } catch (err) {}
+        }
+
+        var saved = null;
+        try { saved = localStorage.getItem(storageKey); } catch (err) {}
+        if (saved) applyFormulaUnitMode(saved);
+
+        root.querySelectorAll('.formula-unit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                applyFormulaUnitMode(btn.getAttribute('data-unit'));
+            });
+        });
+    })();
+
     document.querySelectorAll('.quantity-stepper').forEach(function (stepper) {
         var input = stepper.querySelector('input[type="number"]');
         if (!input) return;

@@ -21,7 +21,7 @@ $autoPushEnabled = $canControlAutoPush && function_exists('bakery_auto_push_is_e
     : false;
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?php echo htmlspecialchars(function_exists('bakery_current_lang') ? bakery_current_lang() : 'en', ENT_QUOTES, 'UTF-8'); ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
