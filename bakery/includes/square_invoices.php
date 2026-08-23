@@ -62,7 +62,8 @@ function bakery_square_ensure_schema(PDO $db): void
                 daily_order_id INT NULL DEFAULT NULL,
                 processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (id),
-                UNIQUE KEY uq_square_webhook_event_id (event_id)
+                UNIQUE KEY uq_square_webhook_event_id (event_id),
+                KEY idx_square_webhook_invoice (square_invoice_id)
              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
         if (function_exists('bakery_forget_table_exists')) {
