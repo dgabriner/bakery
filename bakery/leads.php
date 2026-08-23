@@ -173,11 +173,11 @@ $contact_modes = ['phone', 'email', 'in_person', 'text', 'social_media'];
     <section class="pipeline-section" aria-label="Customer lifecycle pipeline">
         <div class="pipeline-heading">
             <div><h2>Customer pipeline</h2><p>From first conversation through active and inactive client relationships.</p></div>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="filterPipeline('all')">Show all leads</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-stage="all" onclick="filterPipeline('all')">Show all leads</button>
         </div>
         <div class="pipeline-track">
             <?php foreach (['new' => 'New', 'contacted' => 'Contacted', 'interested' => 'Interested', 'qualified' => 'Qualified'] as $stage => $label): ?>
-                <button type="button" class="pipeline-stage" onclick="filterPipeline('<?php echo $stage; ?>')">
+                <button type="button" class="pipeline-stage" data-stage="<?php echo $stage; ?>" onclick="filterPipeline('<?php echo $stage; ?>')">
                     <span class="pipeline-count"><?php echo $pipelineCounts[$stage]; ?></span><span><?php echo $label; ?></span>
                 </button>
             <?php endforeach; ?>
@@ -191,8 +191,8 @@ $contact_modes = ['phone', 'email', 'in_person', 'text', 'social_media'];
             </div>
         </div>
         <div class="pipeline-exits">
-            <button type="button" onclick="filterPipeline('converted')">Converted lead records: <?php echo $pipelineCounts['converted']; ?></button>
-            <button type="button" onclick="filterPipeline('closed')">Closed/lost: <?php echo $pipelineCounts['closed']; ?></button>
+            <button type="button" data-stage="converted" onclick="filterPipeline('converted')">Converted lead records: <?php echo $pipelineCounts['converted']; ?></button>
+            <button type="button" data-stage="closed" onclick="filterPipeline('closed')">Closed/lost: <?php echo $pipelineCounts['closed']; ?></button>
         </div>
     </section>
 
@@ -593,7 +593,10 @@ document.addEventListener('change', function(e) {
         })
         .then(response => response.json())
         .then(data => {
-            if (!data.success) {
+            if (data.success) {
+                leadCard.dataset.pipelineStatus = newStatus;
+                applyPipelineFilter();
+            } else {
                 alert('Error updating status: ' + (data.error || 'Unknown error'));
                 location.reload();
             }
@@ -761,9 +764,19 @@ function toggleFollowUp(contactId, needed) {
     });
 }
 
+var activePipelineFilter = 'all';
+
 function filterPipeline(status) {
+    activePipelineFilter = status;
+    document.querySelectorAll('button[data-stage]').forEach(function(btn) {
+        btn.classList.toggle('active-filter', btn.dataset.stage === status);
+    });
+    applyPipelineFilter();
+}
+
+function applyPipelineFilter() {
     document.querySelectorAll('.lead-card').forEach(function(card) {
-        card.style.display = status === 'all' || card.dataset.pipelineStatus === status ? '' : 'none';
+        card.style.display = activePipelineFilter === 'all' || card.dataset.pipelineStatus === activePipelineFilter ? '' : 'none';
     });
 }
 
@@ -824,6 +837,8 @@ function convertLead(leadId, leadName) {
 .inactive-stage { background: #e2e3e5; color: #383d41; }
 .pipeline-exits { display: flex; gap: 10px; margin-top: 12px; }
 .pipeline-exits button { background: transparent; border: 0; color: #6c757d; text-decoration: underline; cursor: pointer; }
+.pipeline-stage.active-filter, .pipeline-exits button.active-filter { outline: 3px solid #2c3e50; outline-offset: -3px; font-weight: 700; }
+.pipeline-exits button.active-filter { color: #2c3e50; }
 .btn-convert { background: #28a745; color: #fff; }
 .btn-client-link { background: #d4edda; color: #155724; }
 

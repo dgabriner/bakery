@@ -5,6 +5,39 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
 
+// Zone colors are presentation; the zones table owns names (and colors).
+$zoneColors = [
+    'Centro' => '#007bff',
+    'Mission' => '#dc3545',
+    'Ruta Sour Flour' => '#28a745',
+    'Daly City/San Mateo' => '#fd7e14',
+    'North Bay' => '#6f42c1',
+    'East Bay' => '#20c997',
+    'No Zone' => '#6c757d'
+];
+$fallbackZones = ['Centro', 'Mission', 'Ruta Sour Flour', 'Daly City/San Mateo', 'North Bay', 'East Bay'];
+$zones = [];
+try {
+    foreach ($db->query("SELECT name, color FROM zones ORDER BY name")->fetchAll() as $tableZone) {
+        $zoneName = trim((string)$tableZone['name']);
+        if ($zoneName === '' || in_array($zoneName, $zones, true)) {
+            continue;
+        }
+        $zones[] = $zoneName;
+        $tableColor = strtolower(trim((string)$tableZone['color']));
+        if (preg_match('/^#[0-9a-f]{6}$/', $tableColor)) {
+            $zoneColors[$zoneName] = $tableColor;
+        } elseif (!isset($zoneColors[$zoneName])) {
+            $zoneColors[$zoneName] = '#6c757d';
+        }
+    }
+} catch (Exception $e) {
+    // zones table not migrated yet — fall back to the hardcoded list
+}
+if (empty($zones)) {
+    $zones = $fallbackZones;
+}
+
 // Handle AJAX zone updates BEFORE any output
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_zone') {
     header('Content-Type: application/json');
@@ -19,8 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
         
         // Validate zone if provided
-        $validZones = ['Centro', 'Mission', 'Ruta Sour Flour', 'Daly City/San Mateo', 'North Bay', 'East Bay'];
-        if ($newZone !== null && !in_array($newZone, $validZones)) {
+        if ($newZone !== null && !in_array($newZone, $zones, true)) {
             throw new Exception("Invalid zone selected");
         }
         
@@ -71,26 +103,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $page_title = bakery_t('page.map');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
-
-// Define zones and their colors (matching the customer system)
-$zoneColors = [
-    'Centro' => '#007bff',
-    'Mission' => '#dc3545', 
-    'Ruta Sour Flour' => '#28a745',
-    'Daly City/San Mateo' => '#fd7e14',
-    'North Bay' => '#6f42c1',
-    'East Bay' => '#20c997',
-    'No Zone' => '#6c757d'
-];
-
-$zones = [
-    'Centro',
-    'Mission',
-    'Ruta Sour Flour',
-    'Daly City/San Mateo',
-    'North Bay',
-    'East Bay'
-];
 
 // Fetch customers with addresses - prioritize address over stored coordinates
 $customers = $db->query("SELECT id, name, address, latitude, longitude, zone FROM customers WHERE address IS NOT NULL AND address != '' ORDER BY zone, name")->fetchAll();
