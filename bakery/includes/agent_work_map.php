@@ -158,6 +158,7 @@ function bakery_agent_work_map(): array
             ],
             'bugs' => ['no-staff-alerts'],
             'prompt' => 'docs/prompts/10-exception-connections.md',
+            'prompt_status' => 'shipped',
         ],
         'exception-mobile' => [
             'title' => 'Thumb-first mobile exception desk',
@@ -176,6 +177,7 @@ function bakery_agent_work_map(): array
             ],
             'bugs' => ['no-staff-alerts'],
             'prompt' => 'docs/prompts/11-exception-mobile.md',
+            'prompt_status' => 'shipped',
         ],
         'exception-desktop' => [
             'title' => 'Desktop exception workshop',
@@ -194,6 +196,7 @@ function bakery_agent_work_map(): array
             ],
             'bugs' => ['no-staff-alerts'],
             'prompt' => 'docs/prompts/12-exception-desktop.md',
+            'prompt_status' => 'shipped',
         ],
         'staff-alerts' => [
             'title' => 'Staff alert bell over live exceptions and owned work',
@@ -207,6 +210,7 @@ function bakery_agent_work_map(): array
                 'includes/auth.php',
                 'includes/dashboard_command_center.php',
                 'css/nav.css',
+                'scripts/staff_alert_digest.php',
             ],
             'tests' => [
                 'tests/run_staff_alert_tests.php',
@@ -231,6 +235,7 @@ function bakery_agent_work_map(): array
                 'database/schema/057_text_messages.sql',
                 'scripts/test_twilio_connection.php',
                 'scripts/deploy_manifest.ps1',
+                '.env.example',
                 'lang/en.php',
                 'lang/es.php',
             ],
@@ -243,7 +248,9 @@ function bakery_agent_work_map(): array
                 'Every outbound attempt (sent or failed) leaves exactly one ledger row',
                 'Sending happens only through text_comms.php; the API is read-only',
                 'Webhook signature validation defaults on whenever an auth token exists',
+                'Command Center shows customer, test, and general texts from the same ledger',
             ],
+            'bugs' => [],
         ],
         'sfb-origin' => [
             'title' => 'SF Baker origin column and ops firewall',
@@ -335,6 +342,8 @@ function bakery_agent_work_map(): array
                 '.cursor/hooks/session-brief.ps1',
                 '.cursor/hooks/session-brief.cmd',
                 '.cursor/skills/agent-homebase/SKILL.md',
+                '.opencode/opencode.json',
+                '.opencode/skills/test-gate/SKILL.md',
             ],
             'tests' => [
                 'tests/run_agent_homebase_tests.php',
@@ -597,8 +606,11 @@ function bakery_agent_work_map(): array
         ],
         'general' => [
             'title' => 'Unscoped bakery coding mission',
-            'aliases' => ['cursor-agent', 'anonymous-agent', 'admin'],
-            'files' => [],
+            'aliases' => ['cursor-agent', 'anonymous-agent', 'admin', 'broken-windows'],
+            'files' => [
+                'leads.php',
+                'map.php',
+            ],
             'tests' => [
                 'tests/run_i18n_tests.php',
                 'tests/run_integrity_tests.php',
