@@ -95,7 +95,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
             </p>
         </div>
         <div class="ipl-actions no-print">
-            <a class="btn btn-outline" href="production_center.php?week=<?php echo urlencode($pcWeek); ?>#day-<?php echo urlencode($selectedDate); ?>">Production Center</a>
+            <a class="btn btn-outline" href="production_center.php?date=<?php echo urlencode($selectedDate); ?>">Production Center</a>
             <a class="btn btn-outline" href="production.php?date=<?php echo urlencode($selectedDate); ?>">Daily Production</a>
             <a class="btn btn-outline" href="ingredients.php">Ingredients</a>
             <?php if ($plan['error'] === null && !empty($plan['ingredients'])): ?>

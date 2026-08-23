@@ -2,18 +2,11 @@
 // Security check
 define('ACCESS_ALLOWED', true);
 
-// Load includes
+// Load includes ($db + auth gate come from database.php)
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
-
-// Initialize database connection
-$db = new PDO(
-    "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
-    DB_USER,
-    DB_PASS,
-    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-);
+require_once 'includes/demand_review.php';
 
 // Set page title
 $page_title = bakery_t('page.product_distribution');
@@ -54,11 +47,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         switch ($_POST['action']) {
             case 'get_product_customers':
                 $productId = (int)$_POST['product_id'];
-                $selectedDay = isset($_POST['day']) ? (int)$_POST['day'] : null;
-                
-                // Get customers with standing orders for this product
-                $dayFilter = $selectedDay !== null ? "AND so.day_of_week = $selectedDay" : "";
-                
+                $selectedDay = (isset($_POST['day']) && $_POST['day'] !== '') ? (int)$_POST['day'] : null;
+                $deliveryDate = trim((string)($_POST['date'] ?? ''));
+                if ($deliveryDate !== '') {
+                    try {
+                        $deliveryDate = bakery_inventory_validate_date($deliveryDate);
+                    } catch (Throwable $e) {
+                        $deliveryDate = '';
+                    }
+                }
+
+                if ($deliveryDate !== '' && $productId > 0) {
+                    $weekday = bakery_standing_day_from_date($deliveryDate);
+                    if ($selectedDay === null || $selectedDay === $weekday) {
+                        echo json_encode([
+                            'success' => true,
+                            'effective' => true,
+                            'customers_with_orders' => bakery_operating_demand_customers_for_product($db, $deliveryDate, $productId),
+                            'customers_with_routes' => [],
+                            'remaining_customers' => [],
+                            'mix' => bakery_operating_demand_by_product($db, $deliveryDate, ['product_id' => $productId])['mix'] ?? [],
+                        ]);
+                        break;
+                    }
+                }
+
+                $dayClause = $selectedDay !== null ? bakery_standing_day_in_clause($selectedDay) : null;
+                $dayFilter = $dayClause ? ('AND so.day_of_week ' . $dayClause['sql']) : '';
+                $dayValues = $dayClause['values'] ?? [];
+
                 $stmt = $db->prepare("
                     SELECT 
                         c.id, 
@@ -79,13 +96,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     " . bakery_sfb_ops_origin_clause('c', $db) . "
                     ORDER BY c.zone, c.name, so.day_of_week
                 ");
-                $stmt->execute([$productId]);
+                $stmt->execute(array_merge([$productId], $dayValues));
                 $customersWithOrders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                
-                // Get customers with standing routes but no orders for this product
-                $dayFilter2 = $selectedDay !== null ? "AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = $selectedDay" : "";
-                $dayFilterSubquery = $selectedDay !== null ? "AND day_of_week = $selectedDay" : "";
-                
+
+                $dayFilter2 = $dayClause
+                    ? ('AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END ' . $dayClause['sql'])
+                    : '';
+                $dayFilterSubquery = $dayClause ? ('AND day_of_week ' . $dayClause['sql']) : '';
+
                 $stmt2 = $db->prepare("
                     SELECT 
                         c.id, 
@@ -105,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     " . bakery_sfb_ops_origin_clause('c', $db) . "
                     ORDER BY c.zone, c.name, sr.day_of_week
                 ");
-                $stmt2->execute([$productId]);
+                $stmt2->execute(array_merge([$productId], $dayValues, $dayValues));
                 $customersWithRoutes = $stmt2->fetchAll(PDO::FETCH_ASSOC);
                 
                 // Get remaining customers (no standing routes)
@@ -174,7 +192,12 @@ try {
 $productionWeekday = bakery_standing_day_from_date($productionDate);
 $inventoryReady = bakery_inventory_ready($db);
 $productionError = '';
-$productionUsesActual = false;
+$demandMix = [
+    'mode' => 'none',
+    'has_daily' => false,
+    'daily_customers' => 0,
+    'standing_customers' => 0,
+];
 $productionGroups = [];
 $productionTotals = [
     'required' => 0,
@@ -188,9 +211,8 @@ $productionTotals = [
 try {
     // Effective demand is the per-customer merge of dated orders and standing
     // forecast — the same source Daily Production uses. No all-or-nothing flip.
-    require_once 'includes/demand_review.php';
     $demand = bakery_operating_demand_by_product($db, $productionDate);
-    $productionUsesActual = $demand['has_daily'];
+    $demandMix = $demand['mix'] ?? $demandMix;
     $demandByProduct = $demand['by_product'];
 
     $inventorySelect = $inventoryReady
@@ -281,15 +303,20 @@ require_once 'includes/nav.php';
 $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 ?>
 
-<div class="product-distribution-container">
-    <h1>Product Distribution Explorer</h1>
+<div class="product-distribution-container"
+     data-label-effective="<?php echo htmlspecialchars(bakery_t('distribution.explorer_effective'), ENT_QUOTES, 'UTF-8'); ?>"
+     data-label-standing="<?php echo htmlspecialchars(bakery_t('distribution.explorer_standing'), ENT_QUOTES, 'UTF-8'); ?>"
+     data-badge-daily="<?php echo htmlspecialchars(bakery_t('distribution.source_badge_daily'), ENT_QUOTES, 'UTF-8'); ?>"
+     data-badge-standing="<?php echo htmlspecialchars(bakery_t('distribution.source_badge_standing'), ENT_QUOTES, 'UTF-8'); ?>"
+     data-badge-standard="<?php echo htmlspecialchars(bakery_t('distribution.source_badge_standard'), ENT_QUOTES, 'UTF-8'); ?>">
+    <h1><?php echo htmlspecialchars(bakery_t('page.product_distribution'), ENT_QUOTES, 'UTF-8'); ?></h1>
 
     <section class="production-needs" aria-labelledby="production-needs-heading">
         <div class="production-needs-heading">
             <div>
-                <p class="production-eyebrow">Production planning</p>
-                <h2 id="production-needs-heading">Needs by Product Class and Dough Type</h2>
-                <p>Required finished goods, current inventory coverage, and the remaining quantity and dough weight to produce.</p>
+                <p class="production-eyebrow"><?php echo htmlspecialchars(bakery_t('distribution.planning_eyebrow'), ENT_QUOTES, 'UTF-8'); ?></p>
+                <h2 id="production-needs-heading"><?php echo htmlspecialchars(bakery_t('distribution.needs_heading'), ENT_QUOTES, 'UTF-8'); ?></h2>
+                <p><?php echo htmlspecialchars(bakery_t('distribution.needs_lead'), ENT_QUOTES, 'UTF-8'); ?></p>
             </div>
             <div class="production-links">
                 <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($productionDate); ?>">Open inventory</a>
@@ -297,13 +324,22 @@ $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
             </div>
         </div>
 
-        <form method="get" class="production-date-filter">
-            <label>Delivery day
+        <form method="get" class="production-date-filter" data-production-date="<?php echo htmlspecialchars($productionDate, ENT_QUOTES, 'UTF-8'); ?>">
+            <label><?php echo htmlspecialchars(bakery_t('distribution.delivery_day'), ENT_QUOTES, 'UTF-8'); ?>
                 <input type="date" name="production_date" value="<?php echo htmlspecialchars($productionDate, ENT_QUOTES, 'UTF-8'); ?>">
             </label>
-            <button class="btn btn-outline" type="submit">View needs</button>
-            <span class="production-source <?php echo $productionUsesActual ? 'actual' : 'standing'; ?>">
-                <?php echo $productionUsesActual ? 'Daily Orders merged with standing' : 'Standing forecast'; ?>
+            <button class="btn btn-outline" type="submit"><?php echo htmlspecialchars(bakery_t('distribution.view_needs'), ENT_QUOTES, 'UTF-8'); ?></button>
+            <?php
+            $mixMode = (string)($demandMix['mode'] ?? 'none');
+            $mixClass = $mixMode === 'merged' || $mixMode === 'dated' ? 'actual' : 'standing';
+            $mixKey = 'distribution.source_' . $mixMode;
+            $mixLabel = bakery_t($mixKey);
+            if ($mixLabel === $mixKey) {
+                $mixLabel = bakery_t('distribution.source_standing');
+            }
+            ?>
+            <span class="production-source <?php echo $mixClass; ?>">
+                <?php echo htmlspecialchars($mixLabel, ENT_QUOTES, 'UTF-8'); ?>
             </span>
         </form>
 
@@ -385,7 +421,7 @@ $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
                     <option value="">All Days</option>
                     <?php foreach ($dayNames as $dayNum => $dayName): ?>
                         <?php if ($dayNum > 0): ?>
-                            <option value="<?php echo $dayNum; ?>"><?php echo $dayName; ?></option>
+                            <option value="<?php echo $dayNum; ?>"<?php echo (int)$productionWeekday === (int)$dayNum ? ' selected' : ''; ?>><?php echo $dayName; ?></option>
                         <?php endif; ?>
                     <?php endforeach; ?>
                 </select>
@@ -442,7 +478,7 @@ $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
             <div class="customer-sections">
                 <!-- Customers with standing orders -->
                 <div class="customer-section">
-                    <h3 class="section-title">Customers with Standing Orders</h3>
+                    <h3 class="section-title" id="orders-section-title"><?php echo htmlspecialchars(bakery_t('distribution.explorer_standing'), ENT_QUOTES, 'UTF-8'); ?></h3>
                     <div id="customers-with-orders" class="zone-groups"></div>
                 </div>
                 
@@ -490,13 +526,22 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function loadProductCustomers(productId) {
         const selectedDay = document.getElementById('day-filter').value;
-        
+        const dateForm = document.querySelector('.production-date-filter');
+        const productionDate = dateForm ? dateForm.getAttribute('data-production-date') : '';
+        const params = new URLSearchParams();
+        params.set('action', 'get_product_customers');
+        params.set('product_id', productId);
+        params.set('day', selectedDay);
+        if (productionDate) {
+            params.set('date', productionDate);
+        }
+
         fetch('product_distribution.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: `action=get_product_customers&product_id=${productId}&day=${selectedDay}`
+            body: params.toString()
         })
         .then(response => response.json())
         .then(data => {
@@ -513,29 +558,49 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function displayResults(data) {
-        // Update header
+        const root = document.querySelector('.product-distribution-container');
         const dayFilter = document.getElementById('day-filter').value;
         const dayText = dayFilter ? ` (${getDayName(dayFilter)})` : ' (All Days)';
         document.getElementById('selected-product-name').textContent = selectedProductName + dayText;
-        
-        // Display customers with orders
-        displayCustomerSection('customers-with-orders', data.customers_with_orders, true);
-        
-        // Display customers with routes
-        displayCustomerSection('customers-with-routes', data.customers_with_routes, false);
-        
-        // Display remaining customers
-        displayRemainingCustomers('remaining-customers', data.remaining_customers);
-        
-        // Show results
+
+        const effective = !!data.effective;
+        const ordersTitle = document.getElementById('orders-section-title');
+        if (ordersTitle && root) {
+            ordersTitle.textContent = effective
+                ? (root.getAttribute('data-label-effective') || 'Effective demand this delivery day')
+                : (root.getAttribute('data-label-standing') || 'Customers with standing orders');
+        }
+        document.querySelectorAll('.customer-section').forEach(function (section, index) {
+            if (index === 0) {
+                section.style.display = '';
+                return;
+            }
+            section.style.display = effective ? 'none' : '';
+        });
+
+        displayCustomerSection('customers-with-orders', data.customers_with_orders || [], true, effective);
+        if (!effective) {
+            displayCustomerSection('customers-with-routes', data.customers_with_routes || [], false, false);
+            displayRemainingCustomers('remaining-customers', data.remaining_customers || []);
+        }
+
         document.getElementById('customer-results').style.display = 'block';
     }
     
-    function displayCustomerSection(containerId, customers, hasOrders) {
+    function sourceBadge(source) {
+        const root = document.querySelector('.product-distribution-container');
+        const key = source === 'daily' ? 'data-badge-daily'
+            : (source === 'pan_dulce_standard' ? 'data-badge-standard' : 'data-badge-standing');
+        const label = root ? (root.getAttribute(key) || source) : source;
+        return `<span class="source-badge source-${source || 'standing'}">${label}</span>`;
+    }
+
+    function displayCustomerSection(containerId, customers, hasOrders, effective) {
         const container = document.getElementById(containerId);
         container.innerHTML = '';
+        effective = !!effective;
         
-        if (customers.length === 0) {
+        if (!customers || customers.length === 0) {
             container.innerHTML = '<p class="no-customers">No customers found.</p>';
             return;
         }
@@ -573,7 +638,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const dayInfo = hasOrders ? 
                     `<div class="customer-days">
                         ${customer.day_of_week ? `<span class="day-badge">${getDayName(customer.day_of_week)}</span>` : ''}
-                        ${customer.quantity ? `<span class="quantity-badge">${customer.quantity}</span>` : ''}
+                        ${customer.source ? sourceBadge(customer.source) : ''}
+                        ${customer.quantity !== undefined && customer.quantity !== null ? `<span class="quantity-badge">${customer.quantity}</span>` : ''}
                     </div>` : 
                     `<div class="customer-days">
                         ${customer.day_of_week ? `<span class="day-badge">${getDayName(customer.day_of_week)}</span>` : ''}
@@ -582,7 +648,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const driverInfo = customer.driver_name ? 
                     `<div class="driver-info">Driver: ${customer.driver_name}</div>` : '';
                 
-                const quantityInput = hasOrders ? 
+                const quantityInput = hasOrders && !effective ? 
                     `<div class="quantity-input-container">
                         <input type="number" 
                                class="quantity-input" 
@@ -618,7 +684,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         // Add event listeners for quantity inputs
-        if (hasOrders) {
+        if (hasOrders && !effective) {
             container.querySelectorAll('.quantity-input').forEach(input => {
                 input.addEventListener('change', function() {
                     updateStandingOrder(
@@ -1268,6 +1334,28 @@ document.addEventListener('DOMContentLoaded', function() {
     border-radius: 3px;
     font-size: 0.8em;
     font-weight: 500;
+}
+
+.source-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.8em;
+    font-weight: 500;
+}
+
+.source-badge.source-daily {
+    background: #075d83;
+    color: #fff;
+}
+
+.source-badge.source-standing {
+    background: #745410;
+    color: #fff;
+}
+
+.source-badge.source-pan_dulce_standard {
+    background: #5c6e62;
+    color: #fff;
 }
 
 .driver-info {

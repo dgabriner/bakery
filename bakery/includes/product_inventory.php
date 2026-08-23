@@ -76,19 +76,30 @@ function bakery_inventory_credit_return_note(int $dailyOrderId): string {
     return 'Order #' . $dailyOrderId . ' credit taken back';
 }
 
-function bakery_inventory_record_production(PDO $db, string $date, int $productId, int $quantity, ?string $notes = null): void {
-    if ($productId <= 0 || $quantity <= 0) {
-        throw new InvalidArgumentException('Production quantity must be at least one unit.');
+function bakery_inventory_record_production(PDO $db, string $date, int $productId, int $quantity, ?string $notes = null, ?int $expectedProduced = null, int $wasteQuantity = 0): void {
+    if ($productId <= 0 || $quantity < 0 || $wasteQuantity < 0 || ($quantity + $wasteQuantity) <= 0) {
+        throw new InvalidArgumentException('Production or waste quantity must be at least one unit.');
     }
     bakery_inventory_validate_date($date);
     bakery_inventory_ensure_day($db, $date, $productId);
+    $current = $db->prepare(
+        'SELECT produced_quantity FROM product_inventory_days WHERE delivery_date = ? AND product_id = ? FOR UPDATE'
+    );
+    $current->execute([$date, $productId]);
+    $produced = (int)$current->fetchColumn();
+    if ($expectedProduced !== null && $produced !== $expectedProduced) {
+        throw new RuntimeException('stale_production_count');
+    }
     $stmt = $db->prepare(
         'UPDATE product_inventory_days
          SET available_quantity = available_quantity + ?, produced_quantity = produced_quantity + ?
          WHERE delivery_date = ? AND product_id = ?'
     );
     $stmt->execute([$quantity, $quantity, $date, $productId]);
-    bakery_inventory_movement($db, $date, $productId, 'production', $quantity, null, $notes);
+    bakery_inventory_movement($db, $date, $productId, 'production', $quantity + $wasteQuantity, null, $notes);
+    if ($wasteQuantity > 0) {
+        bakery_inventory_movement($db, $date, $productId, 'waste', -$wasteQuantity, null, $notes ?: 'Production waste');
+    }
 }
 
 function bakery_inventory_set_count(PDO $db, string $date, int $productId, int $quantity, ?string $notes = null): void {
@@ -110,11 +121,34 @@ function bakery_inventory_set_count(PDO $db, string $date, int $productId, int $
 }
 
 /**
+ * Van left: open stops on this driver/date become out_for_delivery.
+ * Cancelled, failed, and already-delivered assignments stay off the van.
+ * Assignments remain pending until the driver is at the stop (in_transit locks reorder).
+ */
+function bakery_inventory_mark_open_stops_out_for_delivery(PDO $db, int $driverId, string $date): void
+{
+    bakery_inventory_validate_date($date);
+    if ($driverId <= 0) {
+        return;
+    }
+    $db->prepare(
+        "UPDATE daily_orders do
+         INNER JOIN daily_order_assignments doa ON doa.daily_order_id = do.id
+         SET do.status = 'out_for_delivery'
+         WHERE doa.driver_id = ?
+           AND doa.delivery_date = ?
+           AND do.status NOT IN ('delivered', 'invoiced')
+           AND COALESCE(doa.delivery_status, 'pending') NOT IN ('cancelled', 'delivered', 'failed')"
+    )->execute([$driverId, $date]);
+}
+
+/**
  * Save the final pickup quantities for one driver, returning stock for any reduced load.
  *
  * Pickup quantities are always saved as entered. When warehouse stock is short,
- * only the available portion is reserved; the rest is recorded as a load override
- * (manager confirmed the product was physically picked up).
+ * the confirmed excess is first counted into finished-goods custody, then loaded.
+ * This keeps available + loaded inventory and the movement ledger balanced when
+ * product was physically supplied from a store or another source.
  */
 function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId, array $quantities, ?string $notes = null): void {
     if ($driverId <= 0) {
@@ -152,6 +186,7 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
 
         $oldStmt = $db->prepare('SELECT loaded_quantity FROM driver_load_items WHERE driver_load_id = ? AND product_id = ? FOR UPDATE');
         $stockStmt = $db->prepare('SELECT available_quantity FROM product_inventory_days WHERE delivery_date = ? AND product_id = ? FOR UPDATE');
+        $sourceStockUpdate = $db->prepare('UPDATE product_inventory_days SET available_quantity = available_quantity + ? WHERE delivery_date = ? AND product_id = ?');
         $stockUpdate = $db->prepare('UPDATE product_inventory_days SET available_quantity = available_quantity - ?, loaded_quantity = loaded_quantity + ? WHERE delivery_date = ? AND product_id = ?');
         $itemUpdate = $db->prepare('INSERT INTO driver_load_items (driver_load_id, product_id, loaded_quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE loaded_quantity = VALUES(loaded_quantity)');
         foreach ($quantities as $productId => $rawQuantity) {
@@ -171,9 +206,14 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
                     bakery_inventory_movement($db, $date, $productId, 'load', -$reserved, $driverId, $notes);
                 }
                 if ($override > 0) {
-                    $overrideNote = trim(($notes ?? '') !== '' ? ($notes . ' — ') : '')
-                        . "Load override: {$override} unit(s) picked up without finished-goods reservation.";
-                    bakery_inventory_movement($db, $date, $productId, 'load', 0, $driverId, $overrideNote);
+                    $sourceNote = trim(($notes ?? '') !== '' ? ($notes . ' — ') : '')
+                        . "External load source: counted {$override} unit(s) into finished-goods custody.";
+                    $loadNote = trim(($notes ?? '') !== '' ? ($notes . ' — ') : '')
+                        . "Loaded {$override} externally supplied unit(s).";
+                    $sourceStockUpdate->execute([$override, $date, $productId]);
+                    bakery_inventory_movement($db, $date, $productId, 'count', $override, $driverId, $sourceNote);
+                    $stockUpdate->execute([$override, $override, $date, $productId]);
+                    bakery_inventory_movement($db, $date, $productId, 'load', -$override, $driverId, $loadNote);
                 }
             } elseif ($delta < 0) {
                 $stockUpdate->execute([$delta, $delta, $date, $productId]);
@@ -181,10 +221,11 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
             }
             $itemUpdate->execute([$loadId, $productId, $quantity]);
         }
-        $db->prepare("UPDATE daily_orders do INNER JOIN daily_order_assignments doa ON doa.daily_order_id = do.id SET do.status = 'out_for_delivery' WHERE doa.driver_id = ? AND doa.delivery_date = ? AND do.status NOT IN ('delivered', 'invoiced')")
-            ->execute([$driverId, $date]);
-        if (function_exists('bakery_customer_notify_out_for_delivery_batch')) {
+        bakery_inventory_mark_open_stops_out_for_delivery($db, $driverId, $date);
+        if (!function_exists('bakery_customer_notify_out_for_delivery_batch')) {
             require_once __DIR__ . '/customer_notifications.php';
+        }
+        if (function_exists('bakery_customer_notify_out_for_delivery_batch')) {
             bakery_customer_notify_out_for_delivery_batch($db, $driverId, $date);
         }
 

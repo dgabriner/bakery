@@ -826,37 +826,129 @@ function bakery_operating_demand_lines(PDO $db, string $date, array $filters = [
 }
 
 /**
+ * Count how operating-demand lines mix dated vs standing vs Pan Dulce standard.
+ *
+ * @param list<array<string,mixed>> $lines
+ * @return array{
+ *   daily_customers:int,
+ *   standing_customers:int,
+ *   standard_customers:int,
+ *   has_daily:bool,
+ *   has_standing:bool,
+ *   mode:string
+ * }
+ */
+function bakery_operating_demand_mix_from_lines(array $lines): array
+{
+    $dailyCustomers = [];
+    $standingCustomers = [];
+    $standardCustomers = [];
+    foreach ($lines as $line) {
+        $cid = (int)($line['customer_id'] ?? 0);
+        $src = (string)($line['source'] ?? 'standing');
+        if ($src === 'daily') {
+            $dailyCustomers[$cid] = true;
+        } elseif ($src === 'pan_dulce_standard') {
+            $standardCustomers[$cid] = true;
+        } else {
+            $standingCustomers[$cid] = true;
+        }
+    }
+    $dailyN = count($dailyCustomers);
+    $standingN = count($standingCustomers);
+    $standardN = count($standardCustomers);
+    $mode = 'none';
+    if ($dailyN > 0 && ($standingN > 0 || $standardN > 0)) {
+        $mode = 'merged';
+    } elseif ($dailyN > 0) {
+        $mode = 'dated';
+    } elseif ($standingN > 0 || $standardN > 0) {
+        $mode = 'standing';
+    }
+
+    return [
+        'daily_customers' => $dailyN,
+        'standing_customers' => $standingN,
+        'standard_customers' => $standardN,
+        'has_daily' => $dailyN > 0,
+        'has_standing' => $standingN > 0,
+        'mode' => $mode,
+    ];
+}
+
+/**
+ * Customers contributing effective demand for one product on one delivery date.
+ *
+ * @return list<array{id:int,name:string,zone:string,quantity:int,source:string,day_of_week:int}>
+ */
+function bakery_operating_demand_customers_for_product(PDO $db, string $date, int $productId): array
+{
+    if ($productId <= 0) {
+        return [];
+    }
+    $weekday = bakery_standing_day_from_date($date);
+    $out = [];
+    foreach (bakery_operating_demand_lines($db, $date, ['product_id' => $productId]) as $line) {
+        if ((int)$line['product_id'] !== $productId) {
+            continue;
+        }
+        $out[] = [
+            'id' => (int)$line['customer_id'],
+            'name' => (string)$line['customer_name'],
+            'zone' => (string)($line['customer_zone'] ?? ''),
+            'quantity' => (int)$line['quantity'],
+            'source' => (string)($line['source'] ?? 'standing'),
+            'day_of_week' => $weekday,
+        ];
+    }
+    usort($out, static function ($a, $b) {
+        $z = strcasecmp((string)$a['zone'], (string)$b['zone']);
+        if ($z !== 0) {
+            return $z;
+        }
+        return strcasecmp((string)$a['name'], (string)$b['name']);
+    });
+    return $out;
+}
+
+/**
  * Aggregate effective operating demand by product for one delivery date.
+ *
+ * Dated beats standing per customer. Never all-or-nothing per date.
  *
  * @return array{
  *   by_product: array<int,int>,
  *   has_daily: bool,
  *   required_units: int,
  *   product_count: int,
- *   sources: array<int,string>
+ *   sources: array<int,string>,
+ *   mix: array<string,mixed>
  * }
  */
 function bakery_operating_demand_by_product(PDO $db, string $date, array $filters = []) {
     $byProduct = [];
     $sources = [];
-    $hasDaily = false;
+    $lines = bakery_operating_demand_lines($db, $date, $filters);
 
-    foreach (bakery_operating_demand_lines($db, $date, $filters) as $line) {
+    foreach ($lines as $line) {
         $pid = (int)$line['product_id'];
         $byProduct[$pid] = ($byProduct[$pid] ?? 0) + (int)$line['quantity'];
-        if (($line['source'] ?? '') === 'daily') {
-            $hasDaily = true;
-            $sources[$pid] = 'daily';
-        } elseif (!isset($sources[$pid])) {
-            $sources[$pid] = 'standing';
+        $src = (string)($line['source'] ?? 'standing');
+        if (!isset($sources[$pid])) {
+            $sources[$pid] = $src;
+        } elseif ($sources[$pid] !== $src) {
+            $sources[$pid] = 'mixed';
         }
     }
 
+    $mix = bakery_operating_demand_mix_from_lines($lines);
+
     return [
         'by_product' => $byProduct,
-        'has_daily' => $hasDaily,
+        'has_daily' => $mix['has_daily'],
         'required_units' => array_sum($byProduct),
         'product_count' => count($byProduct),
         'sources' => $sources,
+        'mix' => $mix,
     ];
 }

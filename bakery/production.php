@@ -8,13 +8,61 @@ require_once 'includes/database.php';
 require_once 'includes/daily_order_generation.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/production_plan.php';
+require_once 'includes/production_workflow_strip.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
+require_once 'includes/formula_units.php';
+require_once 'includes/product_pack_yields.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
 // Days of the week for display
 $days = bakery_day_names();
+
+if (!function_exists('bakery_production_pan_dulce_batch_hint')) {
+    /** Translate a Pan Dulce dough total back into the gallon/tray language used at the bench. */
+    function bakery_production_pan_dulce_batch_hint(PDO $db, int $doughTypeId, int $pieces): ?array {
+        if ($doughTypeId <= 0 || $pieces <= 0 || !function_exists('bakery_pack_dough_yield')) {
+            return null;
+        }
+        $yield = bakery_pack_dough_yield($db, $doughTypeId);
+        if (!$yield) {
+            return null;
+        }
+        $traysPerGallon = (float)($yield['trays_per_gallon'] ?? 0);
+        $piecesPerTray = (int)($yield['pieces_per_tray'] ?? 0);
+        if ($traysPerGallon <= 0 || $piecesPerTray <= 0) {
+            return null;
+        }
+        return [
+            'gallons' => $pieces / ($traysPerGallon * $piecesPerTray),
+            'trays' => $pieces / $piecesPerTray,
+            'pieces' => $pieces,
+        ];
+    }
+}
+
+if (!function_exists('bakery_production_pan_dulce_product_hint')) {
+    /** Translate remaining pieces into whole trays plus loose pieces when configured. */
+    function bakery_production_pan_dulce_product_hint(PDO $db, int $productId, int $pieces): ?array {
+        if ($productId <= 0 || $pieces <= 0 || !function_exists('bakery_pack_product_yield')) {
+            return null;
+        }
+        $yield = bakery_pack_product_yield($db, $productId);
+        if (!$yield || strtolower((string)($yield['input_unit'] ?? '')) !== 'tray') {
+            return null;
+        }
+        $piecesPerTray = (int)round((float)($yield['pieces_per_input'] ?? $yield['pieces_per_tray'] ?? 0));
+        if ($piecesPerTray <= 0) {
+            return null;
+        }
+        return [
+            'trays' => intdiv($pieces, $piecesPerTray),
+            'loose' => $pieces % $piecesPerTray,
+            'pieces_per_tray' => $piecesPerTray,
+        ];
+    }
+}
 
 // Date picker (default: tomorrow — bake for the next day)
 $defaultProductionDate = date('Y-m-d', strtotime('+1 day'));
@@ -55,6 +103,9 @@ if (!function_exists('bakery_production_user_message')) {
                 ? bakery_t('production.error_inventory_baker')
                 : bakery_t('production.error_inventory_ops');
         }
+        if (stripos($msg, 'stale_production_count') !== false) {
+            return bakery_t('production.error_stale_made');
+        }
         if (stripos($msg, 'at least one produced') !== false) {
             return bakery_t('production.error_enter_units');
         }
@@ -82,6 +133,11 @@ if (isset($_GET['saved'])) {
             ]);
     }
 }
+$savedWasteNotice = filter_var($_GET['waste'] ?? 0, FILTER_VALIDATE_INT);
+if ($savedWasteNotice !== false && $savedWasteNotice > 0) {
+    $wasteNotice = bakery_t('production.waste_saved_notice', ['count' => number_format($savedWasteNotice)]);
+    $inventoryNotice = trim(($inventoryNotice ? $inventoryNotice . ' ' : '') . $wasteNotice);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confirm_production') {
     try {
@@ -90,15 +146,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confi
         }
         $productionDate = bakery_inventory_validate_date((string)($_POST['production_date'] ?? ''));
         $quantities = $_POST['produced'] ?? [];
+        $wasteQuantities = $_POST['waste'] ?? [];
         if (!is_array($quantities)) {
             throw new InvalidArgumentException(bakery_t('production.error_enter_units'));
         }
+        if (!is_array($wasteQuantities)) $wasteQuantities = [];
+        $expectedMade = $_POST['produced_was'] ?? [];
+        if (!is_array($expectedMade)) {
+            $expectedMade = [];
+        }
         $savedUnits = 0;
+        $savedWaste = 0;
         $savedProducts = 0;
         $db->beginTransaction();
-        foreach ($quantities as $productId => $quantity) {
+        $postedProductIds = array_unique(array_merge(array_keys($quantities), array_keys($wasteQuantities)));
+        foreach ($postedProductIds as $productId) {
+            $quantity = $quantities[$productId] ?? 0;
             $quantity = filter_var($quantity, FILTER_VALIDATE_INT);
-            if ($quantity === false || $quantity <= 0) {
+            $waste = filter_var($wasteQuantities[$productId] ?? 0, FILTER_VALIDATE_INT);
+            if ($quantity === false || $waste === false || $quantity < 0 || $waste < 0) {
+                throw new InvalidArgumentException(bakery_t('production.error_enter_units'));
+            }
+            if ($quantity === 0 && $waste === 0) {
                 continue;
             }
             if ((int)$productId <= 0) {
@@ -107,15 +176,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confi
             if (is_array($bakerProductIds) && !in_array((int)$productId, $bakerProductIds, true)) {
                 throw new InvalidArgumentException(bakery_t('production.error_not_in_list'));
             }
-            bakery_inventory_record_production($db, $productionDate, (int)$productId, (int)$quantity, 'Production confirmed');
+            $expected = filter_var($expectedMade[$productId] ?? 0, FILTER_VALIDATE_INT);
+            bakery_inventory_record_production(
+                $db,
+                $productionDate,
+                (int)$productId,
+                (int)$quantity,
+                'Production confirmed',
+                $expected === false ? 0 : (int)$expected,
+                (int)$waste
+            );
             $savedUnits += (int)$quantity;
+            $savedWaste += (int)$waste;
             $savedProducts++;
         }
-        if ($savedUnits === 0) {
+        if (($savedUnits + $savedWaste) === 0) {
             throw new InvalidArgumentException(bakery_t('production.error_enter_quantity'));
         }
         $db->commit();
-        header('Location: production.php?date=' . urlencode($productionDate) . '&saved=' . $savedUnits . '&products=' . $savedProducts);
+        header('Location: production.php?date=' . urlencode($productionDate) . '&saved=' . $savedUnits . '&waste=' . $savedWaste . '&products=' . $savedProducts);
         exit;
     } catch (Throwable $e) {
         if ($db->inTransaction()) {
@@ -166,9 +245,12 @@ try {
     if (!empty($bakeByProduct)) {
         $productIds = array_keys($bakeByProduct);
         $placeholders = implode(',', array_fill(0, count($productIds), '?'));
-        $bakerClause = $isBaker && !empty($bakerProductIds)
-            ? ' AND p.id IN (' . implode(',', array_map('intval', $bakerProductIds)) . ')'
-            : '';
+        $bakerClause = '';
+        if ($isBaker && is_array($bakerProductIds)) {
+            $bakerClause = empty($bakerProductIds)
+                ? ' AND 1 = 0'
+                : ' AND p.id IN (' . implode(',', array_map('intval', $bakerProductIds)) . ')';
+        }
         $orders = $db->prepare("
             SELECT 
                 p.id as product_id,
@@ -176,9 +258,11 @@ try {
                 p.weight_grams,
                 p.dough_type_id,
                 dt.name as dough_type_name,
-                dt.id as dt_id
+                dt.id as dt_id,
+                pl.name as product_line_name
             FROM products p
             LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
+            LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
             WHERE p.id IN ({$placeholders}) {$bakerClause}
             ORDER BY dt.name, p.name
         ");
@@ -285,7 +369,8 @@ try {
                 'total_weight_grams' => 0,
                 'products' => [],
                 'formula' => $formula,
-                'dough_type_id' => $doughTypeId
+                'dough_type_id' => $doughTypeId,
+                'product_line_name' => (string)($item['product_line_name'] ?? '')
             ];
         }
         
@@ -427,6 +512,22 @@ $orderSourceLabel = !empty($hasDailyOrders) ? bakery_t('production.from_daily_or
 $planCommitted = !empty($bakeList['committed']);
 $planDriftCount = (int)($bakeList['changed_since']['count'] ?? 0);
 $planAvailable = !empty($bakeList['available']);
+$canOpenProductionCenter = !$isBaker
+    && function_exists('bakery_user_has_role')
+    && bakery_user_has_role(['administrator', 'manager']);
+$productionCenterHref = function_exists('bakery_ops_link_production_center')
+    ? bakery_ops_link_production_center(
+        date('Y-m-d', strtotime('monday this week', strtotime($selectedDate))),
+        ['date' => $selectedDate],
+        $pageReturnKey ?: 'production'
+    )
+    : ('production_center.php?date=' . rawurlencode($selectedDate));
+$workflowStages = [];
+try {
+    $workflowStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
+} catch (Throwable $e) {
+    error_log('production workflow strip: ' . $e->getMessage());
+}
 $bakerShortages = [];
 if ($isBaker && function_exists('bakery_exception_desk_product_shortages')) {
     $bakerShortages = bakery_exception_desk_product_shortages($db, $selectedDate, is_array($bakerProductIds) ? $bakerProductIds : null);
@@ -468,10 +569,26 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
     <header class="bp-header">
         <div class="bp-header__top">
             <h1 class="bp-title"><?php echo $isBaker ? bakery_t('production.title_baker') : bakery_t('production.title_ops'); ?></h1>
-            <a class="bp-pack-link<?php echo $allProductionComplete ? ' bp-pack-link--ready' : ''; ?>" href="<?php echo htmlspecialchars($packListHref, ENT_QUOTES, 'UTF-8'); ?>">
-                <?php bakery_te('nav.pack_list'); ?>
-            </a>
+            <div class="bp-header__links">
+                <?php if ($canOpenProductionCenter): ?>
+                    <a class="bp-pack-link" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.open_production_center'); ?></a>
+                <?php endif; ?>
+                <a class="bp-pack-link<?php echo $allProductionComplete ? ' bp-pack-link--ready' : ''; ?>" href="<?php echo htmlspecialchars($packListHref, ENT_QUOTES, 'UTF-8'); ?>">
+                    <?php bakery_te('nav.pack_list'); ?>
+                </a>
+            </div>
         </div>
+        <?php if (!$isBaker): ?>
+            <?php
+            echo bakery_production_workflow_strip_css();
+            echo bakery_production_workflow_strip_html($workflowStages, [
+                'current' => 'produce',
+                'compact' => true,
+                'title' => bakery_t('production_workflow.title'),
+                'lead' => bakery_t('production_workflow.lead_manager'),
+            ]);
+            ?>
+        <?php endif; ?>
         <form method="get" action="production.php" class="bp-date-form">
             <label class="bp-date-label" for="date"><?php bakery_te('production.bake_for_delivery'); ?></label>
             <input type="date" name="date" id="date" class="bp-date-input"
@@ -481,8 +598,10 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
             <?php if ($attentionShortfall): ?><input type="hidden" name="attention" value="shortfall"><?php endif; ?>
             <p class="bp-date-context">
                 <strong><?php echo htmlspecialchars($days[$selectedDay], ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></strong>
-                <span class="bp-date-source"><?php echo htmlspecialchars($orderSourceLabel, ENT_QUOTES, 'UTF-8'); ?></span>
-                <?php if ($planAvailable): ?>
+                <?php if (!$isBaker): ?>
+                    <span class="bp-date-source"><?php echo htmlspecialchars($orderSourceLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php endif; ?>
+                <?php if (!$isBaker && $planAvailable): ?>
                     <?php if ($planCommitted): ?>
                         <span class="bp-plan-chip bp-plan-chip--committed"><?php bakery_te('production.plan_committed'); ?></span>
                         <?php if ($planDriftCount > 0): ?>
@@ -494,6 +613,33 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                 <?php endif; ?>
             </p>
         </form>
+        <?php if (!$isBaker && $planAvailable && !$planCommitted): ?>
+            <div class="bp-alert bp-alert--warn" role="status">
+                <p><strong><?php bakery_te('production.uncommitted_banner_title'); ?></strong>
+                    <?php echo htmlspecialchars($isBaker ? bakery_t('production.uncommitted_banner_baker') : bakery_t('production.uncommitted_banner_ops'), ENT_QUOTES, 'UTF-8'); ?>
+                </p>
+                <?php if ($canOpenProductionCenter): ?>
+                    <a class="bp-btn bp-btn--primary" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.commit_from_center'); ?></a>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+        <?php if ($isBaker): ?>
+            <div class="bp-baker-focus" role="status">
+                <strong><?php bakery_te('production.baker_focus_title'); ?></strong>
+                <span><?php bakery_te('production.baker_focus_lead'); ?></span>
+            </div>
+            <?php if ($planAvailable && !$planCommitted): ?>
+                <details class="bp-plan-note">
+                    <summary><?php bakery_te('production.baker_plan_note'); ?></summary>
+                    <p><?php bakery_te('production.uncommitted_banner_baker'); ?></p>
+                </details>
+            <?php elseif ($planCommitted && $planDriftCount > 0): ?>
+                <details class="bp-plan-note bp-plan-note--drift">
+                    <summary><?php bakery_te('production.baker_drift_note'); ?></summary>
+                    <p><?php echo htmlspecialchars(bakery_t('production.baker_drift_detail', ['count' => $planDriftCount]), ENT_QUOTES, 'UTF-8'); ?></p>
+                </details>
+            <?php endif; ?>
+        <?php endif; ?>
         <?php if (!isset($error) && !empty($productionData)): ?>
             <div class="bp-progress" aria-live="polite">
                 <div class="bp-progress__labels">
@@ -519,7 +665,9 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
     <?php endif; ?>
     <?php
     if ($isBaker && !empty($bakerShortages) && function_exists('bakery_exception_desk_render_baker')) {
+        echo '<details class="bp-baker-help"><summary>' . htmlspecialchars(bakery_t('production.baker_help'), ENT_QUOTES, 'UTF-8') . '</summary>';
         bakery_exception_desk_render_baker($db, $selectedDate, $bakerShortages, 'production.php?date=' . rawurlencode($selectedDate));
+        echo '</details>';
     }
     ?>
     <?php if ($allProductionComplete): ?>
@@ -636,6 +784,64 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
             <?php endif; ?>
             <div class="bp-form-error" id="bp-form-error" role="alert" hidden></div>
 
+            <?php
+            $hasFormulaPanel = false;
+            foreach ($groupedData as $formulaGroup) {
+                if (!empty($formulaGroup['formula']) && (float)($formulaGroup['formula']['total_percentage'] ?? 0) > 0 && !empty($formulaGroup['dough_type_id'])) {
+                    $hasFormulaPanel = true;
+                    break;
+                }
+            }
+            ?>
+            <?php if ($hasFormulaPanel): ?>
+                <?php
+                $formulaDefaultUnit = bakery_formula_default_unit_mode($isBaker);
+                $formulaUnitModes = bakery_formula_unit_modes($isBaker);
+                ?>
+                <div class="formula-unit-bar<?php echo $isBaker ? ' formula-unit-bar--baker' : ''; ?>"
+                     data-formula-units
+                     data-unit-mode="<?php echo htmlspecialchars($formulaDefaultUnit, ENT_QUOTES, 'UTF-8'); ?>"
+                     <?php echo $isBaker ? 'data-baker-units="1"' : ''; ?>>
+                    <div class="formula-unit-bar-row">
+                        <span class="formula-unit-label<?php echo $isBaker ? ' sf-sr-only' : ''; ?>" id="formula-unit-label"><?php echo htmlspecialchars(bakery_t('formula.show_mix_as'), ENT_QUOTES, 'UTF-8'); ?></span>
+                        <div class="formula-unit-switch" role="radiogroup" aria-labelledby="formula-unit-label">
+                            <?php foreach ($formulaUnitModes as $unitMode): ?>
+                                <button type="button"
+                                        role="radio"
+                                        class="formula-unit-btn<?php echo $unitMode === $formulaDefaultUnit ? ' is-active' : ''; ?>"
+                                        data-unit="<?php echo htmlspecialchars($unitMode, ENT_QUOTES, 'UTF-8'); ?>"
+                                        aria-checked="<?php echo $unitMode === $formulaDefaultUnit ? 'true' : 'false'; ?>"
+                                        aria-label="<?php echo htmlspecialchars(bakery_t('formula.units.' . $unitMode . '_aria'), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <?php echo htmlspecialchars(bakery_t('formula.units.' . $unitMode), ENT_QUOTES, 'UTF-8'); ?>
+                                </button>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if (!$isBaker): ?>
+                        <nav class="formula-lang-switch" aria-label="<?php echo htmlspecialchars(bakery_t('formula.lang_label'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <a href="<?php echo htmlspecialchars(bakery_locale_switch_url('en'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo bakery_locale() === 'en' ? ' aria-current="true"' : ''; ?>><?php echo htmlspecialchars(bakery_t('formula.lang.en'), ENT_QUOTES, 'UTF-8'); ?></a>
+                            <a href="<?php echo htmlspecialchars(bakery_locale_switch_url('es'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo bakery_locale() === 'es' ? ' aria-current="true"' : ''; ?>><?php echo htmlspecialchars(bakery_t('formula.lang.es'), ENT_QUOTES, 'UTF-8'); ?></a>
+                        </nav>
+                        <?php endif; ?>
+                    </div>
+                    <?php if (!$isBaker): ?>
+                    <details class="formula-unit-help">
+                        <summary><?php echo htmlspecialchars(bakery_t('formula.help_title'), ENT_QUOTES, 'UTF-8'); ?></summary>
+                        <p><?php echo htmlspecialchars(bakery_t('formula.help_lead'), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <ul>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.water'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.milk'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.cream'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.oil'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.eggs'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.honey'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.starter_liquido'), ENT_QUOTES, 'UTF-8'); ?></li>
+                            <li><?php echo htmlspecialchars(bakery_t('formula.density.other'), ENT_QUOTES, 'UTF-8'); ?></li>
+                        </ul>
+                    </details>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
             <?php foreach ($groupedData as $doughType => $data):
                 $doughTypeId = $data['dough_type_id'] ?? null;
                 $linePlanned = 0;
@@ -646,6 +852,10 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                     $lineMade += (int)$p['made_quantity'];
                     $lineRemaining += (int)$p['remaining_quantity'];
                 }
+                $isPanDulceLine = strcasecmp((string)($data['product_line_name'] ?? ''), 'Pan Dulce') === 0;
+                $panDulceBatch = $isBaker && $isPanDulceLine
+                    ? bakery_production_pan_dulce_batch_hint($db, (int)$doughTypeId, $lineRemaining)
+                    : null;
             ?>
                 <section class="bp-line">
                     <header class="bp-line__header">
@@ -656,12 +866,22 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                 'made' => number_format($lineMade),
                                 'left' => number_format($lineRemaining),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php if ($panDulceBatch): ?>
+                                <p class="bp-batch-hint">
+                                    <strong><?php bakery_te('production.batch_left'); ?></strong>
+                                    <?php echo htmlspecialchars(bakery_t('production.batch_left_values', [
+                                        'gallons' => rtrim(rtrim(number_format((float)$panDulceBatch['gallons'], 2), '0'), '.'),
+                                        'trays' => rtrim(rtrim(number_format((float)$panDulceBatch['trays'], 1), '0'), '.'),
+                                        'pieces' => number_format((int)$panDulceBatch['pieces']),
+                                    ]), ENT_QUOTES, 'UTF-8'); ?>
+                                </p>
+                            <?php endif; ?>
                         </div>
                     </header>
 
                     <?php if (!empty($data['formula']) && (float)($data['formula']['total_percentage'] ?? 0) > 0 && !empty($doughTypeId)):
                         $ingredientsStmt = $db->prepare("
-                            SELECT i.name, fi.percentage
+                            SELECT i.name, i.unit, fi.percentage
                             FROM formula_ingredients fi
                             JOIN ingredients i ON fi.ingredient_id = i.id
                             WHERE fi.dough_type_id = ?
@@ -670,15 +890,27 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                         $ingredientsStmt->execute([$doughTypeId]);
                         $ingredients = $ingredientsStmt->fetchAll(PDO::FETCH_ASSOC);
                         $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
+                        $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
                     ?>
-                        <details class="bp-formula">
+                        <details class="bp-formula" open>
                             <summary><?php echo htmlspecialchars(bakery_t('production.dough_formula', ['grams' => number_format($data['total_weight_grams'], 0)]), ENT_QUOTES, 'UTF-8'); ?></summary>
-                            <ul class="bp-formula__list">
+                            <ul class="bp-formula__list" data-formula-units data-unit-mode="<?php echo htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8'); ?>">
                                 <?php foreach ($ingredients as $ingredient):
                                     $amount = $totalFlour * ($ingredient['percentage'] / 100);
+                                    $classification = bakery_formula_classify_ingredient($ingredient['name'], $ingredient['unit'] ?? '');
                                 ?>
-                                    <li><span><?php echo htmlspecialchars($ingredient['name'], ENT_QUOTES, 'UTF-8'); ?></span><strong><?php echo number_format($amount, 0); ?>g</strong></li>
+                                    <li class="<?php echo !empty($classification['liquid']) ? 'is-liquid' : ''; ?>"
+                                        data-grams="<?php echo htmlspecialchars((string) $amount, ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-liquid="<?php echo !empty($classification['liquid']) ? '1' : '0'; ?>"
+                                        <?php if (!empty($classification['density_lb_per_gal'])): ?>data-density="<?php echo htmlspecialchars((string) $classification['density_lb_per_gal'], ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
+                                        <span><?php echo htmlspecialchars($ingredient['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                        <strong class="ingredient-amount"><?php echo bakery_formula_amount_markup($amount, $classification); ?></strong>
+                                    </li>
                                 <?php endforeach; ?>
+                                <li class="bp-formula-total" data-grams="<?php echo htmlspecialchars((string) $data['total_weight_grams'], ENT_QUOTES, 'UTF-8'); ?>" data-liquid="0">
+                                    <span><?php echo htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <strong class="ingredient-amount"><?php echo bakery_formula_amount_markup($data['total_weight_grams'], $doughClassification); ?></strong>
+                                </li>
                             </ul>
                         </details>
                     <?php endif; ?>
@@ -687,17 +919,22 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                         <?php foreach ($data['products'] as $product):
                             $state = $product['completion_state'];
                             $overPlan = max(0, (int)$product['made_quantity'] - (int)$product['planned_quantity']);
+                            $panDulceProductHint = $isBaker && $isPanDulceLine
+                                ? bakery_production_pan_dulce_product_hint($db, (int)$product['product_id'], (int)$product['remaining_quantity'])
+                                : null;
                         ?>
-                            <article class="bp-product bp-product--<?php echo htmlspecialchars($state, ENT_QUOTES, 'UTF-8'); ?><?php echo (int)$product['remaining_quantity'] > 0 ? ' ops-attention-row' : ''; ?>" id="product-<?php echo (int)$product['product_id']; ?>" data-product-id="<?php echo (int)$product['product_id']; ?>">
+                            <article class="bp-product bp-product--<?php echo htmlspecialchars($state, ENT_QUOTES, 'UTF-8'); ?><?php echo !$isBaker && (int)$product['remaining_quantity'] > 0 ? ' ops-attention-row' : ''; ?>" id="product-<?php echo (int)$product['product_id']; ?>" data-product-id="<?php echo (int)$product['product_id']; ?>">
                                 <div class="bp-product__main">
                                     <div class="bp-product__name-row">
                                         <h3 class="bp-product__name"><?php echo htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?></h3>
-                                        <?php
-                                        echo bakery_ops_render_row_chips($pageExceptions, [
-                                            'product_id' => (int)$product['product_id'],
-                                            'flags' => ((int)$product['remaining_quantity'] > 0) ? ['fg_shortfall' => true] : [],
-                                        ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
-                                        ?>
+                                        <?php if (!$isBaker): ?>
+                                            <?php
+                                            echo bakery_ops_render_row_chips($pageExceptions, [
+                                                'product_id' => (int)$product['product_id'],
+                                                'flags' => ((int)$product['remaining_quantity'] > 0) ? ['fg_shortfall' => true] : [],
+                                            ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
+                                            ?>
+                                        <?php endif; ?>
                                         <span class="bp-status bp-status--<?php echo htmlspecialchars($state, ENT_QUOTES, 'UTF-8'); ?>">
                                             <?php
                                             if ($state === 'complete') {
@@ -713,13 +950,25 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                     <?php if ($product['weight_grams'] !== null): ?>
                                         <p class="bp-product__weight"><?php echo htmlspecialchars(bakery_t('production.each_weight', ['grams' => number_format((int)$product['weight_grams'])]), ENT_QUOTES, 'UTF-8'); ?></p>
                                     <?php endif; ?>
-                                    <dl class="bp-qty-grid">
-                                        <div><dt><?php bakery_te('production.demand'); ?></dt><dd><?php echo number_format((int)$product['demand_quantity']); ?></dd></div>
-                                        <?php if ($planCommitted): ?>
-                                            <div><dt><?php bakery_te('production.committed'); ?></dt><dd><?php echo number_format((int)$product['planned_quantity']); ?></dd></div>
+                                    <?php if ($panDulceProductHint && ((int)$panDulceProductHint['trays'] > 0 || (int)$panDulceProductHint['loose'] > 0)): ?>
+                                        <p class="bp-pack-hint"><?php echo htmlspecialchars(bakery_t('production.tray_hint', [
+                                            'trays' => number_format((int)$panDulceProductHint['trays']),
+                                            'loose' => number_format((int)$panDulceProductHint['loose']),
+                                            'per_tray' => number_format((int)$panDulceProductHint['pieces_per_tray']),
+                                        ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                                    <?php endif; ?>
+                                    <dl class="bp-qty-grid<?php echo $isBaker ? ' bp-qty-grid--baker' : ''; ?>">
+                                        <?php if ($isBaker): ?>
+                                            <div class="bp-qty-primary"><dt><?php bakery_te('production.left'); ?></dt><dd class="bp-qty-left"><?php echo number_format((int)$product['remaining_quantity']); ?></dd></div>
+                                            <div><dt><?php bakery_te('production.made'); ?></dt><dd class="bp-qty-made"><?php echo number_format((int)$product['made_quantity']); ?></dd></div>
+                                        <?php else: ?>
+                                            <div><dt><?php bakery_te('production.demand'); ?></dt><dd><?php echo number_format((int)$product['demand_quantity']); ?></dd></div>
+                                            <?php if ($planCommitted): ?>
+                                                <div><dt><?php bakery_te('production.committed'); ?></dt><dd><?php echo number_format((int)$product['planned_quantity']); ?></dd></div>
+                                            <?php endif; ?>
+                                            <div><dt><?php bakery_te('production.made'); ?></dt><dd class="bp-qty-made"><?php echo number_format((int)$product['made_quantity']); ?></dd></div>
+                                            <div><dt><?php bakery_te('production.left'); ?></dt><dd class="bp-qty-left"><?php echo number_format((int)$product['remaining_quantity']); ?></dd></div>
                                         <?php endif; ?>
-                                        <div><dt><?php bakery_te('production.made'); ?></dt><dd class="bp-qty-made"><?php echo number_format((int)$product['made_quantity']); ?></dd></div>
-                                        <div><dt><?php bakery_te('production.left'); ?></dt><dd class="bp-qty-left"><?php echo number_format((int)$product['remaining_quantity']); ?></dd></div>
                                     </dl>
                                     <?php if ($overPlan > 0): ?>
                                         <p class="bp-variance"><?php echo htmlspecialchars(bakery_t('production.over_plan', ['count' => number_format($overPlan)]), ENT_QUOTES, 'UTF-8'); ?></p>
@@ -729,6 +978,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                     <label class="bp-record__label" for="produced-<?php echo (int)$product['product_id']; ?>"><?php bakery_te('production.record_now'); ?></label>
                                     <span class="quantity-stepper">
                                         <button type="button" class="quantity-step" data-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('production.decrease', ['name' => $product['product_name']]), ENT_QUOTES, 'UTF-8'); ?>">−</button>
+                                        <input type="hidden" name="produced_was[<?php echo (int)$product['product_id']; ?>]" value="<?php echo (int)$product['made_quantity']; ?>">
                                         <input type="number"
                                                id="produced-<?php echo (int)$product['product_id']; ?>"
                                                class="bp-qty-input"
@@ -736,13 +986,15 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                                step="1"
                                                inputmode="numeric"
                                                name="produced[<?php echo (int)$product['product_id']; ?>]"
-                                               value="<?php echo (int)$product['remaining_quantity']; ?>"
+                                               value="0"
                                                data-planned="<?php echo (int)$product['planned_quantity']; ?>"
                                                data-made="<?php echo (int)$product['made_quantity']; ?>"
                                                data-remaining="<?php echo (int)$product['remaining_quantity']; ?>"
                                                aria-label="<?php echo htmlspecialchars(bakery_t('production.units_for', ['name' => $product['product_name']]), ENT_QUOTES, 'UTF-8'); ?>">
                                         <button type="button" class="quantity-step" data-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('production.increase', ['name' => $product['product_name']]), ENT_QUOTES, 'UTF-8'); ?>">+</button>
                                     </span>
+                                    <label class="bp-waste-label" for="waste-<?php echo (int)$product['product_id']; ?>"><?php bakery_te('production.waste_now'); ?></label>
+                                    <input type="number" id="waste-<?php echo (int)$product['product_id']; ?>" class="bp-waste-input" min="0" step="1" inputmode="numeric" name="waste[<?php echo (int)$product['product_id']; ?>]" value="0" aria-label="<?php echo htmlspecialchars(bakery_t('production.waste_for', ['name' => $product['product_name']]), ENT_QUOTES, 'UTF-8'); ?>">
                                 </div>
                             </article>
                         <?php endforeach; ?>
@@ -771,6 +1023,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-header__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .bp-title { margin: 0; font-size: 1.45rem; line-height: 1.2; }
 .bp-pack-link { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; color: #fff; font-weight: 700; min-height: 44px; padding: 10px 16px; text-decoration: none; white-space: nowrap; }
+.bp-header__links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bp-pack-link--ready { background: var(--sf-accent, #d88346); border-color: #e69a5e; }
 .bp-date-form { display: grid; gap: 8px; }
 .bp-date-label { font-size: .9rem; opacity: .9; }
@@ -788,7 +1041,17 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-progress__meta { margin: 8px 0 0; font-size: .85rem; opacity: .9; }
 .bp-alert { border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; font-size: 1rem; line-height: 1.45; }
 .bp-alert--success { background: var(--sf-success-bg, #e8f7ec); border: 1px solid var(--sf-success-border, #8bc99a); color: var(--sf-success, #1f5f32); }
+.bp-alert--warn { background: #fff6e8; border: 1px solid #efc98d; color: #735412; display: grid; gap: 10px; }
 .bp-alert--error { background: var(--sf-danger-bg, #fdecec); border: 1px solid var(--sf-danger-border, #e7a1a1); color: var(--sf-danger, #7a1f1f); }
+.bp-baker-focus { display: grid; gap: 2px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.12); }
+.bp-baker-focus span { font-size: .9rem; opacity: .92; }
+.bp-plan-note { margin-top: 8px; font-size: .85rem; color: #fff3d3; }
+.bp-plan-note summary { cursor: pointer; font-weight: 700; }
+.bp-plan-note p { margin: 6px 0 0; }
+.bp-plan-note--drift > summary { color: #ffd9a0; }
+.bp-baker-help { margin: 0 0 14px; border: 1px solid #dbe7df; border-radius: 10px; background: #f8faf9; }
+.bp-baker-help > summary { cursor: pointer; padding: 12px 14px; color: #42545a; font-weight: 700; }
+.bp-baker-help .exception-desk { margin: 0 12px 12px; }
 .bp-handoff { background: #fff7ea; border: 1px solid #efc98d; border-radius: 12px; padding: 16px; margin-bottom: 14px; display: grid; gap: 12px; }
 .bp-starter, .bp-formula { border: 1px solid #cfe8db; border-radius: 12px; background: #f7fbf8; margin-bottom: 14px; overflow: hidden; }
 .bp-starter__summary, .bp-formula summary { cursor: pointer; font-weight: 700; padding: 14px 16px; list-style: none; }
@@ -806,6 +1069,8 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-line__header { padding: 14px 16px; background: linear-gradient(180deg, #f4faf6, #fff); border-bottom: 1px solid #e4eee8; }
 .bp-line__title { margin: 0; font-size: 1.15rem; color: #173f3c; }
 .bp-line__meta { margin: 6px 0 0; color: #607068; font-size: .92rem; }
+.bp-batch-hint { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: #e7f3ec; color: #174f36; font-size: 1rem; }
+.bp-batch-hint strong { display: block; margin-bottom: 2px; }
 .bp-formula__list { list-style: none; margin: 0; padding: 0 16px 14px; display: grid; gap: 8px; }
 .bp-formula__list li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; background: #fff; border: 1px solid #e3ece7; border-radius: 8px; }
 .bp-products { display: grid; gap: 12px; padding: 14px; }
@@ -815,6 +1080,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-product__name-row { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
 .bp-product__name { margin: 0; font-size: 1.12rem; line-height: 1.25; overflow-wrap: anywhere; }
 .bp-product__weight { margin: 4px 0 0; color: #607068; font-size: .88rem; }
+.bp-pack-hint { display: inline-block; margin: 9px 0 0; padding: 6px 9px; border-radius: 8px; background: #eef6f1; color: #315e46; font-size: .88rem; font-weight: 700; }
 .bp-status { border-radius: 999px; padding: 5px 10px; font-size: .78rem; font-weight: 700; white-space: nowrap; }
 .bp-status--complete { background: #d7f0df; color: #1f5f32; }
 .bp-status--partial { background: #ffe8c2; color: #8a4d00; }
@@ -823,8 +1089,13 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-qty-grid div { background: #fff; border: 1px solid #e3ece7; border-radius: 10px; padding: 10px 8px; text-align: center; }
 .bp-qty-grid dt { margin: 0; font-size: .78rem; color: #607068; text-transform: uppercase; letter-spacing: .03em; }
 .bp-qty-grid dd { margin: 4px 0 0; font-size: 1.35rem; font-weight: 800; color: #173f3c; }
+.bp-qty-grid--baker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bp-qty-grid--baker .bp-qty-primary { background: #e7f3ec; border-color: #8db59a; }
+.bp-qty-grid--baker .bp-qty-primary dd { font-size: 1.8rem; color: #155f36; }
 .bp-variance { margin: 8px 0 0; font-size: .85rem; color: #8a4d00; }
 .bp-record__label { display: block; margin-bottom: 8px; font-weight: 700; color: #1f5f32; }
+.bp-waste-label { display: block; margin-top: 10px; font-size: .82rem; font-weight: 700; color: #7a3d21; }
+.bp-waste-input { width: 100%; min-height: 42px; margin-top: 5px; border: 1px solid #d6a17f; border-radius: 8px; padding: 7px 10px; font-size: 1rem; }
 .quantity-stepper { display: grid; grid-template-columns: 56px minmax(88px, 1fr) 56px; gap: 8px; align-items: stretch; }
 .quantity-stepper input { width: 100%; min-width: 0; min-height: 56px; padding: 8px; border: 2px solid #8db59a; border-radius: 10px; text-align: center; font-size: 1.45rem; font-weight: 800; color: #173f3c; background: #fff; }
 .quantity-step { min-height: 56px; border: 2px solid #8db59a; border-radius: 10px; background: #fff; color: #1f6637; font-size: 1.8rem; line-height: 1; cursor: pointer; touch-action: manipulation; }
@@ -846,6 +1117,98 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
     .bp-header__top { align-items: flex-start; flex-direction: column; }
     .bp-pack-link { align-self: stretch; text-align: center; }
 }
+.formula-unit-bar {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    margin: 0 0 16px 0;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #c5d4cc;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.formula-unit-bar--baker {
+    position: static;
+    margin: 0 0 10px;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+}
+.formula-unit-bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.formula-unit-bar--baker .formula-unit-bar-row { gap: 0; }
+.formula-unit-label { font-weight: 600; color: #2c3e50; font-size: 0.95rem; }
+.formula-unit-switch {
+    display: flex;
+    flex: 1 1 220px;
+    min-width: 0;
+    border: 1px solid #8db59a;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #f3fbf5;
+}
+.formula-unit-bar--baker .formula-unit-switch {
+    flex: 0 0 auto;
+    width: auto;
+}
+.formula-unit-btn {
+    flex: 1 1 0;
+    min-height: 44px;
+    min-width: 44px;
+    border: 0;
+    border-right: 1px solid #8db59a;
+    background: transparent;
+    color: #1f6637;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.formula-unit-bar--baker .formula-unit-btn {
+    flex: 0 0 auto;
+    min-height: 36px;
+    min-width: 40px;
+    padding: 0 12px;
+    font-size: 0.9rem;
+}
+.formula-unit-btn:last-child { border-right: 0; }
+.formula-unit-btn.is-active,
+.formula-unit-btn[aria-checked="true"] { background: #1f6b35; color: #fff; }
+.formula-lang-switch { display: flex; gap: 8px; margin-left: auto; font-size: 0.9rem; }
+.formula-lang-switch a {
+    color: #1f6b35;
+    text-decoration: none;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 8px;
+    border-radius: 8px;
+}
+.formula-lang-switch a[aria-current="true"] { font-weight: 700; background: #e8f5e9; }
+.formula-unit-help { margin-top: 10px; font-size: 0.88rem; color: #4b6351; }
+.formula-unit-help summary { cursor: pointer; font-weight: 600; min-height: 36px; display: flex; align-items: center; }
+.formula-unit-help p { margin: 8px 0; }
+.formula-unit-help ul { margin: 0; padding-left: 1.2em; }
+.ingredient-amount { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 0; text-align: right; }
+[data-unit-mode="g"] .qty-lb,
+[data-unit-mode="g"] .qty-gal,
+[data-unit-mode="g"] .qty-sep { display: none; }
+[data-unit-mode="lb"] .qty-g,
+[data-unit-mode="lb"] .qty-gal,
+[data-unit-mode="lb"] .qty-sep { display: none; }
+[data-unit-mode="gal"] .qty-g,
+[data-unit-mode="gal"] .qty-sep { display: none; }
+[data-unit-mode="gal"] .qty-gal { display: inline; }
+[data-unit-mode="gal"] li:not(.is-liquid) .qty-gal { display: none; }
+[data-unit-mode="gal"] li:not(.is-liquid) .qty-lb { display: inline; }
+[data-unit-mode="all"] .qty-sep { display: inline; }
+@media (max-width: 480px) {
+    [data-unit-mode="all"] .ingredient-amount { flex-direction: column; align-items: flex-end; }
+    [data-unit-mode="all"] .qty-sep { display: none; }
+    .formula-unit-bar:not(.formula-unit-bar--baker) .formula-unit-bar-row { flex-direction: column; align-items: stretch; }
+    .formula-lang-switch { margin-left: 0; justify-content: flex-start; }
+}
 </style>
 
 <script>
@@ -859,6 +1222,33 @@ var __PRODUCTION_I18N__ = <?php echo json_encode([
     'confirm_record_plural' => bakery_t('production.confirm_record_plural', ['units' => '__UNITS__', 'products' => '__PRODUCTS__']),
 ], JSON_UNESCAPED_UNICODE); ?>;
 document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        var storageKey = 'bakery.formulaUnitMode';
+        var bakerView = !!document.querySelector('[data-baker-units]');
+        var modes = bakerView ? ['g', 'lb', 'gal'] : ['g', 'lb', 'gal', 'all'];
+        var fallback = bakerView ? 'g' : 'all';
+        var root = document;
+        function applyFormulaUnitMode(mode) {
+            if (modes.indexOf(mode) === -1) mode = fallback;
+            root.querySelectorAll('[data-formula-units]').forEach(function (el) {
+                el.setAttribute('data-unit-mode', mode);
+            });
+            root.querySelectorAll('.formula-unit-btn').forEach(function (btn) {
+                var on = btn.getAttribute('data-unit') === mode;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-checked', on ? 'true' : 'false');
+            });
+            try { localStorage.setItem(storageKey, mode); } catch (err) {}
+        }
+        var saved = null;
+        try { saved = localStorage.getItem(storageKey); } catch (err) {}
+        if (saved) applyFormulaUnitMode(saved);
+        root.querySelectorAll('.formula-unit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                applyFormulaUnitMode(btn.getAttribute('data-unit'));
+            });
+        });
+    })();
     var i18n = __PRODUCTION_I18N__;
     var form = document.getElementById('bp-work-form');
     var submitBtn = document.getElementById('bp-submit-btn');
@@ -887,14 +1277,16 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateSubmitSummary() {
         if (!form) return;
         var total = 0;
-        var products = 0;
-        form.querySelectorAll('.bp-qty-input').forEach(function (input) {
+        var productIds = {};
+        form.querySelectorAll('.bp-qty-input, .bp-waste-input').forEach(function (input) {
             var qty = parseQty(input);
             if (qty > 0) {
                 total += qty;
-                products += 1;
+                var match = input.name.match(/\[(\d+)\]/);
+                if (match) productIds[match[1]] = true;
             }
         });
+        var products = Object.keys(productIds).length;
         if (submitUnits) {
             submitUnits.textContent = String(total);
             var summaryEl = document.getElementById('bp-submit-summary');
@@ -938,6 +1330,14 @@ document.addEventListener('DOMContentLoaded', function () {
             event.preventDefault();
             changeBy(event.deltaY < 0 ? 1 : -1);
         }, { passive: false });
+    });
+
+    document.querySelectorAll('.bp-waste-input').forEach(function (input) {
+        input.addEventListener('input', function () {
+            if (parseQty(input) !== parseInt(input.value, 10) && input.value !== '') input.value = String(parseQty(input));
+            hideFormError();
+            updateSubmitSummary();
+        });
     });
 
     if (fillBtn && form) {

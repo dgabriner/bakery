@@ -7,6 +7,9 @@ require_once 'includes/product_inventory.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/demand_review.php';
 require_once 'includes/production_plan.php';
+require_once 'includes/production_assign.php';
+require_once 'includes/production_cadence.php';
+require_once 'includes/production_workflow_strip.php';
 require_once 'includes/operational_exceptions.php';
 
 function production_center_week_start(string $value): string {
@@ -62,17 +65,60 @@ function production_center_row_statuses(array $row, bool $hasActualOrders, bool 
     return $statuses;
 }
 
-$weekStart = production_center_week_start((string)($_GET['week'] ?? $_POST['week'] ?? date('Y-m-d')));
-$weekDates = [];
-for ($offset = 0; $offset < 7; $offset++) $weekDates[] = date('Y-m-d', strtotime($weekStart . " +{$offset} days"));
+function production_center_cadence_day_label(string $date, bool $short = false): string
+{
+    $dt = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dt || $dt->format('Y-m-d') !== $date) {
+        return $date;
+    }
+    $dow = (int)$dt->format('N');
+    $names = function_exists('bakery_day_names') ? bakery_day_names($short) : [];
+    $dayName = $names[$dow] ?? $dt->format($short ? 'D' : 'l');
+    $monthDay = function_exists('bakery_localized_month_day') ? bakery_localized_month_day($dt) : $dt->format('M j');
+    return trim($dayName . ' ' . $monthDay);
+}
+
+function production_center_cadence_family_label(string $family): string
+{
+    $key = 'production_cadence.family.' . $family;
+    if (function_exists('bakery_t')) {
+        $label = bakery_t($key);
+        if ($label !== $key) {
+            return $label;
+        }
+    }
+    return $family === BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR ? 'Sour Flour' : 'Pan Dulce';
+}
+
+function production_center_day_href(string $date, bool $showAll, bool $attentionOnly, ?string $returnKey = null): string
+{
+    $q = ['date' => $date];
+    if ($showAll) {
+        $q['show_all'] = '1';
+    }
+    if ($attentionOnly) {
+        $q['attention'] = '1';
+    }
+    $href = 'production_center.php?' . http_build_query($q);
+    if ($returnKey && function_exists('bakery_ops_link_append_return')) {
+        $href = bakery_ops_link_append_return($href, $returnKey);
+    }
+    return $href;
+}
+
+$focus = bakery_production_center_resolve_focus(
+    (string)($_GET['date'] ?? $_POST['date'] ?? ''),
+    (string)($_GET['week'] ?? $_POST['week'] ?? ''),
+    date('Y-m-d')
+);
+$selectedDate = $focus['date'];
+$weekStart = $focus['week_start'];
+$weekDates = $focus['week_dates'];
 $weekEnd = end($weekDates);
 $showAll = ($_GET['show_all'] ?? '') === '1';
 $attentionOnly = (string)($_GET['attention'] ?? '') === '1';
-$focusDate = trim((string)($_GET['date'] ?? ''));
-if ($focusDate !== '' && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $focusDate) || !in_array($focusDate, $weekDates, true))) {
-    $focusDate = '';
-}
-$returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $focusDate !== '' ? $focusDate : $weekStart);
+$focusDate = $selectedDate;
+$returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $pageReturnKey = $returnTarget['key'] ?? null;
 $attentionLabel = $attentionOnly ? 'Showing product-day rows requiring attention' : '';
 $planTableReady = table_exists($db, 'production_plan_items');
@@ -87,9 +133,11 @@ if (is_array($bakerProductIds)) {
     $productClause = empty($bakerProductIds) ? ' WHERE 1 = 0' : ' WHERE p.id IN (' . implode(',', array_fill(0, count($bakerProductIds), '?')) . ')';
 }
 $productStmt = $db->prepare(
-    "SELECT p.id, p.name, p.weight_grams, p.dough_type_id, dt.name AS dough_type_name, dt.product_line_id
+    "SELECT p.id, p.name, p.weight_grams, p.dough_type_id, dt.name AS dough_type_name, dt.product_line_id,
+            pl.name AS product_line_name
      FROM products p
      LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+     LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
      {$productClause}
      ORDER BY dt.name, p.name"
 );
@@ -99,53 +147,162 @@ $productIds = array_map(static fn($product) => (int)$product['id'], $products);
 $allowedProductIds = array_fill_keys($productIds, true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_plan') {
+    $wantsJson = function_exists('bakery_wants_json') && bakery_wants_json();
     try {
         if (!$planTableReady) throw new RuntimeException('Saved production plans are not installed yet. Run scripts/run_migrations.php first.');
-        if (production_center_week_start((string)($_POST['week'] ?? '')) !== $weekStart) {
-            throw new InvalidArgumentException('The production week changed. Reload the page and try again.');
-        }
         $planned = $_POST['planned'] ?? [];
         if (!is_array($planned) || $planned === []) {
             throw new InvalidArgumentException('No changed targets to save. Edit a quantity, then save.');
         }
-        $save = $db->prepare(
-            'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE planned_quantity = VALUES(planned_quantity), created_by_user_id = VALUES(created_by_user_id)'
-        );
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $saved = 0;
-        $db->beginTransaction();
-        foreach ($planned as $date => $productQuantities) {
-            if (!in_array($date, $weekDates, true) || !is_array($productQuantities)) {
-                throw new InvalidArgumentException('A submitted plan item is outside the selected week.');
-            }
-            foreach ($productQuantities as $productId => $quantity) {
-                $productId = (int)$productId;
-                if (is_string($quantity)) $quantity = trim($quantity);
-                if ($quantity === '' || $quantity === null) {
-                    throw new InvalidArgumentException('Batch targets cannot be blank. Use 0 if nothing is planned.');
-                }
-                $quantity = filter_var($quantity, FILTER_VALIDATE_INT);
-                if (!isset($allowedProductIds[$productId]) || $quantity === false || $quantity < 0) {
-                    throw new InvalidArgumentException('Batch targets must be whole numbers of zero or more.');
-                }
-                $save->execute([$date, $productId, $quantity, $user['id'] ?? null]);
-                $saved++;
+        foreach (array_keys($planned) as $postedDate) {
+            if ($postedDate !== $selectedDate) {
+                throw new InvalidArgumentException('A submitted plan item is outside the selected day.');
             }
         }
-        if ($saved === 0) throw new InvalidArgumentException('No changed targets to save.');
-        $db->commit();
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $userId = isset($user['id']) ? (int)$user['id'] : null;
+        if ($wantsJson) {
+            if (count($planned) !== 1) throw new InvalidArgumentException('Autosave accepts one target at a time.');
+            $postedDate = (string)array_key_first($planned);
+            $postedProducts = $planned[$postedDate];
+            if (!is_array($postedProducts) || count($postedProducts) !== 1) throw new InvalidArgumentException('Autosave accepts one target at a time.');
+            $productId = (int)array_key_first($postedProducts);
+            $quantity = filter_var($postedProducts[$productId], FILTER_VALIDATE_INT);
+            $expectedQuantity = filter_var($_POST['expected_quantity'] ?? null, FILTER_VALIDATE_INT);
+            $expectedHasPlan = (string)($_POST['expected_has_plan'] ?? '') === '1';
+            if ($quantity === false || $expectedQuantity === false) throw new InvalidArgumentException('Batch targets must be whole numbers of zero or more.');
+            $result = bakery_production_plan_save_target_cas($db, $postedDate, $productId, (int)$quantity, $allowedProductIds, $userId, $expectedHasPlan, (int)$expectedQuantity);
+            $saved = $result['saved'];
+        } else {
+            $saved = bakery_production_plan_save_targets($db, $planned, $allowedProductIds, $userId);
+        }
         bakery_record_operational_event($db, BAKERY_OP_PRODUCTION_PLAN_SAVED,
-            'Saved ' . $saved . ' production target' . ($saved === 1 ? '' : 's') . ' for week of ' . date('M j', strtotime($weekStart)), [
-            'operational_date' => $weekStart,
-            'metadata' => ['targets_saved' => $saved, 'week_start' => $weekStart],
+            'Saved ' . $saved . ' production target' . ($saved === 1 ? '' : 's') . ' for ' . date('D, M j', strtotime($selectedDate)), [
+            'operational_date' => $selectedDate,
+            'metadata' => ['targets_saved' => $saved, 'delivery_date' => $selectedDate],
         ]);
-        $notice = "Saved {$saved} production target" . ($saved === 1 ? '' : 's') . ' for week of ' . date('M j', strtotime($weekStart)) . '.';
+        $notice = bakery_t('production_center.autosave_notice', ['count' => $saved]);
         $notice .= ' ' . bakery_t('production_center.save_is_not_commit');
+        if ($wantsJson) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'ok' => true,
+                'saved' => $saved,
+                'notice' => $notice,
+            ]);
+            exit;
+        }
     } catch (Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
         $error = $e->getMessage();
+        if ($wantsJson) {
+            $isConflict = str_starts_with($error, 'production_plan_conflict:');
+            http_response_code($isConflict ? 409 : 400);
+            header('Content-Type: application/json; charset=utf-8');
+            if ($isConflict) {
+                $current = substr($error, strlen('production_plan_conflict:'));
+                echo json_encode([
+                    'ok' => false,
+                    'conflict' => true,
+                    'current_has_plan' => $current !== 'none',
+                    'current_quantity' => $current === 'none' ? 0 : (int)$current,
+                    'error' => bakery_t('production_center.autosave_conflict'),
+                ]);
+            } else {
+                echo json_encode(['ok' => false, 'error' => $error]);
+            }
+            exit;
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['assign_preview', 'assign_apply', 'cut_preview', 'cut_apply'], true)) {
+    $wantsJson = true;
+    $assignAction = (string)($_POST['action'] ?? '');
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $productId = (int)($_POST['product_id'] ?? 0);
+        if ($productId <= 0 || empty($allowedProductIds[$productId])) {
+            throw new InvalidArgumentException('Unknown product.');
+        }
+        $assignDate = trim((string)($_POST['delivery_date'] ?? $_POST['date'] ?? $selectedDate));
+        if ($assignDate !== $selectedDate) {
+            throw new InvalidArgumentException($assignAction === 'cut_preview' || $assignAction === 'cut_apply' ? 'Cut the day you are viewing.' : 'Assign the day you are viewing.');
+        }
+        $pool = max(0, (int)($_POST['pool'] ?? 0));
+        if ($assignAction === 'assign_preview' || $assignAction === 'cut_preview') {
+            $customers = $assignAction === 'cut_preview'
+                ? bakery_production_cut_preview($db, $assignDate, $productId, $pool)
+                : bakery_production_assign_preview($db, $assignDate, $productId, $pool);
+            $demand = 0;
+            foreach ($customers as $row) {
+                $demand += (int)$row['quantity'];
+            }
+            echo json_encode([
+                'ok' => true,
+                'date' => $assignDate,
+                'product_id' => $productId,
+                'pool' => $pool,
+                'demand' => $demand,
+                'customers' => $customers,
+            ]);
+            exit;
+        }
+
+        $raw = $_POST['assignments'] ?? [];
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $raw = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($raw) || $raw === []) {
+            throw new InvalidArgumentException($assignAction === 'cut_apply' ? 'No customer quantities to cut.' : 'No customer quantities to assign.');
+        }
+        $assignments = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $assignments[] = [
+                'customer_id' => (int)($row['customer_id'] ?? $row['id'] ?? 0),
+                'quantity' => (int)($row['quantity'] ?? 0),
+            ];
+        }
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $userId = isset($user['id']) ? (int)$user['id'] : null;
+        if ($assignAction === 'cut_apply') {
+            $result = bakery_production_cut_apply($db, $assignDate, $productId, $assignments, $userId);
+            $notice = bakery_t('production_center.cut_saved', [
+                'count' => (int)$result['updated'],
+                'skipped' => (int)$result['skipped'],
+            ]);
+        } else {
+            $scope = (string)($_POST['scope'] ?? 'standing');
+            $result = bakery_production_assign_apply(
+                $db,
+                $assignDate,
+                $productId,
+                $assignments,
+                $scope,
+                $userId
+            );
+            $notice = bakery_t('production_center.assign_saved', [
+                'count' => (int)$result['updated'],
+                'skipped' => (int)$result['skipped'],
+            ]);
+        }
+        echo json_encode([
+            'ok' => true,
+            'result' => $result,
+            'notice' => $notice,
+        ]);
+        exit;
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        exit;
     }
 }
 
@@ -155,8 +312,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'commi
             throw new InvalidArgumentException('The production week changed. Reload the page and try again.');
         }
         $commitDate = trim((string)($_POST['delivery_date'] ?? ''));
-        if (!in_array($commitDate, $weekDates, true)) {
-            throw new InvalidArgumentException('A submitted commit date is outside the selected week.');
+        if ($commitDate !== $selectedDate) {
+            throw new InvalidArgumentException('Commit the day you are viewing.');
         }
         $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
         $result = bakery_production_plan_commit($db, $commitDate, isset($user['id']) ? (int)$user['id'] : null);
@@ -358,6 +515,7 @@ foreach ($weekDates as $date) {
         $row = [
             'productId' => $productId,
             'product' => $product,
+            'family' => bakery_production_cadence_family($product['product_line_name'] ?? null),
             'standing' => $standing,
             'actual' => $actual,
             'demand' => $demand,
@@ -414,6 +572,59 @@ foreach ($weekDates as $date) {
     ];
 }
 
+$familyProductIds = [
+    BAKERY_PRODUCTION_CADENCE_DAILY => [],
+    BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR => [],
+];
+foreach ($products as $product) {
+    $family = bakery_production_cadence_family($product['product_line_name'] ?? null);
+    $familyProductIds[$family][] = (int)$product['id'];
+}
+$cadenceRuns = [];
+if (function_exists('bakery_production_cadence_runs_for_week')) {
+    foreach (bakery_production_cadence_runs_for_week($weekStart, $weekEnd) as $run) {
+        if (empty($familyProductIds[$run['family']])) {
+            continue;
+        }
+        foreach ($run['cover_dates'] as $coverDate) {
+            if (!isset($operatingDemandByDate[$coverDate])) {
+                $operatingDemandByDate[$coverDate] = bakery_operating_demand_by_product($db, $coverDate);
+            }
+        }
+        $units = 0;
+        foreach ($run['cover_dates'] as $coverDate) {
+            $byProduct = $operatingDemandByDate[$coverDate]['by_product'] ?? [];
+            foreach ($familyProductIds[$run['family']] as $pid) {
+                $units += (int)($byProduct[$pid] ?? 0);
+            }
+        }
+        $run['demand_units'] = $units;
+        $cadenceRuns[] = $run;
+    }
+}
+
+$cadenceRuns = array_values(array_filter($cadenceRuns, static function (array $run) use ($selectedDate): bool {
+    if ($run['bake_date'] === $selectedDate) {
+        return true;
+    }
+    return in_array($selectedDate, $run['cover_dates'], true);
+}));
+$days = array_values(array_filter($days, static function (array $day) use ($selectedDate): bool {
+    return $day['date'] === $selectedDate;
+}));
+$dayView = $days[0] ?? null;
+$totals = [
+    'on_hand' => (int)($dayView['summary']['on_hand'] ?? 0),
+    'confirmed' => 0,
+    'demand' => (int)($dayView['summary']['demand'] ?? 0),
+    'planned' => (int)($dayView['summary']['planned'] ?? 0),
+    'make_need' => (int)($dayView['summary']['make_need'] ?? 0),
+    'shortfall' => (int)($dayView['summary']['shortfall'] ?? 0),
+    'attention' => (int)($dayView['summary']['attention'] ?? 0),
+];
+$prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
+$nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
+
 $pageExceptions = [];
 $pageExceptionsDate = $focusDate !== '' ? $focusDate : '';
 if ($pageExceptionsDate !== '') {
@@ -423,6 +634,26 @@ if ($pageExceptionsDate !== '') {
         error_log('production_center exceptions: ' . $e->getMessage());
     }
 }
+
+$hubStages = [];
+try {
+    $hubStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
+} catch (Throwable $e) {
+    error_log('production_center workflow strip: ' . $e->getMessage());
+}
+
+$ordersHref = function_exists('bakery_ops_link_daily_orders')
+    ? bakery_ops_link_daily_orders($selectedDate, [], $pageReturnKey ?: 'production_center')
+    : ('daily_orders.php?date=' . rawurlencode($selectedDate));
+$packHref = function_exists('bakery_ops_link_pack_list')
+    ? bakery_ops_link_pack_list($selectedDate, [], $pageReturnKey ?: 'production_center')
+    : ('pack_list.php?date=' . rawurlencode($selectedDate));
+$productionHref = function_exists('bakery_ops_link_production')
+    ? bakery_ops_link_production($selectedDate, [], $pageReturnKey ?: 'production_center')
+    : ('production.php?date=' . rawurlencode($selectedDate));
+$loadHref = function_exists('bakery_ops_link_driver_load')
+    ? bakery_ops_link_driver_load($selectedDate, [], $pageReturnKey ?: 'production_center')
+    : ('driver_load.php?date=' . rawurlencode($selectedDate));
 
 $page_title = bakery_t('page.production_center');
 require_once 'includes/header.php';
@@ -434,33 +665,91 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <div class="pc-heading">
         <div>
-            <p class="pc-eyebrow">Plan versus need</p>
-            <h1>Production Center</h1>
-            <p>For each product: what demand requires, what you decided to make, what finished goods you already have, and where you are short.</p>
+            <p class="pc-eyebrow"><?php bakery_te('production_center.hub_eyebrow'); ?></p>
+            <h1><?php bakery_te('production_center.hub_title'); ?></h1>
+            <p><?php bakery_te('production_center.hub_lead'); ?></p>
         </div>
         <div class="pc-heading-actions">
-            <a class="btn btn-outline" href="production.php?date=<?php echo urlencode($weekDates[0]); ?>">Open Daily Production</a>
-            <a class="btn btn-outline" href="ingredient_requirements.php?date=<?php echo urlencode($weekDates[0]); ?>&amp;source=plan">Ingredient Planner</a>
+            <a class="btn btn-outline" href="product_manager_plan.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_product_plan'); ?></a>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_orders'); ?></a>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_bake'); ?></a>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_pack'); ?></a>
+            <a class="btn btn-outline" href="ingredient_requirements.php?date=<?php echo urlencode($selectedDate); ?>&amp;source=plan"><?php bakery_te('production_center.link_ingredients'); ?></a>
             <?php if ($inventoryReady): ?>
-                <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($weekStart); ?>">Finished goods</a>
+                <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_fg'); ?></a>
             <?php endif; ?>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($loadHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_loads'); ?></a>
         </div>
     </div>
+
+    <?php
+    echo bakery_production_workflow_strip_css();
+    echo bakery_production_workflow_strip_html($hubStages, [
+        'current' => 'production_plan',
+        'title' => bakery_t('production_workflow.title'),
+        'lead' => bakery_t('production_workflow.lead_manager'),
+    ]);
+    ?>
 
     <?php if ($notice): ?><div class="pc-notice success"><?php echo htmlspecialchars($notice); ?></div><?php endif; ?>
     <?php if ($error): ?><div class="pc-notice error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
     <?php if (!$planTableReady): ?><div class="pc-notice warning">Saved targets are unavailable until the Production Center migration is run. The planning view remains read-only.</div><?php endif; ?>
     <?php if (!$inventoryReady): ?><div class="pc-notice warning">Finished-goods inventory is unavailable, so on-hand and confirmed production show as zero until its migration is run.</div><?php endif; ?>
 
-    <form method="get" class="pc-week-picker">
-        <label>Week of <input type="date" name="week" value="<?php echo htmlspecialchars($weekStart); ?>"></label>
+    <form method="get" class="pc-day-picker" action="production_center.php">
+        <?php if ($pageReturnKey): ?><input type="hidden" name="return" value="<?php echo htmlspecialchars((string)$pageReturnKey); ?>"><?php endif; ?>
         <?php if ($showAll): ?><input type="hidden" name="show_all" value="1"><?php endif; ?>
-        <button class="btn btn-outline" type="submit">View week</button>
-        <span class="pc-week-label">Showing <strong><?php echo htmlspecialchars($weekLabel); ?></strong> · dates are <strong>delivery days</strong></span>
-        <a href="production_center.php?week=<?php echo urlencode($weekStart); ?>&amp;show_all=<?php echo $showAll ? '0' : '1'; ?>" class="pc-text-link"><?php echo $showAll ? 'Hide inactive products' : 'Show all products'; ?></a>
+        <?php if ($attentionOnly): ?><input type="hidden" name="attention" value="1"><?php endif; ?>
+        <a class="btn btn-outline" href="<?php echo htmlspecialchars(production_center_day_href($prevDate, $showAll, $attentionOnly, $pageReturnKey)); ?>"><?php bakery_te('production_center.prev_day'); ?></a>
+        <label class="pc-day-picker-date"><?php bakery_te('production_center.day_label'); ?>
+            <input type="date" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>" onchange="this.form.submit()">
+        </label>
+        <a class="btn btn-outline" href="<?php echo htmlspecialchars(production_center_day_href($nextDate, $showAll, $attentionOnly, $pageReturnKey)); ?>"><?php bakery_te('production_center.next_day'); ?></a>
+        <nav class="pc-week-pills" aria-label="<?php echo htmlspecialchars(bakery_t('production_center.week_nav')); ?>">
+            <?php foreach ($weekDates as $pillDate): ?>
+                <a class="pc-week-pill<?php echo $pillDate === $selectedDate ? ' is-current' : ''; ?>"
+                   href="<?php echo htmlspecialchars(production_center_day_href($pillDate, $showAll, $attentionOnly, $pageReturnKey)); ?>"
+                   <?php echo $pillDate === $selectedDate ? 'aria-current="date"' : ''; ?>>
+                    <?php echo htmlspecialchars(production_center_cadence_day_label($pillDate, true)); ?>
+                </a>
+            <?php endforeach; ?>
+        </nav>
+        <span class="pc-autosave-note" id="pc-autosave-note"><?php bakery_te('production_center.autosave_hint'); ?></span>
+        <a href="<?php echo htmlspecialchars(production_center_day_href($selectedDate, !$showAll, $attentionOnly, $pageReturnKey)); ?>" class="pc-text-link"><?php echo $showAll ? htmlspecialchars(bakery_t('production_center.hide_inactive')) : htmlspecialchars(bakery_t('production_center.show_all')); ?></a>
     </form>
 
-    <section class="pc-summary" aria-label="Weekly production summary">
+    <?php if ($cadenceRuns): ?>
+        <section class="pc-cadence-runs" aria-label="<?php echo htmlspecialchars(bakery_t('production_cadence.runs_aria')); ?>">
+            <div class="pc-cadence-runs-head">
+                <strong><?php bakery_te('production_cadence.runs_title'); ?></strong>
+                <span><?php bakery_te('production_cadence.runs_lead'); ?></span>
+            </div>
+            <ol class="pc-cadence-run-list">
+                <?php foreach ($cadenceRuns as $run): ?>
+                    <?php
+                    $coverLabels = array_map('production_center_cadence_day_label', $run['cover_dates']);
+                    $bakeHref = production_center_day_href($run['cover_dates'][0] ?? $run['bake_date'], $showAll, $attentionOnly, $pageReturnKey);
+                    ?>
+                    <li class="pc-cadence-run">
+                        <span class="pc-cadence-kicker"><?php echo htmlspecialchars(production_center_cadence_family_label($run['family'])); ?></span>
+                        <a href="<?php echo htmlspecialchars($bakeHref, ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo htmlspecialchars(bakery_t('production_cadence.bake_on', [
+                                'day' => production_center_cadence_day_label($run['bake_date']),
+                            ])); ?>
+                        </a>
+                        <span class="pc-cadence-run-meta">
+                            <?php echo htmlspecialchars(bakery_t('production_cadence.covers', [
+                                'days' => implode(', ', $coverLabels),
+                                'units' => number_format((int)($run['demand_units'] ?? 0)),
+                            ])); ?>
+                        </span>
+                    </li>
+                <?php endforeach; ?>
+            </ol>
+        </section>
+    <?php endif; ?>
+
+    <section class="pc-summary" aria-label="<?php echo htmlspecialchars(bakery_t('production_center.day_summary')); ?>">
         <div><span>Demand</span><strong><?php echo number_format($totals['demand']); ?></strong><small>committed or forecast</small></div>
         <div><span>On hand</span><strong><?php echo number_format($totals['on_hand']); ?></strong><small>available + loaded</small></div>
         <div><span>Planned</span><strong><?php echo number_format($totals['planned']); ?></strong><small>desired FG total</small></div>
@@ -470,17 +759,15 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
     </section>
 
     <div class="pc-explainer">
-        <strong>Date assumption:</strong> this screen, saved targets, finished-goods stock, and Daily Production confirmation all use the same calendar date as the <em>delivery day</em>. There is no separate bake-date column.
-        <br><strong>Demand:</strong> per customer, a committed daily order replaces that customer's standing forecast; customers without a dated order still contribute standing quantities for the weekday.
-        <br><strong>Planned:</strong> a saved batch target is the desired finished-goods total for that delivery day — not a separate work-order table. <strong>Still to make</strong> = max(0, Planned − On hand).
-        <br><strong>On hand:</strong> available + already loaded for that delivery day only. Stock is not borrowed from other dates.
-        <br><strong>Confirmed:</strong> units recorded via Daily Production for that same date (<code>produced_quantity</code>). After a manager commits a day, Daily Production bakes the committed snapshot. Saving targets here does not change the baker's numbers until you commit (or commit again).
+        <?php bakery_te('production_cadence.explainer_one_day'); ?>
+        <p class="pc-assign-lead"><?php bakery_te('production_center.assign_lead'); ?></p>
     </div>
 
     <form method="post" class="pc-plan-form" id="pc-plan-form" novalidate>
         <?php echo bakery_csrf_field(); ?>
         <input type="hidden" name="action" value="save_plan">
         <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
+        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
 
         <?php foreach ($days as $day): ?>
             <?php
@@ -497,6 +784,27 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                 <?php echo $day['hasActualOrders'] ? 'Committed demand (real orders)' : 'Forecast demand (standing)'; ?>
                             </span>
                             <span class="pc-date-chip">Delivery day <?php echo htmlspecialchars($dayDate); ?></span>
+                            <?php
+                            $dayLegs = bakery_production_cadence_delivery_legs($dayDate);
+                            $dayWeekday = (int)date('N', strtotime($dayDate));
+                            foreach ($dayLegs as $leg) {
+                                if (empty($familyProductIds[$leg['family']])) {
+                                    continue;
+                                }
+                                $coverLabels = array_map(
+                                    static fn($d) => production_center_cadence_day_label($d, true),
+                                    $leg['cover_dates']
+                                );
+                                echo '<span class="pc-bake-chip">' . htmlspecialchars(bakery_t('production_cadence.day_chip', [
+                                    'family' => production_center_cadence_family_label($leg['family']),
+                                    'bake' => production_center_cadence_day_label($leg['bake_date'], true),
+                                    'days' => implode(', ', $coverLabels),
+                                ])) . '</span>';
+                            }
+                            if ($dayWeekday === 7) {
+                                echo '<span class="pc-bake-chip pc-bake-chip-quiet">' . htmlspecialchars(bakery_t('production_cadence.sunday_light')) . '</span>';
+                            }
+                            ?>
                             <?php if ($commitsReady): ?>
                                 <?php
                                 $dayCommit = $day['commit'] ?? null;
@@ -592,6 +900,49 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                         <?php if (!empty($row['product']['dough_type_name'])): ?>
                                             <small><?php echo htmlspecialchars($row['product']['dough_type_name']); ?></small>
                                         <?php endif; ?>
+                                        <?php
+                                        $rowFamily = $row['family'] ?? bakery_production_cadence_family($row['product']['product_line_name'] ?? null);
+                                        $rowBake = bakery_production_cadence_bake_date_for_delivery($rowFamily, $dayDate);
+                                        if ($rowBake) {
+                                            echo '<small class="pc-row-cadence">' . htmlspecialchars(bakery_t('production_cadence.row_bake', [
+                                                'day' => production_center_cadence_day_label($rowBake, true),
+                                            ])) . '</small>';
+                                        }
+                                        $rowPlanBelow = false;
+                                        foreach ($row['statuses'] as $st) {
+                                            if (($st['code'] ?? '') === 'plan_below') {
+                                                $rowPlanBelow = true;
+                                                break;
+                                            }
+                                        }
+                                        $assignPool = bakery_production_assign_pool_from_row($row);
+                                        ?>
+                                        <button
+                                            type="button"
+                                            class="pc-assign-open<?php echo $rowPlanBelow ? ' pc-assign-open-needed' : ''; ?>"
+                                            data-date="<?php echo htmlspecialchars($dayDate); ?>"
+                                            data-product-id="<?php echo (int)$row['productId']; ?>"
+                                            data-product-name="<?php echo htmlspecialchars($row['product']['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-demand="<?php echo (int)$row['demand']; ?>"
+                                            data-has-plan="<?php echo $row['hasPlan'] ? '1' : '0'; ?>"
+                                            data-on-hand="<?php echo (int)$row['onHand']; ?>"
+                                            data-confirmed="<?php echo (int)$row['confirmed']; ?>"
+                                            data-pool-source="<?php echo htmlspecialchars($assignPool['source'], ENT_QUOTES, 'UTF-8'); ?>"
+                                        ><?php bakery_te($rowPlanBelow ? 'production_center.assign_short' : 'production_center.assign'); ?></button>
+                                        <?php if ($rowPlanBelow): ?>
+                                            <button
+                                                type="button"
+                                                class="pc-cut-open"
+                                                aria-expanded="false"
+                                                data-date="<?php echo htmlspecialchars($dayDate); ?>"
+                                                data-product-id="<?php echo (int)$row['productId']; ?>"
+                                                data-product-name="<?php echo htmlspecialchars($row['product']['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-demand="<?php echo (int)$row['demand']; ?>"
+                                                data-on-hand="<?php echo (int)$row['onHand']; ?>"
+                                                data-confirmed="<?php echo (int)$row['confirmed']; ?>"
+                                                data-pool-source="<?php echo htmlspecialchars($assignPool['source'], ENT_QUOTES, 'UTF-8'); ?>"
+                                            ><?php bakery_te('production_center.cut_open'); ?></button>
+                                        <?php endif; ?>
                                     </td>
                                     <td title="<?php echo htmlspecialchars($demandTitle); ?>">
                                         <strong><?php echo number_format($row['demand']); ?></strong>
@@ -621,6 +972,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                             data-date="<?php echo htmlspecialchars($dayDate); ?>"
                                             data-product-id="<?php echo (int)$row['productId']; ?>"
                                             data-baseline="<?php echo (int)$row['inputBaseline']; ?>"
+                                            data-has-plan="<?php echo $row['hasPlan'] ? '1' : '0'; ?>"
                                             data-demand="<?php echo (int)$row['demand']; ?>"
                                             value="<?php echo (int)$row['planned']; ?>"
                                             <?php echo !$planTableReady ? 'disabled' : ''; ?>
@@ -689,31 +1041,35 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                 <?php else: ?>
                     <p class="pc-empty">
                         No standing orders, real orders, inventory, or saved targets for this day.
-                        <a href="production_center.php?week=<?php echo urlencode($weekStart); ?>&amp;show_all=1">Show all products</a> to plan ahead.
+                        <a href="<?php echo htmlspecialchars(production_center_day_href($selectedDate, true, $attentionOnly, $pageReturnKey)); ?>">Show all products</a> to plan ahead.
                     </p>
                 <?php endif; ?>
             </section>
         <?php endforeach; ?>
 
         <?php if ($planTableReady): ?>
-            <div class="pc-save-bar" id="pc-save-bar">
-                <div>
-                    <strong id="pc-save-state">No unsaved changes</strong>
-                    <span id="pc-save-detail">Week of <?php echo htmlspecialchars($weekLabel); ?> · only edited targets are saved · delivery-day keys</span>
-                </div>
-                <button class="btn btn-primary" type="submit" id="pc-save-btn" disabled>Save changed targets</button>
+            <div class="pc-autosave-bar" id="pc-autosave-bar" aria-live="polite">
+                <strong id="pc-save-state"><?php bakery_te('production_center.autosave_idle'); ?></strong>
+                <span id="pc-save-detail"><?php bakery_te('production_center.autosave_detail'); ?></span>
             </div>
+            <noscript>
+                <div class="pc-save-bar">
+                    <div>
+                        <strong><?php bakery_te('production_center.save_noscript'); ?></strong>
+                    </div>
+                    <button class="btn btn-primary" type="submit"><?php bakery_te('production_center.save_targets'); ?></button>
+                </div>
+            </noscript>
         <?php endif; ?>
     </form>
     <?php if (!empty($commitsReady) && $planTableReady): ?>
-        <?php foreach ($weekDates as $commitDate): ?>
-            <form method="post" id="pc-commit-<?php echo htmlspecialchars($commitDate); ?>" class="pc-commit-form">
-                <?php echo bakery_csrf_field(); ?>
-                <input type="hidden" name="action" value="commit_plan">
-                <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
-                <input type="hidden" name="delivery_date" value="<?php echo htmlspecialchars($commitDate); ?>">
-            </form>
-        <?php endforeach; ?>
+        <form method="post" id="pc-commit-<?php echo htmlspecialchars($selectedDate); ?>" class="pc-commit-form">
+            <?php echo bakery_csrf_field(); ?>
+            <input type="hidden" name="action" value="commit_plan">
+            <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
+            <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+            <input type="hidden" name="delivery_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+        </form>
     <?php endif; ?>
 </main>
 <style>
@@ -727,16 +1083,63 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 .pc-notice.success{background:var(--sf-success-bg,#e5f5e9);border-color:var(--sf-success-border,#b9dfc4);color:var(--sf-success,#195f35)}
 .pc-notice.error{background:var(--sf-danger-bg,#fdeaea);border-color:var(--sf-danger-border,#efc2c2);color:var(--sf-danger,#9f2727)}
 .pc-notice.warning{background:var(--sf-warning-bg,#fff5dd);border-color:var(--sf-warning-border,#efd7a8);color:var(--sf-warning,#80590d)}
-.pc-week-picker{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0}
-.pc-week-picker input,.pc-table input{border:1px solid #cbd7cf;border-radius:5px;padding:8px;background:#fff}
+.pc-week-picker,.pc-day-picker{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0}
+.pc-day-picker-date{display:flex;align-items:center;gap:8px;font-weight:600;color:#254632}
+.pc-week-picker input,.pc-day-picker input,.pc-table input{border:1px solid #cbd7cf;border-radius:5px;padding:8px;background:#fff}
+.pc-week-pills{display:flex;flex-wrap:wrap;gap:6px}
+.pc-week-pill{font-size:.78rem;font-weight:700;color:#246b43;text-decoration:none;border:1px solid #c5d9cb;background:#f3fbf5;padding:5px 9px;border-radius:999px}
+.pc-week-pill.is-current{background:#193b2a;border-color:#193b2a;color:#fff}
+.pc-autosave-note{color:#5a6d61;font-size:.88rem;font-weight:600}
+.pc-autosave-bar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;margin:8px 0 0;color:#506257;font-size:.9rem}
+.pc-autosave-bar.is-saving strong{color:#80590d}
+.pc-autosave-bar.is-saved strong{color:#1f6b35}
+.pc-autosave-bar.is-error strong{color:#9f2727}
 .pc-week-label{color:#5a6d61;font-size:.9rem}
+.pc-cadence-runs{background:#fff;border:1px solid #dce8df;border-left:4px solid #287449;border-radius:9px;padding:14px 16px;margin:16px 0 8px}
+.pc-cadence-runs-head{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.pc-cadence-runs-head strong{color:#193b2a}
+.pc-cadence-runs-head span{color:#5a6d61;font-size:.9rem}
+.pc-cadence-run-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.pc-cadence-run{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:#f7faf7;border-radius:8px;border:1px solid #e1e9e2}
+.pc-cadence-run-prior{background:#f4f1ea;border-color:#e4dcc8}
+.pc-cadence-kicker{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#5d7164}
+.pc-cadence-run a{font-weight:700;color:#1f6b35;text-decoration:none}
+.pc-cadence-run a:hover{text-decoration:underline}
+.pc-cadence-run-meta{font-size:.8rem;color:#506257}
+.pc-bake-chip{font-size:.74rem;color:#1d4d33;background:#e5f3ea;padding:3px 8px;border-radius:999px}
+.pc-bake-chip-quiet{color:#735412;background:#fff3d3}
+.pc-row-cadence{color:#2f6a45!important;font-weight:600}
 .pc-text-link{color:#246b43;font-weight:600}
 .pc-summary{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:12px;margin:18px 0}
 .pc-summary>div{background:#fff;border:1px solid #dce8df;border-radius:9px;padding:14px;box-shadow:0 1px 2px rgba(21,48,33,.04)}
 .pc-summary span,.pc-summary small{display:block;color:#64756a;font-size:.8rem}
 .pc-summary strong{display:block;font-size:1.45rem;color:#1d3f2c;margin:3px 0}
 .pc-explainer{background:#eef7ef;border-left:4px solid #398451;padding:13px 16px;color:#3f5948;margin:18px 0 22px;line-height:1.45}
-.pc-explainer code{font-size:.85em;background:#e2efe4;padding:1px 4px;border-radius:3px}
+.pc-assign-lead{margin:8px 0 0;color:#3f5948}
+.pc-assign-open{display:inline-block;margin-top:6px;border:1px solid #b7d4bf;background:#f3fbf5;color:#1f6b35;font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit}
+.pc-assign-open:hover{background:#e5f5ea}
+.pc-assign-open-needed{background:#fff3d3;border-color:#e2b46a;color:#80590d}
+.pc-cut-open{display:inline-block;margin:6px 0 0 6px;border:1px solid #e2b46a;background:#fff3d3;color:#80590d;font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit}
+.pc-cut-open:hover{background:#fdeac2}
+.pc-cut-open[aria-expanded="true"]{background:#80590d;border-color:#80590d;color:#fff}
+.pc-assign-row td{background:#f4f8f4;padding:0 12px 14px}
+.pc-assign-panel{padding:12px 4px 8px;max-width:920px}
+.pc-assign-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.pc-assign-head h3{margin:0;font-size:1rem;color:#193b2a}
+.pc-assign-meter{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 10px;font-size:.85rem;color:#506257}
+.pc-assign-meter strong{color:#1d3f2c}
+.pc-assign-scope{display:flex;flex-direction:column;gap:6px;margin:8px 0 12px}
+.pc-assign-scope label{display:flex;gap:8px;align-items:flex-start;font-size:.88rem;color:#254632}
+.pc-assign-scope small{display:block;color:#66786c;font-weight:400}
+.pc-assign-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.pc-assign-table{width:100%;border-collapse:collapse;margin-top:8px}
+.pc-assign-table th,.pc-assign-table td{padding:6px 8px;text-align:left;border-bottom:1px solid #e1e9e2;font-size:.85rem}
+.pc-assign-table input{width:72px;padding:5px;border:1px solid #cbd7cf;border-radius:5px}
+.pc-assign-table input:disabled{background:#eef1ef;color:#8a968d}
+.pc-assign-locked{color:#80590d;font-size:.75rem;font-weight:700}
+.pc-assign-msg{margin:8px 0 0;font-size:.88rem}
+.pc-assign-msg.is-error{color:#9f2727}
+.pc-assign-close{border:0;background:transparent;color:#246b43;font-weight:700;cursor:pointer;font-family:inherit}
 .pc-day-card{background:#fff;border:1px solid #dce8df;border-radius:10px;margin:16px 0;overflow:hidden}
 .pc-day-attention{border-color:#e2b46a;box-shadow:0 0 0 1px rgba(176,120,20,.12)}
 .pc-day-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding:14px 18px;background:#f7faf7;border-bottom:1px solid #e1e9e2}
@@ -762,6 +1165,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 .pc-row-short td{background:#fff5f5}
 .pc-table input{width:84px;padding:7px}
 .pc-table input.pc-dirty{border-color:#c9861a;background:#fff8e8;box-shadow:0 0 0 2px rgba(201,134,26,.18)}
+.pc-table input.pc-saving{border-color:#246b43;background:#f3fbf5}
 .pc-table input.pc-invalid{border-color:#b72c2c;background:#fff1f1}
 .pc-plan-cell{min-width:132px}
 .pc-set-demand{display:inline-block;margin-top:4px;border:0;background:transparent;color:#246b43;font-size:.72rem;font-weight:700;padding:0;cursor:pointer;text-decoration:underline}
@@ -797,8 +1201,8 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 }
 @media(max-width:500px){
     .pc-summary{grid-template-columns:1fr}
-    .pc-week-picker{align-items:flex-start;flex-direction:column}
-    .pc-week-picker .btn{width:100%}
+    .pc-week-picker,.pc-day-picker{align-items:flex-start;flex-direction:column}
+    .pc-week-picker .btn,.pc-day-picker .btn{width:100%}
 }
 </style>
 <?php if ($planTableReady): ?>
@@ -806,12 +1210,23 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 (function () {
     var form = document.getElementById('pc-plan-form');
     if (!form) return;
-    var saveBar = document.getElementById('pc-save-bar');
+    var saveBar = document.getElementById('pc-autosave-bar');
     var saveState = document.getElementById('pc-save-state');
     var saveDetail = document.getElementById('pc-save-detail');
-    var saveBtn = document.getElementById('pc-save-btn');
+    var note = document.getElementById('pc-autosave-note');
     var inputs = Array.prototype.slice.call(form.querySelectorAll('.pc-plan-input'));
-    var weekLabel = <?php echo json_encode($weekLabel); ?>;
+    var timers = {};
+    var inflight = 0;
+    var copy = {
+        idle: <?php echo json_encode(bakery_t('production_center.autosave_idle')); ?>,
+        saving: <?php echo json_encode(bakery_t('production_center.autosave_saving')); ?>,
+        saved: <?php echo json_encode(bakery_t('production_center.autosave_saved')); ?>,
+        error: <?php echo json_encode(bakery_t('production_center.autosave_error')); ?>,
+        invalid: <?php echo json_encode(bakery_t('production_center.autosave_invalid')); ?>,
+        hint: <?php echo json_encode(bakery_t('production_center.autosave_hint')); ?>,
+        savedTarget: <?php echo json_encode(bakery_t('production_center.saved_target')); ?>,
+        conflict: <?php echo json_encode(bakery_t('production_center.autosave_conflict')); ?>
+    };
 
     function parseQty(value) {
         if (value === null || value === undefined) return null;
@@ -819,6 +1234,21 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         if (trimmed === '') return null;
         if (!/^\d+$/.test(trimmed)) return NaN;
         return parseInt(trimmed, 10);
+    }
+
+    function csrfToken() {
+        var field = form.querySelector('input[name="csrf_token"]');
+        return field ? field.value : '';
+    }
+
+    function setStatus(kind, message, detail) {
+        if (saveBar) {
+            saveBar.classList.remove('is-saving', 'is-saved', 'is-error');
+            if (kind) saveBar.classList.add('is-' + kind);
+        }
+        if (saveState) saveState.textContent = message;
+        if (saveDetail) saveDetail.textContent = detail || '';
+        if (note) note.textContent = kind === 'saved' ? copy.saved : copy.hint;
     }
 
     function refreshMakeNeed(input) {
@@ -838,40 +1268,121 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         cell.parentElement.classList.toggle('pc-covered', need === 0);
     }
 
-    function syncState() {
-        var dirty = 0;
-        var invalid = 0;
-        inputs.forEach(function (input) {
-            if (input.disabled) return;
-            var baseline = String(input.getAttribute('data-baseline'));
-            var current = String(input.value).trim();
-            var qty = parseQty(current);
-            var isDirty = current !== baseline;
-            var isInvalid = qty === null || isNaN(qty) || qty < 0;
-            input.classList.toggle('pc-dirty', isDirty && !isInvalid);
-            input.classList.toggle('pc-invalid', isDirty && isInvalid);
-            if (isDirty) dirty++;
-            if (isDirty && isInvalid) invalid++;
-            refreshMakeNeed(input);
+    function markInput(input, state) {
+        input.classList.toggle('pc-dirty', state === 'dirty');
+        input.classList.toggle('pc-invalid', state === 'invalid');
+        input.classList.toggle('pc-saving', state === 'saving');
+    }
+
+    function saveInput(input) {
+        if (input.disabled) return;
+        var qty = parseQty(input.value);
+        var baseline = String(input.getAttribute('data-baseline'));
+        var expectedHasPlan = input.getAttribute('data-has-plan') === '1';
+        var current = String(input.value).trim();
+        refreshMakeNeed(input);
+        if (current === baseline) {
+            markInput(input, '');
+            if (inflight === 0) setStatus('', copy.idle, copy.hint);
+            return;
+        }
+        if (qty === null || isNaN(qty) || qty < 0) {
+            markInput(input, 'invalid');
+            setStatus('error', copy.invalid, '');
+            return;
+        }
+        markInput(input, 'saving');
+        inflight += 1;
+        setStatus('saving', copy.saving, '');
+        var body = new URLSearchParams();
+        body.set('action', 'save_plan');
+        body.set('csrf_token', csrfToken());
+        body.set('week', form.querySelector('input[name="week"]').value);
+        body.set('date', form.querySelector('input[name="date"]').value);
+        body.set('planned[' + input.getAttribute('data-date') + '][' + input.getAttribute('data-product-id') + ']', String(qty));
+        body.set('expected_has_plan', expectedHasPlan ? '1' : '0');
+        body.set('expected_quantity', baseline);
+        fetch('production_center.php?date=' + encodeURIComponent(input.getAttribute('data-date')), {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-CSRF-TOKEN': csrfToken()
+            },
+            body: body.toString(),
+            credentials: 'same-origin'
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                return { okHttp: res.ok, data: data };
+            });
+        }).then(function (result) {
+            inflight = Math.max(0, inflight - 1);
+            if (!result.data || result.data.ok !== true) {
+                if (result.data && result.data.conflict) {
+                    input.setAttribute('data-has-plan', result.data.current_has_plan ? '1' : '0');
+                    input.setAttribute('data-baseline', String(result.data.current_quantity));
+                }
+                markInput(input, 'dirty');
+                setStatus('error', result.data && result.data.conflict ? copy.conflict : copy.error, (result.data && result.data.error) ? result.data.error : '');
+                return;
+            }
+            input.setAttribute('data-baseline', String(qty));
+            input.setAttribute('data-has-plan', '1');
+            if (String(input.value).trim() === String(qty)) {
+                markInput(input, '');
+            } else {
+                markInput(input, 'dirty');
+                scheduleSave(input);
+            }
+            var meta = input.parentElement.querySelector('.pc-plan-meta');
+            if (meta) meta.textContent = copy.savedTarget;
+            if (inflight === 0) setStatus('saved', copy.saved, copy.hint);
+        }).catch(function () {
+            inflight = Math.max(0, inflight - 1);
+            markInput(input, 'dirty');
+            setStatus('error', copy.error, '');
         });
-        if (saveBar) {
-            saveBar.classList.toggle('is-dirty', dirty > 0 && invalid === 0);
-            saveBar.classList.toggle('is-invalid', invalid > 0);
-        }
-        if (saveState) {
-            if (invalid > 0) saveState.textContent = 'Fix invalid quantities';
-            else if (dirty > 0) saveState.textContent = dirty + ' unsaved target' + (dirty === 1 ? '' : 's');
-            else saveState.textContent = 'No unsaved changes';
-        }
-        if (saveDetail) {
-            saveDetail.textContent = 'Week of ' + weekLabel + ' · only edited targets are saved · delivery-day keys';
-        }
-        if (saveBtn) saveBtn.disabled = dirty === 0 || invalid > 0;
+    }
+
+    function scheduleSave(input) {
+        var key = input.getAttribute('data-date') + ':' + input.getAttribute('data-product-id');
+        if (timers[key]) clearTimeout(timers[key]);
+        timers[key] = setTimeout(function () {
+            timers[key] = null;
+            saveInput(input);
+        }, 400);
     }
 
     inputs.forEach(function (input) {
-        input.addEventListener('input', syncState);
-        input.addEventListener('change', syncState);
+        input.addEventListener('input', function () {
+            var qty = parseQty(input.value);
+            var baseline = String(input.getAttribute('data-baseline'));
+            var current = String(input.value).trim();
+            refreshMakeNeed(input);
+            if (qty === null || isNaN(qty) || qty < 0) {
+                markInput(input, 'invalid');
+                setStatus('error', copy.invalid, '');
+                return;
+            }
+            markInput(input, current === baseline ? '' : 'dirty');
+            scheduleSave(input);
+        });
+        input.addEventListener('change', function () {
+            var key = input.getAttribute('data-date') + ':' + input.getAttribute('data-product-id');
+            if (timers[key]) {
+                clearTimeout(timers[key]);
+                timers[key] = null;
+            }
+            saveInput(input);
+        });
+        input.addEventListener('blur', function () {
+            var key = input.getAttribute('data-date') + ':' + input.getAttribute('data-product-id');
+            if (timers[key]) {
+                clearTimeout(timers[key]);
+                timers[key] = null;
+                saveInput(input);
+            }
+        });
     });
 
     form.querySelectorAll('.pc-set-demand').forEach(function (btn) {
@@ -887,7 +1398,6 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
     });
 
     form.addEventListener('submit', function (event) {
-        // Strip unchanged inputs so save cannot bulk-overwrite the whole week by accident.
         var pending = [];
         inputs.forEach(function (input) {
             input.removeAttribute('name');
@@ -906,33 +1416,324 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             );
             pending.push(input);
         });
-        if (pending.indexOf(null) !== -1) {
+        if (pending.indexOf(null) !== -1 || !pending.filter(Boolean).length) {
             event.preventDefault();
-            syncState();
-            alert('Batch targets must be whole numbers of zero or more. Blank values are not allowed.');
-            return;
-        }
-        var named = pending.filter(Boolean);
-        if (!named.length) {
-            event.preventDefault();
-            syncState();
-            alert('No changed targets to save.');
-            return;
         }
     });
 
     window.addEventListener('beforeunload', function (event) {
-        var dirty = inputs.some(function (input) {
+        var pending = inputs.some(function (input) {
             return !input.disabled && String(input.value).trim() !== String(input.getAttribute('data-baseline'));
         });
-        if (dirty) {
+        if (pending || inflight > 0) {
             event.preventDefault();
             event.returnValue = '';
         }
     });
-
-    syncState();
 })();
 </script>
 <?php endif; ?>
+<script>
+(function () {
+    var form = document.getElementById('pc-plan-form');
+    if (!form) return;
+    var copy = {
+        title: <?php echo json_encode(bakery_t('production_center.assign_title')); ?>,
+        poolPlanned: <?php echo json_encode(bakery_t('production_center.assign_pool_planned')); ?>,
+        poolOnHand: <?php echo json_encode(bakery_t('production_center.assign_pool_on_hand')); ?>,
+        poolConfirmed: <?php echo json_encode(bakery_t('production_center.assign_pool_confirmed')); ?>,
+        demand: <?php echo json_encode(bakery_t('production_center.assign_demand')); ?>,
+        assigned: <?php echo json_encode(bakery_t('production_center.assign_assigned')); ?>,
+        leftover: <?php echo json_encode(bakery_t('production_center.assign_left')); ?>,
+        over: <?php echo json_encode(bakery_t('production_center.assign_over')); ?>,
+        scopeStanding: <?php echo json_encode(bakery_t('production_center.assign_scope_standing')); ?>,
+        scopeStandingHint: <?php echo json_encode(bakery_t('production_center.assign_scope_standing_hint')); ?>,
+        scopeDaily: <?php echo json_encode(bakery_t('production_center.assign_scope_daily')); ?>,
+        scopeDailyHint: <?php echo json_encode(bakery_t('production_center.assign_scope_daily_hint')); ?>,
+        recommend: <?php echo json_encode(bakery_t('production_center.assign_recommend')); ?>,
+        apply: <?php echo json_encode(bakery_t('production_center.assign_apply')); ?>,
+        close: <?php echo json_encode(bakery_t('production_center.assign_close')); ?>,
+        customer: <?php echo json_encode(bakery_t('production_center.assign_customer')); ?>,
+        qty: <?php echo json_encode(bakery_t('production_center.assign_qty')); ?>,
+        now: <?php echo json_encode(bakery_t('production_center.assign_now')); ?>,
+        empty: <?php echo json_encode(bakery_t('production_center.assign_empty')); ?>,
+        error: <?php echo json_encode(bakery_t('production_center.assign_error')); ?>,
+        locked: <?php echo json_encode(bakery_t('production_center.assign_locked')); ?>,
+        sourceDaily: <?php echo json_encode(bakery_t('distribution.source_badge_daily')); ?>,
+        sourceStanding: <?php echo json_encode(bakery_t('distribution.source_badge_standing')); ?>,
+        sourceStandard: <?php echo json_encode(bakery_t('distribution.source_badge_standard')); ?>,
+        cutTitle: <?php echo json_encode(bakery_t('production_center.cut_title')); ?>,
+        cutHint: <?php echo json_encode(bakery_t('production_center.cut_hint')); ?>,
+        cutAfter: <?php echo json_encode(bakery_t('production_center.cut_after')); ?>,
+        cutApply: <?php echo json_encode(bakery_t('production_center.cut_apply')); ?>
+    };
+
+    function csrfToken() {
+        var field = form.querySelector('input[name="csrf_token"]');
+        return field ? field.value : '';
+    }
+
+    function parseQty(value) {
+        var trimmed = String(value == null ? '' : value).trim();
+        if (trimmed === '' || !/^\d+$/.test(trimmed)) return 0;
+        return parseInt(trimmed, 10);
+    }
+
+    function currentPool(btn) {
+        var row = btn.closest('tr');
+        var input = row ? row.querySelector('.pc-plan-input') : null;
+        if (input) {
+            var typed = String(input.value).trim();
+            if (typed !== '' && /^\d+$/.test(typed)) return parseInt(typed, 10);
+        }
+        var onHand = parseInt(btn.getAttribute('data-on-hand'), 10) || 0;
+        var confirmed = parseInt(btn.getAttribute('data-confirmed'), 10) || 0;
+        if (onHand > 0) return onHand;
+        if (confirmed > 0) return confirmed;
+        return 0;
+    }
+
+    function sourceLabel(source) {
+        if (source === 'daily') return copy.sourceDaily;
+        if (source === 'pan_dulce_standard') return copy.sourceStandard;
+        return copy.sourceStanding;
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function updateMeter(panel) {
+        var pool = parseInt(panel.getAttribute('data-pool'), 10) || 0;
+        var demand = parseInt(panel.getAttribute('data-demand'), 10) || 0;
+        var assigned = 0;
+        panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
+            if (input.disabled) {
+                assigned += parseQty(input.getAttribute('data-current'));
+                return;
+            }
+            assigned += parseQty(input.value);
+        });
+        var leftover = pool - assigned;
+        var leftoverLabel = leftover >= 0 ? copy.leftover : copy.over;
+        var assignedLabel = panel.getAttribute('data-mode') === 'cut' ? copy.cutAfter : copy.assigned;
+        var meter = panel.querySelector('[data-meter]');
+        if (meter) {
+            meter.innerHTML =
+                '<span>' + escapeHtml(poolLabelFromPanel(panel)) + ' <strong>' + pool + '</strong></span>' +
+                '<span>' + escapeHtml(copy.demand) + ' <strong>' + demand + '</strong></span>' +
+                '<span>' + escapeHtml(assignedLabel) + ' <strong>' + assigned + '</strong></span>' +
+                '<span class="' + (leftover === 0 ? 'pc-covered' : 'pc-short') + '">' +
+                escapeHtml(leftoverLabel) + ' <strong>' + Math.abs(leftover) + '</strong></span>';
+        }
+    }
+
+    function poolLabelFromPanel(panel) {
+        var source = panel.getAttribute('data-pool-source') || 'planned';
+        if (source === 'on_hand') return copy.poolOnHand;
+        if (source === 'confirmed') return copy.poolConfirmed;
+        return copy.poolPlanned;
+    }
+
+    function closePanel() {
+        var open = document.querySelector('.pc-assign-row');
+        if (open) open.parentNode.removeChild(open);
+        document.querySelectorAll('.pc-assign-open, .pc-cut-open').forEach(function (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function renderPanel(btn, data, mode) {
+        mode = mode === 'cut' ? 'cut' : 'assign';
+        closePanel();
+        var row = btn.closest('tr');
+        if (!row) return;
+        var panelRow = document.createElement('tr');
+        panelRow.className = 'pc-assign-row';
+        var planInput = row.querySelector('.pc-plan-input');
+        var poolSource = (planInput && String(planInput.value).trim() !== '')
+            ? 'planned'
+            : (btn.getAttribute('data-pool-source') || 'planned');
+        var cell = document.createElement('td');
+        cell.colSpan = row.children.length;
+        var customers = data.customers || [];
+        var rowsHtml = customers.map(function (customer) {
+            var locked = !!customer.locked;
+            var rec = customer.recommended != null ? customer.recommended : customer.quantity;
+            return '<tr>' +
+                '<td>' + escapeHtml(customer.name || '') +
+                (customer.zone ? '<small>' + escapeHtml(customer.zone) + '</small>' : '') +
+                '</td>' +
+                '<td>' + escapeHtml(sourceLabel(customer.source)) +
+                '<small>now ' + String(customer.quantity) +
+                (customer.standing_qty != null ? ' · stand ' + String(customer.standing_qty) : '') +
+                '</small></td>' +
+                '<td><input class="pc-assign-qty" inputmode="numeric" min="0" step="1" max="' +
+                String(mode === 'cut' ? customer.quantity : '') +
+                '" data-customer-id="' + String(customer.id) + '" data-current="' + String(customer.quantity) + '" ' +
+                'data-recommended="' + String(rec) + '" value="' + String(mode === 'cut' ? rec : customer.quantity) + '"' +
+                (locked ? ' disabled' : '') + '>' +
+                (locked ? '<div class="pc-assign-locked">' + escapeHtml(copy.locked) + '</div>' : '') +
+                '</td></tr>';
+        }).join('');
+        var scopeHtml = mode === 'cut'
+            ? ''
+            : '<div class="pc-assign-scope">' +
+              '<label><input type="radio" name="pc-assign-scope" value="standing" checked>' +
+              '<span>' + escapeHtml(copy.scopeStanding) + '<small>' + escapeHtml(copy.scopeStandingHint) + '</small></span></label>' +
+              '<label><input type="radio" name="pc-assign-scope" value="daily">' +
+              '<span>' + escapeHtml(copy.scopeDaily) + '<small>' + escapeHtml(copy.scopeDailyHint) + '</small></span></label>' +
+              '</div>';
+        var hintHtml = mode === 'cut'
+            ? '<p class="pc-assign-msg">' + escapeHtml(copy.cutHint) + '</p>'
+            : '';
+        cell.innerHTML =
+            '<div class="pc-assign-panel" data-pool="' + String(data.pool) + '" data-demand="' + String(data.demand) +
+            '" data-pool-source="' + escapeHtml(poolSource) +
+            '" data-mode="' + mode +
+            '" data-date="' + escapeHtml(btn.getAttribute('data-date')) +
+            '" data-product-id="' + escapeHtml(btn.getAttribute('data-product-id')) + '">' +
+            '<div class="pc-assign-head">' +
+            '<h3>' + escapeHtml((mode === 'cut' ? copy.cutTitle : copy.title)) + ' — ' + escapeHtml(btn.getAttribute('data-product-name') || '') + '</h3>' +
+            '<button type="button" class="pc-assign-close">' + escapeHtml(copy.close) + '</button>' +
+            '</div>' +
+            '<div class="pc-assign-meter" data-meter></div>' +
+            hintHtml +
+            scopeHtml +
+            '<div class="pc-assign-actions">' +
+            '<button type="button" class="btn btn-outline pc-assign-recommend">' + escapeHtml(copy.recommend) + '</button>' +
+            '<button type="button" class="btn btn-primary pc-assign-apply">' + escapeHtml(mode === 'cut' ? copy.cutApply : copy.apply) + '</button>' +
+            '</div>' +
+            (customers.length
+                ? '<table class="pc-assign-table"><thead><tr><th>' + escapeHtml(copy.customer) + '</th><th>' +
+                  escapeHtml(copy.now) + '</th><th>' + escapeHtml(copy.qty) + '</th></tr></thead><tbody>' +
+                  rowsHtml + '</tbody></table>'
+                : '<p class="pc-assign-msg">' + escapeHtml(copy.empty) + '</p>') +
+            '<p class="pc-assign-msg" data-assign-msg hidden></p>' +
+            '</div>';
+        panelRow.appendChild(cell);
+        row.parentNode.insertBefore(panelRow, row.nextSibling);
+        btn.setAttribute('aria-expanded', 'true');
+        var panel = cell.querySelector('.pc-assign-panel');
+        updateMeter(panel);
+        panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
+            input.addEventListener('input', function () { updateMeter(panel); });
+        });
+        panel.querySelector('.pc-assign-close').addEventListener('click', closePanel);
+        panel.querySelector('.pc-assign-recommend').addEventListener('click', function () {
+            panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
+                if (input.disabled) return;
+                input.value = String(parseInt(input.getAttribute('data-recommended'), 10) || 0);
+            });
+            updateMeter(panel);
+        });
+        panel.querySelector('.pc-assign-apply').addEventListener('click', function () {
+            applyPanel(panel, btn, mode);
+        });
+    }
+
+    function applyPanel(panel, btn, mode) {
+        mode = mode === 'cut' ? 'cut' : 'assign';
+        var msg = panel.querySelector('[data-assign-msg]');
+        var assignments = [];
+        panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
+            if (input.disabled) return;
+            assignments.push({
+                customer_id: parseInt(input.getAttribute('data-customer-id'), 10),
+                quantity: parseQty(input.value)
+            });
+        });
+        if (!assignments.length) {
+            msg.hidden = false;
+            msg.className = 'pc-assign-msg is-error';
+            msg.textContent = copy.empty;
+            return;
+        }
+        var scopeEl = panel.querySelector('input[name="pc-assign-scope"]:checked');
+        var body = new URLSearchParams();
+        body.set('action', mode === 'cut' ? 'cut_apply' : 'assign_apply');
+        body.set('csrf_token', csrfToken());
+        body.set('week', form.querySelector('input[name="week"]').value);
+        body.set('date', form.querySelector('input[name="date"]').value);
+        body.set('delivery_date', panel.getAttribute('data-date'));
+        body.set('product_id', panel.getAttribute('data-product-id'));
+        body.set('pool', panel.getAttribute('data-pool'));
+        if (mode === 'assign') {
+            body.set('scope', scopeEl ? scopeEl.value : 'standing');
+        }
+        body.set('assignments', JSON.stringify(assignments));
+        panel.querySelector('.pc-assign-apply').disabled = true;
+        fetch('production_center.php?date=' + encodeURIComponent(panel.getAttribute('data-date')), {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-CSRF-TOKEN': csrfToken()
+            },
+            body: body.toString(),
+            credentials: 'same-origin'
+        }).then(function (res) {
+            return res.json().then(function (data) { return { okHttp: res.ok, data: data }; });
+        }).then(function (result) {
+            if (!result.data || result.data.ok !== true) {
+                panel.querySelector('.pc-assign-apply').disabled = false;
+                msg.hidden = false;
+                msg.className = 'pc-assign-msg is-error';
+                msg.textContent = (result.data && result.data.error) ? result.data.error : copy.error;
+                return;
+            }
+            window.location.reload();
+        }).catch(function () {
+            panel.querySelector('.pc-assign-apply').disabled = false;
+            msg.hidden = false;
+            msg.className = 'pc-assign-msg is-error';
+            msg.textContent = copy.error;
+        });
+    }
+
+    document.querySelectorAll('.pc-assign-open, .pc-cut-open').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (btn.getAttribute('aria-expanded') === 'true') {
+                closePanel();
+                return;
+            }
+            var mode = btn.classList.contains('pc-cut-open') ? 'cut' : 'assign';
+            var pool = currentPool(btn);
+            var body = new URLSearchParams();
+            body.set('action', mode === 'cut' ? 'cut_preview' : 'assign_preview');
+            body.set('csrf_token', csrfToken());
+            body.set('week', form.querySelector('input[name="week"]').value);
+            body.set('date', form.querySelector('input[name="date"]').value);
+            body.set('delivery_date', btn.getAttribute('data-date'));
+            body.set('product_id', btn.getAttribute('data-product-id'));
+            body.set('pool', String(pool));
+            fetch('production_center.php?date=' + encodeURIComponent(btn.getAttribute('data-date')), {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-CSRF-TOKEN': csrfToken()
+                },
+                body: body.toString(),
+                credentials: 'same-origin'
+            }).then(function (res) {
+                return res.json().then(function (data) { return { okHttp: res.ok, data: data }; });
+            }).then(function (result) {
+                if (!result.data || result.data.ok !== true) {
+                    window.alert((result.data && result.data.error) ? result.data.error : copy.error);
+                    return;
+                }
+                result.data.pool = pool;
+                renderPanel(btn, result.data, mode);
+            }).catch(function () {
+                window.alert(copy.error);
+            });
+        });
+    });
+})();
+</script>
 <?php require_once 'includes/footer.php'; ?>

@@ -285,9 +285,8 @@ function bakery_demand_readiness(PDO $db, string $date): array
 }
 
 /**
- * Manager lookahead: Tuesday bake drives Wednesday's route.
- * Dated demand is already filled by the rolling horizon; this strip only
- * orients the next two operating dates.
+ * Manager lookahead: default mid-week is bake tomorrow for the next route.
+ * Friday pan dulce and Sour Flour use the cover windows in production_cadence.php.
  *
  * @param 'dashboard'|'daily_run' $returnKey
  */
@@ -360,5 +359,6 @@ function bakery_render_demand_cadence_strip(PDO $db, string $fromDate, string $r
     echo '<p class="ops-cadence-note">' . htmlspecialchars(bakery_t('cadence.horizon_note', [
         'days' => bakery_demand_horizon_days(),
     ])) . '</p>';
+    echo '<p class="ops-cadence-note">' . htmlspecialchars(bakery_t('cadence.cover_note')) . '</p>';
     echo '</section>';
 }

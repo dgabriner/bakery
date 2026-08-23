@@ -28,7 +28,7 @@ function bakery_ingredient_requirements_sources(): array
         'demand' => [
             'label' => 'Demand (Daily Production source)',
             'short' => 'Demand',
-            'description' => 'Uses dated daily-order quantities when any exist for the day; otherwise standing-order forecast for that weekday. Matches Daily Production.',
+            'description' => 'Per customer, dated orders replace standing for that date; other customers still contribute standing. Same merge as Daily Production.',
         ],
         'to_produce' => [
             'label' => 'Still to produce (demand − finished-goods stock)',
@@ -176,13 +176,20 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
     $notes = [];
     $error = null;
 
-    $demandMode = $hasDaily ? 'daily_orders' : 'standing_orders';
+    $demandMode = 'standing';
     $sourceMeta = $sources[$source];
     $sourceDetail = $sourceMeta['description'];
 
+    require_once __DIR__ . '/demand_review.php';
+    $operatingDemand = bakery_operating_demand_by_product($db, $date);
+    $hasDaily = !empty($operatingDemand['has_daily']);
+    $demandMode = (string)($operatingDemand['mix']['mode'] ?? ($hasDaily ? 'dated' : 'standing'));
+
     if ($source === 'demand') {
-        if ($hasDaily) {
-            $sourceDetail = 'Committed demand from daily_order_items for ' . $date . '.';
+        if ($demandMode === 'merged') {
+            $sourceDetail = 'Per-customer merge of dated orders and standing forecast for ' . $date . '.';
+        } elseif ($demandMode === 'dated') {
+            $sourceDetail = 'Dated daily orders for ' . $date . ' (every customer on this day has a dated order).';
         } else {
             $sourceDetail = 'No daily orders for ' . $date . ' — standing_orders forecast for weekday ' . $weekday . '.';
             $notes[] = 'Standing forecast is in use because no dated daily-order lines exist for this day.';
@@ -198,11 +205,11 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
                 'error' => 'Finished-goods inventory is not available, so “Still to produce” cannot be calculated. Choose Demand or Saved plan, or install finished-goods inventory migrations.',
             ];
         }
-        $sourceDetail = ($hasDaily
-                ? 'Demand from daily orders'
-                : 'Demand from standing forecast')
+        $sourceDetail = ($demandMode === 'merged'
+                ? 'Per-customer merged demand'
+                : ($demandMode === 'dated' ? 'Demand from dated orders' : 'Demand from standing forecast'))
             . ' minus finished-goods available+loaded on ' . $date . '.';
-        if (!$hasDaily) {
+        if ($demandMode === 'standing') {
             $notes[] = 'Standing forecast is the demand base because no dated daily-order lines exist for this day.';
         }
     } elseif ($source === 'plan') {
@@ -285,13 +292,6 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $operatingDemand = ['by_product' => []];
-    if (function_exists('bakery_operating_demand_by_product')) {
-        require_once __DIR__ . '/demand_review.php';
-        $operatingDemand = bakery_operating_demand_by_product($db, $date);
-        $hasDaily = $operatingDemand['has_daily'];
-    }
-
     $products = [];
     $demandWithoutPlan = 0;
     $planWithoutRows = 0;
@@ -311,7 +311,7 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
 
         if ($source === 'demand') {
             $qty = $demandQty;
-            $qtyLabel = $hasDaily ? 'daily_orders' : 'standing_orders';
+            $qtyLabel = (string)($operatingDemand['sources'][$pid] ?? $demandMode);
         } elseif ($source === 'to_produce') {
             $qty = $toProduce;
             $qtyLabel = 'to_produce';
@@ -382,8 +382,8 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
         $notes[] = 'Nothing left to produce for this date (demand covered by finished-goods stock, or no demand).';
     }
 
-    if ($source === 'plan' && $hasDaily) {
-        $notes[] = 'Demand for this date comes from committed daily orders — ingredient requirements follow the saved production plan, not standing forecast.';
+    if ($source === 'plan' && $demandMode !== 'standing') {
+        $notes[] = 'Demand for this date includes dated orders — ingredient requirements follow the saved production plan, not standing forecast alone.';
     }
 
     return [

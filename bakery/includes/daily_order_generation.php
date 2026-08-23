@@ -553,10 +553,12 @@ function bakery_demand_horizon_days(): int
 }
 
 /**
- * Sour Flour cadence: from calendar day D, Tuesday's bake (D+1) is for
- * Wednesday's route (D+2). Production.php is keyed on the delivery date,
- * so bakers opening the sheet on the bake day (default: tomorrow) see
- * the route date's demand.
+ * Default demand lookahead from calendar day D: tomorrow's bake sheet
+ * (D+1) is keyed on the next route date (D+2). That matches mid-week
+ * pan dulce (bake the day before delivery). Friday's pan dulce bake
+ * covers Saturday, Sunday, and Monday; Sour Flour bakes Tuesday/Friday
+ * plus Sunday-for-Monday — see includes/production_cadence.php.
+ * Production.php stays keyed on the delivery date.
  *
  * @return array{from_date:string,bake_day:string,route_date:string,production_date:string,horizon_end:string}
  */

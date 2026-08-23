@@ -255,9 +255,9 @@ $db->prepare("
 ")->execute([$oid]);
 $db->commit();
 $status2 = $db->query("SELECT delivery_status FROM daily_order_assignments WHERE daily_order_id=$oid")->fetchColumn();
-assert_eq('delivered', $status2, 'complete_delivery mark_delivered sets assignment delivered');
+assert_eq('delivered', $status2, 'canonical delivery completion sets assignment delivered');
 $orderStatus = $db->query("SELECT status FROM daily_orders WHERE id=$oid")->fetchColumn();
-assert_eq('delivered', $orderStatus, 'complete_delivery mark_delivered sets daily_orders.status delivered');
+assert_eq('delivered', $orderStatus, 'canonical delivery completion sets daily_orders.status delivered');
 
 echo "\n=== Invoice totals ===\n";
 $inv = $db->prepare("

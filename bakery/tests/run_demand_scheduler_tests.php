@@ -56,7 +56,8 @@ $assert(strpos($tickSrc, 'bakery.sourflour.org/bake/scripts/demand_scheduler.php
 $en = bakery_load_lang_catalog('en');
 $es = bakery_load_lang_catalog('es');
 $assert(!empty($en['cadence.title']) && !empty($es['cadence.title']), 'cadence copy exists in en and es');
-$assert($en['cadence.title'] !== $es['cadence.title'], 'cadence title is translated');
+$assert(!empty($en['cadence.cover_note']) && !empty($es['cadence.cover_note']), 'cover-window cadence copy exists');
+$assert($en['cadence.cover_note'] !== $es['cadence.cover_note'], 'cover-window cadence copy is translated');
 $assert(!empty($en['daily_run.demand_horizon_filled']) && !empty($es['daily_run.demand_horizon_filled']), 'horizon flash copy exists');
 
 $genSrc = (string)file_get_contents($root . '/includes/daily_order_generation.php');

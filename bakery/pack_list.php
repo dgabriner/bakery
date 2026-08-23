@@ -11,20 +11,10 @@ require_once 'includes/operational_exceptions.php';
 $page_title = bakery_t('page.pack_list');
 
 // Persisted pack progress: one row per checked line per date, shared by all staff.
-if (!function_exists('bakery_pack_progress_ensure')) {
+// Migration 030 owns the schema; an incomplete install degrades honestly here.
+if (!function_exists('bakery_pack_progress_ready')) {
     function bakery_pack_progress_ready(PDO $db): bool {
         return function_exists('table_exists') ? table_exists($db, 'pack_progress') : false;
-    }
-
-    function bakery_pack_progress_ensure(PDO $db): void {
-        $db->exec("CREATE TABLE IF NOT EXISTS pack_progress (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            pack_date DATE NOT NULL,
-            line_key VARCHAR(64) NOT NULL,
-            checked_by_user_id INT NULL,
-            checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_pack_line (pack_date, line_key)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     }
 }
 
@@ -44,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
         }
         $checked = ($_POST['checked'] ?? '0') === '1';
         if (!bakery_pack_progress_ready($db)) {
-            bakery_pack_progress_ensure($db);
+            throw new RuntimeException('Packing check-offs are unavailable until database migrations are complete.');
         }
         if ($checked) {
             $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
@@ -146,11 +136,15 @@ $packDeskNotice = !empty($_GET['notice']) ? substr(trim((string)$_GET['notice'])
 try {
     require_once __DIR__ . '/includes/demand_review.php';
     $lineItems = bakery_operating_demand_lines($db, $selectedDate);
-    if ($isBaker && !empty($bakerProductIds)) {
-        $allowed = array_flip($bakerProductIds);
-        $lineItems = array_values(array_filter($lineItems, static function ($row) use ($allowed) {
-            return isset($allowed[(int)$row['product_id']]);
-        }));
+    if ($isBaker && is_array($bakerProductIds)) {
+        if (empty($bakerProductIds)) {
+            $lineItems = [];
+        } else {
+            $allowed = array_flip($bakerProductIds);
+            $lineItems = array_values(array_filter($lineItems, static function ($row) use ($allowed) {
+                return isset($allowed[(int)$row['product_id']]);
+            }));
+        }
     }
     foreach ($lineItems as $row) {
         if (($row['source'] ?? '') === 'daily') {
@@ -443,11 +437,9 @@ unset($routeSection);
 
 // Persisted check-offs for this date (survive refresh and are shared by all staff).
 $checkedMap = [];
+$packProgressReady = bakery_pack_progress_ready($db);
 try {
-    if (!bakery_pack_progress_ready($db)) {
-        bakery_pack_progress_ensure($db);
-    }
-    if (bakery_pack_progress_ready($db)) {
+    if ($packProgressReady) {
         $checkStmt = $db->prepare('SELECT line_key FROM pack_progress WHERE pack_date = ?');
         $checkStmt->execute([$selectedDate]);
         foreach ($checkStmt->fetchAll(PDO::FETCH_COLUMN) as $key) {
@@ -460,10 +452,28 @@ try {
 
 $totalCustomers = count($byCustomer);
 $totalProducts = count($byProduct);
+$totalMadeUnits = array_sum($producedByProduct);
 $orderSourceLabel = $hasDailyOrders ? bakery_t('pack_list.daily_orders') : bakery_t('pack_list.standing_schedule');
 $dateLabel = $days[$selectedDay] . ', ' . date('M j, Y', strtotime($selectedDate));
 $queryBase = http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
 $productionHref = 'production.php?' . http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
+$canOpenProductionCenter = !$isBaker && !$isDriver
+    && function_exists('bakery_user_has_role')
+    && bakery_user_has_role(['administrator', 'manager']);
+$productionCenterHref = function_exists('bakery_ops_link_production_center')
+    ? bakery_ops_link_production_center(
+        date('Y-m-d', strtotime('monday this week', strtotime($selectedDate))),
+        ['date' => $selectedDate],
+        $pageReturnKey ?: 'pack_list'
+    )
+    : ('production_center.php?date=' . rawurlencode($selectedDate));
+$workflowStages = [];
+try {
+    require_once __DIR__ . '/includes/production_workflow_strip.php';
+    $workflowStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
+} catch (Throwable $e) {
+    error_log('pack_list workflow strip: ' . $e->getMessage());
+}
 $pageExceptions = [];
 try {
     $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
@@ -703,6 +713,22 @@ require_once 'includes/nav.php';
 .pack-exceptions li.standing-fallback {
     color: #856404;
 }
+
+.pack-baker-help {
+    margin-bottom: 14px;
+    border: 1px solid var(--pack-border);
+    border-radius: 10px;
+    background: #f8faf9;
+}
+
+.pack-baker-help > summary {
+    cursor: pointer;
+    padding: 12px 14px;
+    color: #42545a;
+    font-weight: 700;
+}
+
+.pack-baker-help .exception-desk { margin: 0 12px 12px; }
 
 .pack-inventory-bar {
     background: #fff;
@@ -1050,14 +1076,29 @@ require_once 'includes/nav.php';
         <div class="pack-toolbar__row">
             <h1 class="pack-title"><?php bakery_te('pack_list.title'); ?></h1>
             <div class="pack-toolbar__actions">
+                <?php if ($canOpenProductionCenter): ?>
+                    <a class="pack-btn" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.production_center'); ?></a>
+                <?php endif; ?>
                 <?php if ($isBaker): ?>
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
                 <?php elseif (!$isDriver): ?>
+                    <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
                     <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>">Driver pickup loads</a>
                 <?php endif; ?>
                 <button type="button" class="pack-btn pack-btn--primary" onclick="window.print()"><?php bakery_te('pack_list.print'); ?></button>
             </div>
         </div>
+        <?php
+        if (!$isBaker && function_exists('bakery_production_workflow_strip_css')) {
+            echo bakery_production_workflow_strip_css();
+            echo bakery_production_workflow_strip_html($workflowStages, [
+                'current' => 'pack',
+                'compact' => true,
+                'title' => bakery_t('production_workflow.title'),
+                'lead' => bakery_t('production_workflow.lead_packer'),
+            ]);
+        }
+        ?>
         <form method="get" action="pack_list.php" class="pack-date-form">
             <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
             <label for="packDate"><?php bakery_te('pack_list.delivery_date'); ?></label>
@@ -1100,7 +1141,11 @@ require_once 'includes/nav.php';
                 <span class="pack-total-card__label"><?php bakery_te('pack_list.products'); ?></span>
                 <span class="pack-total-card__value"><?php echo number_format($totalProducts); ?></span>
             </div>
-            <?php if ($inventoryReady): ?>
+            <?php if ($inventoryReady && !$isBaker): ?>
+                <div class="pack-total-card<?php echo $totalMadeUnits > 0 ? ' pack-total-card--ok' : ''; ?>">
+                    <span class="pack-total-card__label"><?php bakery_te('pack_list.made_units'); ?></span>
+                    <span class="pack-total-card__value"><?php echo number_format($totalMadeUnits); ?></span>
+                </div>
                 <div class="pack-total-card<?php echo $shortageUnits > 0 ? ' pack-total-card--alert' : ' pack-total-card--ok'; ?>">
                     <span class="pack-total-card__label"><?php bakery_te('pack_list.shortage_units'); ?></span>
                     <span class="pack-total-card__value"><?php echo number_format($shortageUnits); ?></span>
@@ -1109,7 +1154,7 @@ require_once 'includes/nav.php';
         </div>
     <?php endif; ?>
 
-    <?php if (!empty($exceptions)): ?>
+    <?php if (!$isBaker && !empty($exceptions)): ?>
         <section class="pack-exceptions" aria-label="Packing exceptions">
             <h2><?php echo count($shortageProducts) > 0 ? bakery_t('pack_list.attention_before_loading') : bakery_t('pack_list.notes'); ?></h2>
             <ul>
@@ -1123,17 +1168,19 @@ require_once 'includes/nav.php';
     <?php endif; ?>
 
     <?php
-    if (!empty($isBaker) && !empty($shortageProducts) && function_exists('bakery_exception_desk_render_baker')) {
+    if ($isBaker && !empty($shortageProducts) && function_exists('bakery_exception_desk_render_baker')) {
+        echo '<details class="pack-baker-help"><summary>' . htmlspecialchars(bakery_t('production.baker_help'), ENT_QUOTES, 'UTF-8') . '</summary>';
         bakery_exception_desk_render_baker(
             $db,
             $selectedDate,
             $shortageProducts,
             'pack_list.php?date=' . rawurlencode($selectedDate) . '&view=' . rawurlencode($viewMode)
         );
+        echo '</details>';
     }
     ?>
 
-    <?php if ($inventoryReady && !empty($productTotals)): ?>
+    <?php if (!$isBaker && $inventoryReady && !empty($productTotals)): ?>
         <section class="pack-inventory-bar" aria-label="Finished goods reconciliation">
             <h2><?php bakery_te('pack_list.finished_goods'); ?></h2>
             <div style="overflow-x:auto">
@@ -1190,7 +1237,7 @@ require_once 'includes/nav.php';
             <?php endif; ?>
         </div>
     <?php else: ?>
-        <p class="pack-session-note"><?php bakery_te('pack_list.session_note'); ?></p>
+        <p class="pack-session-note"><?php bakery_te($packProgressReady ? 'pack_list.session_note' : 'pack_list.progress_unavailable'); ?></p>
 
         <nav class="pack-view-toggle" aria-label="<?php bakery_te('pack_list.by_product'); ?>">
             <a class="<?php echo $viewMode === 'product' ? 'active' : ''; ?>"
@@ -1208,21 +1255,23 @@ require_once 'includes/nav.php';
                 $available = $inventoryReady ? (($availableByProduct[$pid] ?? 0) + ($loadedByProduct[$pid] ?? 0)) : null;
                 $short = ($available !== null && $available < $required) ? ($required - $available) : 0;
             ?>
-                <section class="pack-section<?php echo $short > 0 ? ' ops-attention-row' : ''; ?>" id="pack-product-<?php echo $pid; ?>">
+                <section class="pack-section<?php echo !$isBaker && $short > 0 ? ' ops-attention-row' : ''; ?>" id="pack-product-<?php echo $pid; ?>">
                     <header class="pack-section__header">
                         <div>
                             <h2 class="pack-section__title"><?php echo htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
-                            <?php
-                            echo bakery_ops_render_row_chips($pageExceptions, [
-                                'product_id' => $pid,
-                                'flags' => $short > 0 ? ['fg_shortfall' => true] : [],
-                            ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
-                            ?>
+                            <?php if (!$isBaker): ?>
+                                <?php
+                                echo bakery_ops_render_row_chips($pageExceptions, [
+                                    'product_id' => $pid,
+                                    'flags' => $short > 0 ? ['fg_shortfall' => true] : [],
+                                ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
+                                ?>
+                            <?php endif; ?>
                             <span class="pack-section__subtitle"><?php echo htmlspecialchars($product['dough_type'], ENT_QUOTES, 'UTF-8'); ?></span>
                         </div>
                         <div class="pack-section__totals">
                             <span class="pack-qty-pill pack-qty-pill--big"><?php echo htmlspecialchars(bakery_t('pack_list.total', ['count' => number_format($required)]), ENT_QUOTES, 'UTF-8'); ?></span>
-                            <?php if ($inventoryReady): ?>
+                            <?php if ($inventoryReady && !$isBaker): ?>
                                 <span class="pack-qty-pill"><?php echo htmlspecialchars(bakery_t('pack_list.available_count', ['count' => number_format($available)]), ENT_QUOTES, 'UTF-8'); ?></span>
                                 <?php if ($short > 0): ?>
                                     <span class="pack-qty-pill pack-qty-pill--short"><?php echo htmlspecialchars(bakery_t('pack_list.short', ['count' => number_format($short)]), ENT_QUOTES, 'UTF-8'); ?></span>
@@ -1234,7 +1283,7 @@ require_once 'includes/nav.php';
                         <?php foreach ($product['customers'] as $line): ?>
                             <?php $lineChecked = isset($checkedMap[$line['line_key']]); ?>
                             <div class="pack-line<?php echo $lineChecked ? ' pack-line--checked' : ''; ?>" data-check-key="<?php echo htmlspecialchars($line['line_key'], ENT_QUOTES, 'UTF-8'); ?>">
-                                <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"><?php echo $lineChecked ? '✓' : ' '; ?></button>
+                                <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"<?php echo $packProgressReady ? '' : ' disabled'; ?>><?php echo $lineChecked ? '✓' : ' '; ?></button>
                                 <div class="pack-line__main">
                                     <span class="pack-line__label">
                                         <?php echo bakery_customer_record_link_html((int)$line['customer_id'], $line['customer_name'], $selectedDate, 'pack-customer-link'); ?>
@@ -1264,12 +1313,14 @@ require_once 'includes/nav.php';
                                     </span>
                                 <?php endif; ?>
                             </h2>
-                            <?php
-                            echo bakery_ops_render_row_chips($pageExceptions, [
-                                'customer_id' => (int)$customer['customer_id'],
-                                'flags' => [],
-                            ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
-                            ?>
+                            <?php if (!$isBaker): ?>
+                                <?php
+                                echo bakery_ops_render_row_chips($pageExceptions, [
+                                    'customer_id' => (int)$customer['customer_id'],
+                                    'flags' => [],
+                                ], ['date' => $selectedDate, 'return' => (string)$pageReturnKey]);
+                                ?>
+                            <?php endif; ?>
                         </div>
                         <div class="pack-section__totals">
                             <span class="pack-qty-pill pack-qty-pill--big"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format($customer['total'])]), ENT_QUOTES, 'UTF-8'); ?></span>
@@ -1279,7 +1330,7 @@ require_once 'includes/nav.php';
                         <?php foreach ($customer['products'] as $line): ?>
                             <?php $lineChecked = isset($checkedMap[$line['line_key']]); ?>
                             <div class="pack-line<?php echo $lineChecked ? ' pack-line--checked' : ''; ?>" data-check-key="<?php echo htmlspecialchars($line['line_key'], ENT_QUOTES, 'UTF-8'); ?>">
-                                <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"><?php echo $lineChecked ? '✓' : ' '; ?></button>
+                                <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"<?php echo $packProgressReady ? '' : ' disabled'; ?>><?php echo $lineChecked ? '✓' : ' '; ?></button>
                                 <div class="pack-line__main">
                                     <span class="pack-line__label"><?php echo htmlspecialchars($line['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
                                     <span class="pack-line__meta"><?php echo htmlspecialchars($line['dough_type'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -1327,7 +1378,7 @@ require_once 'includes/nav.php';
                                 <?php foreach ($stop['products'] as $line): ?>
                                     <?php $lineChecked = isset($checkedMap[$line['line_key']]); ?>
                                     <div class="pack-line<?php echo $lineChecked ? ' pack-line--checked' : ''; ?>" data-check-key="<?php echo htmlspecialchars($line['line_key'], ENT_QUOTES, 'UTF-8'); ?>">
-                                        <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"><?php echo $lineChecked ? '✓' : ' '; ?></button>
+                                        <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"<?php echo $packProgressReady ? '' : ' disabled'; ?>><?php echo $lineChecked ? '✓' : ' '; ?></button>
                                         <div class="pack-line__main">
                                             <span class="pack-line__label"><?php echo htmlspecialchars($line['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
                                             <span class="pack-line__meta"><?php echo htmlspecialchars($line['dough_type'], ENT_QUOTES, 'UTF-8'); ?></span>

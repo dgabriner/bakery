@@ -93,6 +93,162 @@ function bakery_production_plan_commit_get(PDO $db, string $date): ?array
 }
 
 /**
+ * Which delivery date Production Center should open.
+ * `date=` wins. Legacy `week=` links (Manager passes the operating date as week)
+ * open that day, not the Monday of the week.
+ *
+ * @return array{date:string,week_start:string,week_dates:list<string>}
+ */
+function bakery_production_center_resolve_focus(?string $dateParam, ?string $weekParam, ?string $today = null): array
+{
+    $today = $today ?: date('Y-m-d');
+    $parse = static function ($value): ?string {
+        $value = trim((string)$value);
+        $dt = DateTime::createFromFormat('!Y-m-d', $value);
+        if (!$dt || $dt->format('Y-m-d') !== $value) {
+            return null;
+        }
+        return $value;
+    };
+    $selected = $parse($dateParam);
+    if ($selected === null) {
+        $selected = $parse($weekParam);
+    }
+    if ($selected === null) {
+        $selected = $parse($today) ?: date('Y-m-d');
+    }
+    $weekStart = DateTime::createFromFormat('!Y-m-d', $selected);
+    $weekStart->modify('monday this week');
+    $weekStartStr = $weekStart->format('Y-m-d');
+    $weekDates = [];
+    for ($i = 0; $i < 7; $i++) {
+        $weekDates[] = date('Y-m-d', strtotime($weekStartStr . ' +' . $i . ' days'));
+    }
+    return [
+        'date' => $selected,
+        'week_start' => $weekStartStr,
+        'week_dates' => $weekDates,
+    ];
+}
+
+/**
+ * Upsert draft production targets. Saving is not commit.
+ *
+ * @param array<string, array<int|string, mixed>> $plannedByDate delivery_date => product_id => qty
+ * @param array<int, true> $allowedProductIds
+ */
+function bakery_production_plan_save_targets(PDO $db, array $plannedByDate, array $allowedProductIds, ?int $userId): int
+{
+    if (!table_exists($db, 'production_plan_items')) {
+        throw new RuntimeException('Saved production plans are not installed. Run scripts/run_migrations.php first.');
+    }
+    if ($plannedByDate === []) {
+        throw new InvalidArgumentException('No changed targets to save. Edit a quantity, then save.');
+    }
+    $save = $db->prepare(
+        'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE planned_quantity = VALUES(planned_quantity), created_by_user_id = VALUES(created_by_user_id)'
+    );
+    $saved = 0;
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        foreach ($plannedByDate as $date => $productQuantities) {
+            $date = (string)$date;
+            $dt = DateTime::createFromFormat('!Y-m-d', $date);
+            if (!$dt || $dt->format('Y-m-d') !== $date || !is_array($productQuantities)) {
+                throw new InvalidArgumentException('A submitted plan item is outside the selected day.');
+            }
+            foreach ($productQuantities as $productId => $quantity) {
+                $productId = (int)$productId;
+                if (is_string($quantity)) {
+                    $quantity = trim($quantity);
+                }
+                if ($quantity === '' || $quantity === null) {
+                    throw new InvalidArgumentException('Batch targets cannot be blank. Use 0 if nothing is planned.');
+                }
+                $quantity = filter_var($quantity, FILTER_VALIDATE_INT);
+                if (!isset($allowedProductIds[$productId]) || $quantity === false || $quantity < 0) {
+                    throw new InvalidArgumentException('Batch targets must be whole numbers of zero or more.');
+                }
+                $save->execute([$date, $productId, $quantity, $userId]);
+                $saved++;
+            }
+        }
+        if ($saved === 0) {
+            throw new InvalidArgumentException('No changed targets to save.');
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+    return $saved;
+}
+
+/**
+ * Save one autosaved target only when it still matches the value the browser read.
+ * This prevents an older tab or delayed request from silently replacing newer work.
+ *
+ * @return array{saved:int,planned_quantity:int,has_plan:bool}
+ */
+function bakery_production_plan_save_target_cas(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $quantity,
+    array $allowedProductIds,
+    ?int $userId,
+    bool $expectedHasPlan,
+    int $expectedQuantity
+): array {
+    $dt = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dt || $dt->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('A submitted plan item is outside the selected day.');
+    }
+    if (!isset($allowedProductIds[$productId]) || $quantity < 0 || $expectedQuantity < 0) {
+        throw new InvalidArgumentException('Batch targets must be whole numbers of zero or more.');
+    }
+    if (!table_exists($db, 'production_plan_items')) {
+        throw new RuntimeException('Saved production plans are not installed. Run scripts/run_migrations.php first.');
+    }
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) $db->beginTransaction();
+    try {
+        $read = $db->prepare(
+            'SELECT planned_quantity FROM production_plan_items WHERE delivery_date = ? AND product_id = ? FOR UPDATE'
+        );
+        $read->execute([$date, $productId]);
+        $current = $read->fetchColumn();
+        $currentHasPlan = $current !== false;
+        $currentQuantity = $currentHasPlan ? (int)$current : 0;
+        if ($currentHasPlan !== $expectedHasPlan || ($currentHasPlan && $currentQuantity !== $expectedQuantity)) {
+            throw new RuntimeException('production_plan_conflict:' . ($currentHasPlan ? (string)$currentQuantity : 'none'));
+        }
+
+        $save = $db->prepare(
+            'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE planned_quantity = VALUES(planned_quantity), created_by_user_id = VALUES(created_by_user_id)'
+        );
+        $save->execute([$date, $productId, $quantity, $userId]);
+        if ($ownTransaction) $db->commit();
+        return ['saved' => 1, 'planned_quantity' => $quantity, 'has_plan' => true];
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
+/**
  * Saved (draft) plan quantities for a date. Not the baker's bake list until committed.
  *
  * @return array<int,int> product_id => planned_quantity
@@ -172,6 +328,41 @@ function bakery_production_plan_state(PDO $db, string $date): array
         'available' => bakery_production_plan_commits_ready($db),
         'commit' => $commit,
         'changed_since' => $changedSince,
+    ];
+}
+
+/**
+ * Quantities the Produce stage should treat as "done when made".
+ *
+ * Committed dates use the bake snapshot (plan below demand stays complete when
+ * the baker finishes that bake). Uncommitted dates keep operating demand.
+ *
+ * @return array{
+ *   by_product:array<int,int>,
+ *   product_count:int,
+ *   required_units:int,
+ *   source:string,
+ *   committed:bool
+ * }
+ */
+function bakery_production_produce_targets_by_product(PDO $db, string $date): array
+{
+    $bakeList = bakery_production_bake_list($db, $date);
+    $byProduct = [];
+    foreach ($bakeList['items'] as $item) {
+        $qty = (int)($item['bake_quantity'] ?? 0);
+        if ($qty <= 0) {
+            continue;
+        }
+        $byProduct[(int)$item['product_id']] = $qty;
+    }
+
+    return [
+        'by_product' => $byProduct,
+        'product_count' => count($byProduct),
+        'required_units' => array_sum($byProduct),
+        'source' => !empty($bakeList['committed']) ? 'committed_plan' : 'demand',
+        'committed' => !empty($bakeList['committed']),
     ];
 }
 
