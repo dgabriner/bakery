@@ -35,6 +35,23 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
 
 $assert(defined('MAIL_DRIVER') && MAIL_DRIVER === 'log', 'MAIL_DRIVER=log (never SMTP a real customer)');
 $assert(!bakery_billing_email_ready(), 'email_ready is false in log mode');
+$assert(bakery_billing_is_fixture_noise(['order_date' => '2099-09-11']), '2099 dates are treated as test noise');
+$assert(!bakery_billing_is_fixture_noise(['order_date' => '2026-08-12', 'customer_email' => 'mario@zaziesf.com']), 'real August deliveries are not test noise');
+$assert(bakery_billing_work_queue([
+    'needs_attention' => false,
+    'is_cod' => false,
+    'square_status' => '',
+    'delivery_confirmed_at' => '2026-08-12 09:00:00',
+    'category' => 'ready',
+]) === 'to_send', 'ready non-COD without Square is To send');
+$assert(bakery_billing_work_queue([
+    'needs_attention' => false,
+    'is_cod' => false,
+    'square_status' => 'UNPAID',
+    'square_invoice_id' => 'sq',
+    'delivery_confirmed_at' => '2026-08-12 09:00:00',
+    'category' => 'already_invoiced',
+]) === 'waiting', 'Square UNPAID is Waiting on pay');
 
 $billingSrc = (string)file_get_contents($root . '/includes/billing.php');
 $assert(strpos($billingSrc, 'INVOICE_TEST_RECIPIENT') === false, 'billing send path does not use INVOICE_TEST_RECIPIENT');

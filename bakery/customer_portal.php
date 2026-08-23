@@ -36,6 +36,8 @@ function bakery_portal_status_badge_class($tone) {
     return $map[$tone] ?? 'badge-muted';
 }
 
+$tipStatus = trim((string)($_GET['tip'] ?? ''));
+
 $page_title = bakery_t('page.portal_home');
 $currentLocale = bakery_locale();
 $portalActivePage = 'home';
@@ -55,6 +57,21 @@ $portalCustomerName = $customer['name'];
   <main class="container">
     <?php if ($homeError !== ''): ?>
       <div class="card"><div class="card-body"><p class="delivery-card-summary"><?php echo htmlspecialchars($homeError); ?></p></div></div>
+    <?php endif; ?>
+    <?php if ($tipStatus === 'thanks'): ?>
+      <div class="card" style="background:var(--ok-bg,#f0fdf4);border-left:4px solid var(--ok,#16a34a)">
+        <div class="card-body" style="padding:14px 16px">
+          <strong><?php bakery_te('portal.tip_thanks_heading'); ?></strong>
+          <p style="margin:4px 0 0;font-size:.9rem;color:var(--muted)"><?php bakery_te('portal.tip_thanks_body'); ?></p>
+        </div>
+      </div>
+    <?php elseif ($tipStatus === 'error'): ?>
+      <div class="card" style="background:var(--warn-bg,#fffbeb);border-left:4px solid var(--warn,#d97706)">
+        <div class="card-body" style="padding:14px 16px">
+          <strong><?php bakery_te('portal.tip_error_heading'); ?></strong>
+          <p style="margin:4px 0 0;font-size:.9rem;color:var(--muted)"><?php bakery_te('portal.tip_error_body'); ?></p>
+        </div>
+      </div>
     <?php endif; ?>
     <section class="card hero-card">
       <div class="card-body">
@@ -168,6 +185,17 @@ $portalCustomerName = $customer['name'];
         </div>
       </section>
     <?php endif; ?>
+
+    <section class="card" style="text-align:center;padding:20px 16px">
+      <p style="font-size:1.1rem;font-weight:600;margin:0 0 4px"><?php bakery_te('portal.tip_heading'); ?></p>
+      <p style="color:var(--muted);font-size:.88rem;margin:0 0 14px"><?php bakery_te('portal.tip_body'); ?></p>
+      <form method="post" action="customer_portal_tip.php">
+        <?php echo bakery_csrf_field(); ?>
+        <button type="submit" class="btn" style="min-width:140px;font-size:1rem">
+          <?php bakery_te('portal.tip_button'); ?>
+        </button>
+      </form>
+    </section>
 
   </main>
   <?php require __DIR__ . '/includes/portal_nav.php'; ?>

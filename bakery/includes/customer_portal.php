@@ -10,6 +10,9 @@ require_once __DIR__ . '/brand.php';
 
 /** Scripts for the customer self-service portal (separate from staff auth). */
 function bakery_customer_portal_scripts() {
+    // Note: the security gate (bakery_enforce_request_security) also treats any
+    // customer_portal_*.php script as portal territory by naming convention.
+    // This list is for portal pages whose names do not follow that pattern.
     return [
         'customer_portal.php',
         'customer_portal_regular.php',
@@ -29,6 +32,7 @@ function bakery_customer_portal_scripts() {
         'customer_portal_notifications.php',
         'customer_portal_issue.php',
         'customer_portal_api.php',
+        'customer_portal_tip.php',
         'sfb_dashboard.php',
         'sfb_starters.php',
         'sfb_ingredients.php',

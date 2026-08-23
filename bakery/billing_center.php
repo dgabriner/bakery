@@ -24,7 +24,7 @@ if (!in_array($panel, $panels, true)) {
     $panel = 'invoices';
 }
 if ($panel === 'exceptions') {
-    $_GET['attention'] = 'needs_attention';
+    $_GET['queue'] = 'problems';
     $panel = 'invoices';
 }
 
@@ -78,10 +78,15 @@ $amountMinRaw = trim((string)($_GET['amount_min'] ?? ''));
 $amountMaxRaw = trim((string)($_GET['amount_max'] ?? ''));
 $amountMin = $amountMinRaw !== '' && is_numeric($amountMinRaw) ? (float)$amountMinRaw : null;
 $amountMax = $amountMaxRaw !== '' && is_numeric($amountMaxRaw) ? (float)$amountMaxRaw : null;
-$deliveredOnly = isset($_GET['delivered_only']) && (string)$_GET['delivered_only'] === '1';
-$collectionFilter = (string)($_GET['collection'] ?? 'all');
+$collectionFilter = (string)($_GET['collection'] ?? 'invoice');
 if (!in_array($collectionFilter, ['all', 'invoice', 'cod'], true)) {
-    $collectionFilter = 'all';
+    $collectionFilter = 'invoice';
+}
+$deliveredOnly = !isset($_GET['show_unconfirmed']) || (string)$_GET['show_unconfirmed'] !== '1';
+$hideFixtures = !isset($_GET['show_test_rows']) || (string)$_GET['show_test_rows'] !== '1';
+$workQueue = (string)($_GET['queue'] ?? 'to_send');
+if (!in_array($workQueue, ['to_send', 'waiting', 'problems', 'all'], true)) {
+    $workQueue = 'to_send';
 }
 $viewMode = (string)($_GET['view'] ?? 'cards');
 $attentionFilter = (string)($_GET['attention'] ?? '');
@@ -169,16 +174,14 @@ require_once __DIR__ . '/includes/nav.php';
         <p class="bc-eyebrow">Orders &amp; Customers</p>
         <h1><?php bakery_te('page.billing_center'); ?></h1>
         <p class="bc-subtitle">
-            Find customers and delivery-backed invoices, reconcile billing exceptions, produce statements,
-            and export deterministic accounting data. Payment in QuickBooks is <strong>not</strong> tracked here unless noted as COD collected at delivery.
+            <?php echo htmlspecialchars(bakery_t('billing.center_subtitle')); ?>
         </p>
     </header>
 
     <nav class="bc-tabs" aria-label="Billing Center panels">
-        <?php echo $panelTab('invoices', 'Invoice reconciliation'); ?>
-        <?php echo $panelTab('customer', 'Customer account'); ?>
-        <?php echo $panelTab('export', 'Accounting export'); ?>
-        <a class="bc-tab bc-tab--warn" href="billing_center.php?panel=exceptions">Billing exceptions</a>
+        <?php echo $panelTab('invoices', bakery_t('billing.tab_invoices')); ?>
+        <?php echo $panelTab('customer', bakery_t('billing.tab_customer')); ?>
+        <?php echo $panelTab('export', bakery_t('billing.tab_export')); ?>
     </nav>
 
     <?php if ($panel === 'invoices'): ?>

@@ -5,14 +5,22 @@ ALTER TABLE customers
   ADD COLUMN square_customer_id VARCHAR(64) NULL DEFAULT NULL AFTER payment_collection;
 
 ALTER TABLE daily_orders
-  ADD COLUMN square_invoice_id VARCHAR(64) NULL DEFAULT NULL,
-  ADD COLUMN square_order_id VARCHAR(64) NULL DEFAULT NULL,
-  ADD COLUMN square_customer_id VARCHAR(64) NULL DEFAULT NULL,
-  ADD COLUMN square_public_url VARCHAR(512) NULL DEFAULT NULL,
-  ADD COLUMN square_status VARCHAR(32) NULL DEFAULT NULL,
-  ADD COLUMN square_recipient_email VARCHAR(255) NULL DEFAULT NULL,
-  ADD COLUMN square_published_at DATETIME NULL DEFAULT NULL,
-  ADD COLUMN square_paid_at DATETIME NULL DEFAULT NULL,
+  ADD COLUMN square_invoice_id VARCHAR(64) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_order_id VARCHAR(64) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_customer_id VARCHAR(64) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_public_url VARCHAR(512) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_status VARCHAR(32) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_recipient_email VARCHAR(255) NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_published_at DATETIME NULL DEFAULT NULL;
+ALTER TABLE daily_orders
+  ADD COLUMN square_paid_at DATETIME NULL DEFAULT NULL;
+ALTER TABLE daily_orders
   ADD COLUMN square_last_synced_at DATETIME NULL DEFAULT NULL;
 
 CREATE TABLE IF NOT EXISTS square_webhook_events (

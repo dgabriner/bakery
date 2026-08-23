@@ -470,11 +470,58 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['invoice_sent_by_user_id'] = $order['invoice_sent_by_user_id'] ?? null;
         $order['invoice_send_channel'] = $order['invoice_send_channel'] ?? null;
         $order['invoice_was_sent'] = !empty($order['invoice_sent_at']);
+        $order['is_fixture_noise'] = bakery_billing_is_fixture_noise($order);
+        $order['work_queue'] = bakery_billing_work_queue($order);
 
         $enriched[] = $order;
     }
 
     return $enriched;
+}
+
+/**
+ * Hide far-future / test-harness rows so Billing Center stays about real stops.
+ */
+function bakery_billing_is_fixture_noise(array $order): bool {
+    $date = (string)($order['order_date'] ?? '');
+    if ($date !== '' && preg_match('/^2099-/', $date)) {
+        return true;
+    }
+    if ($date !== '' && $date > date('Y-m-d', strtotime('+21 days'))) {
+        return true;
+    }
+    $email = strtolower((string)($order['customer_email'] ?? ''));
+    if ($email !== '' && (strpos($email, 'example.invalid') !== false || strpos($email, 'invoice-send-') !== false)) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Staff work bucket for the simplified invoice list.
+ *
+ * @return string to_send|waiting|paid|problems|cod|other
+ */
+function bakery_billing_work_queue(array $order): string {
+    if (!empty($order['needs_attention'])) {
+        return 'problems';
+    }
+    if (!empty($order['is_cod'])) {
+        return 'cod';
+    }
+    $sq = strtoupper((string)($order['square_status'] ?? ''));
+    if ($sq === 'PAID') {
+        return 'paid';
+    }
+    if (in_array($sq, ['UNPAID', 'PAYMENT_PENDING', 'PARTIALLY_PAID', 'DRAFT'], true)
+        || !empty($order['square_invoice_id'])) {
+        return 'waiting';
+    }
+    if (!empty($order['delivery_confirmed_at'])
+        && in_array((string)($order['category'] ?? ''), ['ready', 'already_invoiced'], true)) {
+        return 'to_send';
+    }
+    return 'other';
 }
 
 /**
@@ -889,8 +936,10 @@ function bakery_billing_record_statement(PDO $db, array $data, $userId = null) {
         $data['sent_to_email'] ?? null,
     ]);
     $id = (int)$db->lastInsertId();
-    if (function_exists('bakery_customer_notify_statement_available')) {
+    if (!function_exists('bakery_customer_notify_statement_available')) {
         require_once __DIR__ . '/customer_notifications.php';
+    }
+    if (function_exists('bakery_customer_notify_statement_available')) {
         bakery_customer_notify_statement_available(
             $db,
             (int)$data['customer_id'],

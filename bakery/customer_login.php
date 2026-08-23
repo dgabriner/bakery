@@ -72,7 +72,7 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
   <script src="<?php echo bakery_asset_href('includes/csrf.js'); ?>"></script>
   <title><?php echo htmlspecialchars($page_title); ?></title>
   <style>
-    :root { color-scheme: light; --ink: #33251f; --cream: #fffdf8; --terracotta: #b75c3f; --muted: #7a6a5c; }
+    :root { color-scheme: light; --ink: #1c2a26; --cream: #fffaf2; --terracotta: #c7783a; --muted: #6b7d78; }
     * { box-sizing: border-box; }
     body { align-items: center; background: var(--cream); color: var(--ink); display: flex; font-family: Georgia, 'Times New Roman', serif; justify-content: center; margin: 0; min-height: 100vh; min-height: 100svh; padding: 24px; }
     .wrap { max-width: 420px; text-align: center; width: 100%; }

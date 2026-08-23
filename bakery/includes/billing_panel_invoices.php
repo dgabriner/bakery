@@ -15,11 +15,11 @@ if (!in_array($attentionFilter, $attentionOptions, true)) {
 
 $groupOptions = ['attention', 'none', 'customer', 'date', 'status', 'zone', 'driver'];
 $sortOptions = ['attention', 'date_desc', 'date_asc', 'customer', 'amount_desc', 'amount_asc', 'status'];
-$groupBy = (string)($_GET['group'] ?? 'attention');
+$groupBy = (string)($_GET['group'] ?? 'date');
 if (!in_array($groupBy, $groupOptions, true)) {
-    $groupBy = 'attention';
+    $groupBy = 'date';
 }
-$sortBy = (string)($_GET['sort'] ?? 'attention');
+$sortBy = (string)($_GET['sort'] ?? 'date_desc');
 if (!in_array($sortBy, $sortOptions, true)) {
     $sortBy = 'attention';
 }
@@ -44,6 +44,23 @@ $orderIds = array_map(static function ($o) {
 }, $orders);
 $itemsByOrder = bakery_billing_load_items($db, $orderIds);
 $orders = bakery_billing_enrich_orders($orders, $itemsByOrder, $attentionMeta);
+
+$hideFixtures = isset($hideFixtures) ? $hideFixtures : true;
+$workQueue = isset($workQueue) ? $workQueue : 'to_send';
+$queueCounts = ['to_send' => 0, 'waiting' => 0, 'problems' => 0, 'all' => 0];
+$kept = [];
+foreach ($orders as $order) {
+    if ($hideFixtures && !empty($order['is_fixture_noise'])) {
+        continue;
+    }
+    $kept[] = $order;
+    $bucket = (string)($order['work_queue'] ?? 'other');
+    if (isset($queueCounts[$bucket])) {
+        $queueCounts[$bucket]++;
+    }
+    $queueCounts['all']++;
+}
+$orders = $kept;
 
 $stats = [
     'count' => 0, 'total' => 0.0, 'billable_total' => 0.0, 'delivered' => 0, 'open' => 0,
@@ -82,12 +99,9 @@ foreach ($orders as $order) {
     }
 }
 
-if ($attentionFilter !== 'all') {
-    $orders = array_values(array_filter($orders, static function ($order) use ($attentionFilter) {
-        if ($attentionFilter === 'needs_attention') {
-            return !empty($order['needs_attention']);
-        }
-        return ($order['category'] ?? '') === $attentionFilter;
+if ($workQueue !== 'all') {
+    $orders = array_values(array_filter($orders, static function ($order) use ($workQueue) {
+        return ($order['work_queue'] ?? '') === $workQueue;
     }));
 }
 
@@ -160,9 +174,13 @@ $baseQueryParams = [
     'sort' => $sortBy,
     'view' => $viewMode,
     'collection' => $collectionFilter,
+    'queue' => $workQueue,
 ];
-if ($deliveredOnly) {
-    $baseQueryParams['delivered_only'] = '1';
+if (!$deliveredOnly) {
+    $baseQueryParams['show_unconfirmed'] = '1';
+}
+if (!$hideFixtures) {
+    $baseQueryParams['show_test_rows'] = '1';
 }
 
 $query = function (array $extra = []) use ($baseQueryParams) {
@@ -187,7 +205,10 @@ $query = function (array $extra = []) use ($baseQueryParams) {
         if ($key === 'status' && $value === 'all') {
             unset($merged[$key]);
         }
-        if ($key === 'collection' && $value === 'all') {
+        if ($key === 'collection' && $value === 'invoice') {
+            unset($merged[$key]);
+        }
+        if ($key === 'queue' && $value === 'to_send') {
             unset($merged[$key]);
         }
     }
@@ -246,7 +267,8 @@ $formAction = 'billing_center.php?panel=invoices';
 .ic-exception-box.is-ok{background:#ecfdf5;border-color:#a7f3d0}
 .ic-exception-box.is-danger{background:#fef2f2;border-color:#fecaca}
 .ic-var-neg{color:#b91c1c}.ic-var-pos{color:#047857}
-.ic-note{font-size:.78rem;color:#64748b;margin-top:10px}
+.ic-more-filters{margin-top:4px;font-size:.82rem;color:#475569}
+.ic-more-filters summary{cursor:pointer;font-weight:700}
 .invoice-center{max-width:none;padding:0;margin:0}
 .invoice-center-filters,.invoice-list-panel,.invoice-detail-panel,.invoice-center-stats,.invoice-center-layout{font-family:inherit}
 .invoice-center-filters{display:flex;flex-direction:column;gap:12px;padding:14px;margin-bottom:18px;border:1px solid #dbe4ea;border-radius:16px;background:#f8fbfb}
@@ -275,37 +297,41 @@ $formAction = 'billing_center.php?panel=invoices';
 <section class="invoice-center">
     <form class="invoice-center-filters" method="get" action="<?php echo htmlspecialchars($formAction); ?>" id="invoiceCenterFilters">
         <input type="hidden" name="panel" value="invoices">
-        <input type="hidden" name="range" id="icRangeInput" value="<?php echo htmlspecialchars($range); ?>">
+        <input type="hidden" name="queue" value="<?php echo htmlspecialchars($workQueue); ?>">
         <?php if ($selectedInvoiceId > 0): ?><input type="hidden" name="invoice_id" value="<?php echo $selectedInvoiceId; ?>"><?php endif; ?>
         <div class="ic-filter-grid">
-            <label>Customer<select name="customer_id"><option value="0">All</option><?php foreach ($customers as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php echo $customerId === (int)$c['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($c['name']); ?></option><?php endforeach; ?></select></label>
-            <label>Search<input type="search" name="q" value="<?php echo htmlspecialchars($searchQ); ?>" placeholder="Invoice #, customer, ID"></label>
-            <label>Status<select name="status"><option value="all">All</option><option value="open" <?php echo $statusFilter === 'open' ? 'selected' : ''; ?>>Open</option><?php foreach ($orderStatuses as $st): ?><option value="<?php echo $st; ?>" <?php echo $statusFilter === $st ? 'selected' : ''; ?>><?php echo ucwords(str_replace('_', ' ', $st)); ?></option><?php endforeach; ?></select></label>
+            <label><?php echo htmlspecialchars(bakery_t('billing.filter_customer')); ?><select name="customer_id"><option value="0"><?php echo htmlspecialchars(bakery_t('billing.filter_all_customers')); ?></option><?php foreach ($customers as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php echo $customerId === (int)$c['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($c['name']); ?></option><?php endforeach; ?></select></label>
+            <label><?php echo htmlspecialchars(bakery_t('billing.filter_search')); ?><input type="search" name="q" value="<?php echo htmlspecialchars($searchQ); ?>" placeholder="<?php echo htmlspecialchars(bakery_t('billing.filter_search_ph')); ?>"></label>
             <label><?php echo htmlspecialchars(bakery_t('billing.collection_filter')); ?><select name="collection">
-                <option value="all" <?php echo $collectionFilter === 'all' ? 'selected' : ''; ?>><?php echo htmlspecialchars(bakery_t('billing.collection_all')); ?></option>
                 <option value="invoice" <?php echo $collectionFilter === 'invoice' ? 'selected' : ''; ?>><?php echo htmlspecialchars(bakery_t('billing.collection_invoice')); ?></option>
                 <option value="cod" <?php echo $collectionFilter === 'cod' ? 'selected' : ''; ?>><?php echo htmlspecialchars(bakery_t('billing.collection_cod')); ?></option>
+                <option value="all" <?php echo $collectionFilter === 'all' ? 'selected' : ''; ?>><?php echo htmlspecialchars(bakery_t('billing.collection_all')); ?></option>
             </select></label>
-            <label>Sort<select name="sort"><?php foreach (['attention' => 'Attention', 'date_desc' => 'Date ↓', 'date_asc' => 'Date ↑', 'amount_desc' => 'Amount ↓'] as $k => $l): ?><option value="<?php echo $k; ?>" <?php echo $sortBy === $k ? 'selected' : ''; ?>><?php echo $l; ?></option><?php endforeach; ?></select></label>
-            <label>Start<input type="date" name="start_date" value="<?php echo htmlspecialchars($startDate); ?>"></label>
-            <label>End<input type="date" name="end_date" value="<?php echo htmlspecialchars($endDate); ?>"></label>
-            <label class="ic-check" style="display:flex;align-items:center;gap:8px;margin-top:22px"><input type="checkbox" name="delivered_only" value="1" <?php echo $deliveredOnly ? 'checked' : ''; ?>> Confirmed only</label>
-            <button class="ic-btn ic-btn-primary" type="submit">Apply</button>
+            <label><?php echo htmlspecialchars(bakery_t('billing.filter_from')); ?><input type="date" name="start_date" value="<?php echo htmlspecialchars($startDate); ?>"></label>
+            <label><?php echo htmlspecialchars(bakery_t('billing.filter_through')); ?><input type="date" name="end_date" value="<?php echo htmlspecialchars($endDate); ?>"></label>
+            <input type="hidden" name="range" value="custom">
+            <button class="ic-btn ic-btn-primary" type="submit"><?php echo htmlspecialchars(bakery_t('billing.filter_apply')); ?></button>
         </div>
+        <details class="ic-more-filters">
+            <summary><?php echo htmlspecialchars(bakery_t('billing.more_filters')); ?></summary>
+            <div class="ic-filter-grid" style="margin-top:10px">
+                <label class="ic-check" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="show_unconfirmed" value="1" <?php echo !$deliveredOnly ? 'checked' : ''; ?>> <?php echo htmlspecialchars(bakery_t('billing.show_unconfirmed')); ?></label>
+                <label class="ic-check" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="show_test_rows" value="1" <?php echo !$hideFixtures ? 'checked' : ''; ?>> <?php echo htmlspecialchars(bakery_t('billing.show_test_rows')); ?></label>
+            </div>
+        </details>
     </form>
 
-    <nav class="ic-attention-strip">
-        <a class="ic-chip <?php echo $attentionFilter === 'all' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['attention' => 'all', 'invoice_id' => null])); ?>">All <strong><?php echo $stats['count']; ?></strong></a>
-        <a class="ic-chip <?php echo $attentionFilter === 'needs_attention' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['attention' => 'needs_attention', 'invoice_id' => null])); ?>">Needs attention <strong><?php echo $stats['needs_attention']; ?></strong></a>
-        <?php foreach ($attentionMeta as $key => $meta): ?>
-            <a class="ic-chip <?php echo $attentionFilter === $key ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['attention' => $key, 'invoice_id' => null])); ?>" title="<?php echo htmlspecialchars($meta['help']); ?>"><?php echo htmlspecialchars($meta['short']); ?> <strong><?php echo (int)($categoryCounts[$key] ?? 0); ?></strong></a>
-        <?php endforeach; ?>
+    <nav class="ic-attention-strip" aria-label="<?php echo htmlspecialchars(bakery_t('billing.queue_aria')); ?>">
+        <a class="ic-chip <?php echo $workQueue === 'to_send' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['queue' => 'to_send', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.queue_to_send')); ?> <strong><?php echo (int)$queueCounts['to_send']; ?></strong></a>
+        <a class="ic-chip <?php echo $workQueue === 'waiting' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['queue' => 'waiting', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.queue_waiting')); ?> <strong><?php echo (int)$queueCounts['waiting']; ?></strong></a>
+        <a class="ic-chip <?php echo $workQueue === 'problems' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['queue' => 'problems', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.queue_problems')); ?> <strong><?php echo (int)$queueCounts['problems']; ?></strong></a>
+        <a class="ic-chip <?php echo $workQueue === 'all' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['queue' => 'all', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.queue_all')); ?> <strong><?php echo (int)$queueCounts['all']; ?></strong></a>
     </nav>
 
     <div class="invoice-center-layout">
         <section class="invoice-list-panel">
             <?php if (!$orders): ?>
-                <div style="padding:24px;color:#64748b">No deliveries match.</div>
+                <div style="padding:24px;color:#64748b"><?php echo htmlspecialchars(bakery_t('billing.empty_queue')); ?></div>
             <?php else: ?>
                 <?php
                 $confirmedCount = 0;
@@ -324,11 +350,10 @@ $formAction = 'billing_center.php?panel=invoices';
                             <label class="ic-bulk-select-all"><input type="checkbox" id="bulkSelectAll"> <?php echo htmlspecialchars(bakery_t('billing.select_confirmed')); ?> (<strong><?php echo $confirmedCount; ?></strong>)</label>
                             <div style="display:flex;flex-wrap:wrap;gap:8px">
                                 <button class="ic-btn" type="submit" name="action" value="bulk_mark_invoiced" id="bulkInvoiceSubmit" disabled><?php echo htmlspecialchars(bakery_t('billing.mark_invoiced')); ?> (<span id="bulkInvoiceCount">0</span>)</button>
-                                <button class="ic-btn ic-btn-primary" type="submit" name="action" value="bulk_send_invoices" id="bulkSendSubmit" disabled><?php echo htmlspecialchars(bakery_t('billing.send_invoices')); ?> (<span id="bulkSendCount">0</span>)</button>
                             </div>
                         </div>
                         <?php if (!$emailReady): ?>
-                            <p class="ic-note" style="margin:8px 16px"><?php echo htmlspecialchars(bakery_t('billing.email_not_configured')); ?></p>
+                            <p class="ic-note" style="margin:8px 16px"><?php echo htmlspecialchars(bakery_t('billing.os_email_is_log')); ?></p>
                         <?php endif; ?>
                     <?php endif; ?>
                     <?php if (!empty($_GET['bulk_msg'])): ?>
@@ -356,19 +381,13 @@ $formAction = 'billing_center.php?panel=invoices';
                                 <div>
                                     <strong><?php echo htmlspecialchars($order['customer_name']); ?></strong>
                                     <div style="font-size:.75rem;color:#64748b"><?php echo htmlspecialchars($order['invoice_number']); ?> · <?php echo date('M j', strtotime($order['order_date'])); ?></div>
-                                    <div style="font-size:.7rem;margin-top:2px;color:<?php echo !empty($order['is_cod']) ? '#b45309' : '#0f766e'; ?>"><?php
-                                        echo htmlspecialchars(!empty($order['is_cod']) ? bakery_t('billing.collection_cod') : bakery_t('billing.collection_invoice'));
-                                    ?></div>
-                                    <?php if (!empty($order['square_status'])): ?>
-                                        <div style="font-size:.7rem;color:#334155;margin-top:2px"><?php echo htmlspecialchars(bakery_t('billing.square_status') . ': ' . strtoupper((string)$order['square_status'])); ?></div>
-                                    <?php endif; ?>
-                                    <?php if (!empty($order['invoice_was_sent'])): ?>
-                                        <div style="font-size:.7rem;color:#0f766e;margin-top:2px"><?php
-                                            echo htmlspecialchars(($order['invoice_send_channel'] ?? '') === 'smtp'
-                                                ? bakery_t('billing.sent_smtp')
-                                                : bakery_t('billing.sent_logged'));
-                                        ?></div>
-                                    <?php endif; ?>
+                                    <?php
+                                    $queueLabel = bakery_t('billing.queue_' . (string)($order['work_queue'] ?? 'other'));
+                                    if (($order['work_queue'] ?? '') === 'other') {
+                                        $queueLabel = (string)($order['category_meta']['short'] ?? '');
+                                    }
+                                    ?>
+                                    <div style="font-size:.7rem;margin-top:2px;color:#334155"><?php echo htmlspecialchars($queueLabel); ?></div>
                                 </div>
                                 <div><span class="ic-att <?php echo $attentionClassFor($order['category']); ?>"><?php echo htmlspecialchars($order['category_meta']['short']); ?></span></div>
                                 <div style="text-align:right"><strong style="color:#0f766e">$<?php echo number_format($order['display_amount'], 2); ?></strong></div>
@@ -407,16 +426,12 @@ $formAction = 'billing_center.php?panel=invoices';
                     var checks = form.querySelectorAll('.ic-bulk-check');
                     var countEl = document.getElementById('bulkInvoiceCount');
                     var submitBtn = document.getElementById('bulkInvoiceSubmit');
-                    var sendBtn = document.getElementById('bulkSendSubmit');
-                    var sendCountEl = document.getElementById('bulkSendCount');
                     var selectAll = document.getElementById('bulkSelectAll');
                     function refresh() {
                         var n = 0;
                         checks.forEach(function (c) { if (c.checked) { n++; } });
                         if (countEl) { countEl.textContent = n; }
-                        if (sendCountEl) { sendCountEl.textContent = n; }
                         if (submitBtn) { submitBtn.disabled = n === 0; }
-                        if (sendBtn) { sendBtn.disabled = n === 0; }
                     }
                     checks.forEach(function (c) { c.addEventListener('change', refresh); });
                     if (selectAll) {
@@ -426,10 +441,7 @@ $formAction = 'billing_center.php?panel=invoices';
                         });
                     }
                     form.addEventListener('submit', function (e) {
-                        var action = (e.submitter && e.submitter.value) ? e.submitter.value : '';
-                        var msg = action === 'bulk_send_invoices'
-                            ? <?php echo json_encode(bakery_t('billing.send_confirm')); ?>
-                            : <?php echo json_encode(bakery_t('billing.mark_invoiced_confirm')); ?>;
+                        var msg = <?php echo json_encode(bakery_t('billing.mark_invoiced_confirm')); ?>;
                         if (!window.confirm(msg)) {
                             e.preventDefault();
                         }
@@ -479,6 +491,51 @@ $formAction = 'billing_center.php?panel=invoices';
                     </div>
 
                     <div class="invoice-detail-footer">
+                        <?php
+                        $squareConfigured = function_exists('square_is_configured') ? square_is_configured() : false;
+                        if (!function_exists('square_is_configured') && is_readable(__DIR__ . '/square_config.php')) {
+                            require_once __DIR__ . '/square_config.php';
+                            $squareConfigured = square_is_configured();
+                        }
+                        $canSquare = !empty($selectedInvoice['delivery_confirmed_at'])
+                            && empty($selectedInvoice['is_cod'])
+                            && in_array((string)$selectedInvoice['category'], ['ready', 'already_invoiced'], true);
+                        ?>
+                        <?php if ($canSquare): ?>
+                            <form method="post" action="billing_api.php" style="display:flex;flex-direction:column;gap:8px;width:100%;padding:12px;border:1px solid #d1fae5;border-radius:12px;background:#f0fdfa">
+                                <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
+                                <input type="hidden" name="action" value="send_square_invoice">
+                                <input type="hidden" name="daily_order_id" value="<?php echo (int)$selectedInvoice['id']; ?>">
+                                <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($query(['invoice_id' => $selectedInvoice['id']])); ?>">
+                                <strong><?php echo htmlspecialchars(!empty($selectedInvoice['square_invoice_id']) ? bakery_t('billing.square_send_again') : bakery_t('billing.square_send')); ?></strong>
+                                <p class="ic-note" style="margin:0"><?php echo htmlspecialchars(bakery_t('billing.square_send_help')); ?></p>
+                                <label style="font-size:.8rem"><?php echo htmlspecialchars(bakery_t('billing.square_test_recipient')); ?>
+                                    <input type="email" name="test_recipient" value="" placeholder="danny@sourflour.org" style="width:100%;margin-top:4px">
+                                </label>
+                                <button class="ic-btn ic-btn-primary" type="submit" <?php echo $squareConfigured ? '' : 'disabled'; ?>><?php echo htmlspecialchars(!empty($selectedInvoice['square_invoice_id']) ? bakery_t('billing.square_send_again') : bakery_t('billing.square_send')); ?></button>
+                            </form>
+                            <?php if (!empty($selectedInvoice['square_invoice_id'])): ?>
+                                <form method="post" action="billing_api.php" style="display:inline">
+                                    <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
+                                    <input type="hidden" name="action" value="refresh_square_invoice">
+                                    <input type="hidden" name="daily_order_id" value="<?php echo (int)$selectedInvoice['id']; ?>">
+                                    <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($query(['invoice_id' => $selectedInvoice['id']])); ?>">
+                                    <button class="ic-btn" type="submit"><?php echo htmlspecialchars(bakery_t('billing.square_refresh')); ?></button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if (!$squareConfigured): ?>
+                                <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.square_not_configured')); ?></p>
+                            <?php endif; ?>
+                        <?php elseif (!empty($selectedInvoice['is_cod']) && !empty($selectedInvoice['delivery_confirmed_at'])): ?>
+                            <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.square_cod_blocked')); ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($selectedInvoice['delivery_confirmed_at'])): ?>
+                            <a class="ic-btn ic-btn-primary" href="customer_invoice.php?daily_order_id=<?php echo (int)$selectedInvoice['id']; ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars(bakery_t('billing.view_invoice')); ?></a>
+                        <?php endif; ?>
+                        <a class="ic-btn" href="customer_record.php?customer_id=<?php echo (int)$selectedInvoice['customer_id']; ?>&amp;date=<?php echo urlencode($selectedInvoice['order_date']); ?>">Customer hub</a>
+                        <details style="width:100%;margin-top:8px">
+                            <summary style="cursor:pointer;font-size:.82rem;font-weight:700;color:#475569"><?php echo htmlspecialchars(bakery_t('billing.more_actions')); ?></summary>
+                            <div class="invoice-detail-footer" style="margin-top:8px">
                         <?php if ($selectedInvoice['delivery_confirmed_at'] && $selectedInvoice['status'] !== 'invoiced'): ?>
                             <form method="post" action="billing_api.php" style="display:inline" onsubmit="return confirm(<?php echo htmlspecialchars(json_encode(bakery_t('billing.mark_invoiced_confirm_one')), ENT_QUOTES, 'UTF-8'); ?>);">
                                 <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
@@ -494,71 +551,21 @@ $formAction = 'billing_center.php?panel=invoices';
                                 <input type="hidden" name="action" value="send_invoice">
                                 <input type="hidden" name="daily_order_id" value="<?php echo (int)$selectedInvoice['id']; ?>">
                                 <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($query(['invoice_id' => $selectedInvoice['id']])); ?>">
-                                <button class="ic-btn ic-btn-primary" type="submit"><?php echo htmlspecialchars(!empty($selectedInvoice['invoice_was_sent']) ? bakery_t('billing.resend_invoice') : bakery_t('billing.send_invoice')); ?></button>
+                                <button class="ic-btn" type="submit"><?php echo htmlspecialchars(!empty($selectedInvoice['invoice_was_sent']) ? bakery_t('billing.resend_invoice') : bakery_t('billing.send_invoice')); ?></button>
                             </form>
-                            <a class="ic-btn" href="customer_invoice.php?daily_order_id=<?php echo (int)$selectedInvoice['id']; ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars(bakery_t('billing.view_invoice')); ?></a>
                         <?php endif; ?>
-                        <?php
-                        $squareConfigured = function_exists('square_is_configured') ? square_is_configured() : false;
-                        if (!function_exists('square_is_configured') && is_readable(__DIR__ . '/square_config.php')) {
-                            require_once __DIR__ . '/square_config.php';
-                            $squareConfigured = square_is_configured();
-                        }
-                        $canSquare = !empty($selectedInvoice['delivery_confirmed_at'])
-                            && empty($selectedInvoice['is_cod'])
-                            && in_array((string)$selectedInvoice['category'], ['ready', 'already_invoiced'], true);
-                        ?>
-                        <?php if ($canSquare): ?>
-                            <form method="post" action="billing_api.php" style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px;padding:12px;border:1px solid #d1fae5;border-radius:12px;background:#f0fdfa">
-                                <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
-                                <input type="hidden" name="action" value="send_square_invoice">
-                                <input type="hidden" name="daily_order_id" value="<?php echo (int)$selectedInvoice['id']; ?>">
-                                <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($query(['invoice_id' => $selectedInvoice['id']])); ?>">
-                                <strong><?php echo htmlspecialchars(bakery_t('billing.square_send')); ?></strong>
-                                <label style="font-size:.8rem"><?php echo htmlspecialchars(bakery_t('billing.square_test_recipient')); ?>
-                                    <input type="email" name="test_recipient" value="" placeholder="danny@sourflour.org" style="width:100%;margin-top:4px">
-                                </label>
-                                <label style="font-size:.8rem;display:flex;align-items:center;gap:8px">
-                                    <input type="checkbox" name="draft_only" value="1">
-                                    <?php echo htmlspecialchars(bakery_t('billing.square_draft_only')); ?>
-                                </label>
-                                <button class="ic-btn ic-btn-primary" type="submit" <?php echo $squareConfigured ? '' : 'disabled'; ?>><?php echo htmlspecialchars(!empty($selectedInvoice['square_invoice_id']) ? bakery_t('billing.square_send_again') : bakery_t('billing.square_send')); ?></button>
-                            </form>
-                            <?php if (!empty($selectedInvoice['square_invoice_id'])): ?>
-                                <form method="post" action="billing_api.php" style="display:inline;margin-top:8px">
-                                    <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
-                                    <input type="hidden" name="action" value="refresh_square_invoice">
-                                    <input type="hidden" name="daily_order_id" value="<?php echo (int)$selectedInvoice['id']; ?>">
-                                    <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($query(['invoice_id' => $selectedInvoice['id']])); ?>">
-                                    <button class="ic-btn" type="submit"><?php echo htmlspecialchars(bakery_t('billing.square_refresh')); ?></button>
-                                </form>
-                            <?php endif; ?>
-                            <?php if (!$squareConfigured): ?>
-                                <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.square_not_configured')); ?></p>
-                            <?php endif; ?>
-                        <?php elseif (!empty($selectedInvoice['is_cod']) && !empty($selectedInvoice['delivery_confirmed_at'])): ?>
-                            <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.square_cod_blocked')); ?></p>
-                        <?php endif; ?>
-                        <a class="ic-btn" href="customer_record.php?customer_id=<?php echo (int)$selectedInvoice['customer_id']; ?>&amp;date=<?php echo urlencode($selectedInvoice['order_date']); ?>">Customer hub</a>
                         <a class="ic-btn" href="daily_orders.php?date=<?php echo urlencode($selectedInvoice['order_date']); ?>">Daily order</a>
                         <button class="ic-btn" type="button" onclick="window.print()">Print</button>
+                            </div>
+                        </details>
                     </div>
                     <?php if (!empty($selectedInvoice['invoice_was_sent'])): ?>
                         <p class="ic-note"><?php
-                            $sentLabel = ($selectedInvoice['invoice_send_channel'] ?? '') === 'smtp'
-                                ? bakery_t('billing.sent_smtp')
-                                : bakery_t('billing.sent_logged');
-                            echo htmlspecialchars($sentLabel);
+                            echo htmlspecialchars(bakery_t('billing.os_send_note'));
                             echo ' · ' . htmlspecialchars((string)$selectedInvoice['invoice_sent_at']);
-                            if (!empty($selectedInvoice['invoice_sent_to_email'])) {
-                                echo ' → ' . htmlspecialchars((string)$selectedInvoice['invoice_sent_to_email']);
-                            }
                         ?></p>
                     <?php endif; ?>
-                    <?php if (empty($emailReady) && !empty($selectedInvoice['delivery_confirmed_at'])): ?>
-                        <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.recorded_not_emailed')); ?></p>
-                    <?php endif; ?>
-                    <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.snapshot_note')); ?> <?php echo htmlspecialchars(bakery_t('billing.line_price_source')); ?></p>
+                    <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.snapshot_note')); ?></p>
                 </article>
             <?php else: ?>
                 <div style="padding:24px;color:#64748b">Select a delivery to review billing details.</div>

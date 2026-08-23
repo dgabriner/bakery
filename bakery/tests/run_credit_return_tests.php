@@ -276,6 +276,27 @@ $overflowAlloc = bakery_inventory_allocate_delivery_credits($db, $orderMixed, 6)
 assert_eq(5, (int)$overflowAlloc['lines'][0]['credit_quantity'], 'first line cannot take more than its delivered pieces');
 assert_eq(1, (int)$overflowAlloc['lines'][1]['credit_quantity'], 'remainder continues to the next line in id order');
 
+echo "\n=== External load source stays balanced through closeout ===\n";
+credit_wipe_date($db, $date);
+bakery_inventory_record_production($db, $date, $productA, 1, 'one warehouse unit');
+bakery_inventory_save_driver_load($db, $date, $driverId, [$productA => 3], 'two units supplied externally');
+assert_eq(0, credit_available($db, $date, $productA), 'external source units move directly through available into the load');
+assert_eq(3, credit_loaded($db, $date, $productA), 'loaded custody includes warehouse and externally supplied units');
+
+$sourceCount = $db->prepare(
+    "SELECT COALESCE(SUM(quantity_delta), 0)
+     FROM inventory_movements
+     WHERE delivery_date = ? AND product_id = ? AND movement_type = 'count'"
+);
+$sourceCount->execute([$date, $productA]);
+assert_eq(2, (int)$sourceCount->fetchColumn(), 'ledger counts externally supplied units into custody');
+
+bakery_inventory_reconcile_driver_load($db, $date, $driverId, [
+    $productA => ['returned' => 3, 'wasted' => 0],
+], 'external source closeout');
+assert_eq(3, credit_available($db, $date, $productA), 'all externally sourced load can return to available stock');
+assert_eq(0, credit_loaded($db, $date, $productA), 'external source closeout never drives loaded custody negative');
+
 credit_wipe_date($db, $date);
 
 echo "\n=== Summary ===\n";
