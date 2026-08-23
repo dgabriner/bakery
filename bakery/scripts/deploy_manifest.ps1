@@ -23,6 +23,7 @@ function Get-BakeryDeployRootFiles {
         'customer_portal_delivery.php', 'customer_catalog.php', 'customer_upcoming_edit.php',
         'customer_record.php',
         'square_webhook.php',
+        'text_comms.php', 'text_comms_api.php', 'twilio_webhook.php',
         'route_closeout.php', 'route_analysis.php',
         'driver_load.php', 'driver_stops.php', 'driver_session_ping.php',
         'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php',
@@ -78,6 +79,11 @@ function Test-BakeryDeployWebRootFile {
 function Get-BakeryDeployFileList {
     param(
         [Parameter(Mandatory = $true)][string]$BakeryRoot,
+        # Accepted for caller compatibility (push_sftp_stage.ps1 / push_sftp.ps1 still pass it).
+        # Deliberate no-op: the root sweep below is unconditional and authoritative, so every
+        # deployable root web file ships regardless of mtime. Closes the bug where a newly
+        # added root PHP page 404'd on staging while the sync looked green because it was
+        # missing from the hardcoded whitelist and older than the push baseline.
         [datetime]$AlsoIncludeRootModifiedAfterUtc = [datetime]::MinValue
     )
 
@@ -91,18 +97,20 @@ function Get-BakeryDeployFileList {
         $files.Add($norm)
     }
 
+    # Authoritative sweep: EVERY root file passing Test-BakeryDeployWebRootFile deploys.
+    # -Force so hidden files (a hidden .htaccess) are not silently skipped.
+    Get-ChildItem -Path $BakeryRoot -File -Force | ForEach-Object {
+        if (-not (Test-BakeryDeployWebRootFile $_)) { return }
+        Add-DeployPath $_.Name
+    }
+
+    # Hardcoded whitelist kept only as an ordering/completeness aid: scripts outside this
+    # manifest (build_deploy_zip.ps1) iterate Get-BakeryDeployRootFiles directly, and
+    # Test-Path here also catches whitelisted entries that Get-ChildItem cannot see.
+    # Add-DeployPath de-duplicates everything the sweep above already covered.
     foreach ($file in (Get-BakeryDeployRootFiles)) {
         $src = Join-Path $BakeryRoot $file
         if (Test-Path $src) { Add-DeployPath $file }
-    }
-
-    # New/edited root web files since last push (so test_upload.php etc. are not ignored)
-    if ($AlsoIncludeRootModifiedAfterUtc -gt [datetime]::MinValue) {
-        Get-ChildItem -Path $BakeryRoot -File | ForEach-Object {
-            if (-not (Test-BakeryDeployWebRootFile $_)) { return }
-            if ($_.LastWriteTimeUtc -le $AlsoIncludeRootModifiedAfterUtc) { return }
-            Add-DeployPath $_.Name
-        }
     }
 
     foreach ($dir in (Get-BakeryDeployDirectories)) {

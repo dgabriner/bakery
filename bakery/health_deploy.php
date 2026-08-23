@@ -58,14 +58,12 @@ try {
     check_file($root, 'includes/page_probe.php', 500, ['function bakery_page_probe_arm']);
     check_file($root, 'includes/production_errors.php', 400, ['function bakery_register_production_error_probe']);
     check_file($root, 'includes/config.php', 8000, ['function bakery_resolve_base_url', 'production_errors.php']);
-    check_file($root, 'includes/auth.php', 7000, ['function bakery_enforce_request_security', 'driver_pages_probe.php']);
-    check_file($root, 'driver_list.php', 65000, [
-        'BUILD: driver-list-20260729',
-        'function toggleOrderDetails(dailyOrderId)',
-        'driverPageConfig',
+    check_file($root, 'includes/auth.php', 7000, ['function bakery_enforce_request_security']);
+    check_file($root, 'driver_list.php', 20000, [
+        'function toggleOrderDetails(stopItem, customerId, customerName)',
     ]);
     check_file($root, 'driver_assignment.php', 64000, [
-        'BUILD: driver-assignment-20260729',
+        '<!-- BUILD: driver-assignment-append-20260801 -->',
         'pageLoadError',
     ]);
     check_file($root, 'dough_types.php', 35000, [

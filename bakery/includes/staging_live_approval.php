@@ -29,32 +29,42 @@ function bakery_staging_live_approval_latest(): ?array {
     return is_array($data) ? $data : null;
 }
 
+/**
+ * Root web files eligible for promotion, derived from disk with the SAME rule
+ * as Test-BakeryDeployWebRootFile in scripts/deploy_manifest.ps1:
+ * *.php / *.js / *.css / *.html / .htaccess minus the skip patterns mirrored
+ * in bakery_staging_live_skip_name(). Enumerating instead of hardcoding means
+ * this list can never drift from the deploy surface again.
+ *
+ * Return shape unchanged: a flat list of root-relative file names.
+ */
 function bakery_staging_live_root_files(): array {
-    return [
-        '.htaccess',
-        'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
-        'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
-        'zones.php', 'leads.php', 'pan_dulce_pricing.php',
-        'products.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
-        'daily_orders.php', 'standing_orders.php', 'standing_orders_manager.php', 'orders.php',
-        'bread_distribution.php', 'product_distribution.php', 'production.php', 'pack_list.php',
-        'standing_routes.php', 'daily_route.php', 'drivers.php', 'driver.php', 'driver_list.php',
-        'driver_assignment.php', 'driver_overview.php', 'route_manager.php', 'route_summary.php',
-        'map.php', 'call_headquarters.php', 'complete_delivery.php', 'get_driver_orders.php',
-        'get_customer_order_details.php', 'global_gps_handler.php', 'upload_driver_photo.php',
-        'daily_run.php', 'daily_run_api.php', 'daily_brief.php', 'manager.php', 'billing_center.php',
-        'production_center.php', 'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php',
-        'customer_portal_regular.php',
-        'customer_portal_account.php', 'customer_portal_notifications.php', 'customer_portal_delivery.php',
-        'customer_catalog.php', 'customer_upcoming_edit.php', 'customer_record.php', 'route_closeout.php',
-        'route_analysis.php', 'driver_load.php', 'driver_stops.php', 'driver_session_ping.php',
-        'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php', 'generate_invoice.php',
-        'oauth_callback.php', 'sfb_dashboard.php', 'sfb_starters.php', 'sfb_ingredients.php',
-        'sfb_formulas.php', 'sfb_batches.php', 'sfb_batch.php', 'sfb_resources.php', 'sfb_community.php',
-        'sfb_community_topic.php', 'sfb_shared_batch.php', 'sfb_admin_overview.php', 'sfb_admin_batch.php',
-        'sfb_admin_impersonate.php', 'sfb_admin_studio.php', 'sfb_admin_studio_baker.php',
-        'agent_homebase.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
-    ];
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+    $allowedExtensions = ['.php' => true, '.js' => true, '.css' => true, '.html' => true];
+    $root = dirname(__DIR__);
+    $files = [];
+    foreach (scandir($root) ?: [] as $name) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        $absolute = $root . DIRECTORY_SEPARATOR . $name;
+        if (!is_file($absolute) || is_link($absolute)) {
+            continue;
+        }
+        if ($name !== '.htaccess' && !isset($allowedExtensions[strtolower((string)strrchr($name, '.'))])) {
+            continue;
+        }
+        if (bakery_staging_live_skip_name($name)) {
+            continue;
+        }
+        $files[] = $name;
+    }
+    sort($files, SORT_STRING);
+    $cached = $files;
+    return $files;
 }
 
 function bakery_staging_live_skip_name(string $name): bool {
