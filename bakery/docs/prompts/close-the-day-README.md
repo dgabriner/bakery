@@ -2,7 +2,9 @@
 
 Paste-ready Cursor briefs. Open **each in its own chat** in the `bakery/` workspace. All three may start the same day if they obey file ownership.
 
-Product goal: Daily Run’s remaining open stages become true. Demand confirmation and route closeout already exist. These three close **plan → baker**, **invoice → customer**, and **credits → stock**.
+Confirm status against `BAKERY_PRODUCT_CONTEXT.md` §6–7 and Homebase bugs before reopening a loop: commit-to-bake, invoice send, and credit returns have shipped in part. These files remain the **file-ownership** briefs.
+
+Product goal: Daily Run’s remaining open stages become true. Demand confirmation and route closeout already exist. These three originally closed **plan → baker**, **invoice → customer**, and **credits → stock**.
 
 - [20 — Commit production plan](20-commit-production-plan.md) — baker executes the frozen plan
 - [21 — Canonical invoice send](21-canonical-invoice-send.md) — Billing Center actually sends the snapshot document
@@ -33,4 +35,4 @@ php scripts/agent_homebase.php brief --agent=YOUR-MISSION --json
 php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="..."
 ```
 
-Agent names: `commit-production-plan`, `canonical-invoice-send`, `credits-as-returns`. Local/test DB only. Do not deploy. Do not enable auto-push.
+Canonical `--agent=` slugs: `production-plan`, `invoice-send`, `credits-returns` (aliases `commit-production-plan`, `canonical-invoice-send`, `credits-as-returns` still resolve). Local/test DB only. Do not deploy. Do not retarget auto-push at live `/bake`.

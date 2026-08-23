@@ -1,6 +1,7 @@
 ---
 description: Protect Sour Flour data environments, Git recovery, backups, and deploy targets during stabilization.
-alwaysApply: true
+globs: scripts/**,database/**,.cursor/hooks/**,includes/config.php,includes/database.php,includes/env_loader.php,includes/test_target_guard.php,docs/DATA_*.md,docs/AUTO_PUSH.md,docs/PHASE*.md,docs/HOSTED*.md,docs/PRODUCTION*.md,docs/DEV_WORKFLOW.md,docs/LOCAL_SETUP.md
+alwaysApply: false
 ---
 
 # Data environment stabilization

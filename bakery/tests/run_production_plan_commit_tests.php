@@ -43,6 +43,14 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
     }
 };
 
+$focusWeek = bakery_production_center_resolve_focus('', '2026-08-20', '2026-08-17');
+$assert($focusWeek['date'] === '2026-08-20', 'week= operating date opens that delivery day');
+$assert($focusWeek['week_start'] === '2026-08-17', 'week start is Monday of the focused day');
+$focusDateWins = bakery_production_center_resolve_focus('2026-08-21', '2026-08-17', '2026-08-17');
+$assert($focusDateWins['date'] === '2026-08-21', 'date= wins over week=');
+$focusToday = bakery_production_center_resolve_focus('', '', '2026-08-20');
+$assert($focusToday['date'] === '2026-08-20', 'empty params use today');
+
 $findBake = static function (array $bakeList, int $productId): ?array {
     foreach ($bakeList['items'] as $item) {
         if ((int)$item['product_id'] === $productId) {
@@ -116,11 +124,24 @@ $demandQty = (int)($demand['by_product'][$productId] ?? 0);
 $assert($demandQty >= $demandQtySeed, 'operating demand includes the dated line');
 
 $planQty = $demandQty + 17;
-$db->prepare(
-    'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id)
-     VALUES (?, ?, ?, NULL)
-     ON DUPLICATE KEY UPDATE planned_quantity = VALUES(planned_quantity)'
-)->execute([$date, $productId, $planQty]);
+$savedDraft = bakery_production_plan_save_targets($db, [$date => [$productId => $planQty]], [$productId => true], null);
+$assert($savedDraft === 1, 'save_targets writes one draft quantity');
+$draftAfterSave = bakery_production_plan_draft_quantities($db, $date);
+$assert((int)($draftAfterSave[$productId] ?? 0) === $planQty, 'draft quantity matches the autosave helper');
+
+$casQty = $planQty + 3;
+$casSaved = bakery_production_plan_save_target_cas($db, $date, $productId, $casQty, [$productId => true], null, true, $planQty);
+$assert((int)$casSaved['planned_quantity'] === $casQty, 'conflict-safe autosave accepts the value the browser read');
+$conflictCaught = false;
+try {
+    bakery_production_plan_save_target_cas($db, $date, $productId, $casQty + 4, [$productId => true], null, true, $planQty);
+} catch (RuntimeException $e) {
+    $conflictCaught = str_starts_with($e->getMessage(), 'production_plan_conflict:');
+}
+$assert($conflictCaught, 'stale autosave is rejected instead of overwriting newer work');
+$draftAfterConflict = bakery_production_plan_draft_quantities($db, $date);
+$assert((int)($draftAfterConflict[$productId] ?? 0) === $casQty, 'stale autosave leaves the newer target intact');
+$planQty = $casQty;
 
 $bakeUncommitted = bakery_production_bake_list($db, $date);
 $uncommittedItem = $findBake($bakeUncommitted, $productId);
@@ -167,6 +188,20 @@ $assert($committedItem !== null, 'committed bake list includes the product');
 $assert((int)$committedItem['bake_quantity'] === $planQty, 'baker quantity equals committed plan');
 $assert((int)$committedItem['demand_quantity'] === $demandQty, 'demand still readable after commit');
 $assert((string)$committedItem['source'] === 'committed_plan', 'bake source is committed_plan');
+
+$produceTargets = bakery_production_produce_targets_by_product($db, $date);
+$assert(!empty($produceTargets['committed']), 'produce targets mark the date committed');
+$assert((int)($produceTargets['by_product'][$productId] ?? 0) === $planQty, 'produce targets use committed bake qty');
+
+$runAfterCommit = bakery_daily_run_build($db, $date);
+$produceStageAfterCommit = null;
+foreach ($runAfterCommit['stages'] as $stage) {
+    if (($stage['key'] ?? '') === 'produce') {
+        $produceStageAfterCommit = $stage;
+        break;
+    }
+}
+$assert(($produceStageAfterCommit['target_source'] ?? '') === 'committed_plan', 'Daily Run Produce measures against committed bake');
 
 $producedQty = 3;
 $producedStmt = $db->prepare(

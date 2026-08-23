@@ -9,7 +9,7 @@ from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
-SECRET_KEYS = {"ADMIN_CODE", "DRIVER_CODE"}
+SECRET_KEYS = {"ADMIN_CODE", "DRIVER_CODE", "MANAGER_CODE"}
 
 OVERLAY_SCRIPT = """
 () => {
@@ -103,6 +103,7 @@ def placeholders(env: dict[str, str] | None = None) -> dict[str, str]:
     return {
         "ADMIN_CODE": source.get("DEMO_ADMIN_CODE", ""),
         "DRIVER_CODE": source.get("DEMO_DRIVER_CODE", ""),
+        "MANAGER_CODE": source.get("DEMO_MANAGER_CODE", ""),
         "DRIVER_ID": source.get("DEMO_DRIVER_ID", ""),
         "DATE": source.get("DEMO_DATE", ""),
         "TODAY": source.get("DEMO_TODAY", ""),

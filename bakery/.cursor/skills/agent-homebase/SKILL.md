@@ -11,44 +11,38 @@ description: >-
 
 # Agent Homebase
 
-This repo has a **living** briefing. Chat is not the system of record.
+Chat is steam. Homebase is the ledger. Read `docs/AGENT_DEVELOPMENT_MANUAL.md`.
 
 ## Every session
 
 1. **Open:** `php scripts/agent_homebase.php brief --agent=YOUR-MISSION --json`
-2. Complete any `unread_required_lessons` (`learn --lesson=slug`).
-3. **Start:** `php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="one sentence"`
-4. Read `BAKERY_PRODUCT_CONTEXT.md` for anything §4-adjacent.
+2. Complete `unread_required_lessons` if any (`invariants`, `simple-practices`).
+3. Use `mission_packet` and `craft_stanza`. `tests-for --files=` if you already know the paths.
+4. **Start:** `php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="one sentence"`
 5. **During:** `pin` decisions, `bug` durable defects, `note --kind=question` if blocked.
-6. **End:** `handoff --summary="...eight §10 fields..." --files="a.php,b.php"`
+6. **End:** `handoff` with eight numbered §10 fields. The CLI returns `handoff_score` and `map_suggestions`.
 
-Admin UI: `agent_homebase.php` (administrator only). Same write path as the CLI.
+The CLI hops from the nightly mirror onto **`bakerysf_stage_local`**. Do not store craft on `bakerysf_test`.
+
+Admin UI: `agent_homebase.php` (Craft tab has the poem).
+
+**Doc trust:** product context → Homebase Decided/bugs → development manual → stabilization plan → prompts for ownership → `docs/archive/` is historical.
 
 ## Non-negotiables
 
 - Close loops. Do not add modules or top-level pages unless asked.
-- Dated beats standing **per customer**. Generation preserves dated edits.
+- Dated beats standing **per customer**.
 - Never price historical invoices from live `products.price`.
 - Completing exception *work* never hides a still-true operational fact.
-- Local/test DB only. Do not deploy. Do not enable auto-push.
+- Staging auto-push must never target `bakery.sourflour.org/bake`.
 - i18n: `lang/en.php` and `lang/es.php`.
 
 ## Commands
 
 ```text
 php scripts/agent_homebase.php brief --agent=NAME --json
+php scripts/agent_homebase.php tests-for --files="a.php,lang/en.php" --json
+php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=NAME --mission="..."
-php scripts/agent_homebase.php learn --agent=NAME --lesson=product-thesis
-php scripts/agent_homebase.php pin --agent=NAME --title="..." --body="..." --column=now|next|decided|parked
-php scripts/agent_homebase.php bug --agent=NAME --title="..." --detail="..." --severity=watch
-php scripts/agent_homebase.php note --agent=NAME --kind=question --body="..."
-php scripts/agent_homebase.php handoff --agent=NAME --summary="..." --files="path.php"
+php scripts/agent_homebase.php handoff --agent=NAME --summary="1. ... 8. ..." --files="path.php"
 ```
-
-`--column=decided` is for choices that must outlive this chat.
-
-## More
-
-- Curriculum bodies: [curriculum.md](curriculum.md)
-- Product manual: `BAKERY_PRODUCT_CONTEXT.md`
-- Exception missions: `docs/prompts/exceptions-README.md`

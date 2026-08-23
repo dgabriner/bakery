@@ -26,8 +26,8 @@
       "action": "goto",
       "path": "driver.php?date={{DATE}}",
       "caption": {
-        "en": "Open the route. The map is above the next stop.",
-        "es": "Abre la ruta. El mapa está arriba de la siguiente parada."
+        "en": "Open the route. The next stop is first.",
+        "es": "Abre la ruta. La siguiente parada está primero."
       }
     },
     { "action": "waitForSelector", "selector": "#nextStopCard:not([hidden])" },
@@ -72,14 +72,14 @@
     {
       "action": "caption",
       "caption": {
-        "en": "Check the piece count, then review the invoice",
-        "es": "Revisa las piezas y luego la factura"
+        "en": "Check the piece count, then save. You can still review the invoice.",
+        "es": "Revisa las piezas y guarda. Todavía puedes ver la factura."
       },
       "captionHoldMs": 1600
     },
     {
       "action": "click",
-      "selector": "#deliveryWizardPrimaryBtn",
+      "selector": "#deliveryWizardReviewBtn",
       "force": true,
       "caption": {
         "en": "Review the invoice. Do not save yet.",

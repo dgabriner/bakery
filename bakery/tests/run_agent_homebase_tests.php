@@ -25,9 +25,12 @@ assert_true(in_array('demand-flip', $bugSlugs, true), 'demand-flip is on the wat
 
 $agent = 'homebase-test-' . substr(bin2hex(random_bytes(3)), 0, 6);
 $unreadBefore = bakery_agent_homebase_unread_required($db, $agent);
-assert_true(count($unreadBefore) >= 6, 'new agent has unread required lessons');
+assert_eq(2, count($unreadBefore), 'new agent has two unread required lessons');
+$unreadSlugs = array_column($unreadBefore, 'slug');
+assert_true(in_array('invariants', $unreadSlugs, true), 'invariants is required');
+assert_true(in_array('simple-practices', $unreadSlugs, true), 'simple-practices is required');
 
-bakery_agent_homebase_complete_lesson($db, $agent, 'product-thesis', 'test');
+bakery_agent_homebase_complete_lesson($db, $agent, 'invariants', 'test');
 $unreadAfter = bakery_agent_homebase_unread_required($db, $agent);
 assert_eq(count($unreadBefore) - 1, count($unreadAfter), 'completing a lesson reduces unread required');
 
@@ -55,7 +58,20 @@ assert_eq('handed_off', $handoff['status'], 'handoff closes the session');
 
 $brief = bakery_agent_homebase_brief($db, $agent);
 assert_true(isset($brief['product'], $brief['unread_required_lessons'], $brief['open_bugs']), 'brief has core keys');
+assert_true(isset($brief['mission_packet'], $brief['doc_trust'], $brief['agent_family']), 'brief is a packed packet');
+assert_true(isset($brief['craft_stanza'], $brief['craft_manual'], $brief['database']), 'brief includes craft + database');
+assert_true(strpos((string)$brief['craft_stanza'], 'ovens') !== false || strpos((string)$brief['craft_stanza'], 'ledger') !== false, 'craft stanza is present');
 assert_true(is_array($brief['whiteboard_now']), 'brief includes whiteboard now');
+assert_true($brief['agent_family'] === $agent, 'test agents keep a unique lesson family');
+assert_true(!isset($brief['unread_required_lessons'][0]['body_md']), 'brief omits lesson bodies');
+
+$aliasFamily = bakery_agent_homebase_agent_family('commit-production-plan');
+assert_eq('production-plan', $aliasFamily, 'aliases share a lesson family');
+$aliasUnread = bakery_agent_homebase_unread_required($db, 'commit-production-plan');
+bakery_agent_homebase_complete_lesson($db, '20-commit-production-plan', 'invariants', 'family-share');
+$aliasUnreadAfter = bakery_agent_homebase_unread_required($db, 'commit-production-plan');
+assert_eq(count($aliasUnread) - 1, count($aliasUnreadAfter), 'lesson progress is shared across a mission family');
+$db->prepare('DELETE FROM agent_lesson_progress WHERE agent_name = ?')->execute(['production-plan']);
 
 $adminItems = [];
 foreach (bakery_navigation_groups_for_role('administrator') as $group) {
@@ -73,13 +89,27 @@ assert_true(is_string($formattedEmpty), 'format_body accepts null without throwi
 
 $page = file_get_contents(dirname(__DIR__) . '/agent_homebase.php');
 assert_true($page !== false && strpos($page, 'bakery_require_role([\'administrator\'])') !== false, 'homebase page is administrator-gated');
-assert_true(strpos($page, 'ah-board') !== false, 'homebase page includes the whiteboard');
+assert_true(strpos($page, 'homebase.tab_craft') !== false, 'homebase page has a Craft tab');
+assert_true(strpos($page, 'bakery_agent_homebase_score_handoff') !== false, 'log panel scores §10 handoffs');
 assert_true(strpos($page, 'catch (Throwable $e)') !== false, 'homebase page catches bootstrap failures instead of emitting HTTP 500');
 assert_true(strpos(file_get_contents(dirname(__DIR__) . '/includes/agent_homebase.php'), 'LIMIT ?') === false, 'homebase list queries do not bind LIMIT placeholders');
 
 $cli = file_get_contents(dirname(__DIR__) . '/scripts/agent_homebase.php');
 assert_true($cli !== false && strpos($cli, 'case \'brief\':') !== false, 'CLI exposes brief');
-assert_true(strpos($cli, 'bakery_assert_homebase_target') !== false, 'CLI refuses non-local targets by default');
+assert_true(strpos($cli, 'bakery_homebase_durable_connection') !== false, 'CLI hops onto durable staging');
+assert_true(strpos($cli, "case 'tests-for':") !== false || strpos($cli, "'tests-for'") !== false, 'CLI exposes tests-for');
+assert_true(strpos($cli, "'craft'") !== false, 'CLI exposes craft');
+assert_true(is_readable(dirname(__DIR__) . '/docs/AGENT_DEVELOPMENT_MANUAL.md'), 'development manual exists');
+assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/test-gate/SKILL.md'), 'test-gate skill exists');
+assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/sfb-agent/SKILL.md'), 'sfb-agent skill exists');
+assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/close-a-loop/SKILL.md'), 'close-a-loop skill exists');
+assert_true(strpos(file_get_contents(dirname(__DIR__) . '/includes/test_target_guard.php'), 'function bakery_homebase_durable_connection') !== false, 'durable Homebase hop exists');
+$hooks = file_get_contents(dirname(__DIR__) . '/.cursor/hooks.json');
+assert_true($hooks !== false && strpos($hooks, 'session-brief.cmd') !== false, 'sessionStart injects craft brief');
+assert_true($hooks !== false && strpos($hooks, 'handoff-reminder.cmd') !== false, 'stop hook reminds agents to hand off');
+$safetyRule = file_get_contents(dirname(__DIR__) . '/.cursor/rules/data-environment-safety.mdc');
+assert_true($safetyRule !== false && strpos($safetyRule, 'alwaysApply: false') !== false, 'data-safety rule is glob-scoped');
+assert_true(is_readable(dirname(__DIR__) . '/.cursor/rules/bakery-docs-trust.mdc'), 'doc-trust rule exists');
 
 // Cleanup synthetic rows (keep seeded curriculum/bugs).
 $db->prepare('DELETE FROM agent_lesson_progress WHERE agent_name = ?')->execute([$agent]);

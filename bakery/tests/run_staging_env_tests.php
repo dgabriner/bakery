@@ -36,6 +36,8 @@ $assert(strpos($square, 'IS_STAGING') !== false, 'Square sandbox on staging');
 $assert(strpos($sftp, 'dreamhost-stage') !== false, 'SFTP uploader knows staging target');
 $assert(strpos($sftp, 'bakeryOS cannot target bakery.sourflour.org/bake') !== false, 'bakeryOS cannot write /bake');
 $assert(strpos($sftp, 'remote root must be staging.sourflour.org') !== false, 'staging root is explicit');
+$assert(strpos($sftp, 'Hosted Staging migrations require bakeryOS at exactly staging.sourflour.org') !== false, 'hosted migration transport has an exact account and root guard');
+$assert(strpos($sftp, 'BAKERY_HOSTED_STAGE_ROOT=/home/bakeryOS/staging.sourflour.org') !== false, 'hosted migration command fixes the Staging application root');
 $assert(strpos($pushStage, '.env.sftp.stage') !== false, 'staging push loads stage env only');
 $assert(strpos($pushStage, '.env.sftp') !== false && strpos($pushStage, 'Never loads .env.sftp') !== false, 'staging push documents live env exclusion');
 $assert(strpos($pushStage, 'bakery.sourflour.org/bake') !== false, 'staging push refuses live root');

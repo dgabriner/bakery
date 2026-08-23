@@ -47,7 +47,7 @@ def load_scenario(path: str) -> dict:
 def pick_port(preferred: int) -> int:
     for port in range(preferred, preferred + 20):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Exclusive bind so a busy demo port is skipped instead of reused.
             try:
                 sock.bind(("127.0.0.1", port))
                 return port

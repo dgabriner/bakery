@@ -1,8 +1,10 @@
 # Curriculum (read after `brief`)
 
-Required slugs: `product-thesis`, `roles-and-surfaces`, `invariants`, `best-practices`, `simple-practices`, `bugs-to-focus`, `craft-homebase`, `handoff-shape`.
+Required slugs: `invariants`, `simple-practices`.
 
-Source of truth for lesson bodies is `includes/agent_homebase_seed.php` (upserted into `agent_lessons`). If the DB is down, read that file.
+Development craft (poem + cycles): `docs/AGENT_DEVELOPMENT_MANUAL.md` and `php scripts/agent_homebase.php craft --json`. Also the Homebase **Craft** tab.
+
+Source of truth for lesson bodies is `includes/agent_homebase_seed.php`. File → test map: `includes/agent_work_map.php`.
 
 ## Product
 
@@ -10,10 +12,10 @@ Sour Flour OS runs one wholesale bakery day on flat PHP + MariaDB. Spine: Daily 
 
 ## Practices
 
-Improve existing workflows. Chips where decisions happen. Exception-driven. Extract `includes/` helpers. No framework rewrite. Tests on loopback `bakerysf_local` / `bakerysf_test`.
+Everyday work on `bakerysf_stage_local`. Tests on `bakerysf_test` only. Never the nightly mirror `bakerysf_local`. Map every new `tests/run_*.php` or the drift test fails.
 
 ## Bugs to keep in mind
 
-Plan does not reach the bake sheet. Production confirm is additive. Order vs assignment status can diverge. Legacy invoice generators use live catalog prices. `product_distribution.php` demand-flip. No staff pings. Bake-sheet production waste is still unlogged.
+Commit-to-bake shipped; bakers still do not open Production Center. Additive confirm. Status divergence. Demand-flip. No staff pings. Bake-sheet waste unlogged.
 
-Log new durable bugs on the Homebase watchlist rather than only in chat.
+Shipped: canonical invoice send; credits as FG returns.

@@ -30,6 +30,7 @@ demo_assert('lists admin-route-reorder', in_array('admin-route-reorder', $ids, t
 demo_assert('lists admin-route-verify', in_array('admin-route-verify', $ids, true));
 demo_assert('lists driver-assignment', in_array('driver-assignment', $ids, true));
 demo_assert('lists adjust-route', in_array('adjust-route', $ids, true));
+demo_assert('lists manager-phone', in_array('manager-phone', $ids, true));
 demo_assert('lists driver-login', in_array('driver-login', $ids, true));
 demo_assert('lists driver-tomorrow', in_array('driver-tomorrow', $ids, true));
 demo_assert('lists driver-complete-stop', in_array('driver-complete-stop', $ids, true));
@@ -56,6 +57,9 @@ demo_assert('adjust captions are bilingual', isset($adjust['steps'][0]['caption'
 
 $loginJson = json_encode($login['steps']);
 demo_assert('login uses admin placeholder', strpos($loginJson, '{{ADMIN_CODE}}') !== false);
+$managerPhone = bakery_demo_recorder_load_scenario('manager-phone');
+demo_assert('manager-phone uses manager placeholder', strpos(json_encode($managerPhone['steps']), '{{MANAGER_CODE}}') !== false);
+demo_assert('manager-phone waits for manager.php', strpos(json_encode($managerPhone['steps']), 'manager.php') !== false);
 demo_assert('adjust-route uses driver id placeholder', strpos(json_encode($adjust['steps']), '{{DRIVER_ID}}') !== false);
 demo_assert('adjust-route uses date placeholder', strpos(json_encode($adjust['steps']), '{{DATE}}') !== false);
 
@@ -98,7 +102,9 @@ demo_assert('CLI supports all', strpos($cli, 'all') !== false);
 $python = file_get_contents($root . '/tools/demo-recorder/record.py');
 demo_assert('Python converts to mp4', strpos($python, 'libx264') !== false);
 demo_assert('Python records Playwright video', strpos($python, 'record_video_dir') !== false);
+demo_assert('Python pick_port does not reuse a busy Windows port', strpos($python, 'SO_REUSEADDR') === false);
 demo_assert('Python bootstrap installs ffmpeg', strpos(file_get_contents($root . '/includes/demo_recorder.php'), "install', 'ffmpeg'") !== false);
+demo_assert('recorder drops sandbox Playwright cache', strpos(file_get_contents($root . '/includes/demo_recorder.php'), 'cursor-sandbox-cache') !== false);
 demo_assert('Python refuses live production DB name', strpos($python, 'bakerysf') !== false);
 demo_assert('Python does not force bakerysf_test', strpos($python, 'bakerysf_test') === false);
 
@@ -114,6 +120,7 @@ demo_assert('help mentions login', strpos($helpText, 'login') !== false);
 demo_assert('help mentions daily-run', strpos($helpText, 'daily-run') !== false);
 demo_assert('help mentions admin route build', strpos($helpText, 'admin-route-build') !== false);
 demo_assert('help mentions adjust-route', strpos($helpText, 'adjust-route') !== false);
+demo_assert('help mentions manager-phone', strpos($helpText, 'manager-phone') !== false);
 demo_assert('help mentions publish', strpos($helpText, '--publish') !== false);
 demo_assert('help mentions drivers', strpos($helpText, 'drivers') !== false);
 
@@ -134,6 +141,7 @@ demo_assert('gallery catalog includes admin route reorder', in_array('admin-rout
 demo_assert('gallery catalog includes admin route verify', in_array('admin-route-verify', $catalogIds, true));
 demo_assert('gallery catalog includes driver-assignment', in_array('driver-assignment', $catalogIds, true));
 demo_assert('gallery catalog includes adjust-route', in_array('adjust-route', $catalogIds, true));
+demo_assert('gallery catalog includes manager-phone', in_array('manager-phone', $catalogIds, true));
 $driverIds = array_column(bakery_driver_walkthrough_items(), 'id');
 demo_assert('driver catalog includes tomorrow', in_array('driver-tomorrow', $driverIds, true));
 demo_assert('driver catalog includes complete', in_array('driver-complete-stop', $driverIds, true));
@@ -162,7 +170,7 @@ demo_assert('skip-stop snapshots via skip-stop prepare', strpos($skipScenario, '
 demo_assert('skip-stop shows the confirm button', strpos($skipScenario, '#skipStopConfirmBtn') !== false);
 demo_assert('skip-stop clicks confirm', (bool)preg_match('/"action":\s*"click"[^}]*#skipStopConfirmBtn/', $skipScenario));
 demo_assert('skip-stop waits for skip toast', strpos($skipScenario, 'routeSuccessToast') !== false);
-demo_assert('skip-stop uses Omitir copy', strpos($skipScenario, 'Omitir parada') !== false);
+demo_assert('skip-stop uses Dejar copy', strpos($skipScenario, 'Dejar esta parada') !== false);
 demo_assert('restore maps cancelled when ENUM cannot store it', strpos($demoPhp, "status === 'cancelled'") !== false);
 demo_assert('tomorrow prefers consecutive dated days', strpos($demoPhp, 'bakery_demo_recorder_discover_consecutive_dates') !== false);
 $adjustDriver = file_get_contents($root . '/tools/demo-recorder/scenarios/driver-adjust-route.json');

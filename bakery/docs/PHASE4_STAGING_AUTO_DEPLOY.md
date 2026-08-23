@@ -14,9 +14,9 @@ Live file push remains an explicit command: `.\scripts\push_sftp.ps1` with `.env
 1. Debounce local edits (`queue_sftp_push.ps1` / worker).
 2. Identify changed deployable files (or full set on first baseline).
 3. `php -l` changed PHP; abort on lint failure.
-4. If schema SQL changed and a prior staging baseline exists: dump `bakerysoftware` (`scripts/snapshot_dreamhost_staging.php --confirm-snapshot-staging`). Never `bakerysf`.
-5. Upload files to `bakeryOS` / `staging.sourflour.org`. Incremental auto-push does **not** rewrite remote `.env`.
-6. If schema SQL changed and a baseline exists: `php scripts/run_migrations.php --mode=dreamhost-stage` (requires `bakerysoftware`, refuses `bakerysf`).
+4. Upload files to `bakeryOS` / `staging.sourflour.org`. Incremental auto-push does **not** rewrite remote `.env`.
+5. If a new `050+` schema SQL file changed and a prior staging baseline exists, publish it to the private migration vault. The `bakeryOS` SSH account uploads a private copy of the canonical tools, checkpoints `bakerysoftware` on DreamHost, and only then runs `scripts/run_migrations.php --mode=hosted-stage` beside the database. Never `bakerysf`.
+6. The hosted command must stop if the checkpoint fails. This removes the old requirement that DreamHost authorize the developer workstation as a MySQL client. Additive retries verify already-present columns or indexes before continuing and recording the ledger ID.
 7. Smoke `https://staging.sourflour.org/login.php` for `staging-env-banner`, `STAGING`, and `bakerysoftware`.
 8. Record `storage/deploy/stage/releases/release_*.json` (git commit, SHA-256 of uploaded files, migrations) and `LAST_DEPLOY.json`.
 
@@ -39,3 +39,7 @@ php tests/run_phase4_auto_deploy_tests.php
 php tests/run_staging_env_tests.php
 php scripts/run_migrations.php --mode=dreamhost-stage
 ```
+
+`--mode=dreamhost-stage` remains a guarded diagnostic/recovery mode for an
+authorized workstation. Normal Sync uses `--mode=hosted-stage` privately over
+the existing `bakeryOS` SSH channel.

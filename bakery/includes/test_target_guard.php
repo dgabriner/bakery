@@ -44,13 +44,77 @@ function bakery_assert_local_mirror_target(PDO $db, bool $allowNoSelectedDatabas
 }
 
 /**
- * Agent Homebase writes operational notes. Use everyday local staging, or the
- * disposable test clone when a test process has already isolated itself.
- * Never write Homebase into the untouched nightly mirror.
+ * Agent Homebase writes operational notes.
+ * Actual PDO database must be everyday local staging or the disposable test clone.
+ * Configured DB_NAME may still be the nightly mirror after a CLI hop.
+ * Never write Homebase into bakerysf_local.
  */
 function bakery_assert_homebase_target(PDO $db, bool $allowNoSelectedDatabase = false): void
 {
-    bakery_assert_local_connection($db, ['bakerysf_stage_local', 'bakerysf_test'], $allowNoSelectedDatabase);
+    if (!defined('IS_LOCAL') || !IS_LOCAL || (defined('USE_PROD_DB') && USE_PROD_DB)) {
+        throw new RuntimeException('Refusing Homebase: local mode with USE_PROD_DB=false is required');
+    }
+    $host = strtolower(trim((string)(defined('DB_HOST') ? DB_HOST : '')));
+    if (!in_array($host, ['127.0.0.1', 'localhost', '::1'], true)) {
+        throw new RuntimeException('Refusing Homebase: configured DB_HOST is not loopback');
+    }
+    $allowed = ['bakerysf_stage_local', 'bakerysf_test'];
+    $actualName = (string)$db->query('SELECT DATABASE()')->fetchColumn();
+    if (!$allowNoSelectedDatabase && $actualName === '') {
+        throw new RuntimeException('Refusing Homebase: PDO connection has no selected database');
+    }
+    $actualNameLower = strtolower($actualName);
+    if (!in_array($actualNameLower, $allowed, true)) {
+        throw new RuntimeException(
+            'Refusing Homebase: PDO is ' . $actualName . '. Durable craft lives on bakerysf_stage_local. '
+            . 'bakerysf_test is for isolated tests only (the test gate wipes it). Never the nightly mirror bakerysf_local.'
+        );
+    }
+    $connection = strtolower((string)$db->getAttribute(PDO::ATTR_CONNECTION_STATUS));
+    if ($connection !== '' && !str_contains($connection, '127.0.0.1') && !str_contains($connection, 'localhost') && !str_contains($connection, '::1')) {
+        throw new RuntimeException('Refusing Homebase: PDO connection is not loopback');
+    }
+}
+
+/**
+ * Open the durable Homebase database. If this process is on the nightly mirror,
+ * hop to bakerysf_stage_local with the same local credentials. Isolated tests
+ * already on bakerysf_test stay there.
+ */
+function bakery_homebase_durable_connection(PDO $db): PDO
+{
+    $actual = strtolower((string)$db->query('SELECT DATABASE()')->fetchColumn());
+    if (in_array($actual, ['bakerysf_stage_local', 'bakerysf_test'], true)) {
+        return $db;
+    }
+    if ($actual !== 'bakerysf_local') {
+        return $db;
+    }
+    if (!defined('IS_LOCAL') || !IS_LOCAL || (defined('USE_PROD_DB') && USE_PROD_DB)) {
+        throw new RuntimeException('Homebase hop requires local USE_PROD_DB=false');
+    }
+    $port = defined('DB_PORT') ? DB_PORT : '3306';
+    try {
+        $stage = new PDO(
+            'mysql:host=' . DB_HOST . ';port=' . $port . ';dbname=bakerysf_stage_local;charset=utf8mb4',
+            DB_USER,
+            DB_PASS,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::MYSQL_ATTR_INIT_COMMAND => 'SET NAMES utf8mb4',
+            ]
+        );
+    } catch (PDOException $e) {
+        throw new RuntimeException(
+            'Homebase needs bakerysf_stage_local (durable). The nightly mirror bakerysf_local is read-only. Create/refresh staging: '
+            . 'php scripts/refresh_local_from_snapshot.php --target=bakerysf_stage_local. '
+            . 'Do not store craft on bakerysf_test — the local test gate wipes it. '
+            . '(' . $e->getMessage() . ')'
+        );
+    }
+    return $stage;
 }
 
 /**

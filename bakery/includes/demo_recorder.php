@@ -108,6 +108,7 @@ function bakery_demo_recorder_list_scenarios(): array
         'driver-skip-stop' => 13,
         'driver-adjust-route' => 14,
         'driver-call-hq' => 15,
+        'manager-phone' => 7,
     ];
     usort($out, static function ($a, $b) use ($order) {
         $oa = $order[$a['id']] ?? 50;
@@ -205,7 +206,7 @@ function bakery_demo_recorder_validate_scenario(array $data): void
         }
         if (preg_match('/"(?:value|code)"\\s*:\\s*"\\d{4}"/', json_encode($step) ?: '')) {
             throw new InvalidArgumentException(
-                'Step ' . $index . ' hard-codes a login code; use {{ADMIN_CODE}} or {{DRIVER_CODE}}'
+                'Step ' . $index . ' hard-codes a login code; use {{ADMIN_CODE}}, {{DRIVER_CODE}}, or {{MANAGER_CODE}}'
             );
         }
     }
@@ -238,9 +239,12 @@ function bakery_demo_recorder_merged_env(array $extra): array
 {
     $env = [];
     foreach (array_merge($_SERVER, $_ENV) as $key => $value) {
-        if (is_string($key) && is_string($value) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
-            $env[$key] = $value;
-        }
+            if (is_string($key) && is_string($value) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+                if ($key === 'PLAYWRIGHT_BROWSERS_PATH' && strpos($value, 'cursor-sandbox-cache') !== false) {
+                    continue;
+                }
+                $env[$key] = $value;
+            }
     }
     foreach (['PATH', 'Path', 'SystemRoot', 'WINDIR', 'USERPROFILE', 'HOME', 'TEMP', 'TMP', 'PATHEXT', 'LOCALAPPDATA'] as $key) {
         $value = getenv($key);
@@ -371,6 +375,24 @@ function bakery_demo_recorder_admin_code(): string
     return $code;
 }
 
+function bakery_demo_recorder_manager_code(PDO $db): string
+{
+    require_once bakery_demo_recorder_root() . '/includes/auth.php';
+    if (!table_exists($db, 'users') || !table_exists($db, 'roles')) {
+        return '';
+    }
+    $stmt = $db->query(
+        "SELECT u.login_code
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         WHERE r.slug = 'manager' AND u.is_active = 1
+           AND u.login_code IS NOT NULL AND u.login_code <> ''
+         ORDER BY u.id
+         LIMIT 1"
+    );
+    return bakery_normalize_login_code((string)($stmt ? $stmt->fetchColumn() : ''));
+}
+
 function bakery_demo_recorder_discover_route(PDO $db): array
 {
     require_once bakery_demo_recorder_root() . '/includes/auth.php';
@@ -404,6 +426,7 @@ function bakery_demo_recorder_discover_route(PDO $db): array
     }
     return [
         'admin_code' => bakery_demo_recorder_admin_code(),
+        'manager_code' => bakery_demo_recorder_manager_code($db),
         'driver_code' => $driverCode,
         'driver_id' => (int)($row['driver_id'] ?? 0),
         'date' => (string)($row['delivery_date'] ?? date('Y-m-d')),
@@ -640,6 +663,10 @@ function bakery_demo_recorder_prepare(string $root, array $scenario): array
     $needsDriverCode = in_array($kind, ['driver-login', 'driver-route', 'adjust-route', 'skip-stop'], true);
     if ($needsDriverCode && ((int)$codes['driver_id'] <= 0 || (string)$codes['driver_code'] === '')) {
         throw new RuntimeException('No driver login on bakerysf_local with remaining stops to record');
+    }
+    $needsManagerCode = strpos(json_encode($scenario['steps'] ?? []), '{{MANAGER_CODE}}') !== false;
+    if ($needsManagerCode && (string)($codes['manager_code'] ?? '') === '') {
+        throw new RuntimeException('No manager login on bakerysf_local to record the phone workspace');
     }
     if ($kind === 'adjust-route' && (int)$codes['pending'] < 2) {
         throw new RuntimeException('No local-mirror route with 2+ remaining stops to demonstrate adjust');

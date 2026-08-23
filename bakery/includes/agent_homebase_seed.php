@@ -16,7 +16,7 @@ function bakery_agent_homebase_seed_lessons(): array
             'title' => 'What we are building',
             'summary' => 'Sour Flour OS runs one bakery day. Close loops; do not add modules.',
             'sort_order' => 10,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
 **Sour Flour OS** (working name: Bakery Manager) runs the physical day of a wholesale bakery. Stack: flat PHP + MariaDB, no framework, DreamHost.
 
@@ -37,7 +37,7 @@ MD
             'title' => 'Roles and where work happens',
             'summary' => 'Menu hiding is never the only control. Driver UX is the reference.',
             'sort_order' => 20,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
 Roles (enforced in `includes/auth.php`): administrator, manager, baker, driver, plus the customer portal.
 
@@ -76,7 +76,7 @@ MD
             'title' => 'Best practices',
             'summary' => 'Improve existing workflows. Closed loops beat new screens. Exceptions over dashboards.',
             'sort_order' => 40,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
 - Improve existing workflows before inventing systems. This app has too many screens.
 - Prefer closed loops: after the user’s action, what carries it forward? If the answer is “memory,” that is the bug.
@@ -89,7 +89,7 @@ MD
 - Ugly code that closes a loop beats clean code that opens a new one.
 - i18n: add keys to `lang/en.php` **and** `lang/es.php`.
 - Do not add a new top-level page when an include + existing screen will do.
-- Local DB only for tests (`bakerysf_local` / `bakerysf_test`). Never `setup_local_db` against the production mirror. Do not deploy unless asked. Auto-push stays off.
+- Local staging for everyday work (`bakerysf_stage_local`). Tests on `bakerysf_test` only. Never `setup_local_db` against the nightly mirror `bakerysf_local`. Do not deploy to live. Staging auto-push may already be on; never retarget it at live `/bake`.
 MD
         ],
         [
@@ -104,30 +104,29 @@ MD
 2. Start a Homebase session (`php scripts/agent_homebase.php start --agent= --mission=`).
 3. Put shared writes in `includes/`. Pages authorize → validate → call helper → render/redirect.
 4. CSRF on POSTs. `bakery_require_role` on the server. Menu hiding is not security.
-5. Run the relevant `tests/run_*.php` plus anything that shares the helper. Use `bakery_assert_local_test_target`.
+5. Run the tests in the mission packet from `brief --json` (`tests/run_*.php`). Use `bakery_assert_local_test_target`. Do not invent PHPUnit.
 6. End with the §10 handoff and `php scripts/agent_homebase.php handoff ...`.
 7. Pin unfinished thoughts on the whiteboard instead of leaving them only in chat.
 
-If you are lost, run `php scripts/agent_homebase.php brief --json` and read the required lessons you have not completed.
+If you are lost, run `php scripts/agent_homebase.php brief --json`. Required lessons are `invariants` and `simple-practices` only; the rest of the curriculum stays available.
 MD
         ],
         [
             'slug' => 'bugs-to-focus',
             'track' => 'bugs',
             'title' => 'Bugs and open loops to focus on',
-            'summary' => 'Plan does not reach the baker. Several status divergences. Known lying screens.',
+            'summary' => 'Plan commit, demand-flip, bake-sheet confirm, and load/skip status alignment shipped; baker UX, bake-sheet waste, and staff pings remain.',
             'sort_order' => 60,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
-Highest-value open loops (verify against code; this list is also the Bugs board):
+Highest-value **open** loops (verify against code and the Bugs board):
 
-- Production Center **saves** targets; Daily Production still bakes to **demand**. No commit/lock. Late demand changes after planning surface nowhere.
-- Production confirm is **additive** — re-entry double-counts. No bake-sheet waste. Door credits now post FG `return` movements at confirm (do not also return them at closeout).
-- Loading a van sets orders `out_for_delivery` but can leave assignments `pending`. Skip may cancel the assignment but not the order.
-- Billing Center bulk-marks invoiced and can send/record the portal invoice. Legacy generators (`simple_invoice.php`, `generate_invoice.php`) redirect to Billing Center — do not extend them.
-- `product_distribution.php` still flips demand all-or-nothing (violates dated-beats-standing per customer).
+- **Baker UX:** commit path shipped (schema 048). Daily Production bakes the committed snapshot with demand alongside and drift flags. Bakers still do not open Production Center — that is their home; do not rebuild a second planner.
+- Bake-sheet **waste** is still unlogged (confirm itself is stale-guarded).
 - Exception ownership exists; staff are not pinged. Completing work must never hide a still-true operational fact.
 - Overlapping route screens. Driver Assignment is canonical.
+
+**Shipped — do not reopen:** Billing Center send/record of the portal invoice; door credits as FG returns at confirm; legacy invoice generators redirect to Billing Center; `product_distribution.php` demand-flip (dated beats standing per customer via `bakery_operating_demand_*`); bake-sheet confirm re-entry double-count; order/assignment load+skip alignment.
 
 When you find a new durable bug, log it: `php scripts/agent_homebase.php bug --title= --detail=`.
 MD
@@ -138,7 +137,7 @@ MD
             'title' => 'Professional craft: live in this Homebase',
             'summary' => 'Every mission checks in, learns, pins, and hands off here — not only in chat.',
             'sort_order' => 70,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
 This studio is how we accumulate judgment across chats.
 
@@ -155,7 +154,7 @@ MD
             'title' => 'Handoff shape (every session)',
             'summary' => 'The eight fields from BAKERY_PRODUCT_CONTEXT §10.',
             'sort_order' => 80,
-            'is_required' => 1,
+            'is_required' => 0,
             'body_md' => <<<'MD'
 1. What you investigated (files/workflows actually read).
 2. Decisions made and why (especially §4-adjacent).
@@ -177,28 +176,28 @@ function bakery_agent_homebase_seed_bugs(): array
     return [
         [
             'slug' => 'plan-not-on-bake-sheet',
-            'title' => 'Committed production plan never reaches Daily Production',
-            'detail' => 'Production Center saves production_plan_items. Daily Production still builds the bake list from demand. No commit/lock; “planned” on the bake sheet means demand. Post-commit drift is silent.',
-            'severity' => 'critical',
-            'status' => 'open',
+            'title' => 'Bakers still do not live in the committed plan',
+            'detail' => 'Commit path shipped (production_plan_commits, schema 048). Daily Production bakes the committed snapshot with demand alongside and production_plan_drift. Remaining gap: bakers still do not open Production Center. Do not rebuild a second planner. Additive confirm and bake-sheet waste are separate bugs.',
+            'severity' => 'watch',
+            'status' => 'watching',
             'focus_area' => 'production',
             'source' => 'product-context',
         ],
         [
             'slug' => 'additive-production',
             'title' => 'Production confirmation double-counts on re-entry',
-            'detail' => 'bakery_inventory_record_production adds to available_quantity and produced_quantity every time. Bake-sheet waste is not captured.',
+            'detail' => 'Shipped: Record-now starts at 0; Set all remaining is explicit; bakery_inventory_record_production rejects a stale expected produced_quantity so a back-button resubmit cannot double-count. Bake-sheet waste is still not captured (separate remaining gap).',
             'severity' => 'watch',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'production',
             'source' => 'product-context',
         ],
         [
             'slug' => 'status-divergence',
             'title' => 'Order vs assignment status can diverge',
-            'detail' => 'Loading may set daily_orders.status out_for_delivery while assignments stay pending. Skip may cancel the assignment but not the order.',
+            'detail' => 'Shipped: load marks only open stops out_for_delivery and leaves assignments pending so My Route can still reorder. Skip cancels the assignment and pulls the order off out_for_delivery (ready). Unskip restores pending and, if that driver still has an open load, out_for_delivery. Failed-stop recovery is separate.',
             'severity' => 'watch',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'delivery',
             'source' => 'product-context',
         ],
@@ -214,9 +213,9 @@ function bakery_agent_homebase_seed_bugs(): array
         [
             'slug' => 'demand-flip',
             'title' => 'product_distribution.php demand-flip',
-            'detail' => 'Legacy all-or-nothing dated vs standing for a date. Violates dated-beats-standing per customer. Use bakery_operating_demand_* helpers.',
-            'severity' => 'broken-window',
-            'status' => 'open',
+            'detail' => 'Shipped: Product Distribution, Daily Production, and the ingredient planner consume bakery_operating_demand_* so dated orders replace standing per customer. Mix chip and explorer show dated vs standing on the same delivery day. Do not reopen as all-or-nothing per date.',
+            'severity' => 'watch',
+            'status' => 'fixed',
             'focus_area' => 'demand',
             'source' => 'product-context',
         ],
@@ -262,8 +261,8 @@ function bakery_agent_homebase_seed_whiteboard(): array
         ],
         [
             'column_key' => 'next',
-            'title' => 'Commit production plan → bake sheet',
-            'body' => 'Highest-value remaining ops loop after exceptions. Daily Production must execute the committed plan with demand alongside and drift flags.',
+            'title' => 'Baker executes the committed plan in Daily Production',
+            'body' => 'Commit/lock shipped. Remaining: baker UX lives on Daily Production, not Production Center. Additive confirm and bake-sheet waste still open.',
             'agent_name' => 'homebase',
             'sort_order' => 10,
         ],
@@ -273,6 +272,13 @@ function bakery_agent_homebase_seed_whiteboard(): array
             'body' => 'Flat PHP + MariaDB. Extract includes/ helpers. Procedural page controllers stay. Code wins over stale README/ARCHITECTURE.',
             'agent_name' => 'homebase',
             'sort_order' => 10,
+        ],
+        [
+            'column_key' => 'decided',
+            'title' => 'Agent briefing trust order',
+            'body' => 'Product context → Homebase Decided/bugs → data-environment plan. docs/archive/ is historical. brief --json is a packed mission packet from includes/agent_work_map.php. Required lessons are invariants + simple-practices only.',
+            'agent_name' => 'homebase',
+            'sort_order' => 20,
         ],
         [
             'column_key' => 'parked',

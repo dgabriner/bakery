@@ -21,7 +21,7 @@
       "delay": 200
     },
     { "action": "waitForURL", "includes": "driver.php" },
-    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state, .route-prep-tomorrow-cta" },
+    { "action": "waitForSelector", "selector": ".route-day-nav, .empty-state, a.bakery-nav__tomorrow" },
     {
       "action": "goto",
       "path": "driver.php?date={{TODAY}}",

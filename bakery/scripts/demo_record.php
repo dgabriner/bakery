@@ -37,6 +37,7 @@ Commands:
   admin-route-verify        Verify the route in My Route
   driver-assignment         Driver Assignment
   adjust-route              Adjust remaining stop order
+  manager-phone             Laura’s phone Manager workspace
   <file.json>               Custom scenario
 
 Options:
@@ -151,6 +152,7 @@ foreach ($targets as $target) {
 
     $codes = [
         'admin_code' => bakery_demo_recorder_admin_code(),
+        'manager_code' => '',
         'driver_code' => '',
         'driver_id' => 0,
         'date' => date('Y-m-d'),
@@ -220,6 +222,7 @@ foreach ($targets as $target) {
             'APP_ENV' => 'local',
             'DB_NAME' => defined('DB_NAME') ? (string)DB_NAME : 'bakerysf_local',
             'DEMO_ADMIN_CODE' => $codes['admin_code'],
+            'DEMO_MANAGER_CODE' => (string)($codes['manager_code'] ?? ''),
             'DEMO_DRIVER_CODE' => (string)$codes['driver_code'],
             'DEMO_DRIVER_ID' => (string)(int)$codes['driver_id'],
             'DEMO_DATE' => (string)$codes['date'],

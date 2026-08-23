@@ -1,5 +1,9 @@
 # Prompt 20 — Commit production plan
 
+**Status (2026-08):** Commit/lock **shipped** (schema 048). Daily Production bakes the committed snapshot with demand alongside and `production_plan_drift`. Production Center assigns recorded bake quantities to standing (default) or one-off dated orders — do not add a second assignment page. Remaining: bakers still do not open Production Center. Confirm against Homebase bugs and `BAKERY_PRODUCT_CONTEXT.md` §6.2 before treating this as a greenfield loop.
+
+This file is **file ownership**, not a live status report. Canonical `--agent=production-plan`.
+
 Paste this entire file into a **new** Cursor chat in the `bakery/` workspace.
 
 Sister prompts: `docs/prompts/21-canonical-invoice-send.md`, `docs/prompts/22-credits-as-returns.md`. You own **plan → baker**. You do not send invoices. You do not post delivery credits to inventory.

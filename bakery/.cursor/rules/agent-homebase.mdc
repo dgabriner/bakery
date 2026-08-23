@@ -5,8 +5,8 @@ alwaysApply: true
 
 # Agent Homebase
 
-Before coding in `bakery/`, run `php scripts/agent_homebase.php brief --agent=<mission> --json` and follow `.cursor/skills/agent-homebase/SKILL.md`.
+Before coding in `bakery/`, run `php scripts/agent_homebase.php brief --agent=<mission> --json` and follow `.cursor/skills/agent-homebase/SKILL.md` plus `docs/AGENT_DEVELOPMENT_MANUAL.md`. Use the packed `mission_packet`; do not re-read archived docs.
 
 During work, pin decisions (`--column=decided` for lasting ones) and log durable bugs. Do not leave those only in chat.
 
-End every session with a §10 handoff via `php scripts/agent_homebase.php handoff`. Completing exception *work* never hides a still-true operational fact. Local DB only; do not deploy; do not enable auto-push.
+End every session with a numbered §10 handoff. Completing exception *work* never hides a still-true operational fact. Craft ledger is `bakerysf_stage_local`. Tests wipe `bakerysf_test`. Staging auto-push must never target `bakery.sourflour.org/bake`.

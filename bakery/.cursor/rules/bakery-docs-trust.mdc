@@ -1,0 +1,18 @@
+---
+description: Doc trust order for Sour Flour OS. Dated status notes are evidence, not briefing.
+globs: docs/**,AGENTS.md,BAKERY_PRODUCT_CONTEXT.md
+alwaysApply: false
+---
+
+# Doc trust
+
+When documents disagree, use this order:
+
+1. `BAKERY_PRODUCT_CONTEXT.md`
+2. Agent Homebase whiteboard **Decided** and the open bug watchlist
+3. `docs/AGENT_DEVELOPMENT_MANUAL.md` for how agents develop (poem, databases, session cycle)
+4. `docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md` for database, backup, Git, sync, deploy, or DreamHost work
+5. `docs/prompts/` for file ownership — confirm the loop is still open in §6–7 / Homebase bugs
+6. `docs/archive/` and dated status memos — historical only. Do not brief from them.
+
+Code wins over a stale paragraph; then fix the paragraph.

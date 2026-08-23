@@ -2,9 +2,9 @@
 
 ## Outcome
 
-`manager.php` is the management front door for an operating date. Administrators can enter it from the persistent **Bakery Manager** button without giving up administrator access; managers see the same workspace in their normal role. It does not impersonate a driver or change any permissions.
+`manager.php` is the management front door for an operating date. The **manager role** (Laura) gets a phone-first focused workspace: Today, Routes, Kitchen, Missed, and a More drawer that still holds the full operational catalog. Administrators keep the desktop command center (workshop, attention queue, recovery forms) and the ops hamburger. Completing exception *work* never hides a still-true operational fact.
 
-The workspace deliberately centers the work a route manager has to own:
+The workspace centers the work a floor manager has to own:
 
 1. Are dated orders ready?
 2. Does every stop have a route and driver?
@@ -45,9 +45,10 @@ The first Manager Mode iteration closes that gap with a date-scoped scorecard, a
 Known limits remain:
 
 - Driver progress is based on recorded assignment status, not a guaranteed live location or communication signal.
-- The board does not yet expose capacity, vehicle, driver availability, stop ETA, or route duration.
-- The manager cannot acknowledge, assign an owner to, or leave a resolution note on an exception.
-- Production, packing, finished goods, and pickup loads remain canonical linked modules. Bakery Manager presents their handoff status but does not duplicate their edits.
+- The board does not yet expose vehicle capacity, stop ETA, or route duration.
+- Exception acknowledgement, owner, note, and completed state live in `manager_exception_work`. Completing that row does not suppress the live operational exception.
+- Production, packing, finished goods, and pickup loads remain canonical linked modules. The phone Kitchen board is read-only; edits stay on Daily Production and Pack List.
+- Day-of phone sheets (move one stop, dated qty, skip) call existing helpers. Driver Assignment remains the canonical wide route board.
 - Broader release/security issues in `docs/NEXT_STEPS_TODO.md` still need to be handled before a production deployment.
 
 ## Recommended next increments

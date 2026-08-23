@@ -1,18 +1,13 @@
-# P0 local implementation note — 2026-08-12
+# Historical — do not brief from this file
 
-This local-only tranche disabled auto-push with
-`storage/deploy/.auto_push_disabled`, removed the legacy public baker auto-login,
-moved source-managed staff codes to environment-only values, added an
-audit-backed five-attempt/15-minute login throttle, denied the listed diagnostic
-endpoints in Apache, quarantined the parse-invalid driver trace, and removed
-diagnostics from the production manifest.
+Dated status notes are **evidence**, not the living briefing.
 
-The new test-target guard checks local mode, `USE_PROD_DB`, configured
-host/name, `SELECT DATABASE()`, and PDO connection status before reset or
-regression commands run. `scripts/run_local_test_gate.ps1` now performs the
-guarded local reset, migrations, lint, and discovered regression suites; the
-interactive developer workflow calls it for its test option.
+**Trust order**
 
-Still human-operated and intentionally not performed: production user/log audit,
-credential rotation, a reviewed baseline commit, production preflight, and any
-deployment. Auto-push remains disabled and no deploy was attempted.
+1. `BAKERY_PRODUCT_CONTEXT.md`
+2. Agent Homebase whiteboard **Decided** and the open bug watchlist
+3. `docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md` for database, backup, Git, sync, deploy, or DreamHost work
+
+Archived copy: [docs/archive/P0_LOCAL_IMPLEMENTATION_2026-08-12.md](archive/P0_LOCAL_IMPLEMENTATION_2026-08-12.md)
+
+See [docs/archive/README.md](archive/README.md).

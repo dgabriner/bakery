@@ -30,17 +30,23 @@
         "es": "Si una tienda no puede recibir el pedido, omítela"
       }
     },
-    { "action": "waitForSelector", "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn" },
+    { "action": "waitForSelector", "selector": "#nextStopCard .next-stop-more-toggle" },
     {
       "action": "scroll",
-      "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn",
-      "waitAfter": 700
+      "selector": "#nextStopCard .next-stop-more-toggle",
+      "waitAfter": 400
+    },
+    {
+      "action": "click",
+      "selector": "#nextStopCard .next-stop-more-toggle",
+      "force": true,
+      "caption": { "en": "Open More for skip and HQ recovery", "es": "Abre Más para dejar la parada o pedir a oficina" }
     },
     {
       "action": "click",
       "selector": "#nextStopCard button.route-btn--skip.skip-stop-btn",
       "force": true,
-      "caption": { "en": "Tap Skip stop", "es": "Toca Omitir parada" }
+      "caption": { "en": "Tap Drop this stop", "es": "Toca Dejar esta parada" }
     },
     { "action": "waitForSelector", "selector": "#skipStopModal:not([hidden])" },
     {
@@ -62,8 +68,8 @@
       "selector": "#skipStopConfirmBtn",
       "force": true,
       "caption": {
-        "en": "Then tap Skip stop. The next store becomes next.",
-        "es": "Luego toca Omitir parada. La siguiente tienda pasa a ser la próxima."
+        "en": "Then tap Drop this stop. The next store becomes next.",
+        "es": "Luego toca Dejar esta parada. La siguiente tienda pasa a ser la próxima."
       }
     },
     {

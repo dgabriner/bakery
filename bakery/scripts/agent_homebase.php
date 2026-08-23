@@ -29,10 +29,13 @@ require_once $root . '/includes/agent_homebase.php';
 function bakery_agent_cli_help(): void
 {
     echo <<<TXT
-Agent Homebase (local staging/test unless --allow-production AND USE_PROD_DB)
+Agent Homebase (hops to bakerysf_stage_local; bakerysf_test only when already isolated)
 
 Commands:
-  brief       Opening briefing (unread lessons, bugs, board, recent handoffs)
+  brief       Opening briefing (packed mission packet, craft stanza, bugs, board)
+  tests-for   Map files to tests (--files=a.php,b.php)
+  craft       Development manual + poem (no database required for the text)
+  nag-check   Whether the stop hook should remind (open sessions)
   start       Open a development session
   learn       Mark a lesson complete (--lesson=slug)
   lessons     List curriculum
@@ -47,9 +50,10 @@ Commands:
   sessions    Recent sessions
 
 Options:
-  --agent=name
-  --mission="Exception connections"
-  --lesson=product-thesis
+  --agent=name           Canonical slugs from brief.canonical_slugs
+  --mission="..."        Session title; on brief, selects the work-map packet
+  --files=a.php,b.php    tests-for and handoff
+  --lesson=invariants
   --notes="..."
   --title=...
   --body=...
@@ -59,7 +63,6 @@ Options:
   --status=open
   --kind=insight|question|coach
   --summary=...          Handoff markdown (alias of --body on handoff)
-  --files=a.php,b.php
   --session=12
   --json
   --allow-production     Requires USE_PROD_DB=true as well
@@ -120,16 +123,50 @@ if ($command === '' || in_array($command, ['help', '-h', '--help'], true)) {
 }
 
 try {
+    $commandEarly = (string)($args['command'] ?? '');
+    $json = !empty($args['json']);
+    if ($commandEarly === 'craft') {
+        bakery_agent_cli_emit([
+            'manual' => bakery_agent_craft_manual_rel(),
+            'stanza' => bakery_agent_craft_stanza(),
+            'poem' => bakery_agent_craft_poem(),
+            'cycles' => [
+                'One operating date',
+                'Packet, not encyclopedia',
+                'One mutation path in includes/',
+                'Prove it on bakerysf_test',
+                'Leave the ledger on bakerysf_stage_local',
+            ],
+        ], $json);
+        exit(0);
+    }
+    if ($commandEarly === 'tests-for') {
+        $files = (string)($args['files'] ?? '');
+        if ($files === '') {
+            throw new InvalidArgumentException('--files=a.php,b.php is required');
+        }
+        bakery_agent_cli_emit(bakery_agent_work_map_suggest($files), $json);
+        exit(0);
+    }
+
     $db = check_mysql_connection();
+    if (empty($args['allow_production'])) {
+        $db = bakery_homebase_durable_connection($db);
+    }
     bakery_agent_cli_assert_target($db, !empty($args['allow_production']));
     bakery_agent_homebase_ensure($db);
 
     $agent = bakery_agent_homebase_clean_name((string)($args['agent'] ?? 'cursor-agent'));
-    $json = !empty($args['json']);
 
     switch ($command) {
         case 'brief':
-            bakery_agent_cli_emit(bakery_agent_homebase_brief($db, $agent), $json);
+            bakery_agent_cli_emit(
+                bakery_agent_homebase_brief($db, $agent, (string)($args['mission'] ?? '')),
+                $json
+            );
+            break;
+        case 'nag-check':
+            bakery_agent_cli_emit(bakery_agent_homebase_nag_state($db), $json);
             break;
         case 'start':
             $session = bakery_agent_homebase_start_session($db, $agent, (string)($args['mission'] ?? ''));
@@ -193,13 +230,16 @@ try {
             break;
         case 'handoff':
             $md = trim((string)($args['summary'] ?? $args['body'] ?? ''));
+            $files = (string)($args['files'] ?? '');
             $session = bakery_agent_homebase_handoff(
                 $db,
                 $agent,
                 $md,
-                (string)($args['files'] ?? ''),
+                $files,
                 isset($args['session']) ? (int)$args['session'] : null
             );
+            $session['handoff_score'] = bakery_agent_homebase_score_handoff($md);
+            $session['map_suggestions'] = bakery_agent_work_map_suggest($files);
             bakery_agent_cli_emit($session, $json);
             break;
         case 'sessions':

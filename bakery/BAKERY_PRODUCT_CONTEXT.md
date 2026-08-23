@@ -41,7 +41,7 @@ gated checklist (Confirm Demand → Commit Production Plan → Produce → Pack 
 Assign/Load/Dispatch → Deliver & Reconcile → Invoice → Close the Day) whose closeout
 refuses to record while blockers exist. Dated demand now lazy-generates, route construction
 prepares demand first, and route closeout reconciles loads. Remaining loop-closes are
-mostly polish (bake-sheet waste, overnight cron on DreamHost). The product work is
+mostly polish (staff alerts, overnight cron on DreamHost). The product work is
 closing those loops — not adding modules.
 
 ## 2. Primary user roles
@@ -51,7 +51,7 @@ Server-side role enforcement lives in `includes/auth.php`; menu in
 
 | Role | Needs that drive product decisions |
 |------|-------------------------------------|
-| **Manager / owner** | State of the bakery in 30 seconds; what changed; what's unusual; what's not done; tomorrow's readiness. Works from Daily Run / Operations Dashboard / Daily Brief. |
+| **Manager / owner** | State of the bakery in 30 seconds; what changed; what's unusual; what's not done; tomorrow's readiness. The **manager role** works from a phone-first `manager.php` (Today / Routes / Kitchen / Missed, extras in More). Administrators still use Daily Run / Operations Dashboard / Daily Brief as the desktop spine. Driver UX remains the reference implementation for role flows. |
 | **Order/customer manager** | Find a customer fast; see their normal pattern and today's exception; create/edit orders safely; manage standing orders, pauses, pricing. |
 | **Production planner** | Turn confirmed demand into one production plan; know the baker sees the approved numbers; hear about late changes. Works in Production Center + Ingredient Planner. |
 | **Baker** | A clear, sequenced workload: what, how much, which dough, formula grams. Sees only Daily Production + Pack List, filtered to assigned product lines. Should never reverse-engineer orders. |
@@ -92,7 +92,10 @@ keys — several nav items already show raw keys because this was skipped.
   line-filtered per baker, progress from `produced_quantity`. After a manager commits
   the date, bake quantities come from the committed plan snapshot; dated demand stays
   visible beside them. Uncommitted dates show demand and say so — they do not silently
-  treat saved Production Center targets as the bake list.
+  treat saved Production Center targets as the bake list. Baker-role presentation stays
+  work-first: amount left and made are primary, formulas open in grams, manager plan notes
+  and shortage reporting are collapsed, and configured Pan Dulce yields translate pieces
+  into bench-language gallon/tray hints. Manager views retain drift and reconciliation detail.
 - **Driver workflow** (`driver.php` + `complete_delivery.php`). Transactional confirm
   writes assignment status, order status, delivered line quantities, and a pricing snapshot
   in one step; notifies the customer. My Route also shows a compact remaining-stop map
@@ -107,8 +110,10 @@ keys — several nav items already show raw keys because this was skipped.
   edits flow through the same demand model staff use.
 - **Finished-goods inventory** (`includes/product_inventory.php`). Per product/day
   quantities, immutable movement ledger (`production`, `count`, `load`, `load_correction`,
-  `return`, `waste`, `delivery`), row locking, load corrections return stock, over-loading
-  prevented. Door credits at confirm post `return` movements (see §4.8–4.9). Route closeout
+  `return`, `waste`, `delivery`), row locking, and load corrections return stock. A manager-
+  confirmed above-stock pickup (for example, product supplied by a store) first posts a
+  `count` source adjustment and then a `load`, so loaded custody stays balanced. Door credits
+  at confirm post `return` movements (see §4.8–4.9). Route closeout
   (`route_closeout.php`) reconciles per-driver loaded = net delivered + returned + waste
   and gates Daily Run day close.
 - **Invoice snapshots** (migration 014 + `complete_delivery.php`). Confirmation freezes
@@ -123,7 +128,8 @@ Violating these breaks operations even if the code "works."
 
 1. **Dated beats standing, per customer.** A customer's dated order replaces their standing
    order for that date only; other customers still fall back to standing. Never flip
-   all-or-nothing per date (legacy `product_distribution.php` does this — known bug).
+   all-or-nothing per date. Consumption goes through `bakery_operating_demand_*`
+   (Product Distribution, Daily Production, ingredient planner).
 2. **Standing = template/forecast. Daily = commercial commitment.** Standing edits never
    rewrite past dated orders; dated edits never write standing. Shared semantics live in
    `includes/customer_order_mutations.php`.
@@ -132,9 +138,14 @@ Violating these breaks operations even if the code "works."
    action, first view of Daily Run / Daily Orders / dashboard / Daily Production
    (`bakery_fill_demand_horizon` → `bakery_ensure_daily_orders_for_date`), route build
    (`assign_from_standing`), or DreamHost cron `scripts/demand_scheduler.php`.
-   Cadence from calendar today: bake tomorrow (`today+1`) for the route the day after
-   (`today+2`). Daily Production is keyed on the delivery date, so the Tuesday bake
-   sheet is Wednesday's standing-derived orders. Route build prepares dated demand
+   Cadence from calendar today: default mid-week lookahead is bake tomorrow
+   (`today+1`) for the route the day after (`today+2`). That matches pan dulce
+   Monday→Tuesday through Thursday→Friday. Friday's pan dulce bake covers
+   Saturday (including Markets), Sunday, and Monday. Sour Flour is a separate
+   line: Tuesday and Friday for the following days' deliveries, plus Sunday
+   for Monday. Encoded in `includes/production_cadence.php`. Daily Production
+   stays keyed on the delivery date, so the Tuesday pan dulce bake sheet is
+   Wednesday's standing-derived orders. Route build prepares dated demand
    first and then explicitly rebuilds the standing-route stops. It respects week
    pauses, date-range pauses, and skip dates, and filters
    `is_active = 1` — inactive customers never generate. Re-generation preserves
@@ -149,12 +160,15 @@ Violating these breaks operations even if the code "works."
    delivered, invoiced`. Assignment status: `pending, in_transit, delivered, failed,
    cancelled, rescheduled` (`rescheduled` is retained for legacy history).
    These two advance on *different* write paths — keep them consistent when you touch either.
-   Known divergence: loading a van sets orders `out_for_delivery` but leaves assignments
-   `pending`; skip cancels the assignment but not the order.
-7. **Production confirmation is additive** (`bakery_inventory_record_production`): each
-   "Record now" adds units to `available_quantity` and `produced_quantity`. Re-entry
-   double-counts. Production waste is still not captured on the bake sheet; route waste
-   is captured at closeout.
+   Load marks **open** stops' orders `out_for_delivery` and leaves assignments `pending`
+   (`in_transit` is at-the-door and locks reorder). Skip cancels the assignment and
+   pulls the order off `out_for_delivery` (back to `ready`). Unskip restores pending;
+   if that driver still has an open load, the order returns to `out_for_delivery`.
+7. **Production confirmation is additive by batch** (`bakery_inventory_record_production`):
+   each "Record now" adds sellable units. The bake sheet starts at 0 and posts the made-so-far
+   count so a stale resubmit cannot double-count. Waste/unusable units from the same batch
+   are recorded beside good output: gross output posts a `production` movement, waste posts
+   a negative `waste` movement, and only good units increase Made and available FG.
 8. **Loads move custody, not ownership:** saving a driver load moves FG `available → loaded`;
    reducing a load returns stock. Delivery confirmation does **not** post the sale —
    end-of-route closeout does (`bakery_inventory_reconcile_driver_load`): posts van
@@ -175,8 +189,8 @@ Violating these breaks operations even if the code "works."
    `confirm_delivery` / `bakery_confirm_delivery` sets delivered pieces, credits taken back,
    snapshot totals, COD `amount_collected`, `delivery_confirmed_at`, marks order +
    assignment delivered, and posts FG credit returns. Billable math stays
-   `billable_pieces = delivered_pieces - credits_taken_back`. Legacy `mark_delivered`
-   skips the snapshot — don't build on it.
+   `billable_pieces = delivered_pieces - credits_taken_back`. Obsolete delivery mutations
+   were removed; callers use this one confirmation transaction.
 10. **Invoice identity is computed, not stored:** `INV-YYYYMMDD-{orderId padded 5}`, one
     invoice per confirmed delivery. Legacy period generators (`simple_invoice.php`,
     `generate_invoice_simple.php`, `generate_invoice.php`) redirect to Billing Center;
@@ -195,10 +209,14 @@ Violating these breaks operations even if the code "works."
 15. **Feature checks are runtime, not install-time:** much core code uses `table_exists()` /
     column checks and degrades to "unavailable" states. Preserve that tolerance — the
     dashboard's honesty about missing data is deliberate.
-16. **Unassign is not delete.** Driver Assignment removes a stop from a dated route but
-    keeps its order and quantities. Only Daily Orders removes an order shell, and only
-    after every product line is gone. One-time demand starts in Daily Orders (create/edit),
-    then moves to Driver Assignment for routing.
+17. **Bake day is not always the delivery day.** Main pan dulce is produced Mon–Fri;
+    Friday's bake covers Saturday (Markets), Sunday, and Monday; Monday's bake is for
+    Tuesday. Sunday deliveries are usually none; Sunday production is minimal.
+    Sour Flour is a separate Tuesday/Friday cadence plus Sunday-for-Monday.
+    Some items are daily; others last multiple days or can sit in stock. Saved
+    targets and inventory stay keyed on the delivery date
+    (`includes/production_cadence.php` names the cover window; it does not
+    auto-borrow stock across dates).
 
 ## 5. Major application surfaces
 
@@ -212,9 +230,9 @@ Compact map — entry points only, not every file.
 | Daily Orders | `daily_orders.php`, `includes/demand_review.php` | The day's demand: generate, create one-time dated orders, review states, edit |
 | Standing Orders | `standing_orders_manager.php` (canonical; `standing_orders.php` legacy) | Recurring weekly template |
 | Customers | `customers.php` (searchable list), `customer_record.php` (Customer Hub — summaries + deep links), `customer_overview.php`, `customer_schedule.php`, `customer_pricing.php`, `leads.php` | Records, hub orientation, lifecycle, schedule, pricing, pipeline |
-| Production Center | `production_center.php` (schema 015 + 048) | Weekly saved FG targets vs demand/stock; explicit per-date commit to the baker |
-| Daily Production | `production.php` | Baker's bake list by dough; confirm → FG inventory |
-| Pack List | `pack_list.php` | Packing checklist by product / customer / route; shared check-offs; FG shortage uses on-hand + loaded |
+| Production Center | `production_center.php` (schema 015 + 048), `includes/production_cadence.php`, `includes/production_assign.php`, `includes/production_workflow_strip.php` | Production Manager hub for one delivery day: Demand→Plan→Produce→Pack strip, saved FG targets vs demand/stock, conflict-safe autosave, bake-run cover chips, assign units to standing (default) or one-off dated orders, explicit commit to the baker |
+| Daily Production | `production.php` | Baker's bake list by dough; confirms good output + waste to FG ledger; shares the kitchen strip; loud when uncommitted |
+| Pack List | `pack_list.php` | Packing checklist by product / customer / route; shared check-offs; FG shortage uses on-hand + loaded; made units + kitchen strip |
 | Finished Goods | `inventory.php`, `includes/product_inventory.php` | Counts, availability, movement ledger |
 | Ingredient Planner | `ingredient_requirements.php`, `includes/ingredient_requirements.php` | Plan/demand → formula grams, batches, purchase *hints* (no PO) |
 | Driver Assignment | `driver_assignment.php`, `includes/driver_assignments.php` | Canonical route board: prepare demand + build from standing, drag, transfer, unassign without deleting demand |
@@ -226,7 +244,7 @@ Compact map — entry points only, not every file.
 | Service Issues | `service_issues.php`, `service_issues_api.php`, `includes/customer_delivery_issues.php` | Real queue for customer-reported problems |
 | Portal | `customer_portal*.php`, `customer_login.php`, `qr_login.php`, `includes/customer_portal.php`, `includes/portal_*` | Customer self-service |
 | Admin | `users.php`, `login_history.php`, `historical_navigation.php`, `module_guide.php`, `agent_homebase.php` | Identity, audit, retained legacy menu, Agent Learning Studio / Homebase (admin coaching view; agents use `scripts/agent_homebase.php`) |
-| Insights | `customer_overview.php`, `customer_routes.php`, `product_distribution.php` (known demand-flip bug) | Read-only exploration |
+| Insights | `customer_overview.php`, `customer_routes.php`, `product_distribution.php` (per-customer demand merge) | Read-only exploration |
 | Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; **no staff alerts exist** |
 | Timeline | `operational_timeline.php`, `includes/operational_timeline.php` | Audit/event feed per date/customer/order |
 
@@ -239,8 +257,10 @@ Compact map — entry points only, not every file.
    same overnight. A `demand_confirmations` table (schema 031) records manager
    confirmation per date; Daily Run stage 1 is complete only when confirmed (and
    reopens on post-confirm demand drift from `operational_events`), which
-   hard-gates closeout; the dashboard shows a tomorrow-readiness strip plus the
-   two-day bake→route cadence. Standing remains the template; dated edits win.
+   hard-gates closeout; the dashboard shows a    tomorrow-readiness strip plus the
+   demand cadence (mid-week bake-tomorrow / route-next-day, with Friday pan dulce
+   covering Saturday–Monday and Sour Flour on Tuesday/Friday/Sunday-for-Monday).
+   Standing remains the template; dated edits win.
 2. **Plan → baker.** Shipped: Production Center still saves per-day draft targets.
    `production_plan_commits` + `production_plan_commit_items` (schema 048) record an
    explicit manager commit per delivery date. Daily Production bakes the committed
@@ -249,14 +269,24 @@ Compact map — entry points only, not every file.
    Post-commit dated-demand changes raise `production_plan_drift`; the bake sheet
    does not auto-rewrite. Re-commit updates baker numbers and does not zero
    `produced_quantity`. Completing exception work never hides still-true drift.
-3. **Route closeout.** Closed via `route_closeout.php` (loaded = net delivered + returned +
-   waste + door credits). Door credits are FG `return` movements at confirm, not van leftover.
-   Remaining gap: production-side waste is still not captured on the bake sheet.
+   When planned or on-hand is below demand, Production Center **Assign to orders**
+   recommends proportional store quantities. Default apply writes standing (and
+   this delivery day's dated line; later same-weekday dated copies of the old
+   standing amount follow). **This delivery only** writes dated quantities and
+   leaves standing alone. Van / delivered orders are skipped.
+   Daily Run **Produce** completion measures against the committed bake when a
+   commit exists (so intentional plan-below-demand does not leave Produce stuck).
+   Production Center is the Production Manager hub (kitchen stage strip + deep
+   links); bakers still do not open it — they stay on Daily Production + Pack List.
+3. **Route and production waste.** Closed: `route_closeout.php` reconciles loaded = net
+   delivered + returned + waste + door credits, while Daily Production records batch waste
+   without adding unusable units to sellable FG. Door credits remain FG `return` movements
+   at confirm, not van leftover.
 4. **Canonical invoicing.** Billing Center bulk-marks invoiced and can send the portal
    `customer_invoice.php` document (snapshot totals) to the customer billing email, or
-   record the send when `MAIL_DRIVER=log`. Legacy generators redirect to Billing Center.
-   Non-COD Ready deliveries can be sent as a Square Invoice from Billing Center; COD stays
-   on Route Manager. Still deferred: AR aging, weekly rollup invoices, full QuickBooks sync.
+   record the send when `MAIL_DRIVER=log`. Non-COD Ready deliveries can be sent as a Square
+   Invoice (card, Cash App Pay, bank ACH) from Billing Center; COD stays on Route Manager.
+   Still deferred: AR aging, weekly rollup invoices, full QuickBooks sync.
 5. **Customer fragmentation.** Contact, lifecycle, standing, schedule, pricing, billing, and
    issues still live on specialized screens; `customer_record.php` is now the staff hub
    (nav + search + jump links). Editing still happens on the specialized screens — do not
@@ -280,27 +310,28 @@ a later item.
    (`bakery_fill_demand_horizon`) on Daily Run / Daily Orders / dashboard / Daily
    Production, DreamHost cron `scripts/demand_scheduler.php`, `demand_confirmations`
    + Confirm Demand hard-gating stage 1 / closeout, "changed since confirmation",
-   tomorrow-readiness strip, two-day bake→route cadence. *Still open: optional
+   tomorrow-readiness strip, demand cadence with Friday/Sour Flour cover windows. *Still open: optional
    overnight cron must be installed on DreamHost (page load fills the horizon
    even without it).*
 2. **Production-plan integration** — shipped: commit action in Production Center
    (and Daily Run calling the same helper); Daily Production executes the committed
    plan with demand alongside + drift flags; post-commit demand changes raise
-   `production_plan_drift`. *Bakers still do not open Production Center.*
+   `production_plan_drift`. Production Center can assign the recorded bake to
+   standing (usual) or one-off dated orders. *Bakers still do not open Production Center.*
 3. **Route closeout/reconciliation** — shipped (`route_closeout.php`): per-driver loaded vs
    delivered vs returned vs wasted; waste + delivery movement types; Daily Run closeout
    requires closed routes.
 4. **Canonical invoicing** — shipped: bulk mark-invoiced, send/record of the portal
    per-delivery invoice from Billing Center, legacy generators quarantined. Non-COD Square
-   invoice send plus webhook/poll status lives in Billing Center. *Still deferred: AR aging,
+   invoice send + webhook/poll status is in Billing Center. *Still deferred: AR aging,
    weekly rollup invoices, full QuickBooks sync.*
 5. **Customer hub + findability** — `customer_record.php` is the staff hub (nav item
    "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
    open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
    links — do not rebuild standing/pricing/billing editors inside the hub.
 6. **High-value usability fixes** — bulk actions, inline order editing, broken-window batch
-   (leads filter bug, dead `customer_upcoming.php` redirect, missing i18n keys,
-   `product_distribution.php` demand flip). Pack List now has shared check-offs, route/driver
+   (leads filter bug, dead `customer_upcoming.php` redirect, missing i18n keys).
+   Product Distribution demand is the per-customer merge (dated beats standing). Pack List now has shared check-offs, route/driver
    grouping, and shortage display aligned with dashboard (on-hand + loaded).
 
 Deferred bigger ideas (only after loops close): money visibility (balances/credits/aging),

@@ -1,5 +1,7 @@
 # Prompt 22 — Credits as finished-goods returns
 
+**Status (2026-08):** Door credits post FG `return` at confirm **shipped**. Do not double-count at closeout. Do not reopen this loop. File ownership only. Canonical `--agent=credits-returns`.
+
 Paste this entire file into a **new** Cursor chat in the `bakery/` workspace.
 
 Sister prompts: `docs/prompts/20-commit-production-plan.md`, `docs/prompts/21-canonical-invoice-send.md`. You own **credits → stock**. You do not commit production plans. You do not email invoices.

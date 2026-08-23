@@ -8,6 +8,11 @@
 .ah-hero h1 { color: inherit; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.7rem, 3.6vw, 2.35rem); font-weight: 500; margin: 0; }
 .ah-hero .ah-eyebrow { color: #d7e8c8; font-size: .76rem; font-weight: 750; letter-spacing: .12em; margin: 0 0 6px; text-transform: uppercase; }
 .ah-hero p { color: rgba(244,247,242,.82); margin: 8px 0 0; max-width: 640px; }
+.ah-poem-line { font-family: Georgia, "Times New Roman", serif; font-style: italic; }
+.ah-poem {
+  font-family: Georgia, "Times New Roman", serif; font-size: 1.02rem; line-height: 1.65;
+  color: #2c3f36; white-space: pre-wrap; margin-top: 12px;
+}
 .ah-hero code { background: rgba(0,0,0,.22); border-radius: 6px; color: #eaf4d8; font-size: .82rem; padding: 2px 6px; }
 .ah-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 .ah-hero-actions a { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); border-radius: 9px; color: #fff; font-size: .88rem; font-weight: 700; padding: 8px 12px; text-decoration: none; }

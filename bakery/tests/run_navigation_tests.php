@@ -79,18 +79,21 @@ navigation_test_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 
 navigation_test_assert(in_array('call_headquarters.php', bakery_driver_scripts(), true), 'drivers can access Call HQ');
 
 $managerNav = navigation_test_render_nav('manager', 'production');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__menu-toggle') !== false, 'manager navigation includes a mobile menu control');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__manager-shortcut') !== false, 'manager navigation keeps Manager Mode visible');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__route-shortcut') !== false, 'manager navigation keeps My Route visible');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__drawer') !== false, 'manager navigation uses a mobile drawer shell');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__account') !== false, 'manager navigation includes account controls in the drawer');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__backdrop') !== false, 'manager navigation includes a menu backdrop');
-navigation_test_assert(strpos($managerNav, 'closeGroups') !== false, 'manager navigation closes sibling and outside dropdowns');
-navigation_test_assert(strpos($managerNav, 'bakery-nav-drawer-open') !== false, 'manager navigation locks page scroll while the drawer is open');
-navigation_test_assert(!preg_match('/<details[^>]*\sopen(?:\s|>)/', $managerNav), 'current-page dropdown is not forced open');
+navigation_test_assert(strpos($managerNav, 'bakery-nav--manager') !== false, 'manager navigation uses the focused manager shell');
+navigation_test_assert(strpos($managerNav, 'bakery-nav--focused') !== false, 'manager navigation is a focused workspace');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__menu-toggle') === false, 'manager phone navigation has no hamburger');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps extras in More');
+navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager navigation includes Routes');
+navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
+navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
+navigation_test_assert(strpos($managerNav, 'daily_orders.php') !== false, 'manager More includes Daily Orders');
+navigation_test_assert(strpos($managerNav, 'billing_center.php') !== false, 'manager More includes Billing Center');
+navigation_test_assert(strpos($managerNav, 'bakery-nav--ops') === false, 'manager focused nav is not the admin ops shell');
 
 $adminNav = navigation_test_render_nav('administrator', 'users');
 navigation_test_assert(strpos($adminNav, 'bakery-nav--ops') !== false, 'administrator navigation uses the operations mobile shell');
+navigation_test_assert(strpos($adminNav, 'bakery-nav__billing-shortcut') !== false, 'administrator navigation includes a Billing Center shortcut');
+navigation_test_assert(strpos($adminNav, 'billing_center.php') !== false, 'administrator navigation links to Billing Center');
 navigation_test_assert(strpos($adminNav, 'User Management') !== false, 'administrator navigation still includes User Management');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__section--primary') !== false, 'administrator navigation marks Primary work');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__section--extras') !== false, 'administrator navigation marks Extras & setup');
@@ -106,6 +109,8 @@ $navCss = file_get_contents(dirname(__DIR__) . '/css/nav.css');
 navigation_test_assert(strpos($navCss, '.bakery-nav--ops .bakery-nav__usage-mark') !== false, 'nav.css styles the usage mark for ops nav');
 navigation_test_assert(strpos($navCss, '.bakery-nav--ops .bakery-nav__item--usage-everyday') !== false, 'nav.css tints everyday ops items');
 navigation_test_assert(strpos($navCss, '.bakery-nav__group[open] > .bakery-nav__panel') !== false, 'nav.css only shows panels when a group is open');
+navigation_test_assert(strpos($navCss, '@media (max-width: 1180px)') !== false, 'ops navigation uses a tablet-width drawer instead of overlapping the top bar');
+navigation_test_assert(strpos($adminNav, 'data-drawer-breakpoint="1180"') !== false, 'ops navigation exposes the drawer breakpoint to script');
 
 $usageCounts = ['everyday' => 0, 'moderate' => 0, 'occasional' => 0];
 foreach (bakery_navigation_groups_for_role('administrator') as $group) {
@@ -114,7 +119,7 @@ foreach (bakery_navigation_groups_for_role('administrator') as $group) {
         $usageCounts[$usage]++;
     }
 }
-navigation_test_assert(($usageCounts['everyday'] + $usageCounts['moderate'] + $usageCounts['occasional']) === 50, 'all administrator items carry a usage level');
+navigation_test_assert(($usageCounts['everyday'] + $usageCounts['moderate'] + $usageCounts['occasional']) === 51, 'all administrator items carry a usage level');
 navigation_test_assert($usageCounts['everyday'] >= 10, 'everyday bucket includes the core operating tabs');
 navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket includes setup and admin tabs');
 
@@ -133,6 +138,9 @@ navigation_test_assert(strpos($driverNav, 'bakery-nav__tomorrow') !== false, 'dr
 navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'driver navigation includes the live status dot');
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');
+navigation_test_assert(strpos($driverNav, 'bakery-nav__more') !== false, 'driver navigation parks Pack, Stops, and QR behind More');
+navigation_test_assert(strpos($driverNav, 'driver_stops.php') !== false, 'Stops remains reachable from More');
+navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Call HQ, and More');
 
 $driverHqNav = navigation_test_render_nav('driver', 'call_headquarters');
 navigation_test_assert(strpos($driverHqNav, 'routeDateNavToggle') === false, 'driver Call HQ navigation omits the route date toggle');

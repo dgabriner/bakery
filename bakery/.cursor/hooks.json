@@ -1,6 +1,12 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/session-brief.cmd",
+        "timeout": 15
+      }
+    ],
     "afterFileEdit": [
       {
         "command": ".cursor/hooks/auto-push.cmd",
@@ -17,6 +23,11 @@
       {
         "command": ".cursor/hooks/auto-push.cmd",
         "timeout": 20
+      },
+      {
+        "command": ".cursor/hooks/handoff-reminder.cmd",
+        "timeout": 12,
+        "loop_limit": 1
       }
     ]
   }

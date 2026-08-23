@@ -1,0 +1,137 @@
+{
+  "id": "manager-phone",
+  "title": {
+    "en": "Manager phone home",
+    "es": "Inicio de gerente en el teléfono"
+  },
+  "description": {
+    "en": "Laura’s phone workspace: today, routes, kitchen, and who did not get bread.",
+    "es": "El espacio de Laura en el teléfono: hoy, rutas, cocina y quién no recibió pan."
+  },
+  "prepare": "users",
+  "viewport": { "width": 390, "height": 844 },
+  "captionPosition": "top",
+  "slowMo": 360,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2600,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    {
+      "action": "waitForSelector",
+      "selector": "#code",
+      "caption": {
+        "en": "Open staff login on the phone",
+        "es": "Abre la entrada del personal en el teléfono"
+      },
+      "narration": {
+        "en": "Open staff login on the phone.",
+        "es": "Abre la entrada del personal en el teléfono."
+      }
+    },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{MANAGER_CODE}}",
+      "delay": 200,
+      "caption": {
+        "en": "Type the manager code — it submits itself",
+        "es": "Escribe el código de gerente; se envía solo"
+      },
+      "narration": {
+        "en": "Type the manager code. It submits by itself.",
+        "es": "Escribe el código de gerente. Se envía solo."
+      }
+    },
+    { "action": "waitForURL", "includes": "manager.php" },
+    {
+      "action": "waitForSelector",
+      "selector": ".manager-phone[data-view='today']",
+      "caption": {
+        "en": "Today shows the next action and a quiet scorecard",
+        "es": "Hoy muestra la siguiente acción y el resumen del día"
+      },
+      "narration": {
+        "en": "This is Laura’s home. Today tells her the loudest next action, then a scorecard. Unusual is loud. Zero stays quiet.",
+        "es": "Este es el inicio de Laura. Hoy le dice la acción más urgente y luego el resumen. Lo inusual se ve fuerte. El cero se queda quieto."
+      }
+    },
+    { "action": "wait", "ms": 900 },
+    {
+      "action": "click",
+      "selector": "a.bakery-nav__direct[href*='view=routes']",
+      "caption": {
+        "en": "Routes: who is out, and what is still unassigned",
+        "es": "Rutas: quién está en camino y qué falta asignar"
+      },
+      "narration": {
+        "en": "Routes shows each driver and any stops that still need a driver.",
+        "es": "Rutas muestra cada repartidor y las paradas que todavía necesitan chofer."
+      }
+    },
+    { "action": "waitForSelector", "selector": ".manager-phone[data-view='routes']" },
+    {
+      "action": "clickIf",
+      "selector": ".manager-phone__driver details summary",
+      "caption": {
+        "en": "Open a driver to see remaining stops",
+        "es": "Abre un repartidor para ver las paradas que faltan"
+      }
+    },
+    { "action": "wait", "ms": 800 },
+    {
+      "action": "click",
+      "selector": "a.bakery-nav__direct[href*='view=kitchen']",
+      "caption": {
+        "en": "Kitchen is bake and pack for this delivery date",
+        "es": "Cocina es horneo y empaque de esta fecha de entrega"
+      },
+      "narration": {
+        "en": "Kitchen is read-only here. Daily Production is keyed on delivery date — Tuesday’s bake sheet is Wednesday’s orders.",
+        "es": "Cocina es solo lectura aquí. La producción diaria usa la fecha de entrega: la hoja del martes es para los pedidos del miércoles."
+      }
+    },
+    { "action": "waitForSelector", "selector": ".manager-phone__cadence" },
+    { "action": "wait", "ms": 700 },
+    {
+      "action": "click",
+      "selector": "a.bakery-nav__direct[href*='view=missed']",
+      "caption": {
+        "en": "Missed is who did not get bread",
+        "es": "Faltó es quién no recibió pan"
+      },
+      "narration": {
+        "en": "Missed is failed attempts, leftover pending after the run, and never assigned. Recover from the same desk.",
+        "es": "Faltó son intentos fallidos, pendientes al cerrar la ruta y nunca asignados. Se recuperan desde el mismo escritorio."
+      }
+    },
+    { "action": "waitForSelector", "selector": ".manager-phone[data-view='missed']" },
+    { "action": "wait", "ms": 700 },
+    {
+      "action": "click",
+      "selector": "a.manager-phone__adjust-btn[data-sheet='move']",
+      "caption": {
+        "en": "Move one stop without leaving this date",
+        "es": "Mueve una parada sin salir de esta fecha"
+      },
+      "narration": {
+        "en": "Day-of changes sit on this same date: move a stop, change today’s quantity, or skip. Standing orders stay in More.",
+        "es": "Los cambios del día están en esta misma fecha: mover una parada, cambiar la cantidad de hoy o saltar. Los pedidos fijos quedan en Más."
+      }
+    },
+    { "action": "waitForSelector", "selector": ".manager-phone-sheet[data-sheet='move']" },
+    { "action": "wait", "ms": 900 },
+    {
+      "action": "click",
+      "selector": "a.manager-phone-sheet__close",
+      "caption": {
+        "en": "More keeps the rest of her tools",
+        "es": "Más guarda el resto de sus herramientas"
+      },
+      "narration": {
+        "en": "The More drawer still has Daily Orders, Driver Assignment, Production, Pack, and the rest of her catalog.",
+        "es": "El cajón Más sigue teniendo Pedidos del día, Asignación, Producción, Empaque y el resto de su catálogo."
+      }
+    },
+    { "action": "waitForSelector", "selector": ".manager-phone[data-view='missed']" }
+  ]
+}

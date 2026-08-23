@@ -11,6 +11,9 @@ $assert = function ($ok, $label) use (&$fail) {
 };
 
 $assert(strpos($snapshot, 'prod_db_mysqldump') !== false, 'snapshot uses shared dump helper');
+$dumpHelper = (string)file_get_contents($root . '/scripts/prod_db_cli.php');
+$assert(strpos($dumpHelper, 'prod_db_cli_supports_option') !== false, 'dump helper detects client-version option support');
+$assert(strpos($dumpHelper, 'prod_db_cli_supports_option($mysqldump, \'--ssl-verify-server-cert\')') !== false, 'new SSL flag is conditional for older hosted clients');
 $assert(strpos($snapshot, 'snapshot_validate_sql') !== false, 'snapshot validates SQL markers');
 $assert(strpos($snapshot, 'gzopen') !== false, 'snapshot writes compressed SQL');
 $assert(strpos($snapshot, 'PROD_DB_') === false, 'snapshot does not print production credential values');

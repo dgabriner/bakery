@@ -277,3 +277,16 @@ function bakery_locale_switch_url(string $locale): string {
     $query['locale'] = $locale;
     return $path . '?' . http_build_query($query);
 }
+
+/** Aliases used by baker formula-unit markup (PR b9941e8). */
+function bakery_current_lang(): string {
+    return bakery_locale();
+}
+
+function bakery_lang_catalog($lang): array {
+    return bakery_load_lang_catalog((string) $lang);
+}
+
+function bakery_lang_switch_query($lang): string {
+    return bakery_locale_switch_url((string) $lang);
+}

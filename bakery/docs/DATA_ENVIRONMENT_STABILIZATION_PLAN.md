@@ -306,8 +306,9 @@ A staging deployment batch performs:
 8. run health/smoke checks;
 9. record success/failure and exact files/migrations.
 
-Uncommitted edits may auto-deploy to staging for fast phone feedback, but only a
-committed, tested manifest can become a production release candidate.
+Uncommitted edits may auto-deploy to staging for fast phone feedback. The hosted
+promotion captures immutable hashes of the exact accepted Staging bytes; Git is
+the development history, not a runtime promotion prerequisite.
 
 Phase 4 evidence (2026-08-18, production auto-push remains unreachable):
 
@@ -319,9 +320,10 @@ Phase 4 evidence (2026-08-18, production auto-push remains unreachable):
   `staging.sourflour.org`. Auto-push never calls it.
 - Staging incremental pushes lint PHP, write
   `storage/deploy/stage/releases/release_*.json`, skip remote `.env` unless
-  `-All` / `-EnvOnly`, snapshot `bakerysoftware` and run
-  `scripts/run_migrations.php --mode=dreamhost-stage` when schema SQL changed
-  after a prior baseline, and smoke `https://staging.sourflour.org/login.php`
+  `-All` / `-EnvOnly`, and when schema SQL changes use the `bakeryOS` SSH
+  channel to checkpoint `bakerysoftware` on-host and run
+  `scripts/run_migrations.php --mode=hosted-stage` after a prior baseline. This
+  avoids workstation MySQL host authorization. The flow then smokes `https://staging.sourflour.org/login.php`
   for the STAGING banner and `bakerysoftware`.
 - `push.bat` now calls the staging push script. Explicit live `/bake` remains
   `.\scripts\push_sftp.ps1` only.
@@ -338,6 +340,14 @@ Rollback: restore the prior staging code artifact and staging pre-deploy dump.
 Disable staging auto-push with `storage/deploy/.auto_push_disabled`.
 
 ## Phase 5 — one controlled production promotion
+
+Current implementation (2026-08-22): Staging Manager creates one immutable,
+hashed approval and the cron workers on the Live account pull it. The board
+allows only the exact migration ID identified by schema comparison, polls both
+workers, and requires database **Match** plus successful files. The migration
+worker verifies a production backup before any DDL and records statement-level
+progress for forward repair. See `HOSTED_PROMOTION.md` for the canonical current
+sequence; the design bullets below are retained as history.
 
 Add controls to an existing administrator surface; do not create a new top-level
 module.

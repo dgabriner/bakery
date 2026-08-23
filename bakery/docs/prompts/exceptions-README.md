@@ -4,6 +4,8 @@ Paste-ready Cursor briefs for three parallel upgrade missions. Open each in its 
 
 The product goal: **exceptions are workable in the many ways a bakery day actually breaks** — add, change, review, fix, hand off, come back — without inventing a second OS. Mobile is one-thumb simple. Desktop is a workshop.
 
+Canonical `--agent=` slugs: `exception-connections`, `exception-mobile`, `exception-desktop`.
+
 - [10 — Exception connections](10-exception-connections.md) — chips and round-trips on the screens where the work already happens
 - [11 — Mobile exception desk](11-exception-mobile.md) — thumb-first act / note / hand off
 - [12 — Desktop exception workshop](12-exception-desktop.md) — bulk, related, filters, create-from-row

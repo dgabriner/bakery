@@ -1,5 +1,7 @@
 # Prompt 21 — Canonical invoice send
 
+**Status (2026-08):** Send/record of the portal invoice **shipped**. Legacy generators redirect to Billing Center. Do not reopen this loop. File ownership only. Canonical `--agent=invoice-send`. Confirm against Homebase (bugs `invoice-send-gap`, `legacy-invoice-live-price` are fixed).
+
 Paste this entire file into a **new** Cursor chat in the `bakery/` workspace.
 
 Sister prompts: `docs/prompts/20-commit-production-plan.md`, `docs/prompts/22-credits-as-returns.md`. You own **invoice → customer**. You do not change the bake sheet. You do not post inventory returns.

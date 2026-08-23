@@ -9,6 +9,8 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/schema_sql.php';
 require_once __DIR__ . '/agent_homebase_seed.php';
+require_once __DIR__ . '/agent_work_map.php';
+require_once __DIR__ . '/agent_craft.php';
 
 function bakery_agent_homebase_tables(): array
 {
@@ -116,7 +118,7 @@ function bakery_agent_homebase_seed(PDO $db): void
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            title = VALUES(title), detail = VALUES(detail), severity = VALUES(severity),
-           focus_area = VALUES(focus_area), source = VALUES(source)'
+           status = VALUES(status), focus_area = VALUES(focus_area), source = VALUES(source)'
     );
     foreach (bakery_agent_homebase_seed_bugs() as $bug) {
         $bugStmt->execute([
@@ -172,6 +174,16 @@ function bakery_agent_homebase_clean_name(string $name): string
     return $name;
 }
 
+function bakery_agent_homebase_agent_family(string $name): string
+{
+    $name = bakery_agent_homebase_clean_name($name);
+    if (preg_match('/^homebase-test-/i', $name)) {
+        return $name;
+    }
+    $resolved = bakery_agent_work_map_resolve($name);
+    return $resolved ?: 'general';
+}
+
 function bakery_agent_homebase_lessons(PDO $db, ?string $track = null): array
 {
     if ($track) {
@@ -199,7 +211,7 @@ function bakery_agent_homebase_progress_for(PDO $db, string $agentName): array
          WHERE p.agent_name = ?
          ORDER BY p.completed_at'
     );
-    $stmt->execute([bakery_agent_homebase_clean_name($agentName)]);
+    $stmt->execute([bakery_agent_homebase_agent_family($agentName)]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -213,7 +225,7 @@ function bakery_agent_homebase_unread_required(PDO $db, string $agentName): arra
          WHERE l.is_required = 1 AND p.id IS NULL
          ORDER BY l.sort_order, l.id'
     );
-    $stmt->execute([bakery_agent_homebase_clean_name($agentName)]);
+    $stmt->execute([bakery_agent_homebase_agent_family($agentName)]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -229,7 +241,7 @@ function bakery_agent_homebase_complete_lesson(PDO $db, string $agentName, strin
          ON DUPLICATE KEY UPDATE notes = VALUES(notes), completed_at = CURRENT_TIMESTAMP'
     );
     $stmt->execute([
-        bakery_agent_homebase_clean_name($agentName),
+        bakery_agent_homebase_agent_family($agentName),
         (int)$lesson['id'],
         trim($notes) !== '' ? trim($notes) : null,
     ]);
@@ -466,39 +478,154 @@ function bakery_agent_homebase_notes(PDO $db, int $limit = 40): array
     return $db->query('SELECT * FROM agent_notes ORDER BY id DESC LIMIT ' . $limit)->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function bakery_agent_homebase_brief(PDO $db, string $agentName = ''): array
+function bakery_agent_homebase_compact_lesson(array $row): array
+{
+    return [
+        'slug' => (string)($row['slug'] ?? ''),
+        'title' => (string)($row['title'] ?? ''),
+        'summary' => (string)($row['summary'] ?? ''),
+        'track' => (string)($row['track'] ?? ''),
+    ];
+}
+
+function bakery_agent_homebase_compact_bug(array $bug): array
+{
+    return [
+        'slug' => (string)($bug['slug'] ?? ''),
+        'title' => (string)($bug['title'] ?? ''),
+        'severity' => (string)($bug['severity'] ?? ''),
+        'status' => (string)($bug['status'] ?? ''),
+        'focus_area' => (string)($bug['focus_area'] ?? ''),
+    ];
+}
+
+function bakery_agent_homebase_compact_session(array $row): array
+{
+    return [
+        'id' => (int)($row['id'] ?? 0),
+        'agent_name' => (string)($row['agent_name'] ?? ''),
+        'mission' => (string)($row['mission'] ?? ''),
+        'status' => (string)($row['status'] ?? ''),
+        'started_at' => $row['started_at'] ?? null,
+        'ended_at' => $row['ended_at'] ?? null,
+        'files_touched' => $row['files_touched'] ?? null,
+    ];
+}
+
+function bakery_agent_homebase_brief(PDO $db, string $agentName = '', string $missionHint = ''): array
 {
     $agentName = bakery_agent_homebase_clean_name($agentName);
-    $openBugs = bakery_agent_homebase_bugs($db, 'open');
+    $family = bakery_agent_homebase_agent_family($agentName);
+    $resolved = bakery_agent_work_map_resolve($missionHint !== '' ? $missionHint : $agentName);
+    $packet = bakery_agent_work_map_packet($resolved);
+    $allBugs = array_map('bakery_agent_homebase_compact_bug', bakery_agent_homebase_bugs($db));
+    $activeBugs = array_values(array_filter(
+        $allBugs,
+        static fn ($bug) => in_array($bug['status'], ['open', 'watching'], true)
+    ));
+    if ($packet['bugs'] !== []) {
+        $wanted = array_flip($packet['bugs']);
+        $focused = array_values(array_filter(
+            $allBugs,
+            static fn ($bug) => isset($wanted[$bug['slug']])
+        ));
+        $activeFocused = array_values(array_filter(
+            $focused,
+            static fn ($bug) => in_array($bug['status'], ['open', 'watching'], true)
+        ));
+        $openBugs = $activeFocused !== [] ? $activeFocused : $activeBugs;
+        $shippedBugs = array_values(array_filter(
+            $focused,
+            static fn ($bug) => in_array($bug['status'], ['fixed', 'wont-fix'], true)
+        ));
+    } else {
+        $openBugs = $activeBugs;
+        $shippedBugs = [];
+    }
+    $openBugs = array_slice($openBugs, 0, 12);
     $board = bakery_agent_homebase_board($db);
     $nowTitles = array_map(static fn ($c) => $c['title'], $board['now'] ?? []);
     $decidedTitles = array_map(static fn ($c) => $c['title'], $board['decided'] ?? []);
     $openSession = bakery_agent_homebase_open_session($db, $agentName);
-    $recent = bakery_agent_homebase_sessions($db, 8);
+    $recent = [];
+    foreach (array_slice(bakery_agent_homebase_sessions($db, 5), 0, 5) as $row) {
+        $compact = bakery_agent_homebase_compact_session($row);
+        if (!empty($row['handoff_md'])) {
+            $compact['handoff_score'] = bakery_agent_homebase_score_handoff((string)$row['handoff_md']);
+        }
+        $recent[] = $compact;
+    }
     $questions = [];
-    foreach (bakery_agent_homebase_notes($db, 20) as $note) {
+    foreach (bakery_agent_homebase_notes($db, 12) as $note) {
         if ($note['kind'] === 'question') {
-            $questions[] = $note;
+            $body = (string)$note['body'];
+            if (strlen($body) > 240) {
+                $body = substr($body, 0, 237) . '...';
+            }
+            $questions[] = [
+                'id' => (int)$note['id'],
+                'title' => (string)$note['title'],
+                'body' => $body,
+                'agent_name' => (string)$note['agent_name'],
+            ];
+        }
+        if (count($questions) >= 5) {
+            break;
         }
     }
+    $unread = array_map(
+        'bakery_agent_homebase_compact_lesson',
+        bakery_agent_homebase_unread_required($db, $agentName)
+    );
+    $next = [];
+    if ($unread !== []) {
+        $next[] = 'Complete unread required lessons (invariants, simple-practices): learn --lesson=slug';
+    }
+    $next[] = 'Start a session if you are doing work (start --mission=)';
+    $next[] = 'Run mission tests from mission_packet.tests (or tests-for --files=)';
+    $next[] = 'Pin decisions; log durable bugs; hand off with the eight §10 fields';
+    if (($packet['prompt_status'] ?? '') === 'shipped') {
+        $next[] = 'This loop is shipped. Do not reopen it from the paste-ready prompt; use file ownership only.';
+    }
+    if (($packet['prompt_status'] ?? '') === 'partial') {
+        $next[] = 'Commit path shipped; remaining baker UX lives on Daily Production — do not rebuild a second planner.';
+    }
+    if ($packet['slug'] !== 'general' && $agentName !== $packet['slug'] && $family !== $packet['slug']) {
+        $next[] = 'Prefer canonical --agent=' . $packet['slug'];
+    } elseif ($packet['slug'] !== 'general' && $agentName !== $packet['slug']) {
+        $next[] = 'Prefer canonical --agent=' . $packet['slug'] . ' (alias resolved)';
+    }
+
+    $database = '';
+    try {
+        $database = (string)$db->query('SELECT DATABASE()')->fetchColumn();
+    } catch (Throwable $e) {
+        $database = '';
+    }
+
     return [
         'product' => 'Sour Flour OS runs one wholesale bakery day. Close loops; do not add modules.',
         'manual' => 'BAKERY_PRODUCT_CONTEXT.md',
-        'cli' => 'php scripts/agent_homebase.php brief|start|learn|pin|bug|note|handoff --json',
+        'craft_manual' => bakery_agent_craft_manual_rel(),
+        'craft_stanza' => bakery_agent_craft_stanza(),
+        'cli' => 'php scripts/agent_homebase.php brief|tests-for|craft|start|learn|pin|bug|note|handoff --json',
         'admin' => 'agent_homebase.php',
         'agent' => $agentName,
-        'open_session' => $openSession,
-        'unread_required_lessons' => bakery_agent_homebase_unread_required($db, $agentName),
+        'agent_family' => $family,
+        'suggested_agent' => $packet['slug'],
+        'canonical_slugs' => bakery_agent_work_map_canonical_slugs(),
+        'doc_trust' => bakery_agent_doc_trust_order(),
+        'database' => $database,
+        'mission_packet' => $packet,
+        'open_session' => $openSession ? bakery_agent_homebase_compact_session($openSession) : null,
+        'unread_required_lessons' => $unread,
         'open_bugs' => $openBugs,
+        'shipped_bugs' => $shippedBugs,
         'whiteboard_now' => $nowTitles,
         'whiteboard_decided' => $decidedTitles,
         'open_questions' => $questions,
         'recent_sessions' => $recent,
-        'next_actions' => [
-            'Complete unread required lessons (learn --lesson=slug)',
-            'Start a session if you are doing work (start --mission=)',
-            'Pin decisions; log durable bugs; hand off with the eight §10 fields',
-        ],
+        'next_actions' => $next,
     ];
 }
 

@@ -7,7 +7,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Role | Current workspace access |
 | --- | --- |
 | Administrator | Every current module, user management, historical navigation, and administrator-only diagnostics. |
-| Manager | All current operational modules: production, orders, customers, drivers, routes, products, and insights. Cannot alter users or roles, and does not receive historical or diagnostic tools in the day-to-day menu. |
+| Manager | Same operational permissions as before (production, orders, customers, drivers, routes, products, insights). Phone home is a focused workspace on **Bakery Manager**: Today, Routes, Kitchen, Missed, plus More for the rest of the catalog. Cannot alter users or roles, and does not receive historical or diagnostic tools. |
 | Baker | **Daily Production** and **Pack List** only. |
 | Driver | **My Route** and **Call HQ** only. Delivery completion, photos, and route-specific actions are contained within My Route. |
 
@@ -15,6 +15,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 
 | Area | Module | Purpose |
 | --- | --- | --- |
+| Workday | Bakery Manager | Phone home for the manager role (Today / Routes / Kitchen / Missed). Administrators still see the desktop command workspace. |
 | Workday | Operations Dashboard | Today’s order, production, and delivery snapshot. |
 | Production | Production Center | Weekly finished-goods planning based on orders and stock. |
 | Production | Daily Production | Daily bake schedule and quantities. Bakers can access this page. |

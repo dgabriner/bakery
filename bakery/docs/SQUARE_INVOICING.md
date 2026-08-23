@@ -17,7 +17,7 @@ Set these in Staging `.env` (sandbox) and Live `.env` (production). Never commit
 
 Check: `php scripts/test_square_connection.php`
 
-Apply schema: `php scripts/run_migrations.php` (adds `055_square_invoices`). Reversible by dropping `daily_orders.square_*`, `customers.square_customer_id`, and `square_webhook_events`.
+Apply schema: `php scripts/run_migrations.php` (adds `055_square_invoices`; `056_square_webhook_invoice_index` repairs tables created by the earlier runtime path). Reversible by dropping `daily_orders.square_*`, `customers.square_customer_id`, and `square_webhook_events`.
 
 ## Webhook
 

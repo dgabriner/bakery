@@ -1,0 +1,9 @@
+---
+description: Keep English and Spanish staff strings in pair.
+globs: lang/**/*.php
+alwaysApply: false
+---
+
+# i18n
+
+Add or change keys in both `lang/en.php` and `lang/es.php`. Run `php tests/run_i18n_tests.php`.

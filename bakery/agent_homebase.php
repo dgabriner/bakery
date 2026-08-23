@@ -16,7 +16,7 @@ $error = '';
 $notice = '';
 $loadError = '';
 $panel = (string)($_GET['panel'] ?? 'home');
-$allowedPanels = ['home', 'learn', 'bugs', 'board', 'log'];
+$allowedPanels = ['home', 'learn', 'bugs', 'board', 'log', 'craft'];
 if (!in_array($panel, $allowedPanels, true)) {
     $panel = 'home';
 }
@@ -144,10 +144,13 @@ require_once __DIR__ . '/includes/nav.php';
       <p class="ah-eyebrow"><?php bakery_te('homebase.eyebrow'); ?></p>
       <h1><?php bakery_te('homebase.title'); ?></h1>
       <p><?php bakery_te('homebase.lead'); ?></p>
+      <p class="ah-muted"><?php bakery_te('homebase.doc_trust'); ?></p>
+      <p class="ah-poem-line"><?php echo htmlspecialchars($brief['craft_stanza'] ?? '', ENT_QUOTES, 'UTF-8'); ?></p>
       <p><code>php scripts/agent_homebase.php brief --agent=your-mission --json</code></p>
     </div>
     <div class="ah-hero-actions">
       <span class="ah-pill"><?php bakery_te('homebase.link_manual'); ?>: BAKERY_PRODUCT_CONTEXT.md</span>
+      <span class="ah-pill"><?php bakery_te('homebase.link_craft'); ?>: docs/AGENT_DEVELOPMENT_MANUAL.md</span>
     </div>
   </header>
 
@@ -165,7 +168,7 @@ require_once __DIR__ . '/includes/nav.php';
   <?php endif; ?>
 
   <nav class="ah-tabs" aria-label="<?php bakery_te('homebase.nav'); ?>">
-    <?php foreach (['home' => 'homebase.tab_home', 'learn' => 'homebase.tab_learn', 'bugs' => 'homebase.tab_bugs', 'board' => 'homebase.tab_board', 'log' => 'homebase.tab_log'] as $key => $labelKey): ?>
+    <?php foreach (['home' => 'homebase.tab_home', 'learn' => 'homebase.tab_learn', 'bugs' => 'homebase.tab_bugs', 'board' => 'homebase.tab_board', 'log' => 'homebase.tab_log', 'craft' => 'homebase.tab_craft'] as $key => $labelKey): ?>
       <a class="<?php echo $panel === $key ? 'is-active' : ''; ?>" href="agent_homebase.php?panel=<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te($labelKey); ?></a>
     <?php endforeach; ?>
   </nav>
@@ -364,6 +367,21 @@ php scripts/agent_homebase.php handoff --agent=NAME --summary="..." --files="a.p
         <?php endforeach; ?>
       </div>
     </section>
+  <?php elseif ($panel === 'craft'): ?>
+    <div class="ah-grid">
+      <section class="ah-panel">
+        <h2><?php bakery_te('homebase.craft_poem'); ?></h2>
+        <div class="ah-poem"><?php echo nl2br(htmlspecialchars(bakery_agent_craft_poem(), ENT_QUOTES, 'UTF-8')); ?></div>
+      </section>
+      <section class="ah-panel">
+        <h2><?php bakery_te('homebase.craft_cycles'); ?></h2>
+        <p><?php bakery_te('homebase.craft_help'); ?></p>
+        <p class="ah-muted">docs/AGENT_DEVELOPMENT_MANUAL.md</p>
+        <pre class="ah-cli">php scripts/agent_homebase.php craft --json
+php scripts/agent_homebase.php tests-for --files=a.php,b.php --json
+php scripts/agent_homebase.php brief --agent=SLUG --json</pre>
+      </section>
+    </div>
   <?php else: ?>
     <div class="ah-grid">
       <section class="ah-panel">
@@ -383,6 +401,8 @@ php scripts/agent_homebase.php handoff --agent=NAME --summary="..." --files="a.p
               <h3><?php echo htmlspecialchars($session['agent_name'] . ' — ' . ($session['mission'] ?: bakery_t('homebase.untitled')), ENT_QUOTES, 'UTF-8'); ?></h3>
               <p class="ah-meta"><?php echo htmlspecialchars($session['status'] . ' · ' . $session['started_at'], ENT_QUOTES, 'UTF-8'); ?></p>
               <?php if (!empty($session['handoff_md'])): ?>
+                <?php $score = bakery_agent_homebase_score_handoff((string)$session['handoff_md']); ?>
+                <p class="ah-pill<?php echo $score['complete'] ? ' ah-pill--ok' : ' ah-pill--watch'; ?>"><?php echo (int)$score['score']; ?>/8 §10</p>
                 <div class="ah-body"><?php echo bakery_agent_homebase_format_body($session['handoff_md']); ?></div>
               <?php endif; ?>
               <?php if (!empty($session['files_touched'])): ?>
