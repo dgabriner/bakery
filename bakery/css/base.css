@@ -18,12 +18,14 @@ body {
   font-size: 1rem;
   line-height: 1.5;
   color: var(--sf-text);
-  background: var(--sf-bg);
+  background-color: var(--sf-bg);
+  background-image: var(--sf-paper-wash);
   -webkit-font-smoothing: antialiased;
 }
 
 body.workspace-driver,
-body.workspace-baker {
+body.workspace-baker,
+body.workspace-manager {
   background: var(--sf-bg-elevated);
 }
 
@@ -54,7 +56,13 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--sf-text);
 }
 
-h1 { font-size: clamp(1.5rem, 3vw, 1.85rem); letter-spacing: -0.02em; }
+h1 {
+  font-family: var(--sf-font-serif);
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--sf-brand);
+}
 h2 { font-size: clamp(1.15rem, 2.5vw, 1.35rem); }
 h3 { font-size: 1.05rem; }
 
@@ -67,9 +75,9 @@ p {
   margin: 0 0 var(--sf-space-2);
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--sf-text-muted);
+  color: var(--sf-brand-muted);
 }
 
 .sf-meta,
@@ -109,8 +117,9 @@ p {
   gap: var(--sf-space-4);
   margin-bottom: var(--sf-space-6);
   padding: var(--sf-space-5);
-  background: linear-gradient(135deg, var(--sf-bg-elevated) 0%, var(--sf-surface-muted) 100%);
+  background: linear-gradient(180deg, var(--sf-bg-elevated) 0%, var(--sf-surface) 100%);
   border: 1px solid var(--sf-border);
+  border-left: 4px solid var(--sf-accent);
   border-radius: var(--sf-radius-lg);
   box-shadow: var(--sf-shadow-sm);
 }
@@ -118,7 +127,7 @@ p {
 .page-header h1,
 .sf-page-header h1 {
   margin: 0;
-  color: var(--sf-text);
+  color: var(--sf-brand);
 }
 
 .page-header .button-group,
@@ -144,6 +153,11 @@ p {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius-md);
+}
+
+.date-navigation,
+.sf-date-bar {
+  box-shadow: var(--sf-shadow-sm);
 }
 
 .date-info h2,
@@ -262,12 +276,14 @@ p {
   background: var(--sf-primary);
   border-color: var(--sf-primary);
   color: var(--sf-text-inverse);
+  box-shadow: 0 1px 2px rgba(24, 40, 36, 0.14);
 }
 
 .btn-primary:hover:not(:disabled),
 .sf-btn--primary:hover:not(:disabled) {
   background: var(--sf-primary-hover);
   border-color: var(--sf-primary-hover);
+  box-shadow: 0 3px 8px rgba(24, 40, 36, 0.16);
 }
 
 .btn-secondary,
@@ -555,7 +571,7 @@ table td,
 
 table th,
 .sf-table th {
-  background: var(--sf-surface-muted);
+  background: var(--sf-bg-elevated);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -667,7 +683,7 @@ th.num {
 }
 
 .auth-bar-driver a {
-  color: #b8e4dc;
+  color: var(--sf-nav-text-muted, #d7ebe6);
 }
 
 .local-env-banner {

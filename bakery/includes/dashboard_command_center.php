@@ -113,7 +113,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         'daily_orders' => bakery_ops_link_daily_orders($date),
         'standing' => $base . 'standing_orders_manager.php',
         'production' => bakery_ops_link_production($date),
-        'production_center' => bakery_ops_link_production_center($weekStart),
+        'production_center' => bakery_ops_link_production_center($weekStart, ['date' => $date]),
         'pack' => bakery_ops_link_pack_list($date),
         'inventory' => bakery_ops_link_inventory($date),
         'driver_load' => bakery_ops_link_driver_load($date),
@@ -971,8 +971,10 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
 
     // Customer service issues (global, not date-scoped)
     try {
-        if (function_exists('bakery_delivery_issues_open_count')) {
+        if (!function_exists('bakery_delivery_issues_open_count')) {
             require_once __DIR__ . '/customer_delivery_issues.php';
+        }
+        if (function_exists('bakery_delivery_issues_open_count')) {
             $openIssues = bakery_delivery_issues_open_count($db);
             if ($openIssues > 0) {
                 $exceptions[] = bakery_ops_exception([

@@ -26,8 +26,9 @@
     gap: var(--sf-space-4);
     margin-bottom: var(--sf-space-5);
     padding: var(--sf-space-4) var(--sf-space-5);
-    background: linear-gradient(135deg, var(--sf-bg-elevated) 0%, var(--sf-surface-muted) 55%, var(--sf-bg) 100%);
+    background: linear-gradient(180deg, var(--sf-bg-elevated) 0%, var(--sf-surface) 100%);
     border: 1px solid var(--sf-border);
+    border-left: 4px solid var(--sf-accent);
     border-radius: var(--sf-radius-lg);
     box-shadow: var(--sf-shadow-sm);
 }
@@ -35,15 +36,18 @@
 .ops-eyebrow {
     margin: 0 0 0.2rem;
     font-size: 0.75rem;
-    letter-spacing: 0.06em;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--sf-text-muted);
+    color: var(--sf-brand-muted);
 }
 
 .ops-header h1 {
     margin: 0 0 0.35rem;
-    font-size: clamp(1.45rem, 3vw, 1.7rem);
-    color: var(--sf-text);
+    font-family: var(--sf-font-serif);
+    font-size: clamp(1.45rem, 3vw, 1.8rem);
+    font-weight: 600;
+    color: var(--sf-brand);
 }
 
 .ops-date-line {
@@ -341,9 +345,9 @@
     justify-content: space-between;
     gap: 0.85rem;
     padding: 0.85rem 1rem;
-    background: #fff;
-    border: 1px solid #e2e8e4;
-    border-radius: 10px;
+    background: var(--sf-surface);
+    border: 1px solid var(--sf-border);
+    border-radius: var(--sf-radius-md);
 }
 
 .ops-exception.severity-critical {
@@ -449,19 +453,19 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.8rem 0.95rem;
-    background: #fff;
-    border: 1px solid #d9e3e8;
-    border-radius: 8px;
+    background: var(--sf-surface);
+    border: 1px solid var(--sf-border);
+    border-radius: var(--sf-radius-md);
     text-decoration: none;
-    color: #1f3340;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    color: var(--sf-text);
+    transition: border-color 0.15s, box-shadow 0.15s, color 0.15s;
 }
 
 .ops-quick-link:hover {
-    border-color: #2f7ea8;
-    box-shadow: 0 2px 10px rgba(47, 126, 168, 0.12);
+    border-color: var(--sf-primary);
+    box-shadow: var(--sf-shadow-sm);
     text-decoration: none;
-    color: #2f7ea8;
+    color: var(--sf-primary);
 }
 
 .ops-quick-link-icon {
@@ -476,7 +480,7 @@
 
 .ops-quick-link-desc {
     font-size: 0.8rem;
-    color: #667782;
+    color: var(--sf-text-muted);
     margin-top: 0.1rem;
 }
 
@@ -764,7 +768,7 @@
     border-left-color: var(--sf-link, #2563eb);
 }
 
-/* Two-day demand cadence: Tuesday bake → Wednesday route */
+/* Demand cadence: mid-week bake tomorrow; Friday/Sour Flour use cover windows */
 .ops-cadence {
     margin: 0 0 1.5rem;
     padding: 0.85rem 1.1rem 0.7rem;

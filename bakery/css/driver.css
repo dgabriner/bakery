@@ -1023,10 +1023,50 @@ body.driver-workflow-page .next-stop-zone {
 }
 
 body.driver-workflow-page .next-stop-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     margin-bottom: 5px;
+}
+
+body.driver-workflow-page .next-stop-actions-primary {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+body.driver-workflow-page .next-stop-more {
+    margin: 0;
+}
+
+body.driver-workflow-page .next-stop-more-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #d4ece8;
+    font-size: 0.9rem;
+    font-weight: 750;
+    cursor: pointer;
+    list-style: none;
+}
+
+body.driver-workflow-page .next-stop-more-toggle::-webkit-details-marker {
+    display: none;
+}
+
+body.driver-workflow-page .next-stop-more-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+}
+
+body.driver-workflow-page .next-stop .exception-desk--driver {
+    display: none;
 }
 
 body.driver-workflow-page .route-btn {
@@ -1050,7 +1090,6 @@ body.driver-workflow-page .route-btn--navigate {
 }
 
 body.driver-workflow-page .route-btn--photo {
-    grid-column: 1 / -1;
     min-height: 64px;
     background: #d48727;
     box-shadow: 0 9px 18px rgba(74, 43, 8, 0.25);
@@ -4538,6 +4577,7 @@ body.photo-mode-open {
 
     #deliveryPhotoModal .delivery-wizard-actions .delivery-wizard-back,
     #deliveryPhotoModal .delivery-wizard-actions #deliveryWizardFailBtn,
+    #deliveryPhotoModal .delivery-wizard-actions .delivery-wizard-review,
     #deliveryPhotoModal .delivery-wizard-actions .delivery-wizard-primary {
         width: 100%;
         min-width: 0;
@@ -4847,22 +4887,53 @@ body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route 
         grid-column: 1 / -1;
     }
 
+    .route-dashboard:not(.route-dashboard--prep) {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .route-dashboard:not(.route-dashboard--prep) .route-primary-column {
+        display: contents;
+    }
+
+    .route-mobile-progress {
+        order: 0;
+    }
+
+    .route-section-next,
+    .route-done-banner {
+        order: 1;
+    }
+
+    .route-map {
+        order: 2;
+    }
+
+    .route-section-overview {
+        order: 3;
+    }
+
+    .route-section-manifest {
+        order: 4;
+    }
+
+    .route-closeout-cta {
+        order: 5;
+    }
+
+    .route-secondary-column {
+        order: 6;
+    }
+
     .route-primary-column {
         display: flex;
         flex-direction: column;
         gap: 14px;
     }
 
-    .route-section-next {
+    .route-dashboard--prep .route-section-next {
         order: -2;
-    }
-
-    .route-section-overview {
-        order: 0;
-    }
-
-    .route-section-manifest {
-        order: 1;
     }
 
     .route-overview-heading h1 {
@@ -5071,6 +5142,26 @@ body.route-has-sticky-dock .route-success-toast {
     display: block;
     font-size: 0.78rem;
     line-height: 1.4;
+}
+
+#deliveryPhotoModal .delivery-variance-ack {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.82rem;
+    font-weight: 750;
+    color: #78350f;
+}
+
+#deliveryPhotoModal .delivery-variance-ack input {
+    margin-top: 3px;
+    width: 18px;
+    height: 18px;
+}
+
+#deliveryPhotoModal .delivery-wizard-review {
+    width: 100%;
 }
 
 #deliveryPhotoModal .delivery-ordered-ref {
@@ -6128,6 +6219,41 @@ body.route-prep-sheet-open .route-prep-add-dock {
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: #587177;
+}
+
+.route-prep-other-routes {
+    margin: 0 0 16px;
+    padding: 2px 12px 10px;
+    border: 1px solid #c5d5d7;
+    border-radius: 16px;
+    background: #fff;
+}
+
+.route-prep-other-routes > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 48px;
+    cursor: pointer;
+    font-weight: 800;
+    color: #0c3d42;
+    list-style: none;
+}
+
+.route-prep-other-routes > summary::-webkit-details-marker {
+    display: none;
+}
+
+.route-prep-other-routes-count {
+    color: #587177;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.route-prep-other-routes[open] > summary {
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e4eeef;
 }
 
 .route-prep-candidate {

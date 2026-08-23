@@ -524,6 +524,7 @@ function bakery_wants_json() {
         'upload_product_photo.php',
         'customer_portal_api.php',
         'route_manager.php',
+        'staff_alerts_api.php',
     ];
     return in_array(basename($uri), $jsonScripts, true);
 }
@@ -1019,7 +1020,11 @@ function bakery_enforce_request_security(PDO $db = null) {
     }
 
     // Customer portal uses phone + passcode session (not staff login).
-    if (in_array($script, $portalScripts, true)) {
+    // Any customer_portal_*.php page is portal territory by naming convention,
+    // so new portal pages cannot silently fall through to the staff login gate.
+    $isPortalScript = in_array($script, $portalScripts, true)
+        || strpos($script, 'customer_portal_') === 0;
+    if ($isPortalScript) {
         bakery_require_portal_login($db);
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {

@@ -1,0 +1,368 @@
+/* Phone-first Manager workspace (manager role). */
+
+body.workspace-manager {
+  background: var(--sf-bg-elevated, #f4f7f5);
+}
+
+.manager-phone {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 0.85rem 0.85rem 1.5rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.manager-phone__hero {
+  background: linear-gradient(135deg, #173f3c 0%, #28615d 100%);
+  color: #fff;
+  border-radius: 16px;
+  padding: 1rem 1rem 0.85rem;
+}
+
+.manager-phone__eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #bfe5df;
+}
+
+.manager-phone__hero h1 {
+  margin: 0.2rem 0 0.7rem;
+  font-family: var(--sf-font-serif, Georgia, serif);
+  font-size: 1.45rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.manager-phone__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.manager-phone__dates a,
+.manager-phone__dates button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  text-decoration: none;
+  font: inherit;
+  font-weight: 700;
+}
+
+.manager-phone__today {
+  background: #fff !important;
+  color: #173f3c !important;
+  border-color: #fff !important;
+}
+
+.manager-phone__dates form {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.manager-phone__dates input[type="date"] {
+  min-height: 44px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 0 0.4rem;
+}
+
+.manager-phone__when {
+  margin: 0.55rem 0 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.88rem;
+}
+
+.manager-phone__next,
+.manager-phone__panel,
+.manager-phone__driver,
+.manager-phone__score,
+.manager-phone__tomorrow {
+  background: #fff;
+  border: 1px solid var(--sf-border, #d5e0dc);
+  border-radius: 14px;
+  padding: 0.9rem;
+}
+
+.manager-phone__next {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.manager-phone__next--attention {
+  border-top: 4px solid var(--sf-warning, #c77c31);
+}
+
+.manager-phone__next--ready {
+  border-top: 4px solid var(--sf-success, #2f7d4a);
+}
+
+.manager-phone__next span,
+.manager-phone__score span,
+.manager-phone__zone {
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.manager-phone__next strong,
+.manager-phone__metric {
+  font-size: 1.2rem;
+}
+
+.manager-phone__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.manager-phone__score {
+  text-decoration: none;
+  color: inherit;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.manager-phone__score strong {
+  font-size: 1.45rem;
+}
+
+.manager-phone__score small {
+  font-size: 0.8rem;
+  color: var(--sf-text-muted, #7a8a84);
+  font-weight: 650;
+}
+
+.manager-phone__score.is-loud,
+.manager-phone__panel--loud,
+.manager-phone__driver.is-loud {
+  border-top: 4px solid var(--sf-warning, #c77c31);
+}
+
+.manager-phone__tomorrow {
+  display: grid;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: inherit;
+  min-height: 56px;
+}
+
+.manager-phone__tomorrow--missing,
+.manager-phone__tomorrow--incomplete,
+.manager-phone__tomorrow--empty,
+.manager-phone__tomorrow--needs {
+  border-top: 4px solid var(--sf-warning, #c77c31);
+}
+
+.manager-phone__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.5rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--sf-border-strong, #b7c7c2);
+  background: #fff;
+  color: var(--sf-text, #17332f);
+  font: inherit;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+  width: 100%;
+}
+
+.manager-phone__btn--primary {
+  background: var(--sf-primary, #1a6b63);
+  border-color: var(--sf-primary, #1a6b63);
+  color: #fff;
+}
+
+.manager-phone__drivers,
+.manager-phone__adjust {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.manager-phone__adjust {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.manager-phone__adjust-btn {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.4rem;
+  border-radius: 12px;
+  background: #eef6f3;
+  color: #173f3c;
+  font-weight: 750;
+  font-size: 0.82rem;
+  text-align: center;
+  text-decoration: none;
+  line-height: 1.15;
+}
+
+.manager-phone__driver header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.manager-phone__driver h2,
+.manager-phone__driver h3,
+.manager-phone__panel h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.08rem;
+}
+
+.manager-phone__live {
+  color: var(--sf-primary, #1a6b63);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.manager-phone__counts,
+.manager-phone__cadence,
+.manager-phone__panel p {
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.9rem;
+  margin: 0 0 0.55rem;
+}
+
+.manager-phone__list {
+  list-style: none;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.manager-phone__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--sf-border, #d5e0dc);
+}
+
+.manager-phone__list small {
+  color: var(--sf-text-secondary, #536258);
+}
+
+.manager-phone__list .is-failed strong,
+.manager-phone__list .is-failed {
+  color: var(--sf-danger, #c0392b);
+}
+
+.manager-phone__bar {
+  height: 8px;
+  background: #e3ebe8;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.manager-phone__bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #237064, #469789);
+}
+
+.manager-phone-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.manager-phone-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.manager-phone-sheet__card {
+  position: relative;
+  width: min(100%, 440px);
+  max-height: 86vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 18px 18px 0 0;
+  padding: 1rem 1rem calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  gap: 0.7rem;
+}
+
+.manager-phone-sheet__close {
+  justify-self: end;
+  font-weight: 750;
+}
+
+.manager-phone-sheet__form,
+.manager-phone-sheet__qty {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.manager-phone-sheet label {
+  display: grid;
+  gap: 0.3rem;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.manager-phone-sheet input,
+.manager-phone-sheet select,
+.manager-phone-sheet textarea {
+  min-height: 48px;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--sf-border-strong, #b7c7c2);
+}
+
+.manager-phone__driver details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.manager-phone-sheet__chips {
+  max-height: 36vh;
+  overflow: auto;
+  padding-bottom: 0.2rem;
+}
+
+@media (min-width: 640px) {
+  .manager-phone__adjust {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  body.workspace-manager {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  }
+}

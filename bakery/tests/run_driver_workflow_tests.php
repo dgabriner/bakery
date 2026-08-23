@@ -360,6 +360,20 @@ try {
 }
 assert_true($lockedMoveBlocked, 'delivered stops cannot be moved by a driver reorder');
 
+$db->prepare(
+    "UPDATE daily_order_assignments SET delivery_status='in_transit' WHERE daily_order_id=?"
+)->execute([$secondOrderId]);
+$inTransitMoveBlocked = false;
+try {
+    bakery_driver_reorder_remaining_stops($db, 1, $reorderDate, [$secondOrderId, $thirdOrderId]);
+} catch (RuntimeException $e) {
+    $inTransitMoveBlocked = strpos($e->getMessage(), 'cannot be moved') !== false;
+}
+assert_true($inTransitMoveBlocked, 'in-transit stop cannot move while the driver is serving it');
+$db->prepare(
+    "UPDATE daily_order_assignments SET delivery_status='pending' WHERE daily_order_id=?"
+)->execute([$secondOrderId]);
+
 $assistantStmt->execute(['route-assistant@local.test']);
 $assistant = $assistantStmt->fetch(PDO::FETCH_ASSOC);
 $_SESSION['user_id'] = (int)$assistant['id'];
@@ -440,6 +454,23 @@ $_SESSION['user_role_slug'] = 'driver';
 $_SESSION['user_driver_id'] = 1;
 $blockedTake = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerB, false);
 assert_eq('on_other_route', $blockedTake['code'], 'taking another driver stop needs confirm');
+
+$search = bakery_driver_plan_search($db, 1, $prepDate, '');
+assert_true(isset($search['unassigned'], $search['usual'], $search['matches'], $search['other_routes']), 'prep search returns candidate groups');
+assert_true(!empty($search['take_approval']) && empty($search['take_approval']['required']), 'takes do not require manager approval yet');
+$otherStopCount = 0;
+$foundOtherB = false;
+foreach ($search['other_routes'] as $group) {
+    $otherStopCount += count($group['stops']);
+    foreach ($group['stops'] as $stop) {
+        if ((int)$stop['customer_id'] === $prepCustomerB) {
+            $foundOtherB = true;
+        }
+    }
+}
+assert_true($otherStopCount >= 1, 'expandable other-driver list includes assigned stops');
+assert_true($foundOtherB, 'other-driver list includes the stop assigned to driver 2');
+
 $taken = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerB, true);
 assert_true(!empty($taken['ok']) && !empty($taken['taken_from_other']), 'driver can take a pending stop after confirm');
 
@@ -474,8 +505,54 @@ try {
 }
 assert_true($otherDriverBlocked, 'driver cannot add stops to another identity');
 
-$search = bakery_driver_plan_search($db, 1, $prepDate, '');
-assert_true(isset($search['unassigned'], $search['usual'], $search['matches']), 'prep search returns candidate groups');
+$policy = bakery_driver_plan_take_policy($db);
+assert_true($policy['mode'] === 'immediate' && $policy['approver_role'] === 'manager', 'take policy is immediate with a manager approver reserved');
+assert_true(
+    bakery_driver_plan_take_is_approved($db, 2, 1, $otherOrderId),
+    'immediate policy approves a take without a manager queue'
+);
+
+require_once $root . '/includes/pan_dulce_standards.php';
+$standardProducts = bakery_pan_dulce_standard_products($db);
+$prepDow = bakery_standing_day_from_date($prepDate);
+$noStandingStmt = $db->prepare(
+    "SELECT c.id
+     FROM customers c
+     WHERE c.is_active = 1
+       AND c.id NOT IN (?, ?)
+       AND NOT EXISTS (
+           SELECT 1 FROM standing_orders so
+           WHERE so.customer_id = c.id
+             AND so.quantity > 0
+             AND CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END = ?
+       )
+       AND NOT EXISTS (
+           SELECT 1 FROM daily_orders do
+           WHERE do.customer_id = c.id AND do.order_date = ?
+       )
+     ORDER BY c.id
+     LIMIT 1"
+);
+$noStandingStmt->execute([$prepCustomerA, $prepCustomerB, $prepDow, $prepDate]);
+$noStandingCustomerId = (int)$noStandingStmt->fetchColumn();
+if ($noStandingCustomerId > 0 && $standardProducts !== []) {
+    $standingBefore = $db->prepare(
+        'SELECT COUNT(*) FROM standing_orders WHERE customer_id = ? AND CASE WHEN day_of_week = 0 THEN 7 ELSE day_of_week END = ?'
+    );
+    $standingBefore->execute([$noStandingCustomerId, $prepDow]);
+    $standingCountBefore = (int)$standingBefore->fetchColumn();
+    $filledAdd = bakery_driver_plan_add_stop($db, 1, $prepDate, $noStandingCustomerId, false);
+    assert_true(!empty($filledAdd['ok']), 'driver can add a customer with no standing for the day');
+    assert_true(!empty($filledAdd['filled_standard']), 'empty weekday standing fills the standard 1x dated order');
+    assert_eq('pan_dulce_1x', $filledAdd['filled_standard_source'], 'fill source is the Pan Dulce 1x standard');
+    $itemStmt = $db->prepare('SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ? AND quantity > 0');
+    $itemStmt->execute([(int)$filledAdd['daily_order_id']]);
+    assert_true((int)$itemStmt->fetchColumn() > 0, 'standard fill writes dated order lines');
+    $standingBefore->execute([$noStandingCustomerId, $prepDow]);
+    assert_eq($standingCountBefore, (int)$standingBefore->fetchColumn(), 'standard fill does not rewrite standing orders');
+} else {
+    assert_true(true, 'snapshot has no customer without weekday standing plus Pan Dulce standards; skip 1x fill check');
+}
 
 $_SESSION['user_id'] = 1;
 $_SESSION['user_email'] = 'driver-workflow@example.test';

@@ -479,14 +479,15 @@ function bakery_exception_desk_recovery_card(array $case, array $drivers, string
                     <input type="datetime-local" name="retry_at" value="<?php echo bakery_exception_desk_h($retryDefault); ?>">
                 </label>
             </details>
-            <label class="exception-desk__select-label"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.reassign_to')); ?>
-                <select name="to_driver_id">
-                    <option value=""><?php echo bakery_exception_desk_h(bakery_t('exception_desk.choose_driver')); ?></option>
-                    <?php foreach ($drivers as $driverRow): ?>
-                        <option value="<?php echo (int)$driverRow['id']; ?>"><?php echo bakery_exception_desk_h((string)$driverRow['name']); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
+            <p class="exception-desk__select-label"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.reassign_to')); ?></p>
+            <div class="exception-desk__chips">
+                <?php foreach ($drivers as $driverRow): ?>
+                    <label class="exception-desk__chip">
+                        <input type="radio" name="to_driver_id" value="<?php echo (int)$driverRow['id']; ?>">
+                        <span><?php echo bakery_exception_desk_h((string)$driverRow['name']); ?></span>
+                    </label>
+                <?php endforeach; ?>
+            </div>
             <details class="exception-desk__more">
                 <summary><?php echo bakery_exception_desk_h(bakery_t('exception_desk.more')); ?></summary>
                 <label><?php echo bakery_exception_desk_h(bakery_t('exception_desk.communication')); ?>

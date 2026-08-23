@@ -190,6 +190,14 @@ a.exception-desk__btn {
   display: none;
 }
 
+body.workspace-manager .exception-desk--manager {
+  display: grid;
+}
+
+body.workspace-manager .manager-desktop-only {
+  display: none !important;
+}
+
 @media (max-width: 720px) {
   .manager-desktop-only {
     display: none !important;
@@ -251,4 +259,26 @@ body.workspace-driver .exception-desk--driver .exception-desk__btn {
 
 body.fail-stop-modal-open {
   overflow: hidden;
+}
+
+.exception-desk__hq-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.exception-desk__hq-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #065f46;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-align: center;
+  text-decoration: none;
 }

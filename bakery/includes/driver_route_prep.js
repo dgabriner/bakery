@@ -165,36 +165,63 @@
       .replace(/"/g, '&quot;');
   }
 
-  function candidateButton(row) {
+  function candidateButton(row, approval) {
     if (row.state === 'mine') {
       return '<span class="route-prep-candidate-state">' + escapeHtml(t('prep_already', 'Already on your route', { name: row.customer_name })) + '</span>';
     }
     if (row.state === 'other') {
-      return '<button type="button" class="route-prep-candidate-btn" data-take="1">' + escapeHtml(t('prep_take', 'Take')) + '</button>';
+      var takeLabel = approval && approval.required
+        ? t('prep_ask_manager', 'Ask manager')
+        : t('prep_take', 'Take');
+      return '<button type="button" class="route-prep-candidate-btn" data-take="1">' + escapeHtml(takeLabel) + '</button>';
     }
     return '<button type="button" class="route-prep-candidate-btn">' + escapeHtml(t('prep_add_this', 'Add')) + '</button>';
   }
 
-  function renderGroup(title, rows) {
+  function renderCandidate(row, approval) {
+    var meta = [];
+    if (row.zone) meta.push(row.zone);
+    if (row.pieces > 0) meta.push(t('prep_pieces', ':count pcs', { count: row.pieces, COUNT: row.pieces }));
+    if (row.state === 'other' && row.assigned_driver_name) {
+      meta.push(t('prep_on_other', ':name is on :driver\'s route', {
+        name: row.customer_name,
+        driver: row.assigned_driver_name
+      }));
+    }
+    return '<article class="route-prep-candidate" data-customer-id="' + String(row.customer_id) + '" data-customer-name="' + escapeHtml(row.customer_name) + '" data-other-driver="' + escapeHtml(row.assigned_driver_name || '') + '">'
+      + '<div><strong>' + escapeHtml(row.customer_name) + '</strong>'
+      + '<p>' + escapeHtml(row.customer_address || '') + '</p>'
+      + (meta.length ? '<p class="route-prep-candidate-meta">' + escapeHtml(meta.join(' · ')) + '</p>' : '')
+      + '</div>' + candidateButton(row, approval) + '</article>';
+  }
+
+  function renderGroup(title, rows, approval) {
     if (!rows || !rows.length) return '';
     var html = '<section class="route-prep-group"><h3>' + escapeHtml(title) + '</h3>';
     rows.forEach(function (row) {
-      var meta = [];
-      if (row.zone) meta.push(row.zone);
-      if (row.pieces > 0) meta.push(t('prep_pieces', ':count pcs', { count: row.pieces, COUNT: row.pieces }));
-      if (row.state === 'other' && row.assigned_driver_name) {
-        meta.push(t('prep_on_other', ':name is on :driver\'s route', {
-          name: row.customer_name,
-          driver: row.assigned_driver_name
-        }));
-      }
-      html += '<article class="route-prep-candidate" data-customer-id="' + String(row.customer_id) + '" data-customer-name="' + escapeHtml(row.customer_name) + '" data-other-driver="' + escapeHtml(row.assigned_driver_name || '') + '">'
-        + '<div><strong>' + escapeHtml(row.customer_name) + '</strong>'
-        + '<p>' + escapeHtml(row.customer_address || '') + '</p>'
-        + (meta.length ? '<p class="route-prep-candidate-meta">' + escapeHtml(meta.join(' · ')) + '</p>' : '')
-        + '</div>' + candidateButton(row) + '</article>';
+      html += renderCandidate(row, approval);
     });
     return html + '</section>';
+  }
+
+  function renderOtherRoutes(groups, approval) {
+    var count = 0;
+    (groups || []).forEach(function (group) {
+      count += (group.stops || []).length;
+    });
+    if (!count) return '';
+    var html = '<details class="route-prep-other-routes">'
+      + '<summary><span>' + escapeHtml(t('prep_other_routes', 'On other drivers’ routes')) + '</span>'
+      + '<span class="route-prep-other-routes-count">' + escapeHtml(t('prep_other_routes_count', ':count stops on other routes', { count: count, COUNT: count })) + '</span></summary>';
+    (groups || []).forEach(function (group) {
+      if (!group.stops || !group.stops.length) return;
+      html += '<section class="route-prep-group"><h3>' + escapeHtml(group.driver_name || '') + '</h3>';
+      group.stops.forEach(function (row) {
+        html += renderCandidate(row, approval);
+      });
+      html += '</section>';
+    });
+    return html + '</details>';
   }
 
   var searchTimer = 0;
@@ -208,10 +235,12 @@
     try {
       var data = await post('plan_search', { q: query || '' });
       if (seq !== searchSeq) return;
+      var approval = data.take_approval || { required: false, mode: 'immediate' };
       var html = '';
-      html += renderGroup(t('prep_unassigned', 'Needs a driver'), data.unassigned || []);
-      html += renderGroup(t('prep_usual', 'Usually on your route'), data.usual || []);
-      html += renderGroup(t('prep_matches', 'Matching stores'), data.matches || []);
+      html += renderGroup(t('prep_unassigned', 'Needs a driver'), data.unassigned || [], approval);
+      html += renderGroup(t('prep_usual', 'Usually on your route'), data.usual || [], approval);
+      html += renderOtherRoutes(data.other_routes || [], approval);
+      html += renderGroup(t('prep_matches', 'Matching stores'), data.matches || [], approval);
       if (!html) {
         html = '<p class="route-prep-results-status">' + escapeHtml(
           query ? t('prep_no_matches', 'No stores match that search.') : t('prep_no_suggestions', 'Search for a store to add it to this route.')
@@ -240,6 +269,10 @@
         customer_id: customerId,
         take: take ? '1' : '0'
       });
+      if (!data.success && data.code === 'take_needs_approval') {
+        toast(data.message || t('prep_take_needs_approval', 'A manager has to approve moving this stop.'));
+        return;
+      }
       if (!data.success && data.code === 'on_other_route') {
         var confirmed = window.confirm(t('prep_take_confirm', ':name is on :driver\'s route. Take this stop?', {
           name: data.customer_name || name,

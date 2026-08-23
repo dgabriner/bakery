@@ -13,7 +13,10 @@ require_once __DIR__ . '/driver_assignments.php';
  *     query:string,
  *     unassigned:list<array<string,mixed>>,
  *     usual:list<array<string,mixed>>,
- *     matches:list<array<string,mixed>>
+ *     matches:list<array<string,mixed>>,
+ *     other_routes:list<array{driver_id:int,driver_name:string,stops:list<array<string,mixed>>}>,
+ *     other_route_count:int,
+ *     take_approval:array{required:bool,mode:string,approver_role:string}
  * }
  */
 function bakery_driver_plan_search(PDO $db, int $driverId, string $deliveryDate, string $query): array
@@ -23,10 +26,12 @@ function bakery_driver_plan_search(PDO $db, int $driverId, string $deliveryDate,
     $query = trim(preg_replace('/\s+/', ' ', $query) ?? '');
     $origin = bakery_sfb_ops_origin_clause('c', $db);
     $pieceSelect = '(SELECT COALESCE(SUM(doi.quantity), 0) FROM daily_order_items doi WHERE doi.daily_order_id = do.id)';
+    $takeApproval = bakery_driver_plan_take_policy($db);
 
     $unassigned = [];
     $usual = [];
     $matches = [];
+    $otherRoutes = [];
 
     if ($query === '') {
         $unassignedStmt = $db->prepare(
@@ -93,6 +98,8 @@ function bakery_driver_plan_search(PDO $db, int $driverId, string $deliveryDate,
                 $usual[] = $formatted;
             }
         }
+
+        $otherRoutes = bakery_driver_plan_other_routes($db, $driverId, $deliveryDate, $origin, $pieceSelect);
     } else {
         $like = '%' . $query . '%';
         $matchStmt = $db->prepare(
@@ -125,12 +132,76 @@ function bakery_driver_plan_search(PDO $db, int $driverId, string $deliveryDate,
         }
     }
 
+    $otherCount = 0;
+    foreach ($otherRoutes as $group) {
+        $otherCount += count($group['stops']);
+    }
+
     return [
         'query' => $query,
         'unassigned' => $unassigned,
         'usual' => $usual,
         'matches' => $matches,
+        'other_routes' => $otherRoutes,
+        'other_route_count' => $otherCount,
+        'take_approval' => $takeApproval,
     ];
+}
+
+/**
+ * Pending/failed stops currently assigned to other drivers, grouped by driver.
+ *
+ * @return list<array{driver_id:int,driver_name:string,stops:list<array<string,mixed>>}>
+ */
+function bakery_driver_plan_other_routes(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    string $origin,
+    string $pieceSelect
+): array {
+    $stmt = $db->prepare(
+        "SELECT
+            c.id AS customer_id,
+            c.name AS customer_name,
+            c.address AS customer_address,
+            c.zone,
+            do.id AS daily_order_id,
+            doa.driver_id AS assigned_driver_id,
+            d.name AS assigned_driver_name,
+            {$pieceSelect} AS pieces
+         FROM daily_order_assignments doa
+         JOIN daily_orders do ON do.id = doa.daily_order_id AND do.order_date = doa.delivery_date
+         JOIN customers c ON c.id = do.customer_id
+         {$origin}
+         JOIN drivers d ON d.id = doa.driver_id
+         WHERE doa.delivery_date = ?
+           AND doa.driver_id <> ?
+           AND doa.delivery_status IN ('pending', 'failed')
+           AND c.is_active = 1
+         ORDER BY d.name, COALESCE(doa.route_order, 2147483647), c.name
+         LIMIT 80"
+    );
+    $stmt->execute([$deliveryDate, $driverId]);
+
+    $groups = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $formatted = bakery_driver_plan_format_candidate($row, $driverId);
+        $assignedId = (int)$formatted['assigned_driver_id'];
+        if ($assignedId <= 0) {
+            continue;
+        }
+        if (!isset($groups[$assignedId])) {
+            $groups[$assignedId] = [
+                'driver_id' => $assignedId,
+                'driver_name' => (string)$formatted['assigned_driver_name'],
+                'stops' => [],
+            ];
+        }
+        $groups[$assignedId]['stops'][] = $formatted;
+    }
+
+    return array_values($groups);
 }
 
 /**

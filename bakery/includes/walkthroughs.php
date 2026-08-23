@@ -44,6 +44,11 @@ function bakery_walkthrough_items(): array
             'title_key' => 'walkthroughs.item.adjust_route.title',
             'desc_key' => 'walkthroughs.item.adjust_route.desc',
         ],
+        [
+            'id' => 'manager-phone',
+            'title_key' => 'walkthroughs.item.manager_phone.title',
+            'desc_key' => 'walkthroughs.item.manager_phone.desc',
+        ],
     ];
 }
 

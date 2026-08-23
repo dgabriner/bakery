@@ -11,11 +11,32 @@ require_once 'includes/dashboard_command_center.php';
 require_once 'includes/daily_run.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/manager_mode.php';
+require_once 'includes/manager_phone.php';
 require_once 'includes/exception_workshop.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/demand_review.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/staging_live_approval.php';
+require_once 'includes/hosted_migration_approval.php';
+
+if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['live_status'] ?? '') === '1') {
+    if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator', 'manager'])) {
+        http_response_code(403);
+        exit;
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, max-age=0');
+    echo json_encode(bakery_staging_live_status() ?: ['status' => 'unavailable', 'message' => 'Live status is temporarily unavailable.']);
+    exit;
+}
+if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['migration_status'] ?? '') === '1') {
+    if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator'])) { http_response_code(403); exit; }
+    header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store, max-age=0');
+    echo json_encode(bakery_hosted_migration_status() ?: ['status' => 'unavailable', 'message' => 'Live migration status is temporarily unavailable.']); exit;
+}
+if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['schema_compare'] ?? '') === '1') {
+    bakery_hosted_live_schema_cache_clear();
+}
 
 $today = date('Y-m-d');
 $selectedDate = trim((string)($_GET['date'] ?? $today));
@@ -93,10 +114,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mutation = (string)($_POST['manager_mutation'] ?? '');
         if ($mutation === 'approve_live') {
             if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
-                throw new RuntimeException('Type confirm to approve this staging release.');
+                throw new RuntimeException('Type confirm to promote this Staging version to Live.');
             }
-            bakery_staging_live_approval_submit((string)($_POST['release_id'] ?? ''), (string)($_POST['git_commit'] ?? ''));
-            $managerNotice = 'Staging approved for live. Live has not been changed.';
+            bakery_staging_live_approval_submit();
+            $managerNotice = 'Live promotion queued. It usually finishes automatically within one minute.';
+        } elseif ($mutation === 'approve_migration_live') {
+            if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
+                throw new RuntimeException('Type confirm to approve this additive database migration.');
+            }
+            $migration = bakery_hosted_migration_approve_recommended($db, (string)($_POST['migration_file'] ?? ''));
+            $managerNotice = 'Live database migration ' . $migration['migration_id'] . ' queued. It will run separately after a fresh backup.';
+        } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip'], true)) {
+            $managerNotice = bakery_manager_phone_handle_post($db, $selectedDate, $_POST);
         } elseif ($mutation === 'exception_work') {
             $workKey = (string)($_POST['work_key'] ?? '');
             $matched = null;
@@ -122,7 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $managerNotice = 'Delivery recovery updated.';
         }
         if ($managerNotice !== null) {
-            header('Location: ' . BASE_URL . 'manager.php?date=' . rawurlencode($selectedDate) . '&notice=' . rawurlencode($managerNotice));
+            $redirectView = bakery_manager_phone_view((string)($_POST['view'] ?? $_GET['view'] ?? 'today'));
+            header('Location: ' . BASE_URL . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=' . rawurlencode($redirectView) . '&notice=' . rawurlencode($managerNotice));
             exit;
         }
     } catch (Throwable $e) {
@@ -449,6 +479,46 @@ $exceptionState = static function (string $severity): string {
     return in_array($severity, ['critical', 'warning', 'info'], true) ? $severity : 'warning';
 };
 
+if (bakery_manager_is_phone_workspace()) {
+    $phoneCtx = bakery_manager_phone_build($db, [
+        'date' => $selectedDate,
+        'previousDate' => $previousDate,
+        'nextDate' => $nextDate,
+        'today' => $today,
+        'dateDisplay' => $dateDisplay,
+        'dailyOrders' => $dailyOrders,
+        'missingDaily' => $missingDaily,
+        'unassigned' => $unassigned,
+        'pending' => $pending,
+        'inTransit' => $inTransit,
+        'delivered' => $delivered,
+        'failed' => $failed,
+        'assignedStops' => $assignedStops,
+        'driversWithWork' => $driversWithWork,
+        'routesOpen' => $routesOpen,
+        'dailyRun' => $dailyRun,
+        'driverRows' => $driverRows,
+        'routePlan' => $routePlan,
+        'productionSummary' => $productionSummary,
+        'productionRows' => $productionRows,
+        'packingSummary' => $packingSummary,
+        'packingProducts' => $packingProducts,
+        'bakerRows' => $bakerRows,
+        'bakerActivityAvailable' => $bakerActivityAvailable,
+        'exceptions' => $exceptions,
+        'recoveryCases' => $recoveryCases,
+        'untriagedFailedStops' => $untriagedFailedStops,
+        'error' => $managerError,
+        'notice' => $managerNotice,
+        'db' => $db,
+    ]);
+    require_once 'includes/header.php';
+    require_once 'includes/nav.php';
+    bakery_manager_phone_render($phoneCtx);
+    require_once 'includes/footer.php';
+    exit;
+}
+
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
@@ -464,24 +534,182 @@ require_once 'includes/nav.php';
       <p class="manager-hero__copy">See production, packing, baker activity, routes, and the work that must be reconciled before closeout.</p>
     </div>
     <div class="manager-hero__actions">
-      <?php if (bakery_staging_live_approval_available()): $approval = bakery_staging_live_approval_latest(); ?>
-        <details class="manager-live-approval">
-          <summary class="sf-btn sf-btn--primary">Approve staging for Live</summary>
-          <form method="post" class="manager-live-approval__form">
-            <?php echo bakery_csrf_field(); ?>
-            <input type="hidden" name="manager_mutation" value="approve_live">
-            <label>Release ID <input name="release_id" required pattern="[A-Za-z0-9._:-]{3,160}" placeholder="release_YYYYMMDD_HHMMSS"></label>
-            <label>Git commit (optional) <input name="git_commit" pattern="[0-9a-fA-F]{7,64}"></label>
-            <label>Type <code>confirm</code> <input name="confirm_phrase" required autocomplete="off"></label>
-            <button type="submit" class="sf-btn sf-btn--outline">Record approval</button>
-            <?php if (is_array($approval)): ?><small>Last approval: <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?> — <?php echo htmlspecialchars((string)($approval['approved_at'] ?? '')); ?></small><?php endif; ?>
-          </form>
-        </details>
-      <?php endif; ?>
       <a class="sf-btn sf-btn--primary" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_run.php?date=<?php echo urlencode($selectedDate); ?>">Open Daily Run</a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_brief.php?date=<?php echo urlencode($selectedDate); ?>">Shift brief</a>
     </div>
   </header>
+
+  <?php if (bakery_staging_live_approval_available()):
+    $liveBoard = bakery_staging_live_board(isset($db) && $db instanceof PDO ? $db : null);
+    $compare = $liveBoard['compare'];
+    $schemaState = (string)($compare['state'] ?? 'unknown');
+    $next = (string)$liveBoard['next'];
+    $approval = $liveBoard['approval'];
+    $livePromotion = $liveBoard['files_status'];
+    $migrationStatus = $liveBoard['migration_status'];
+    $migrationApproval = $liveBoard['migration_approval'];
+    $recommended = $liveBoard['recommended'];
+    $candidates = $liveBoard['candidates'];
+    $dbBadge = [
+        'equal' => ['class' => 'is-match', 'key' => 'manager.live_db_match'],
+        'live_behind' => ['class' => 'is-behind', 'key' => 'manager.live_db_behind'],
+        'discrepancy' => ['class' => 'is-stop', 'key' => 'manager.live_db_stop'],
+    ][$schemaState] ?? ['class' => 'is-unknown', 'key' => 'manager.live_db_unknown'];
+    $dbDetail = [
+        'equal' => 'manager.live_db_match_detail',
+        'live_behind' => 'manager.live_db_behind_detail',
+        'discrepancy' => 'manager.live_db_stop_detail',
+    ][$schemaState] ?? bakery_staging_live_unknown_detail_key(
+        (string)($compare['reason'] ?? ''),
+        bakery_hosted_migration_succeeded($migrationStatus)
+    );
+    $nextKey = 'manager.live_next_' . $next;
+    $echoNames = static function (array $names) {
+        $names = array_values($names);
+        if ($names === []) {
+            return;
+        }
+        $preview = array_slice($names, 0, 12);
+        echo '<ul>';
+        foreach ($preview as $name) {
+            echo '<li>' . htmlspecialchars((string)$name) . '</li>';
+        }
+        echo '</ul>';
+        $more = count($names) - count($preview);
+        if ($more > 0) {
+            echo '<small>' . htmlspecialchars(bakery_t('manager.schema_more', ['count' => (string)$more])) . '</small>';
+        }
+    };
+  ?>
+  <section class="manager-live-board" data-schema-state="<?php echo htmlspecialchars($schemaState); ?>">
+    <header class="manager-live-board__head">
+      <h2><?php echo htmlspecialchars(bakery_t('manager.live_title')); ?></h2>
+      <p class="manager-live-board__next manager-live-board__next--<?php echo htmlspecialchars($next); ?>">
+        <strong><?php echo htmlspecialchars(bakery_t('manager.live_next')); ?></strong>
+        <?php echo htmlspecialchars(bakery_t($nextKey)); ?>
+      </p>
+    </header>
+    <div class="manager-live-board__grid">
+      <article class="manager-live-card<?php echo in_array($next, ['promote_files', 'promote_files_applied'], true) ? ' is-next' : ''; ?>">
+        <h3><?php echo htmlspecialchars(bakery_t('manager.live_files')); ?></h3>
+        <p><?php echo htmlspecialchars(bakery_t('manager.live_files_help')); ?></p>
+        <?php if (is_array($livePromotion)): ?>
+          <p class="manager-live-card__status" data-live-promotion-status data-status-url="?live_status=1">
+            <?php echo htmlspecialchars(bakery_t('manager.live_files_status')); ?>:
+            <?php echo htmlspecialchars(ucwords(str_replace('_', ' ', (string)($livePromotion['status'] ?? 'unknown')))); ?>
+            <?php if (!empty($livePromotion['completed_at'])): ?> — <?php echo htmlspecialchars((string)$livePromotion['completed_at']); ?><?php endif; ?>
+            <?php if (!empty($livePromotion['message'])): ?> · <?php echo htmlspecialchars((string)$livePromotion['message']); ?><?php endif; ?>
+          </p>
+        <?php endif; ?>
+        <form method="post" class="manager-live-card__form">
+          <?php echo bakery_csrf_field(); ?>
+          <input type="hidden" name="manager_mutation" value="approve_live">
+          <label><?php echo htmlspecialchars(bakery_t('manager.live_confirm')); ?>
+            <input name="confirm_phrase" required autocomplete="off">
+          </label>
+          <button type="submit" class="sf-btn sf-btn--primary"><?php echo htmlspecialchars(bakery_t('manager.live_send_files')); ?></button>
+          <?php if (is_array($approval)): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_queued')); ?>:
+              <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?>
+              — <?php echo htmlspecialchars((string)($approval['approved_at_local'] ?? $approval['approved_at'] ?? '')); ?>
+              · <?php echo number_format((int)($approval['file_count'] ?? 0)); ?>
+            </small>
+          <?php endif; ?>
+        </form>
+      </article>
+      <article class="manager-live-card<?php echo in_array($next, ['migrate', 'stop', 'migrate_missing', 'retry'], true) ? ' is-next' : ''; ?>">
+        <h3><?php echo htmlspecialchars(bakery_t('manager.live_database')); ?></h3>
+        <div class="manager-live-state <?php echo htmlspecialchars($dbBadge['class']); ?>" role="status">
+          <strong><?php echo htmlspecialchars(bakery_t($dbBadge['key'])); ?></strong>
+          <span><?php echo htmlspecialchars(bakery_t($dbDetail, ['id' => (string)($migrationStatus['migration_id'] ?? '')])); ?></span>
+        </div>
+        <?php if ($schemaState === 'unknown'): ?>
+          <p><a class="sf-btn sf-btn--primary" href="?date=<?php echo urlencode($selectedDate); ?>&amp;schema_compare=1"><?php echo htmlspecialchars(bakery_t('manager.live_retry')); ?></a></p>
+        <?php endif; ?>
+        <?php if (!empty($compare['missing_on_live'])): ?>
+          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_missing')); ?></small>
+          <?php $echoNames($compare['missing_on_live']); ?>
+        <?php endif; ?>
+        <?php if (!empty($compare['staging_only_migrations'])): ?>
+          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_behind')); ?></small>
+          <?php $echoNames($compare['staging_only_migrations']); ?>
+        <?php endif; ?>
+        <?php if (!empty($compare['extra_on_live'])): ?>
+          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_extra')); ?></small>
+          <?php $echoNames($compare['extra_on_live']); ?>
+        <?php endif; ?>
+        <?php if (!empty($compare['live_only_migrations'])): ?>
+          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_extra')); ?></small>
+          <?php $echoNames($compare['live_only_migrations']); ?>
+        <?php endif; ?>
+        <?php if (!empty($compare['mismatches'])): ?>
+          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_mismatch')); ?></small>
+          <?php $echoNames($compare['mismatches']); ?>
+        <?php endif; ?>
+        <?php if ($schemaState === 'live_behind'): ?>
+        <form method="post" class="manager-live-card__form">
+          <?php echo bakery_csrf_field(); ?>
+          <input type="hidden" name="manager_mutation" value="approve_migration_live">
+          <?php if (is_array($recommended)): ?>
+            <input type="hidden" name="migration_file" value="<?php echo htmlspecialchars($recommended['file']); ?>">
+            <p><strong><?php echo htmlspecialchars($recommended['id']); ?></strong></p>
+          <?php else: ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_no_exact_update')); ?></small>
+          <?php endif; ?>
+          <label><?php echo htmlspecialchars(bakery_t('manager.live_confirm')); ?>
+            <input name="confirm_phrase" required autocomplete="off" <?php echo $next === 'migrate' ? '' : 'disabled'; ?>>
+          </label>
+          <button type="submit" class="sf-btn sf-btn--primary" <?php echo $next === 'migrate' ? '' : 'disabled'; ?>><?php echo htmlspecialchars(bakery_t('manager.live_send_db')); ?></button>
+        </form>
+        <?php endif; ?>
+        <?php if (is_array($migrationStatus)): ?>
+          <small data-live-migration-status data-status-url="?migration_status=1"
+            data-expected-release="<?php echo htmlspecialchars((string)($migrationApproval['release_id'] ?? '')); ?>"><?php echo htmlspecialchars(bakery_t('manager.live_db_worker')); ?>:
+            <?php echo htmlspecialchars((string)($migrationStatus['status'] ?? 'unknown')); ?>
+            <?php if (!empty($migrationStatus['message'])): ?> · <?php echo htmlspecialchars((string)$migrationStatus['message']); ?><?php endif; ?>
+          </small>
+        <?php endif; ?>
+      </article>
+    </div>
+  </section>
+  <script>
+  (function () {
+    var statuses = Array.prototype.slice.call(document.querySelectorAll('[data-live-promotion-status], [data-live-migration-status]'));
+    if (!statuses.length || !window.fetch) return;
+    function refreshStatus(status) {
+      var url = status.getAttribute('data-status-url');
+      fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (data) {
+          if (!data || !data.status) return;
+          var expected = status.getAttribute('data-expected-release') || '';
+          if (expected && data.release_id && data.release_id !== expected) {
+            status.textContent = <?php echo json_encode(bakery_t('manager.live_db_worker')); ?> + ': ' + <?php echo json_encode(bakery_t('manager.live_worker_waiting')); ?>;
+            return;
+          }
+          var prior = status.getAttribute('data-worker-status') || '';
+          status.setAttribute('data-worker-status', data.status);
+          var label = data.status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+          var prefix = status.hasAttribute('data-live-migration-status')
+            ? <?php echo json_encode(bakery_t('manager.live_db_worker')); ?>
+            : <?php echo json_encode(bakery_t('manager.live_files_status')); ?>;
+          var text = prefix + ': ' + label;
+          if (data.completed_at) text += ' — ' + data.completed_at;
+          if (data.message) text += ' · ' + data.message;
+          status.textContent = text;
+          if (status.hasAttribute('data-live-migration-status') && data.status === 'succeeded' && prior && prior !== 'succeeded') {
+            var separator = window.location.search ? '&' : '?';
+            window.location.href = window.location.href + separator + 'schema_compare=1';
+          }
+        })
+        .catch(function () {});
+    }
+    function refreshAll() { statuses.forEach(refreshStatus); }
+    refreshAll();
+    window.setInterval(refreshAll, 5000);
+  }());
+  </script>
+  <?php endif; ?>
 
   <nav class="manager-date-nav" aria-label="Choose operating date">
     <a href="?date=<?php echo urlencode($previousDate); ?>">Previous day</a>
@@ -567,7 +795,7 @@ require_once 'includes/nav.php';
         <div class="manager-progress" aria-label="<?php echo $productionPercent; ?> percent of production target recorded"><span style="width:<?php echo $productionPercent; ?>%"></span></div>
         <p><?php echo $productionSummary['has_daily'] ? 'Dated demand is feeding this bake target.' : 'Forecast demand is being used until dated orders are ready.'; ?></p>
         <div class="manager-handoff-card__links">
-          <a href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?week=<?php echo urlencode($selectedDate); ?>">Adjust plan</a>
+          <a href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?date=<?php echo urlencode($selectedDate); ?>">Adjust plan</a>
           <a href="<?php echo htmlspecialchars(bakery_ops_link_production($selectedDate, [], 'manager')); ?>">Open bake sheet</a>
         </div>
       </article>
@@ -695,7 +923,7 @@ require_once 'includes/nav.php';
           <h2 id="production-board-title">What is going to production</h2>
         </div>
         <div class="manager-section__actions">
-          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?week=<?php echo urlencode($selectedDate); ?>">Production Center</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?date=<?php echo urlencode($selectedDate); ?>">Production Center</a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(bakery_ops_link_production($selectedDate, [], 'manager')); ?>">Daily Production</a>
         </div>
       </div>
@@ -805,7 +1033,7 @@ require_once 'includes/nav.php';
       </div>
       <div class="manager-tools-list">
         <a href="<?php echo htmlspecialchars(bakery_ops_link_daily_orders($selectedDate, [], 'manager')); ?>"><strong>Demand & order changes</strong><span>Review the commercial commitment</span></a>
-        <a href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?week=<?php echo urlencode($selectedDate); ?>"><strong>Production targets</strong><span>Adjust saved plan quantities</span></a>
+        <a href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?date=<?php echo urlencode($selectedDate); ?>"><strong>Production targets</strong><span>Adjust saved plan quantities</span></a>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_pack_list($selectedDate, [], 'manager')); ?>"><strong>Packing checklist</strong><span>Check customer, product, or route work</span></a>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_driver_assignment($selectedDate, [], 'manager')); ?>"><strong>Routes & dispatch</strong><span>Assign drivers and shape delivery work</span></a>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_driver_load($selectedDate, [], 'manager')); ?>"><strong>Pickup loads</strong><span>Move finished goods into route custody</span></a>

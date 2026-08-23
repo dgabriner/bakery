@@ -165,8 +165,10 @@ function bakery_daily_run_counts_toward_progress(string $uiState): bool
  */
 function bakery_daily_run_required_products(PDO $db, string $date, int $weekday): array
 {
-    if (function_exists('bakery_operating_demand_by_product')) {
+    if (!function_exists('bakery_operating_demand_by_product')) {
         require_once __DIR__ . '/demand_review.php';
+    }
+    if (function_exists('bakery_operating_demand_by_product')) {
         $demand = bakery_operating_demand_by_product($db, $date);
         return [
             'by_product' => $demand['by_product'],
@@ -230,7 +232,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $links = [
         'daily_run' => $base . 'daily_run.php?date=' . rawurlencode($date),
         'daily_orders' => bakery_ops_link_daily_orders($date, [], 'daily_run'),
-        'production_center' => bakery_ops_link_production_center($weekStart, [], 'daily_run'),
+        'production_center' => bakery_ops_link_production_center($weekStart, ['date' => $date], 'daily_run'),
         'production' => bakery_ops_link_production($date, [], 'daily_run'),
         'pack' => bakery_ops_link_pack_list($date, [], 'daily_run'),
         'inventory' => bakery_ops_link_inventory($date, [], 'daily_run'),
@@ -513,7 +515,8 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 &$blockers,
                 $missingPlanProducts,
                 $planShortProducts,
-                $weekStart
+                $weekStart,
+                $date
             ): void {
                 if ($missingPlanProducts > 0) {
                     $blockers[] = bakery_ops_exception([
@@ -526,7 +529,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                             . ($missingPlanProducts === 1 ? '' : 's')
                             . ' have no production_plan_items row for this date.',
                         'count' => $missingPlanProducts,
-                        'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1'], 'daily_run'),
+                        'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date], 'daily_run'),
                         'action' => 'Finish Production Plan',
                     ]);
                 }
@@ -541,7 +544,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                             . ($planShortProducts === 1 ? '' : 's')
                             . ' are below dated order quantities.',
                         'count' => $planShortProducts,
-                        'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1'], 'daily_run'),
+                        'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date], 'daily_run'),
                         'action' => 'Finish Production Plan',
                     ]);
                 }
@@ -631,6 +634,20 @@ function bakery_daily_run_build(PDO $db, string $date): array
     }
 
     // --- Stage 3: Produce ---
+    // Measure against the bake sheet: committed plan when committed, else demand.
+    $produceTargets = function_exists('bakery_production_produce_targets_by_product')
+        ? bakery_production_produce_targets_by_product($db, $date)
+        : [
+            'by_product' => $requiredByProduct,
+            'product_count' => $productCount,
+            'required_units' => $requiredUnits,
+            'source' => 'demand',
+            'committed' => false,
+        ];
+    $produceByProduct = $produceTargets['by_product'];
+    $produceProductCount = (int)$produceTargets['product_count'];
+    $produceAgainstCommit = !empty($produceTargets['committed']);
+
     $produceStage = [
         'key' => 'produce',
         'step' => 3,
@@ -641,6 +658,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'blockers' => [],
         'action_label' => 'Open Daily Production',
         'href' => $links['production'],
+        'target_source' => $produceTargets['source'] ?? 'demand',
     ];
 
     $completeProducts = 0;
@@ -649,7 +667,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $unitsMade = 0;
     $unitsPlanned = 0;
 
-    if ($productCount === 0) {
+    if ($produceProductCount === 0) {
         $produceStage['ui_state'] = 'empty';
         $produceStage['summary'] = 'Nothing to produce';
     } elseif (!$inventoryReady) {
@@ -657,7 +675,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $produceStage['summary'] = 'Finished-goods inventory not installed';
     } else {
         try {
-            $productIds = array_keys($requiredByProduct);
+            $productIds = array_keys($produceByProduct);
             $placeholders = implode(',', array_fill(0, count($productIds), '?'));
             $stmt = $db->prepare("
                 SELECT product_id, COALESCE(produced_quantity, 0) AS produced_quantity
@@ -670,7 +688,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 $produced[(int)$row['product_id']] = (int)$row['produced_quantity'];
             }
 
-            foreach ($requiredByProduct as $productId => $plannedQty) {
+            foreach ($produceByProduct as $productId => $plannedQty) {
                 $madeQty = $produced[$productId] ?? 0;
                 $unitsPlanned += $plannedQty;
                 $unitsMade += min($madeQty, $plannedQty);
@@ -684,21 +702,28 @@ function bakery_daily_run_build(PDO $db, string $date): array
             }
 
             $produceStage['metrics'] = [
-                ['label' => 'Products complete', 'value' => $completeProducts . '/' . $productCount],
+                ['label' => 'Products complete', 'value' => $completeProducts . '/' . $produceProductCount],
                 ['label' => 'In progress', 'value' => $partialProducts],
                 ['label' => 'Not started', 'value' => $pendingProducts],
                 ['label' => 'Units recorded', 'value' => number_format($unitsMade) . '/' . number_format($unitsPlanned)],
+                [
+                    'label' => 'Measured against',
+                    'value' => $produceAgainstCommit ? 'Committed bake' : 'Demand',
+                ],
             ];
 
             if ($pendingProducts > 0 || $partialProducts > 0) {
                 $inProgress = $partialProducts > 0 || ($completeProducts > 0 && $pendingProducts > 0);
-                $produceStage['ui_state'] = $pendingProducts === $productCount ? 'not_started' : ($inProgress ? 'in_progress' : 'needs_attention');
+                $produceStage['ui_state'] = $pendingProducts === $produceProductCount ? 'not_started' : ($inProgress ? 'in_progress' : 'needs_attention');
                 if ($partialProducts > 0 || ($completeProducts > 0 && $pendingProducts > 0)) {
                     $produceStage['ui_state'] = 'in_progress';
                 } else {
                     $produceStage['ui_state'] = 'not_started';
                 }
-                $produceStage['summary'] = $completeProducts . '/' . $productCount . ' products complete';
+                $produceStage['summary'] = $completeProducts . '/' . $produceProductCount . ' products complete';
+                if ($produceAgainstCommit) {
+                    $produceStage['summary'] .= ' · vs committed bake';
+                }
                 if ($pendingProducts > 0) {
                     $produceStage['summary'] .= ' · ' . $pendingProducts . ' not started';
                 }
@@ -733,8 +758,9 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 }
             } else {
                 $produceStage['ui_state'] = 'complete';
-                $produceStage['summary'] = 'All ' . $productCount . ' products recorded · '
-                    . number_format($unitsMade) . ' units';
+                $produceStage['summary'] = 'All ' . $produceProductCount . ' products recorded · '
+                    . number_format($unitsMade) . ' units'
+                    . ($produceAgainstCommit ? ' · vs committed bake' : '');
             }
         } catch (Throwable $e) {
             error_log('daily_run produce: ' . $e->getMessage());
@@ -1023,7 +1049,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'summary' => '',
         'metrics' => [],
         'blockers' => [],
-        'action_label' => 'Open Invoice Center',
+        'action_label' => function_exists('bakery_t') ? bakery_t('orders.open_billing_center') : 'Open Billing Center',
         'href' => $links['invoice'],
     ];
 

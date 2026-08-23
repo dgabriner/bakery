@@ -304,6 +304,83 @@ function bakery_customer_ensure_daily_order(PDO $db, array $customer, $date) {
 }
 
 /**
+ * True when the customer has a positive standing quantity for that weekday.
+ */
+function bakery_customer_weekday_has_standing(PDO $db, int $customerId, string $date): bool
+{
+    $dayOfWeek = bakery_standing_day_from_date($date);
+    foreach (bakery_customer_standing_lines($db, $customerId, $dayOfWeek) as $line) {
+        if ((int)($line['quantity'] ?? 0) > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * If this weekday has no standing demand and the dated order is empty, fill
+ * the dated order with the standard 1× Pan Dulce mix. Never writes standing.
+ *
+ * @param array<string,mixed>|null $customer
+ * @return array{filled:bool,source:string,item_count:int}
+ */
+function bakery_customer_fill_empty_dated_order_from_standard(
+    PDO $db,
+    int $dailyOrderId,
+    string $date,
+    ?array $customer = null
+): array {
+    $result = [
+        'filled' => false,
+        'source' => 'none',
+        'item_count' => 0,
+    ];
+    if ($dailyOrderId <= 0) {
+        return $result;
+    }
+
+    $customerId = (int)($customer['id'] ?? 0);
+    if ($customerId <= 0) {
+        $idStmt = $db->prepare('SELECT customer_id FROM daily_orders WHERE id = ? LIMIT 1');
+        $idStmt->execute([$dailyOrderId]);
+        $customerId = (int)$idStmt->fetchColumn();
+    }
+    if ($customerId <= 0) {
+        return $result;
+    }
+
+    $itemCount = 0;
+    foreach (bakery_customer_daily_items($db, $dailyOrderId) as $item) {
+        if ((int)($item['quantity'] ?? 0) > 0) {
+            $itemCount++;
+        }
+    }
+    if ($itemCount > 0) {
+        $result['source'] = 'existing';
+        $result['item_count'] = $itemCount;
+        return $result;
+    }
+    if (bakery_customer_weekday_has_standing($db, $customerId, $date)) {
+        $result['source'] = 'standing';
+        return $result;
+    }
+
+    require_once __DIR__ . '/pan_dulce_standards.php';
+    try {
+        $applied = bakery_apply_pan_dulce_daily_standard($db, $dailyOrderId, 1.0);
+        bakery_customer_update_daily_total($db, $dailyOrderId);
+        $updated = (int)($applied['updated'] ?? 0);
+        $result['filled'] = $updated > 0;
+        $result['source'] = $result['filled'] ? 'pan_dulce_1x' : 'none';
+        $result['item_count'] = $updated;
+    } catch (Throwable $e) {
+        $result['source'] = 'none';
+    }
+
+    return $result;
+}
+
+/**
  * Create the dated order shell a manager will edit for one specific date.
  * Existing dated demand wins; this never replaces or clears an order.
  *

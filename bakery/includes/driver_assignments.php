@@ -696,7 +696,9 @@ function bakery_driver_reorder_remaining_stops(
         static fn(int $id): bool => $id > 0
     )));
 
-    $lockedStatuses = ['delivered', 'cancelled'];
+    // A stop at the door is already operationally in progress and must not
+    // jump elsewhere in the route while the driver is serving it.
+    $lockedStatuses = ['delivered', 'cancelled', 'in_transit'];
     $db->beginTransaction();
     try {
         $stmt = $db->prepare('
@@ -730,7 +732,7 @@ function bakery_driver_reorder_remaining_stops(
 
         foreach ($orderedDailyOrderIds as $orderId) {
             if (!isset($movableByOrderId[$orderId])) {
-                throw new RuntimeException('Completed or skipped stops cannot be moved');
+                throw new RuntimeException('Completed, skipped, or in-transit stops cannot be moved');
             }
         }
 
@@ -1004,8 +1006,46 @@ function bakery_driver_add_customer_to_route(
 }
 
 /**
+ * Take-from-another-driver policy.
+ *
+ * Takes apply immediately today. When a manager approval queue ships, set
+ * required=true and let bakery_driver_plan_take_is_approved() read that queue.
+ *
+ * @return array{required:bool,mode:string,approver_role:string}
+ */
+function bakery_driver_plan_take_policy(?PDO $db = null): array
+{
+    unset($db);
+    return [
+        'required' => false,
+        'mode' => 'immediate',
+        'approver_role' => 'manager',
+    ];
+}
+
+/**
+ * Whether this driver may pull another driver's stop now.
+ * Immediate while take policy required=false. Later: approved request row.
+ */
+function bakery_driver_plan_take_is_approved(
+    PDO $db,
+    int $fromDriverId,
+    int $toDriverId,
+    int $dailyOrderId
+): bool {
+    $policy = bakery_driver_plan_take_policy($db);
+    if (empty($policy['required'])) {
+        return true;
+    }
+    unset($fromDriverId, $toDriverId, $dailyOrderId);
+    return false;
+}
+
+/**
  * Drivers (and managers in driver mode) may add one dated stop to their own
- * route. This never rewrites standing routes or Pan Dulce standards.
+ * route. This never rewrites standing routes. If the customer has no standing
+ * for that weekday and the dated order is empty, it fills the standard 1×
+ * Pan Dulce mix on the dated order only.
  *
  * @return array{
  *     ok:bool,
@@ -1015,7 +1055,10 @@ function bakery_driver_add_customer_to_route(
  *     customer_name:string,
  *     daily_order_id:int,
  *     other_driver_name:string,
- *     taken_from_other:bool
+ *     taken_from_other:bool,
+ *     filled_standard:bool,
+ *     filled_standard_source:string,
+ *     take_approval:array{required:bool,mode:string,approver_role:string}
  * }
  */
 function bakery_driver_plan_add_stop(
@@ -1054,6 +1097,7 @@ function bakery_driver_plan_add_stop(
         );
     }
     $customerName = (string)$customer['name'];
+    $takeApproval = bakery_driver_plan_take_policy($db);
 
     $empty = [
         'ok' => false,
@@ -1064,9 +1108,15 @@ function bakery_driver_plan_add_stop(
         'daily_order_id' => 0,
         'other_driver_name' => '',
         'taken_from_other' => false,
+        'filled_standard' => false,
+        'filled_standard_source' => 'none',
+        'take_approval' => $takeApproval,
     ];
 
     require_once __DIR__ . '/customer_order_mutations.php';
+
+    $filled = ['filled' => false, 'source' => 'none', 'item_count' => 0];
+    $dailyOrderId = 0;
 
     $db->beginTransaction();
     try {
@@ -1113,16 +1163,43 @@ function bakery_driver_plan_add_stop(
                 );
                 return $empty;
             }
+            if (!bakery_driver_plan_take_is_approved(
+                $db,
+                $assignedDriverId,
+                $driverId,
+                (int)$existing['daily_order_id']
+            )) {
+                $db->rollBack();
+                $empty['code'] = 'take_needs_approval';
+                $empty['other_driver_name'] = (string)($existing['driver_name'] ?: ('Driver #' . $assignedDriverId));
+                $empty['daily_order_id'] = (int)$existing['daily_order_id'];
+                $empty['message'] = bakery_driver_plan_text(
+                    'driver.prep_take_needs_approval',
+                    [],
+                    'A manager has to approve moving this stop.'
+                );
+                return $empty;
+            }
 
             $sourceDriverId = $assignedDriverId;
             $scheduled = $existing['scheduled_delivery_time'] ?? null;
             $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $deliveryDate);
+            $filled = bakery_customer_fill_empty_dated_order_from_standard($db, $dailyOrderId, $deliveryDate, $customer);
             $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$existing['id']]);
             bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, $scheduled);
             bakery_driver_renumber_route_orders($db, [$sourceDriverId, $driverId], $deliveryDate);
             $db->commit();
 
-            bakery_driver_plan_record_add($db, $driverId, $deliveryDate, $customerId, $customerName, (string)($driverRow['name'] ?? ''), true);
+            bakery_driver_plan_record_add(
+                $db,
+                $driverId,
+                $deliveryDate,
+                $customerId,
+                $customerName,
+                (string)($driverRow['name'] ?? ''),
+                true,
+                ['filled_standard_source' => $filled['source']]
+            );
 
             return [
                 'ok' => true,
@@ -1137,10 +1214,14 @@ function bakery_driver_plan_add_stop(
                 'daily_order_id' => $dailyOrderId,
                 'other_driver_name' => (string)($existing['driver_name'] ?? ''),
                 'taken_from_other' => true,
+                'filled_standard' => !empty($filled['filled']),
+                'filled_standard_source' => (string)$filled['source'],
+                'take_approval' => $takeApproval,
             ];
         }
 
         $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $deliveryDate);
+        $filled = bakery_customer_fill_empty_dated_order_from_standard($db, $dailyOrderId, $deliveryDate, $customer);
         bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, null);
         $db->commit();
     } catch (Throwable $e) {
@@ -1150,21 +1231,41 @@ function bakery_driver_plan_add_stop(
         throw $e;
     }
 
-    bakery_driver_plan_record_add($db, $driverId, $deliveryDate, $customerId, $customerName, (string)($driverRow['name'] ?? ''), false);
+    bakery_driver_plan_record_add(
+        $db,
+        $driverId,
+        $deliveryDate,
+        $customerId,
+        $customerName,
+        (string)($driverRow['name'] ?? ''),
+        false,
+        ['filled_standard_source' => $filled['source']]
+    );
+
+    $addedMessage = !empty($filled['filled'])
+        ? bakery_driver_plan_text(
+            'driver.prep_added_standard',
+            ['name' => $customerName],
+            'Added :name with the standard 1× order'
+        )
+        : bakery_driver_plan_text(
+            'driver.prep_added',
+            ['name' => $customerName],
+            'Added :name'
+        );
 
     return [
         'ok' => true,
         'code' => 'added',
-        'message' => bakery_driver_plan_text(
-            'driver.prep_added',
-            ['name' => $customerName],
-            'Added :name'
-        ),
+        'message' => $addedMessage,
         'customer_id' => $customerId,
         'customer_name' => $customerName,
         'daily_order_id' => $dailyOrderId,
         'other_driver_name' => '',
         'taken_from_other' => false,
+        'filled_standard' => !empty($filled['filled']),
+        'filled_standard_source' => (string)$filled['source'],
+        'take_approval' => $takeApproval,
     ];
 }
 
@@ -1206,12 +1307,14 @@ function bakery_driver_plan_record_add(
     int $customerId,
     string $customerName,
     string $driverName,
-    bool $takenFromOther
+    bool $takenFromOther,
+    array $extra = []
 ): void {
     if (!function_exists('bakery_record_operational_event') || !defined('BAKERY_OP_DRIVER_ROUTE_ASSIGNED')) {
         return;
     }
     $verb = $takenFromOther ? 'Moved' : 'Added';
+    $policy = bakery_driver_plan_take_policy($db);
     bakery_record_operational_event(
         $db,
         BAKERY_OP_DRIVER_ROUTE_ASSIGNED,
@@ -1221,10 +1324,14 @@ function bakery_driver_plan_record_add(
             'operational_date' => $deliveryDate,
             'driver_id' => $driverId,
             'customer_id' => $customerId,
-            'metadata' => [
-                'source' => 'driver_route_prep',
-                'taken_from_other' => $takenFromOther,
-            ],
+            'metadata' => array_merge(
+                [
+                    'source' => 'driver_route_prep',
+                    'taken_from_other' => $takenFromOther,
+                    'take_approval' => $policy,
+                ],
+                $extra
+            ),
         ]
     );
 }

@@ -15,7 +15,7 @@ if ($existingUser = bakery_current_user()) {
         ? 'driver.php'
         : ($existingRole === 'baker'
             ? ('production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day'))))
-            : 'index.php');
+            : ($existingRole === 'manager' ? 'manager.php' : 'index.php'));
     header('Location: ' . BASE_URL . $existingHome);
     exit;
 }
@@ -51,6 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $dest = BASE_URL . 'driver.php';
                 } elseif ($user && $user['role_slug'] === 'baker') {
                     $dest = BASE_URL . 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
+                } elseif ($user && ($user['role_slug'] ?? '') === 'manager') {
+                    $dest = BASE_URL . 'manager.php';
                 }
                 header('Location: ' . $dest);
                 exit;
@@ -80,14 +82,14 @@ $currentLocale = bakery_locale();
   <style>
     :root {
       color-scheme: light;
-      --ink: var(--sf-text, #33251f);
-      --cream: var(--sf-bg-elevated, #fffdf8);
-      --terracotta: var(--sf-accent, #b75c3f);
-      --muted: var(--sf-text-muted, #6b5c52);
-      --border: var(--sf-border, #c9b9a8);
+      --ink: var(--sf-text, #1c2a26);
+      --cream: var(--sf-bg-elevated, #fffaf2);
+      --terracotta: var(--sf-accent, #c7783a);
+      --muted: var(--sf-text-muted, #6b7d78);
+      --border: var(--sf-border, #ddd4c6);
     }
     * { box-sizing: border-box; }
-    body { align-items: center; background: var(--cream); color: var(--ink); display: flex; font-family: Georgia, 'Times New Roman', serif; justify-content: center; margin: 0; min-height: 100vh; min-height: 100svh; padding: clamp(20px, 5vh, 56px) clamp(20px, 5vw, 72px); }
+    body { align-items: center; background-color: var(--cream); background-image: var(--sf-paper-wash, none); color: var(--ink); display: flex; flex-direction: column; font-family: Georgia, 'Times New Roman', serif; justify-content: center; margin: 0; min-height: 100vh; min-height: 100svh; padding: clamp(20px, 5vh, 56px) clamp(20px, 5vw, 72px); }
     .wrap { text-align: center; width: min(100%, 760px); }
     .brands { align-items: center; display: flex; flex-direction: column; gap: clamp(22px, 4vh, 34px); justify-content: center; margin: 0 auto clamp(36px, 7vh, 58px); }
     .la-victoria-logo { display: block; height: auto; max-width: 400px; width: min(78vw, 400px); }
@@ -100,6 +102,8 @@ $currentLocale = bakery_locale();
     .bakery-lang-switch--inline { background: rgba(0,0,0,.04); border-radius: 999px; display: inline-flex; gap: 2px; padding: 3px; }
     .bakery-lang-switch--inline .bakery-lang-switch__btn { border-radius: 999px; color: var(--muted); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: .82rem; padding: 6px 14px; text-decoration: none; }
     .bakery-lang-switch--inline .bakery-lang-switch__btn--active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.12); color: var(--ink); font-weight: 600; }
+    .portal-link { margin: 28px 0 0; font-size: .85rem; }
+    .portal-link a { color: var(--muted); }
     @media (max-width: 560px) {
       html { height: 100%; overflow: hidden; }
       body { align-items: flex-start; height: 100%; inset: 0; min-height: 0; overflow: hidden; padding: max(10px, env(safe-area-inset-top)) 18px 14px; position: fixed; width: 100%; }
@@ -145,6 +149,7 @@ $currentLocale = bakery_locale();
              autocomplete="one-time-code" autofocus
              value="<?php echo htmlspecialchars($_POST['code'] ?? ''); ?>">
     </form>
+    <p class="portal-link"><a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php"><?php bakery_te('login.customer_portal_link'); ?></a></p>
   </div>
   <script>
     (function () {
@@ -179,6 +184,5 @@ $currentLocale = bakery_locale();
       });
     })();
   </script>
-  <p style="text-align:center;margin-top:20px;font-size:.85rem;"><a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php" style="color:#7a6a5c;"><?php bakery_te('login.customer_portal_link'); ?></a></p>
 </body>
 </html>

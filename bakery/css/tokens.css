@@ -5,40 +5,41 @@
 :root {
   /* Typography */
   --sf-font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --sf-font-serif: Georgia, "Times New Roman", serif;
+  --sf-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
   --sf-font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
 
   /* Text */
-  --sf-text: #1e2b28;
+  --sf-text: #1c2a26;
   --sf-text-secondary: #4a5c57;
   --sf-text-muted: #6b7d78;
   --sf-text-inverse: #f8faf9;
 
   /* Surfaces */
-  --sf-bg: #f6f3ee;
-  --sf-bg-elevated: #fffdf9;
-  --sf-surface: #ffffff;
-  --sf-surface-muted: #f0f4f2;
-  --sf-surface-inset: #e8eeeb;
+  --sf-bg: #f3eee5;
+  --sf-bg-elevated: #fffaf2;
+  --sf-surface: #fffefb;
+  --sf-surface-muted: #f3eee6;
+  --sf-surface-inset: #ebe4d8;
 
   /* Borders & shadows */
-  --sf-border: #d4ddd8;
-  --sf-border-strong: #b8c7c0;
-  --sf-radius-sm: 6px;
-  --sf-radius-md: 10px;
-  --sf-radius-lg: 14px;
-  --sf-shadow-sm: 0 1px 3px rgba(24, 40, 36, 0.06);
-  --sf-shadow-md: 0 4px 16px rgba(24, 40, 36, 0.08);
-  --sf-shadow-lg: 0 12px 32px rgba(24, 40, 36, 0.12);
+  --sf-border: #ddd4c6;
+  --sf-border-strong: #c9bda9;
+  --sf-radius-sm: 8px;
+  --sf-radius-md: 12px;
+  --sf-radius-lg: 16px;
+  --sf-shadow-sm: 0 1px 2px rgba(42, 32, 18, 0.05), 0 1px 3px rgba(24, 40, 36, 0.04);
+  --sf-shadow-md: 0 4px 18px rgba(42, 32, 18, 0.08);
+  --sf-shadow-lg: 0 14px 36px rgba(42, 32, 18, 0.12);
 
   /* Brand & actions */
-  --sf-brand: #173f3c;
-  --sf-brand-hover: #1f524e;
-  --sf-brand-muted: #28615d;
+  --sf-brand: #153834;
+  --sf-brand-hover: #1d4a45;
+  --sf-brand-muted: #2a5f5a;
   --sf-primary: #24746a;
   --sf-primary-hover: #1d5f57;
-  --sf-accent: #d88346;
-  --sf-accent-hover: #c86e33;
+  --sf-accent: #c7783a;
+  --sf-accent-hover: #b4642c;
+  --sf-link: var(--sf-primary);
 
   /* Semantic states */
   --sf-success: #1f7a48;
@@ -71,8 +72,17 @@
   /* Focus ring */
   --sf-focus-ring: 0 0 0 3px rgba(36, 116, 106, 0.35);
 
+  /* Paper wash (body background) */
+  --sf-paper-wash:
+    radial-gradient(ellipse 90% 55% at 8% -8%, rgba(255, 250, 242, 0.95), transparent 58%),
+    radial-gradient(ellipse 70% 45% at 100% 0%, rgba(199, 120, 58, 0.08), transparent 52%);
+
   /* Nav (referenced by nav.css) */
   --sf-nav-bg: var(--sf-brand);
+  --sf-nav-bg-top: #1c4641;
   --sf-nav-border: var(--sf-brand-muted);
   --sf-nav-panel-bg: var(--sf-bg-elevated);
+  --sf-nav-text: #f4fbf9;
+  --sf-nav-text-muted: #d7ebe6;
+  --sf-nav-drawer: #102f2c;
 }

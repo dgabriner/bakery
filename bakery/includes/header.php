@@ -9,12 +9,13 @@ $authUser = function_exists('bakery_current_user') ? bakery_current_user() : nul
 $authRoleSlug = $authUser['role_slug'] ?? '';
 $isBakerUser = $authUser && $authRoleSlug === 'baker';
 $isDriverUser = $authUser && bakery_is_driver_route_role($authRoleSlug);
-$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser;
+$isManagerUser = $authUser && $authRoleSlug === 'manager';
+$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser || $isManagerUser;
 $showLocalDebugBanner = defined('IS_LOCAL') && IS_LOCAL && !$isBakerUser;
 $showStagingBanner = defined('IS_STAGING') && IS_STAGING;
 $workspaceBodyClass = $isDriverUser
     ? 'workspace-driver'
-    : ($isBakerUser ? 'workspace-baker' : ($authUser ? 'workspace-ops' : ''));
+    : ($isBakerUser ? 'workspace-baker' : ($isManagerUser ? 'workspace-manager' : ($authUser ? 'workspace-ops' : '')));
 if (!function_exists('bakery_user_can_control_auto_push')) {
     $autoPushControlPath = __DIR__ . '/auto_push_control.php';
     if (is_file($autoPushControlPath)) {
@@ -71,6 +72,9 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     </script>
     <script defer src="<?php echo bakery_asset_href('includes/login_audit.js'); ?>"></script>
     <?php endif; ?>
+    <?php if ($authUser && in_array($authRoleSlug, ['administrator', 'manager'], true)): ?>
+    <script defer src="<?php echo bakery_asset_href('includes/staff_alerts.js'); ?>"></script>
+    <?php endif; ?>
     <script>window.__BAKERY_LOCALE__ = <?php echo json_encode($currentLocale); ?>;     window.__BAKERY_I18N__ = <?php echo json_encode([
         'saving' => bakery_t('common.saving'),
         'loading' => bakery_t('common.loading'),
@@ -111,8 +115,6 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
         <span class="auto-push-slider"></span>
       </label>
       <button type="button" class="auto-push-sync<?php echo $autoPushEnabled ? '' : ' auto-push-sync-emphasis'; ?>" id="auto-push-sync"><?php bakery_te('env.sync_live'); ?></button>
-      <button type="button" class="auto-push-sync" id="auto-push-promote">Promote approved to Live</button>
-      <button type="button" class="auto-push-sync" id="auto-push-direct">Local directly to Live</button>
       <span class="auto-push-status auto-push-status--muted" id="auto-push-status"></span>
     </div>
     <?php endif; ?>
@@ -160,8 +162,6 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
         <span class="auto-push-slider"></span>
       </label>
       <button type="button" class="auto-push-sync<?php echo $autoPushEnabled ? '' : ' auto-push-sync-emphasis'; ?>" id="auto-push-sync"><?php bakery_te('env.sync_live'); ?></button>
-      <button type="button" class="auto-push-sync" id="auto-push-promote-mobile">Promote approved to Live</button>
-      <button type="button" class="auto-push-sync" id="auto-push-direct-mobile">Local directly to Live</button>
       <span class="auto-push-status auto-push-status--muted" id="auto-push-status"></span>
     </div>
     <?php endif; ?>
@@ -182,7 +182,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
   <?php if ($authSelectedDriverId > 0): ?>
   <span class="auth-bar-driver">
     <?php echo htmlspecialchars(bakery_t('role.driving_as')); ?> <strong><?php echo htmlspecialchars($authSelectedDriverName !== '' ? $authSelectedDriverName : ('#' . $authSelectedDriverId)); ?></strong>
-    · <a href="<?php echo htmlspecialchars(BASE_URL); ?>driver.php?change_driver=1" style="color:#7fdbff;"><?php bakery_te('common.change'); ?></a>
+    · <a href="<?php echo htmlspecialchars(BASE_URL); ?>driver.php?change_driver=1"><?php bakery_te('common.change'); ?></a>
   </span>
   <?php endif; ?>
   <?php $langSwitchVariant = 'inline'; require __DIR__ . '/language_switch.php'; ?>

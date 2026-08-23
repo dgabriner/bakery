@@ -224,7 +224,7 @@ function bakery_render_driver_stop_item(
 ): void {
     $status = $stop['delivery_status'] ?? 'pending';
     $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $status : 'pending';
-    $isDone = in_array($status, ['delivered', 'cancelled'], true);
+    $isDone = in_array($status, ['delivered', 'cancelled', 'failed'], true);
     $isPastList = $listKind === 'past';
     $phoneHref = preg_replace('/\D+/', '', bakery_driver_stop_phone($stop));
     $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
@@ -266,6 +266,7 @@ function bakery_render_driver_stop_item(
         data-lat="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
         data-lng="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>"
         data-maps-url="<?php echo htmlspecialchars($mapsHref, ENT_QUOTES, 'UTF-8'); ?>"
+        data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
         data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>">
         <div class="stop-item-main">
             <span class="stop-item-order">#<?php echo $stop['route_order'] ?: '&mdash;'; ?></span>
@@ -483,7 +484,7 @@ if ($selectedDriverId > 0 && $driver) {
             }
 
             $status = $row['delivery_status'] ?? 'pending';
-            if (in_array($status, ['delivered', 'cancelled'], true)) {
+            if (in_array($status, ['delivered', 'cancelled', 'failed'], true)) {
                 $driverCompletedStops++;
             }
 
@@ -539,7 +540,7 @@ $upcomingStops = [];
 $pastStops = [];
 foreach ($orderedStops as $stop) {
     $status = $stop['delivery_status'] ?? 'pending';
-    $isDone = in_array($status, ['delivered', 'cancelled'], true);
+    $isDone = in_array($status, ['delivered', 'cancelled', 'failed'], true);
     if ($isDone) {
         $pastStops[] = $stop;
     } elseif ($nextStop === null) {
@@ -729,14 +730,6 @@ document.body.classList.add('driver-route-prep');
     <?php if (!empty($driverDeskNotice)): ?>
     <p class="exception-desk__reported" role="status"><?php echo htmlspecialchars($driverDeskNotice, ENT_QUOTES, 'UTF-8'); ?></p>
     <?php endif; ?>
-    <?php if ($selectedDate === $todayDate && !$routePrepMode): ?>
-    <a class="route-prep-tomorrow-cta" href="<?php echo htmlspecialchars($prepTomorrowUrl, ENT_QUOTES, 'UTF-8'); ?>">
-        <span class="route-prep-tomorrow-kicker"><?php bakery_te('driver.prep_tomorrow_cta'); ?></span>
-        <strong><?php echo $prepTomorrowCount > 0
-            ? htmlspecialchars(bakery_t('driver.prep_tomorrow_cta_body', ['count' => number_format($prepTomorrowCount)]))
-            : htmlspecialchars(bakery_t('driver.prep_tomorrow_cta_empty')); ?></strong>
-    </a>
-    <?php endif; ?>
     <?php if ($error): ?>
     <div class="empty-state"><p><?php echo $error; ?></p></div>
     <?php elseif ($routePrepMode || $totalStops > 0): ?>
@@ -872,12 +865,14 @@ document.body.classList.add('driver-route-prep');
         <?php endif; ?>
 
         <div class="next-stop-actions">
+            <div class="next-stop-actions-primary">
             <button type="button"
                 class="route-btn route-btn--photo photo-complete-btn"
                 data-driver-id="<?php echo (int)$selectedDriverId; ?>"
                 data-driver-name="<?php echo htmlspecialchars($nextStop['driver_name'] ?? $driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>"
                 data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>"
                 data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.arrival_photo'); ?></button>
@@ -889,6 +884,10 @@ document.body.classList.add('driver-route-prep');
                 data-lng="<?php echo $nextCoords ? htmlspecialchars((string)$nextCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>"
                 target="_blank" rel="noopener"><?php bakery_te('driver.directions'); ?></a>
             <?php endif; ?>
+            </div>
+            <details class="next-stop-more">
+                <summary class="next-stop-more-toggle"><?php bakery_te('driver.more_actions'); ?></summary>
+                <div class="next-stop-more-body">
             <?php if ($phoneHref): ?>
             <a class="route-btn route-btn--call" href="<?php echo htmlspecialchars($phoneHref); ?>"><?php bakery_te('driver.call_store'); ?></a>
             <?php endif; ?>
@@ -904,6 +903,8 @@ document.body.classList.add('driver-route-prep');
             <?php if ($remainingStops > 1): ?>
             <button type="button" class="route-btn route-btn--adjust change-next-btn"><?php bakery_te('driver.adjust_route'); ?></button>
             <?php endif; ?>
+                </div>
+            </details>
         </div>
         <?php echo bakery_exception_desk_driver_fail_form($nextStop, 'driver.php?date=' . rawurlencode($selectedDate)); ?>
 
@@ -1001,7 +1002,7 @@ document.body.classList.add('driver-route-prep');
             <?php
             foreach ($orderedStops as $stop):
                 $status = $stop['delivery_status'] ?? 'pending';
-                if (in_array($status, ['delivered', 'cancelled'], true)) {
+                if (in_array($status, ['delivered', 'cancelled', 'failed'], true)) {
                     continue;
                 }
                 $isNext = $nextStop && (int)$nextStop['daily_order_id'] === (int)$stop['daily_order_id'];
@@ -1199,6 +1200,10 @@ document.body.classList.add('driver-route-prep');
                     <div class="delivery-variance-alert" id="deliveryVarianceAlert" hidden role="alert">
                         <strong><?php bakery_te('driver.variance_title'); ?></strong>
                         <span id="deliveryVarianceText"></span>
+                        <label class="delivery-variance-ack" for="deliveryVarianceAck">
+                            <input type="checkbox" id="deliveryVarianceAck">
+                            <span><?php bakery_te('driver.variance_ack'); ?></span>
+                        </label>
                     </div>
                     <div class="delivery-ordered-ref" id="deliveryOrderedRef" aria-live="polite"></div>
                     <div class="delivery-confirmation-fields">
@@ -1268,7 +1273,8 @@ document.body.classList.add('driver-route-prep');
                 <button type="button" class="btn btn-outline delivery-wizard-back" id="deliveryWizardBackBtn" hidden><?php bakery_te('driver.back'); ?></button>
                 <button type="button" class="btn btn-outline delivery-wizard-skip" id="deliveryWizardSkipBtn"><?php bakery_te('driver.skip_photo'); ?></button>
                 <button type="button" class="btn btn-outline fail-stop-btn" id="deliveryWizardFailBtn"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
-                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.continue'); ?></button>
+                <button type="button" class="btn btn-outline delivery-wizard-review" id="deliveryWizardReviewBtn" hidden><?php bakery_te('driver.review_invoice'); ?></button>
+                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.save_delivery'); ?></button>
             </div>
 
             <div class="delivery-invoice-footer-actions" id="deliveryInvoiceFooterActions" hidden>
@@ -1340,6 +1346,11 @@ document.body.classList.add('driver-route-prep');
                 <button type="button" class="exception-desk__btn" id="failStopCancelBtn"><?php bakery_te('driver.skip_cancel'); ?></button>
                 <button type="submit" class="exception-desk__btn exception-desk__btn--primary" id="failStopConfirmBtn"><?php bakery_te('exception_desk.report'); ?></button>
             </div>
+            <div class="exception-desk__hq-links" id="failStopHqLinks" data-hq-phone="+14155091210" data-store="" data-order-id="">
+                <a class="exception-desk__hq-link" id="failStopCallLink" href="tel:+14155091210"><?php bakery_te('exception_desk.call_hq'); ?></a>
+                <a class="exception-desk__hq-link" id="failStopSmsLink" href="sms:+14155091210"><?php bakery_te('exception_desk.text_hq'); ?></a>
+                <a class="exception-desk__hq-link" id="failStopWaLink" href="https://wa.me/14155091210" target="_blank" rel="noopener"><?php bakery_te('exception_desk.whatsapp_hq'); ?></a>
+            </div>
         </form>
     </div>
 </div>
@@ -1371,6 +1382,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'arrival_saved' => bakery_t('driver.photo_saved_add_departure'),
     'continue' => bakery_t('driver.continue'),
     'review_invoice' => bakery_t('driver.review_invoice'),
+    'save_delivery' => bakery_t('driver.save_delivery'),
+    'variance_ack_needed' => bakery_t('driver.variance_ack_needed'),
+    'saved_leaving_later' => bakery_t('driver.saved_leaving_later'),
+    'more_actions' => bakery_t('driver.more_actions'),
+    'hq_message' => bakery_t('exception_desk.hq_message'),
     'confirm_save' => bakery_t('driver.confirm_save'),
     'delivery_photos' => bakery_t('driver.delivery_photos'),
     'call_store' => bakery_t('driver.call_store'),
@@ -1392,6 +1408,10 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'prep_add_this' => bakery_t('driver.prep_add_this'),
     'prep_take' => bakery_t('driver.prep_take'),
     'prep_take_confirm' => bakery_t('driver.prep_take_confirm'),
+    'prep_ask_manager' => bakery_t('driver.prep_ask_manager'),
+    'prep_take_needs_approval' => bakery_t('driver.prep_take_needs_approval'),
+    'prep_other_routes' => bakery_t('driver.prep_other_routes'),
+    'prep_other_routes_count' => bakery_t('driver.prep_other_routes_count'),
     'prep_remove_confirm' => bakery_t('driver.prep_remove_confirm'),
     'prep_unassigned' => bakery_t('driver.prep_unassigned'),
     'prep_usual' => bakery_t('driver.prep_usual'),
@@ -1750,7 +1770,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     function getActiveStops() {
         return Array.prototype.slice.call(document.querySelectorAll('#stopList .stop-item')).filter(function (el) {
             var status = el.getAttribute('data-status') || '';
-            return status !== 'delivered' && status !== 'cancelled';
+            return status !== 'delivered' && status !== 'cancelled' && status !== 'failed';
         });
     }
 
@@ -1806,8 +1826,10 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             metaParts.push('<span>' + di.pieces_ordered.replace('__COUNT__', escapeHtml(orderedPieces)) + '</span>');
         }
 
+        var assignmentId = stopEl.getAttribute('data-assignment-id') || '0';
         var canAdjust = getActiveStops().length > 1;
         var actions =
+            '<div class="next-stop-actions-primary">' +
             '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' +
             ' data-driver-id="' +
             escapeHtml(driverId) +
@@ -1817,6 +1839,8 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             escapeHtml(customerId) +
             '" data-daily-order-id="' +
             escapeHtml(dailyOrderId) +
+            '" data-assignment-id="' +
+            escapeHtml(assignmentId) +
             '" data-customer-name="' +
             escapeHtml(name) +
             '" data-address="' +
@@ -1835,6 +1859,10 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                   escapeHtml(stopLng) +
                   '" target="_blank" rel="noopener">' + escapeHtml(di.directions) + '</a>'
                 : '') +
+            '</div>' +
+            '<details class="next-stop-more"><summary class="next-stop-more-toggle">' +
+            escapeHtml(di.more_actions || 'More') +
+            '</summary><div class="next-stop-more-body">' +
             (tel ? '<a class="route-btn route-btn--call" href="' + tel + '">' + escapeHtml(di.call_store) + '</a>' : '') +
             '<button type="button" class="route-btn route-btn--skip skip-stop-btn"' +
             ' data-daily-order-id="' +
@@ -1844,11 +1872,13 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
             '">' + escapeHtml(di.skip_stop) + '</button>' +
             '<button type="button" class="route-btn fail-stop-btn"' +
             ' data-daily-order-id="' + escapeHtml(dailyOrderId) +
+            '" data-assignment-id="' + escapeHtml(assignmentId) +
             '" data-customer-name="' + escapeHtml(name) +
-            '">' + escapeHtml(di.cant_deliver || 'Report failed stop') + '</button>' +
+            '">' + escapeHtml(di.cant_deliver || 'Need HQ to recover') + '</button>' +
             (canAdjust
                 ? '<button type="button" class="route-btn route-btn--adjust change-next-btn">' + escapeHtml(di.adjust_route) + '</button>'
-                : '');
+                : '') +
+            '</div></details>';
         card.innerHTML =
             '<p class="next-stop-eyebrow"><span>' + escapeHtml(di.next_stop) +
             (routeOrder ? ' · #' + escapeHtml(routeOrder) : '') +
@@ -1999,7 +2029,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         var actions = stopEl.querySelector('.contact-actions');
         if (!actions) return;
         var status = stopEl.getAttribute('data-status') || 'pending';
-        var isDone = status === 'delivered' || status === 'cancelled';
+        var isDone = status === 'delivered' || status === 'cancelled' || status === 'failed';
         var address = stopEl.getAttribute('data-address') || '';
         var phone = stopEl.getAttribute('data-phone') || '';
         var name = stopEl.getAttribute('data-customer-name') || '';
@@ -2112,7 +2142,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         items.forEach(function (el) {
             var status = el.getAttribute('data-status') || '';
             el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
-            if (status === 'delivered' || status === 'cancelled') {
+            if (status === 'delivered' || status === 'cancelled' || status === 'failed') {
                 moveStopToPastList(el);
                 return;
             }
@@ -2436,10 +2466,10 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                 stop.setAttribute('data-status', 'failed');
                 updateStopStatusBadge(stop, 'failed');
                 rebuildStopContactActions(stop);
+                moveStopToPastList(stop);
             }
             refreshRouteUi();
             showSuccessToast(message || di.fail_success);
-            setTimeout(function () { window.location.reload(); }, 700);
         }
     };
 
@@ -2598,13 +2628,44 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         });
     }
 
-    var failModalState = { dailyOrderId: 0, assignmentId: 0, submitting: false };
+    var failModalState = { dailyOrderId: 0, assignmentId: 0, customerName: '', submitting: false };
+
+    function failHqReasonLabel() {
+        var form = document.getElementById('failStopForm');
+        var checked = form ? form.querySelector('input[name="reason_code"]:checked') : null;
+        if (!checked) return '';
+        var chip = checked.closest('label');
+        var span = chip ? chip.querySelector('span') : null;
+        return (span ? span.textContent : checked.value || '').trim();
+    }
+
+    function updateFailHqLinks() {
+        var wrap = document.getElementById('failStopHqLinks');
+        if (!wrap) return;
+        var phone = wrap.getAttribute('data-hq-phone') || '+14155091210';
+        var digits = phone.replace(/\D+/g, '');
+        var store = failModalState.customerName || '';
+        var orderId = String(failModalState.dailyOrderId || '');
+        var reason = failHqReasonLabel();
+        var message = (di.hq_message || "Can't deliver: :store, order #:id, :reason")
+            .replace(':store', store)
+            .replace(':id', orderId)
+            .replace(':reason', reason);
+        var encoded = encodeURIComponent(message);
+        var callLink = document.getElementById('failStopCallLink');
+        var smsLink = document.getElementById('failStopSmsLink');
+        var waLink = document.getElementById('failStopWaLink');
+        if (callLink) callLink.setAttribute('href', 'tel:' + phone);
+        if (smsLink) smsLink.setAttribute('href', 'sms:' + phone + '?body=' + encoded);
+        if (waLink) waLink.setAttribute('href', 'https://wa.me/' + digits + '?text=' + encoded);
+    }
 
     function openFailStopModal(dailyOrderId, assignmentId, customerName) {
         var modal = document.getElementById('failStopModal');
         if (!modal) return;
         failModalState.dailyOrderId = parseInt(String(dailyOrderId || 0), 10);
         failModalState.assignmentId = parseInt(String(assignmentId || 0), 10);
+        failModalState.customerName = customerName || '';
         failModalState.submitting = false;
         var customerEl = document.getElementById('failStopModalCustomer');
         var orderInput = document.getElementById('failStopOrderId');
@@ -2622,6 +2683,16 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('fail-stop-modal-open');
+        updateFailHqLinks();
+        var form = document.getElementById('failStopForm');
+        if (form && form.getAttribute('data-hq-bound') !== '1') {
+            form.setAttribute('data-hq-bound', '1');
+            form.addEventListener('change', function (event) {
+                if (event.target && event.target.name === 'reason_code') {
+                    updateFailHqLinks();
+                }
+            });
+        }
     }
 
     function closeFailStopModal() {

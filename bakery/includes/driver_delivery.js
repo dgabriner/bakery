@@ -500,10 +500,15 @@
         primaryBtn.classList.remove('has-saved-photo');
       } else if (step === 'delivery') {
         primaryBtn.hidden = false;
-        primaryBtn.textContent = i18n('review_invoice');
+        primaryBtn.textContent = i18n('save_delivery');
         primaryBtn.classList.remove('has-saved-photo');
       }
       primaryBtn.disabled = state.submitting;
+    }
+    var reviewBtn = $('deliveryWizardReviewBtn');
+    if (reviewBtn) {
+      reviewBtn.hidden = step !== 'delivery';
+      reviewBtn.disabled = state.submitting;
     }
 
     if (step === 'delivery') {
@@ -1220,11 +1225,13 @@
       primaryBtn.disabled = isSubmitting;
       primaryBtn.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
       if (isSubmitting && state.currentStep === 'delivery') {
-        primaryBtn.textContent = i18n('loading');
+        primaryBtn.textContent = i18n('saving');
       } else if (state.currentStep === 'delivery') {
-        primaryBtn.textContent = i18n('review_invoice');
+        primaryBtn.textContent = i18n('save_delivery');
       }
     }
+    var reviewBtn = $('deliveryWizardReviewBtn');
+    if (reviewBtn) reviewBtn.disabled = isSubmitting;
     if (confirmBtn) {
       confirmBtn.disabled = isSubmitting;
       confirmBtn.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
@@ -1281,6 +1288,8 @@
     } else {
       alertEl.hidden = true;
       if (textEl) textEl.textContent = '';
+      var ack = $('deliveryVarianceAck');
+      if (ack) ack.checked = false;
     }
   }
 
@@ -1612,11 +1621,14 @@
     }
 
     if (!skipVarianceCheck && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
-      showVarianceConfirm(pieces, function () {
-        hideVarianceConfirm();
-        confirmDelivery(true);
-      });
-      return;
+      var ack = $('deliveryVarianceAck');
+      if (!ack || !ack.checked) {
+        var alertEl = $('deliveryVarianceAlert');
+        if (alertEl) alertEl.hidden = false;
+        setStatus(i18n('variance_ack_needed'), 'error');
+        if (ack) ack.focus();
+        return;
+      }
     }
     hideVarianceConfirm();
 
@@ -1671,13 +1683,9 @@
       state.completionMessage = successMessage;
       state.savedTotal = Number(data.total || 0);
       state.isSaved = true;
-      state.photoReturnStep = 'complete';
+      state.photoReturnStep = null;
       setSubmitting(false);
-      var typeSelect = $('deliveryPhotoType');
-      if (typeSelect) typeSelect.value = 'After';
-      goToStep('photo');
-      updatePhotoWorkflowUi(false);
-      setStatus(i18n('departure_guidance'), 'success');
+      finishDeliveryUi(i18n('saved_leaving_later') || successMessage);
     } catch (err) {
       if (err && err.isSessionError) {
         setStatus(err.message, 'error');
@@ -1719,6 +1727,7 @@
     if (photoModal) {
       photoModal.setAttribute('data-daily-order-id', String(state.dailyOrderId || 0));
       photoModal.setAttribute('data-customer-name', state.customerName || '');
+      photoModal.setAttribute('data-assignment-id', String(opts.assignmentId || 0));
     }
     state.blob = null;
     state.preparing = false;
@@ -1740,6 +1749,8 @@
     state.submitting = false;
     state.currentStep = 'photo';
     state.pendingVarianceConfirm = null;
+    var varianceAck = $('deliveryVarianceAck');
+    if (varianceAck) varianceAck.checked = false;
     state.confirmationSaved = false;
     state.completionMessage = '';
     state.stopFinished = false;
@@ -1941,6 +1952,7 @@
       customerName: btn.getAttribute('data-customer-name') || '',
       address: btn.getAttribute('data-address') || (btn.closest('.stop-item') && btn.closest('.stop-item').getAttribute('data-address')) || '',
       date: btn.getAttribute('data-date') || '',
+      assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
       startStep: btn.getAttribute('data-start-step') || 'photo',
       autoOpenCamera: true
@@ -1980,9 +1992,16 @@
       if (state.currentStep === 'photo') {
         goToStep('delivery');
       } else if (state.currentStep === 'delivery') {
-        populateInvoicePreview();
+        confirmDelivery(false);
       }
     });
+    var reviewBtn = $('deliveryWizardReviewBtn');
+    if (reviewBtn) {
+      reviewBtn.addEventListener('click', function () {
+        if (state.submitting) return;
+        populateInvoicePreview();
+      });
+    }
     $('deliveryWizardBackBtn').addEventListener('click', function () {
       if (state.submitting) return;
       if (state.currentStep === 'delivery') goToStep('photo');

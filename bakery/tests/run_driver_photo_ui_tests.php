@@ -274,9 +274,19 @@ foreach ([
     'driver.prep_title',
     'driver.prep_add',
     'driver.prep_remove',
+    'driver.prep_other_routes',
+    'driver.prep_take',
+    'driver.prep_added_standard',
     'driver.prep_edit_route',
     'driver.prep_tomorrow_cta',
     'nav.tomorrow_route',
+    'nav.more',
+    'driver.more_actions',
+    'driver.save_delivery',
+    'driver.variance_ack',
+    'driver.saved_leaving_later',
+    'exception_desk.call_hq',
+    'exception_desk.hq_message',
 ] as $key) {
     driver_photo_assert(
         "route prep translation exists in English and Spanish: {$key}",
@@ -308,16 +318,48 @@ driver_photo_assert(
 
 $prepHelpers = (string)file_get_contents($root . '/includes/driver_assignments.php');
 $prepSearch = (string)file_get_contents($root . '/includes/driver_route_prep.php');
+$mutations = (string)file_get_contents($root . '/includes/customer_order_mutations.php');
 driver_photo_assert(
     'drivers can add and unassign dated stops without rewriting standing',
     strpos($prepHelpers, 'function bakery_driver_plan_add_stop') !== false
         && strpos($prepHelpers, 'function bakery_driver_assert_route_plan_edit') !== false
         && strpos($prepHelpers, "'driver', 'driver_assistant'") !== false
         && strpos($prepSearch, 'function bakery_driver_plan_search') !== false
+        && strpos($prepSearch, 'function bakery_driver_plan_other_routes') !== false
+        && strpos($prepHelpers, 'function bakery_driver_plan_take_policy') !== false
+        && strpos($prepHelpers, 'function bakery_driver_plan_take_is_approved') !== false
+        && strpos($prepScript, 'route-prep-other-routes') !== false
+        && strpos($prepScript, 'take_needs_approval') !== false
+        && strpos($mutations, 'function bakery_customer_fill_empty_dated_order_from_standard') !== false
         && strpos($deliveryHandler, "case 'plan_add_stop':") !== false
         && strpos($deliveryHandler, "case 'plan_remove_stop':") !== false
         && strpos($prepScript, 'plan_add_stop') !== false
         && strpos($prepScript, 'plan_remove_stop') !== false
+);
+
+driver_photo_assert(
+    'My Route puts the next stop above the map on phones',
+    strpos($styles, '.route-dashboard:not(.route-dashboard--prep) .route-primary-column') !== false
+        && strpos($styles, 'display: contents;') !== false
+        && strpos($styles, '.route-section-next,') !== false
+        && strpos($page, 'class="next-stop-actions-primary"') !== false
+        && strpos($page, 'class="next-stop-more"') !== false
+        && strpos($page, 'route-prep-tomorrow-cta') === false
+);
+driver_photo_assert(
+    'happy-path confirm saves from the quantity step without a forced leave photo',
+    strpos($page, 'id="deliveryWizardReviewBtn"') !== false
+        && strpos($page, 'id="deliveryVarianceAck"') !== false
+        && strpos($script, "primaryBtn.textContent = i18n('save_delivery')") !== false
+        && strpos($script, "finishDeliveryUi(i18n('saved_leaving_later')") !== false
+        && strpos($script, "state.photoReturnStep = 'complete'") === false
+);
+driver_photo_assert(
+    'failed stops update live and include HQ contact links',
+    strpos($page, 'id="failStopHqLinks"') !== false
+        && strpos($page, 'id="failStopWaLink"') !== false
+        && strpos($page, 'function updateFailHqLinks()') !== false
+        && strpos($page, "setTimeout(function () { window.location.reload(); }, 700);") === false
 );
 
 exit($failures > 0 ? 1 : 0);

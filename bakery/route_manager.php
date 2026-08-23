@@ -5,6 +5,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
 require_once 'includes/route_manager.php';
+require_once 'includes/driver_assignments.php';
 
 // Handle AJAX request for delivery photos
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'get_delivery_photos') {
@@ -55,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit;
     }
     if (!is_array($orderIds) || count($orderIds) === 0) {
-        echo json_encode(['success' => false, 'error' => 'order_ids must be a non-empty array']);
+        echo json_encode(['success' => false, 'error' => 'order_ids must contain the remaining stops']);
         exit;
     }
 
@@ -68,60 +69,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     try {
-        // Require a complete ordered list of this driver's stops for the date
-        $checkStmt = $db->prepare("
-            SELECT daily_order_id
-            FROM daily_order_assignments
-            WHERE driver_id = ?
-              AND delivery_date = ?
-        ");
-        $checkStmt->execute([$driverId, $date]);
-        $assigned = array_map('intval', $checkStmt->fetchAll(PDO::FETCH_COLUMN));
-        $assignedSorted = $assigned;
-        $submittedSorted = $orderIds;
-        sort($assignedSorted);
-        sort($submittedSorted);
-        if ($assignedSorted !== $submittedSorted) {
-            echo json_encode([
-                'success' => false,
-                'error' => 'Route changed since last load — refresh and try again',
-            ]);
-            exit;
-        }
-
-        $db->beginTransaction();
-
-        // Two-phase update avoids unique (driver, date, route_order) collisions if present
-        $tempStmt = $db->prepare("
-            UPDATE daily_order_assignments
-            SET route_order = ?
-            WHERE daily_order_id = ?
-              AND driver_id = ?
-              AND delivery_date = ?
-        ");
-        foreach ($orderIds as $index => $dailyOrderId) {
-            $tempStmt->execute([1000 + $index, $dailyOrderId, $driverId, $date]);
-        }
-
-        $finalStmt = $db->prepare("
-            UPDATE daily_order_assignments
-            SET route_order = ?
-            WHERE daily_order_id = ?
-              AND driver_id = ?
-              AND delivery_date = ?
-        ");
-        foreach ($orderIds as $index => $dailyOrderId) {
-            $finalStmt->execute([$index + 1, $dailyOrderId, $driverId, $date]);
-        }
-
-        $db->commit();
+        $result = bakery_driver_reorder_remaining_stops($db, $driverId, $date, $orderIds);
 
         echo json_encode([
             'success' => true,
             'message' => 'Route order updated',
             'driver_id' => $driverId,
             'date' => $date,
-            'order_ids' => $orderIds,
+            'order_ids' => array_column($result['stops'], 'daily_order_id'),
+            'stops' => $result['stops'],
         ]);
     } catch (Exception $e) {
         if ($db->inTransaction()) {
@@ -500,6 +456,10 @@ let infoWindow;
 let pendingGeocode = 0;
 let reorderSaveTimer = null;
 let didDragStop = false;
+let deliveriesRequestSeq = 0;
+let trackingRequestSeq = 0;
+let deliveriesAbortController = null;
+let trackingAbortController = null;
 
 function initMap() {
     const mapEl = document.getElementById('route-map');
@@ -550,9 +510,15 @@ function formatTime(value) {
     return hours + ':' + minutes + ' ' + ampm;
 }
 
-function loadDeliveries() {
+function loadDeliveries(options) {
+    const background = options && options.background === true;
     const selectedDate = document.getElementById('tracking-date').value;
     const selectedDrivers = getSelectedDrivers();
+    const selectedDriversKey = selectedDrivers.slice().sort((a, b) => a - b).join(',');
+    const requestSeq = ++deliveriesRequestSeq;
+
+    if (deliveriesAbortController) deliveriesAbortController.abort();
+    deliveriesAbortController = typeof AbortController === 'function' ? new AbortController() : null;
 
     if (selectedDrivers.length === 0) {
         driversData = {};
@@ -573,6 +539,7 @@ function loadDeliveries() {
     fetch(window.location.pathname + window.location.search, {
         method: 'POST',
         body: formData,
+        signal: deliveriesAbortController ? deliveriesAbortController.signal : undefined,
         headers: {
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
@@ -586,6 +553,12 @@ function loadDeliveries() {
         return data;
     })
     .then(data => {
+        const currentDriversKey = getSelectedDrivers().slice().sort((a, b) => a - b).join(',');
+        if (requestSeq !== deliveriesRequestSeq
+            || document.getElementById('tracking-date').value !== selectedDate
+            || currentDriversKey !== selectedDriversKey) {
+            return;
+        }
         if (data.success) {
             driversData = data.data || {};
             updateMap();
@@ -594,21 +567,30 @@ function loadDeliveries() {
             updateDeliveryList();
             updateLastRefreshTime();
             // GPS history is always useful context; map trails remain an opt-in overlay.
-            loadTrackingOverlay();
+            loadTrackingOverlay({ background: background });
         } else {
             console.error('Failed to load deliveries:', data.error);
-            showError('Failed to load deliveries: ' + (data.error || 'Unknown error'));
+            if (!background) showError('Failed to load deliveries: ' + (data.error || 'Unknown error'));
         }
     })
     .catch(error => {
+        if ((error && error.name === 'AbortError') || requestSeq !== deliveriesRequestSeq) return;
         console.error('Error loading deliveries:', error);
-        showError('Network error loading deliveries' + (error && error.message ? ': ' + error.message : ''));
+        if (!background) {
+            showError('Network error loading deliveries' + (error && error.message ? ': ' + error.message : ''));
+        }
     });
 }
 
-function loadTrackingOverlay() {
+function loadTrackingOverlay(options) {
+    const background = options && options.background === true;
     const selectedDate = document.getElementById('tracking-date').value;
     const selectedDrivers = getSelectedDrivers();
+    const selectedDriversKey = selectedDrivers.slice().sort((a, b) => a - b).join(',');
+    const requestSeq = ++trackingRequestSeq;
+
+    if (trackingAbortController) trackingAbortController.abort();
+    trackingAbortController = typeof AbortController === 'function' ? new AbortController() : null;
 
     const formData = new FormData();
     formData.append('action', 'get_tracking_data');
@@ -618,6 +600,7 @@ function loadTrackingOverlay() {
     fetch(window.location.pathname + window.location.search, {
         method: 'POST',
         body: formData,
+        signal: trackingAbortController ? trackingAbortController.signal : undefined,
         headers: {
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
@@ -625,6 +608,12 @@ function loadTrackingOverlay() {
     })
     .then(response => response.json())
     .then(data => {
+        const currentDriversKey = getSelectedDrivers().slice().sort((a, b) => a - b).join(',');
+        if (requestSeq !== trackingRequestSeq
+            || document.getElementById('tracking-date').value !== selectedDate
+            || currentDriversKey !== selectedDriversKey) {
+            return;
+        }
         clearTrackingPaths();
         renderGpsActivity(data && data.success ? data.data : {});
         if (!map || !data.success || !data.data || !document.getElementById('show-tracking').checked) return;
@@ -644,8 +633,9 @@ function loadTrackingOverlay() {
         });
     })
     .catch(err => {
+        if ((err && err.name === 'AbortError') || requestSeq !== trackingRequestSeq) return;
         console.warn('Tracking overlay failed:', err);
-        renderGpsActivity({});
+        if (!background) renderGpsActivity({});
     });
 }
 
@@ -923,6 +913,7 @@ function updateDeliveryList() {
         const stopRows = stops.map((d, stopIndex) => {
             const status = statusLabels[d.delivery_status] || d.delivery_status;
             const isDelivered = d.delivery_status === 'delivered';
+            const isRouteLocked = ['delivered', 'cancelled', 'in_transit'].includes(d.delivery_status);
             const photoCount = d.photo_count || 0;
             const isFirst = stopIndex === 0;
             const isLast = stopIndex === stops.length - 1;
@@ -947,10 +938,10 @@ function updateDeliveryList() {
                     data-order-id="${d.daily_order_id}"
                     data-customer-id="${d.customer_id}"
                     data-status="${escapeHtml(d.delivery_status)}"
-                    draggable="true"
+                    draggable="${isRouteLocked ? 'false' : 'true'}"
                     tabindex="0"
-                    title="Move with ↑ ↓ · Tap to view stop details">
-                    <span class="drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+                    title="${isRouteLocked ? 'This stop is locked in route history' : 'Move with ↑ ↓ · Tap to view stop details'}">
+                    ${isRouteLocked ? '' : '<span class="drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>'}
                     <div class="stop-order">${d.route_order > 0 ? d.route_order : '—'}</div>
                     <div class="stop-body">
                         <div class="stop-name">
@@ -973,11 +964,11 @@ function updateDeliveryList() {
                         <button type="button" class="stop-move-btn" data-move="up"
                             aria-label="Move stop up"
                             title="Move up"
-                            ${isFirst ? 'disabled' : ''}>↑</button>
+                            ${isRouteLocked || isFirst ? 'disabled' : ''}>↑</button>
                         <button type="button" class="stop-move-btn" data-move="down"
                             aria-label="Move stop down"
                             title="Move down"
-                            ${isLast ? 'disabled' : ''}>↓</button>
+                            ${isRouteLocked || isLast ? 'disabled' : ''}>↓</button>
                     </div>
                 </li>
             `;
@@ -1067,7 +1058,7 @@ function updateDeliveryList() {
 }
 
 function moveStopInList(routeList, item, delta) {
-    const items = Array.from(routeList.querySelectorAll('.delivery-stop'));
+    const items = Array.from(routeList.querySelectorAll('.delivery-stop')).filter(isMovableRouteItem);
     const fromIndex = items.indexOf(item);
     if (fromIndex < 0) return;
 
@@ -1088,13 +1079,21 @@ function moveStopInList(routeList, item, delta) {
 }
 
 function updateMoveButtons(routeList) {
-    const items = Array.from(routeList.querySelectorAll('.delivery-stop'));
+    const allItems = Array.from(routeList.querySelectorAll('.delivery-stop'));
+    const items = allItems.filter(isMovableRouteItem);
+    allItems.filter(item => !isMovableRouteItem(item)).forEach(item => {
+        item.querySelectorAll('.stop-move-btn').forEach(btn => { btn.disabled = true; });
+    });
     items.forEach((item, index) => {
         const upBtn = item.querySelector('.stop-move-btn[data-move="up"]');
         const downBtn = item.querySelector('.stop-move-btn[data-move="down"]');
         if (upBtn) upBtn.disabled = index === 0;
         if (downBtn) downBtn.disabled = index === items.length - 1;
     });
+}
+
+function isMovableRouteItem(item) {
+    return item && !['delivered', 'cancelled', 'in_transit'].includes(item.dataset.status || 'pending');
 }
 
 function setReorderStatus(message, tone) {
@@ -1114,8 +1113,13 @@ function setupDeliveryListDragAndDrop() {
 
     document.querySelectorAll('.delivery-stops').forEach(routeList => {
         let draggedItem = null;
+        updateMoveButtons(routeList);
 
         routeList.querySelectorAll('.delivery-stop').forEach(item => {
+            if (!isMovableRouteItem(item)) {
+                item.draggable = false;
+                return;
+            }
             // On phones/tablets, use ↑ ↓ buttons only — native drag fights with scrolling
             if (touchMode) {
                 item.draggable = false;
@@ -1141,11 +1145,13 @@ function setupDeliveryListDragAndDrop() {
             });
 
             item.addEventListener('dragover', function(e) {
+                if (!isMovableRouteItem(this)) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
             });
 
             item.addEventListener('dragenter', function(e) {
+                if (!isMovableRouteItem(this)) return;
                 e.preventDefault();
                 if (draggedItem && draggedItem !== this && draggedItem.parentNode === this.parentNode) {
                     this.classList.add('drag-over');
@@ -1182,7 +1188,7 @@ function setupDeliveryListDragAndDrop() {
 function applyRouteOrderFromList(routeList) {
     const driverId = routeList.dataset.driverId;
     const items = Array.from(routeList.querySelectorAll('.delivery-stop'));
-    const orderIds = items.map(item => parseInt(item.dataset.orderId, 10));
+    const orderIds = items.filter(isMovableRouteItem).map(item => parseInt(item.dataset.orderId, 10));
 
     items.forEach((item, index) => {
         const orderEl = item.querySelector('.stop-order');
@@ -1622,9 +1628,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Keep the manager's activity feed current without interrupting route planning.
+    // Keep delivery, COD, photo, and GPS state current without interrupting an edit.
     window.setInterval(function() {
-        if (!document.hidden) loadTrackingOverlay();
+        if (document.hidden
+            || document.querySelector('.delivery-stop.dragging')
+            || document.querySelector('#reorder-status.is-saving')) return;
+        loadDeliveries({ background: true });
     }, 60000);
 
     const photosClose = document.getElementById('deliveryPhotosModalClose');

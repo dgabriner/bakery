@@ -159,6 +159,10 @@ route_summary_assert('page links back to the Route Manager board', strpos($page,
 route_summary_assert('lightbox script is present', strpos($js, 'rsLightbox') !== false);
 route_summary_assert('Route Manager links to Route Summary', strpos($managerPage, 'route_summary.php?date=') !== false);
 route_summary_assert('Route Manager uses the shared include', strpos($managerPage, "require_once 'includes/route_manager.php'") !== false);
+route_summary_assert('Route Manager reorders through the canonical helper', strpos($managerPage, 'bakery_driver_reorder_remaining_stops') !== false);
+route_summary_assert('Route Manager no longer rewrites route_order directly', strpos($managerPage, 'SET route_order = ?') === false);
+route_summary_assert('Route Manager ignores stale async responses', strpos($managerPage, 'deliveriesRequestSeq') !== false && strpos($managerPage, 'trackingRequestSeq') !== false);
+route_summary_assert('Route Manager background refreshes delivery state', strpos($managerPage, 'loadDeliveries({ background: true })') !== false);
 
 $requiredKeys = [
     'page.route_summary',

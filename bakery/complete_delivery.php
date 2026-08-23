@@ -19,6 +19,7 @@ require_once __DIR__ . '/includes/customer_notifications.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/driver_route_prep.php';
 require_once __DIR__ . '/includes/delivery_recovery.php';
+require_once __DIR__ . '/includes/delivery_skip.php';
 
 if (PHP_SAPI !== 'cli') {
     header('Content-Type: application/json');
@@ -30,139 +31,6 @@ if (PHP_SAPI !== 'cli') {
  * Mark assignment and parent daily_order as delivered in one transaction.
  * Safe to call when caller already holds an open transaction.
  */
-/**
- * Mark an assignment stop as skipped (cancelled) with a required reason.
- */
-function bakery_skip_delivery_stop(PDO $db, int $dailyOrderId, string $reason): void {
-    $reason = trim($reason);
-    if ($reason === '') {
-        throw new Exception('A reason is required to skip this stop');
-    }
-    if (strlen($reason) > 500) {
-        throw new Exception('Skip reason must be 500 characters or fewer');
-    }
-
-    $checkStmt = $db->prepare(
-        'SELECT doa.id, doa.delivery_status
-         FROM daily_order_assignments doa
-         WHERE doa.daily_order_id = ?
-         ORDER BY doa.id DESC
-         LIMIT 1'
-    );
-    $checkStmt->execute([$dailyOrderId]);
-    $assignment = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    if (!$assignment) {
-        throw new Exception('Stop not found on any route');
-    }
-
-    $currentStatus = (string)($assignment['delivery_status'] ?? 'pending');
-    if (in_array($currentStatus, ['delivered', 'cancelled'], true)) {
-        throw new Exception('This stop has already been completed or skipped');
-    }
-
-    $skipNote = 'Skipped: ' . $reason;
-    $hasNotesColumn = function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes');
-
-    if ($hasNotesColumn) {
-        $notesStmt = $db->prepare('SELECT notes FROM daily_order_assignments WHERE id = ?');
-        $notesStmt->execute([(int)$assignment['id']]);
-        $existingNotes = trim((string)($notesStmt->fetchColumn() ?: ''));
-        $combinedNotes = $existingNotes !== '' ? $existingNotes . "\n" . $skipNote : $skipNote;
-        $updateStmt = $db->prepare(
-            "UPDATE daily_order_assignments
-             SET delivery_status = 'cancelled', notes = ?
-             WHERE id = ?"
-        );
-        $updateStmt->execute([$combinedNotes, (int)$assignment['id']]);
-    } else {
-        $updateStmt = $db->prepare(
-            "UPDATE daily_order_assignments
-             SET delivery_status = 'cancelled'
-             WHERE id = ?"
-        );
-        $updateStmt->execute([(int)$assignment['id']]);
-    }
-
-    if ($updateStmt->rowCount() === 0) {
-        throw new Exception('Could not skip this stop');
-    }
-
-    $ctx = bakery_operational_order_context($db, $dailyOrderId);
-    if ($ctx) {
-        bakery_record_operational_event($db, BAKERY_OP_DELIVERY_SKIPPED, 'Skipped delivery to ' . $ctx['customer_name'], [
-            'operational_date' => $ctx['order_date'],
-            'customer_id' => (int)$ctx['customer_id'],
-            'daily_order_id' => $dailyOrderId,
-            'assignment_id' => $ctx['assignment_id'] !== null ? (int)$ctx['assignment_id'] : null,
-            'driver_id' => $ctx['driver_id'] !== null ? (int)$ctx['driver_id'] : bakery_operational_driver_id(),
-            'metadata' => ['reason' => $reason],
-        ]);
-    }
-}
-
-/**
- * Restore a skipped (cancelled) stop back to pending on the driver's route.
- */
-function bakery_unskip_delivery_stop(PDO $db, int $dailyOrderId): void {
-    $checkStmt = $db->prepare(
-        'SELECT doa.id, doa.delivery_status
-         FROM daily_order_assignments doa
-         WHERE doa.daily_order_id = ?
-         ORDER BY doa.id DESC
-         LIMIT 1'
-    );
-    $checkStmt->execute([$dailyOrderId]);
-    $assignment = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    if (!$assignment) {
-        throw new Exception('Stop not found on any route');
-    }
-
-    $currentStatus = (string)($assignment['delivery_status'] ?? 'pending');
-    if ($currentStatus !== 'cancelled') {
-        throw new Exception('Only skipped stops can be restored');
-    }
-
-    $restoreNote = 'Restored to route by driver';
-    $hasNotesColumn = function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes');
-
-    if ($hasNotesColumn) {
-        $notesStmt = $db->prepare('SELECT notes FROM daily_order_assignments WHERE id = ?');
-        $notesStmt->execute([(int)$assignment['id']]);
-        $existingNotes = trim((string)($notesStmt->fetchColumn() ?: ''));
-        $combinedNotes = $existingNotes !== '' ? $existingNotes . "\n" . $restoreNote : $restoreNote;
-        $updateStmt = $db->prepare(
-            "UPDATE daily_order_assignments
-             SET delivery_status = 'pending', notes = ?
-             WHERE id = ?"
-        );
-        $updateStmt->execute([$combinedNotes, (int)$assignment['id']]);
-    } else {
-        $updateStmt = $db->prepare(
-            "UPDATE daily_order_assignments
-             SET delivery_status = 'pending'
-             WHERE id = ?"
-        );
-        $updateStmt->execute([(int)$assignment['id']]);
-    }
-
-    $verifyStmt = $db->prepare('SELECT delivery_status FROM daily_order_assignments WHERE id = ?');
-    $verifyStmt->execute([(int)$assignment['id']]);
-    if ((string)($verifyStmt->fetchColumn() ?: '') !== 'pending') {
-        throw new Exception('Could not restore this stop');
-    }
-
-    $ctx = bakery_operational_order_context($db, $dailyOrderId);
-    if ($ctx) {
-        bakery_record_operational_event($db, BAKERY_OP_DELIVERY_UNSKIPPED, 'Restored skipped stop for ' . $ctx['customer_name'], [
-            'operational_date' => $ctx['order_date'],
-            'customer_id' => (int)$ctx['customer_id'],
-            'daily_order_id' => $dailyOrderId,
-            'assignment_id' => $ctx['assignment_id'] !== null ? (int)$ctx['assignment_id'] : null,
-            'driver_id' => $ctx['driver_id'] !== null ? (int)$ctx['driver_id'] : bakery_operational_driver_id(),
-        ]);
-    }
-}
-
 function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId): void {
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
@@ -836,37 +704,6 @@ try {
             ]);
             break;
 
-        case 'mark_delivered':
-            if (!isset($_POST['daily_order_id'])) {
-                throw new Exception('Daily order ID is required');
-            }
-            $dailyOrderId = (int)$_POST['daily_order_id'];
-            bakery_delivery_assert_driver_access($db, $dailyOrderId);
-            bakery_mark_delivery_delivered($db, $dailyOrderId);
-
-            $ctx = bakery_operational_order_context($db, $dailyOrderId);
-            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
-            $user = bakery_current_user();
-            $actorName = $user['display_name'] ?? 'Driver';
-            bakery_operational_log_delivery(
-                $db,
-                BAKERY_OP_DELIVERY_MARKED,
-                $dailyOrderId,
-                $actorName . ' marked delivery complete for ' . ($ctx['customer_name'] ?? 'customer'),
-                [
-                    'ordered_pieces' => $invoice['ordered_pieces'],
-                    'delivered_pieces' => $invoice['ordered_pieces'],
-                    'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
-                ],
-                bakery_delivery_gps_payload($_POST)
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Delivery marked as completed successfully'
-            ]);
-            break;
-
         case 'skip_stop':
             if (!isset($_POST['daily_order_id'])) {
                 throw new Exception('Daily order ID is required');
@@ -952,6 +789,9 @@ try {
                 'unassigned' => $found['unassigned'],
                 'usual' => $found['usual'],
                 'matches' => $found['matches'],
+                'other_routes' => $found['other_routes'],
+                'other_route_count' => $found['other_route_count'],
+                'take_approval' => $found['take_approval'],
             ]);
             break;
 
@@ -971,6 +811,9 @@ try {
                 'daily_order_id' => $added['daily_order_id'],
                 'other_driver_name' => $added['other_driver_name'],
                 'taken_from_other' => $added['taken_from_other'],
+                'filled_standard' => !empty($added['filled_standard']),
+                'filled_standard_source' => $added['filled_standard_source'] ?? 'none',
+                'take_approval' => $added['take_approval'] ?? bakery_driver_plan_take_policy($db),
             ]);
             break;
 
@@ -984,140 +827,6 @@ try {
                 'message' => function_exists('bakery_t')
                     ? bakery_t('driver.prep_removed')
                     : 'Stop removed from your route.',
-            ]);
-            break;
-
-        case 'get_order_items':
-            if (!isset($_POST['daily_order_id'])) {
-                throw new Exception('Daily order ID is required');
-            }
-            $dailyOrderId = (int)$_POST['daily_order_id'];
-            bakery_delivery_assert_driver_access($db, $dailyOrderId);
-
-            $orderStmt = $db->prepare(
-                "SELECT do.id, c.name AS customer_name
-                 FROM daily_orders do
-                 JOIN customers c ON c.id = do.customer_id
-                 WHERE do.id = ?"
-            );
-            $orderStmt->execute([$dailyOrderId]);
-            $order = $orderStmt->fetch();
-            if (!$order) {
-                throw new Exception('Order not found');
-            }
-
-            $stmt = $db->prepare(
-                "SELECT doi.id, doi.quantity, doi.unit_price, doi.line_total, p.name AS product_name
-                 FROM daily_order_items doi
-                 JOIN products p ON p.id = doi.product_id
-                 WHERE doi.daily_order_id = ?
-                 ORDER BY p.name"
-            );
-            $stmt->execute([$dailyOrderId]);
-            $items = $stmt->fetchAll();
-
-            $html = '<div style="padding: 10px;">';
-            $html .= '<h3 style="margin-top:0;">Modify Order — ' . htmlspecialchars($order['customer_name']) . '</h3>';
-            $html .= '<form id="modify-order-form">';
-            if (empty($items)) {
-                $html .= '<p>No items on this order.</p>';
-            } else {
-                foreach ($items as $item) {
-                    $html .= '<div style="margin-bottom:12px;">';
-                    $html .= '<label style="display:block;font-weight:600;">' .
-                        htmlspecialchars($item['product_name']) .
-                        ' <span style="font-weight:400;color:#666;">($' .
-                        number_format((float)$item['unit_price'], 2) . ')</span></label>';
-                    $html .= '<input type="number" min="0" step="1" name="quantity_' . (int)$item['id'] . '" value="' .
-                        (int)$item['quantity'] . '" style="width:100%;padding:8px;">';
-                    $html .= '</div>';
-                }
-            }
-            $html .= '</form>';
-            $html .= '<div style="display:flex;gap:8px;margin-top:16px;">';
-            $html .= '<button type="button" onclick="saveModifiedOrder()" style="flex:1;padding:10px;background:#28a745;color:#fff;border:none;border-radius:4px;">Save & Deliver</button>';
-            $html .= '<button type="button" onclick="closeCompleteDeliveryModal()" style="flex:1;padding:10px;background:#6c757d;color:#fff;border:none;border-radius:4px;">Cancel</button>';
-            $html .= '</div></div>';
-
-            echo json_encode(['success' => true, 'html' => $html, 'items' => $items]);
-            break;
-
-        case 'update_order_and_deliver':
-            if (!isset($_POST['daily_order_id'])) {
-                throw new Exception('Daily order ID is required');
-            }
-            if (!isset($_POST['updates'])) {
-                throw new Exception('Updates are required');
-            }
-
-            $dailyOrderId = (int)$_POST['daily_order_id'];
-            bakery_delivery_assert_driver_access($db, $dailyOrderId);
-            $updates = json_decode($_POST['updates'], true);
-            if (!is_array($updates)) {
-                throw new Exception('Invalid updates payload');
-            }
-
-            $db->beginTransaction();
-
-            foreach ($updates as $itemId => $quantity) {
-                $itemId = (int)$itemId;
-                $quantity = (int)$quantity;
-                if ($quantity < 0) {
-                    throw new Exception('Delivered quantity cannot be negative');
-                }
-                $upd = $db->prepare(
-                    'UPDATE daily_order_items
-                     SET delivered_quantity = ?, line_total = (? * unit_price)
-                     WHERE id = ? AND daily_order_id = ?'
-                );
-                $upd->execute([$quantity, $quantity, $itemId, $dailyOrderId]);
-            }
-
-            $sum = $db->prepare(
-                'SELECT COALESCE(SUM(delivered_quantity), 0),
-                        COALESCE(SUM(line_total), 0)
-                 FROM daily_order_items WHERE daily_order_id = ?'
-            );
-            $sum->execute([$dailyOrderId]);
-            $totals = $sum->fetch(PDO::FETCH_NUM);
-            $deliveredPieces = (int)($totals[0] ?? 0);
-            $orderTotal = round((float)($totals[1] ?? 0), 2);
-
-            $tot = $db->prepare(
-                'UPDATE daily_orders
-                 SET total_amount = ?, delivered_pieces = ?, delivery_order_total = ?,
-                     delivery_confirmed_at = NOW()
-                 WHERE id = ?'
-            );
-            $tot->execute([$orderTotal, $deliveredPieces, $orderTotal, $dailyOrderId]);
-
-            bakery_mark_delivery_delivered($db, $dailyOrderId);
-
-            $db->commit();
-
-            $ctx = bakery_operational_order_context($db, $dailyOrderId);
-            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
-            $user = bakery_current_user();
-            $actorName = $user['display_name'] ?? 'Driver';
-            bakery_operational_log_delivery(
-                $db,
-                BAKERY_OP_DELIVERY_MODIFIED,
-                $dailyOrderId,
-                $actorName . ' modified order and delivered to ' . ($ctx['customer_name'] ?? 'customer'),
-                [
-                    'ordered_pieces' => $invoice['ordered_pieces'],
-                    'delivered_pieces' => $deliveredPieces,
-                    'total' => $orderTotal,
-                    'updates' => $updates,
-                    'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
-                ],
-                bakery_delivery_gps_payload($_POST)
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Order updated and delivery completed',
-                'total' => $orderTotal
             ]);
             break;
 
