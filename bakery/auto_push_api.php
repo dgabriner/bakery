@@ -100,7 +100,20 @@ try {
             }
             $result = bakery_auto_push_run_live_promotion($action === 'direct_live');
             if (!$result['ok']) http_response_code(500);
-            echo json_encode($result + ['message' => $result['ok'] ? 'Live promotion complete' : 'Live promotion failed']);
+            $message = 'Live promotion failed';
+            if (!empty($result['ok'])) {
+                $out = (string)($result['output'] ?? '');
+                if (preg_match('/Uploading (\d+) changed file/', $out, $m)) {
+                    $message = 'Live promotion complete: uploaded ' . $m[1] . ' changed file(s)';
+                } elseif (stripos($out, 'already matches this candidate') !== false) {
+                    $message = 'Live already matches this release; no files uploaded';
+                } else {
+                    $message = 'Live promotion complete';
+                }
+            } else {
+                $message = bakery_auto_push_live_fail_message($result['output'] ?? '');
+            }
+            echo json_encode($result + ['message' => $message]);
             break;
 
         default:

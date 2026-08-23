@@ -20,6 +20,8 @@ $checks = [
     'exact disposable test database is required' => strpos($source, "['bakerysf_test']") !== false,
     'homebase writes stay off the nightly mirror' => strpos($source, 'function bakery_assert_homebase_target') !== false
         && strpos($source, "['bakerysf_stage_local', 'bakerysf_test']") !== false,
+    'homebase hops from the nightly mirror onto staging' => strpos($source, 'function bakery_homebase_durable_connection') !== false
+        && strpos($source, 'bakerysf_stage_local') !== false,
 ];
 $failed = 0;
 foreach ($checks as $label => $ok) {

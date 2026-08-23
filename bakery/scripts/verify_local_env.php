@@ -29,13 +29,18 @@ function check($ok, $msg) {
     }
 }
 
-$appEnv = strtolower((string)($_ENV['APP_ENV'] ?? ''));
-$useProdRaw = strtolower((string)($_ENV['USE_PROD_DB'] ?? 'false'));
+function verify_env_value(string $name, string $default = ''): string {
+    $value = $_ENV[$name] ?? getenv($name);
+    return ($value === false || $value === null || $value === '') ? $default : (string)$value;
+}
+
+$appEnv = strtolower(verify_env_value('APP_ENV'));
+$useProdRaw = strtolower(verify_env_value('USE_PROD_DB', 'false'));
 $useProd = in_array($useProdRaw, ['1', 'true', 'yes', 'on'], true);
-$dbHost = strtolower((string)($_ENV['DB_HOST'] ?? ''));
-$dbName = strtolower((string)($_ENV['DB_NAME'] ?? ''));
-$mailDriver = strtolower((string)($_ENV['MAIL_DRIVER'] ?? ''));
-$mapsEnabled = strtolower((string)($_ENV['MAPS_ENABLED'] ?? 'false'));
+$dbHost = strtolower(verify_env_value('DB_HOST'));
+$dbName = strtolower(verify_env_value('DB_NAME'));
+$mailDriver = strtolower(verify_env_value('MAIL_DRIVER'));
+$mapsEnabled = strtolower(verify_env_value('MAPS_ENABLED', 'false'));
 
 check($appEnv === 'local' || $appEnv === 'development' || $appEnv === 'dev', "APP_ENV is local-like (got: {$appEnv})");
 check($mailDriver === 'log', "MAIL_DRIVER=log (got: {$mailDriver})");
@@ -47,8 +52,8 @@ if ($useProd) {
     if (is_readable($pullPath)) {
         bakery_load_env_file($pullPath);
     }
-    $prodHost = strtolower((string)($_ENV['PROD_DB_HOST'] ?? ''));
-    $prodName = strtolower((string)($_ENV['PROD_DB_NAME'] ?? ''));
+    $prodHost = strtolower(verify_env_value('PROD_DB_HOST'));
+    $prodName = strtolower(verify_env_value('PROD_DB_NAME'));
     $looksProd = (
         strpos($prodHost, 'sourflour') !== false ||
         strpos($prodHost, 'dreamhost') !== false ||
@@ -73,9 +78,9 @@ try {
     check(defined('IS_LOCAL') && IS_LOCAL, 'IS_LOCAL is true after config load');
     check(defined('USE_PROD_DB') && USE_PROD_DB === $useProd, 'USE_PROD_DB constant matches .env flag');
     if ($useProd) {
-        check(defined('DB_NAME') && strtolower(DB_NAME) === strtolower((string)($_ENV['PROD_DB_NAME'] ?? '')), 'DB_NAME constant uses PROD_DB_NAME');
+        check(defined('DB_NAME') && strtolower(DB_NAME) === strtolower(verify_env_value('PROD_DB_NAME')), 'DB_NAME constant uses PROD_DB_NAME');
     } else {
-        check(defined('DB_NAME') && DB_NAME === ($_ENV['DB_NAME'] ?? ''), 'DB_NAME constant matches env');
+        check(defined('DB_NAME') && DB_NAME === verify_env_value('DB_NAME'), 'DB_NAME constant matches env');
     }
     check(defined('MAIL_DRIVER') && MAIL_DRIVER === 'log', 'MAIL_DRIVER constant is log');
 } catch (Throwable $e) {
@@ -86,7 +91,7 @@ try {
     require_once $root . '/includes/database.php';
     $db = check_mysql_connection();
     $name = $db->query('SELECT DATABASE()')->fetchColumn();
-    $expected = $useProd ? ($_ENV['PROD_DB_NAME'] ?? null) : ($_ENV['DB_NAME'] ?? null);
+    $expected = $useProd ? verify_env_value('PROD_DB_NAME') : verify_env_value('DB_NAME');
     check($name === $expected, "Connected database is {$name}");
     $tables = $db->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
     check(count($tables) > 0, 'Database has tables (' . count($tables) . ')');

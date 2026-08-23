@@ -14,7 +14,12 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-$root = dirname(__DIR__);
+$hostedStageRoot = rtrim((string)getenv('BAKERY_HOSTED_STAGE_ROOT'), '/');
+if ($hostedStageRoot !== '' && $hostedStageRoot !== '/home/bakeryOS/staging.sourflour.org') {
+    fwrite(STDERR, "Refusing unexpected hosted Staging application root.\n");
+    exit(1);
+}
+$root = $hostedStageRoot !== '' ? $hostedStageRoot : dirname(__DIR__);
 require_once $root . '/includes/env_loader.php';
 
 $requestedMigrationDb = '';
@@ -28,15 +33,16 @@ foreach ($argv as $arg) {
     }
 }
 
-if ($migrationMode === 'dreamhost-stage') {
+if ($migrationMode === 'dreamhost-stage' || $migrationMode === 'hosted-stage') {
     if ($requestedMigrationDb !== '' && $requestedMigrationDb !== 'bakerysoftware') {
         fwrite(STDERR, "Refusing: --mode=dreamhost-stage only targets bakerysoftware.\n");
         exit(1);
     }
     bakery_clear_env_keys(['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS', 'APP_ENV', 'USE_PROD_DB']);
-    $stagingEnv = $root . DIRECTORY_SEPARATOR . '.env.staging.dreamhost';
+    $stagingEnv = $root . DIRECTORY_SEPARATOR
+        . ($migrationMode === 'hosted-stage' ? '.env' : '.env.staging.dreamhost');
     if (!is_readable($stagingEnv)) {
-        fwrite(STDERR, "Missing gitignored .env.staging.dreamhost\n");
+        fwrite(STDERR, "Missing hosted Staging database environment\n");
         exit(1);
     }
     bakery_load_env_file($stagingEnv, true);
@@ -48,7 +54,7 @@ if ($migrationMode === 'dreamhost-stage') {
     $_SERVER['USE_PROD_DB'] = 'false';
 } else {
     if ($migrationMode !== 'local' && $migrationMode !== '') {
-        fwrite(STDERR, "Unknown --mode={$migrationMode}. Use local (default) or dreamhost-stage.\n");
+        fwrite(STDERR, "Unknown --mode={$migrationMode}. Use local, dreamhost-stage, or hosted-stage.\n");
         exit(1);
     }
     $envPath = $root . DIRECTORY_SEPARATOR . '.env';
@@ -135,7 +141,7 @@ function bakery_mark_migration(PDO $db, $id) {
 
 try {
     $db = check_mysql_connection();
-    if ($migrationMode === 'dreamhost-stage') {
+    if ($migrationMode === 'dreamhost-stage' || $migrationMode === 'hosted-stage') {
         bakery_assert_dreamhost_staging_target($db);
     } else {
         $migrationTarget = strtolower((string)(defined('DB_NAME') ? DB_NAME : ''));
@@ -148,6 +154,12 @@ try {
     bakery_ensure_migrations_table($db);
 
     $migrationsDir = $root . '/database/schema';
+    $newMigrationsDir = $migrationMode === 'hosted-stage'
+        ? dirname($root) . '/.sourflour-migration-source'
+        : $migrationsDir;
+    if ($migrationMode === 'hosted-stage' && !is_dir($newMigrationsDir)) {
+        throw new RuntimeException('Private hosted Staging migration source is missing.');
+    }
 
     // 003 — weekday normalize
     if (!bakery_migration_applied($db, '003_weekday_normalize')) {
@@ -1109,6 +1121,46 @@ try {
         echo "  OK\n";
     } else {
         echo "Skip 049_invoice_send (already applied)\n";
+    }
+
+    // 050+ — self-contained additive SQL migrations. New migrations must be
+    // safe to run verbatim on Staging and are later approved separately for Live.
+    // 051 is a Live catch-up of 037–047; Staging that already has those objects
+    // only records the ledger id.
+    require_once $root . '/includes/hosted_migration_runtime.php';
+    foreach (glob($newMigrationsDir . '/[0-9][0-9][0-9]_*.sql') ?: [] as $migrationPath) {
+        $file = basename($migrationPath, '.sql');
+        $number = (int)substr($file, 0, 3);
+        if ($number < 50 || bakery_migration_applied($db, $file)) {
+            continue;
+        }
+        if ($file === '051_live_ops_catchup'
+            && bakery_schema_table_exists($db, 'agent_bugs')
+            && bakery_column_exists($db, 'driver_load_items', 'wasted_quantity')) {
+            echo "Recording migration {$file} (Staging already has catch-up objects)...\n";
+            bakery_mark_migration($db, $file);
+            echo "  OK\n";
+            continue;
+        }
+        $migrationSql = (string)file_get_contents($migrationPath);
+        if (($supersededBy = bakery_hosted_migration_superseded_by($migrationSql)) !== null) {
+            echo "Recording migration {$file} (superseded by {$supersededBy})...\n";
+            bakery_mark_migration($db, $file);
+            echo "  OK\n";
+            continue;
+        }
+        if ($number >= 55) {
+            [$hostedSafe, $hostedMessage] = bakery_hosted_migration_sql_safe($migrationSql);
+            if (!$hostedSafe) {
+                throw new RuntimeException("Migration {$file} is not portable to the hosted Live gate: {$hostedMessage}");
+            }
+        }
+        echo "Applying migration {$file}...\n";
+        foreach (bakery_parse_sql_file($migrationPath) as $statement) {
+            bakery_hosted_migration_exec_statement($db, $statement);
+        }
+        bakery_mark_migration($db, $file);
+        echo "  OK\n";
     }
 
     echo "Migrations complete.\n";

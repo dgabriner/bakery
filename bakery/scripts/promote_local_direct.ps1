@@ -9,7 +9,7 @@ $repoRoot = Split-Path $bakeryRoot -Parent
 
 $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot)
 $dirty = @(& git -C $repoRoot status --porcelain --untracked-files=all -- @($deployFiles | ForEach-Object { "bakery/$_" }))
-if ($dirty.Count -gt 0) { throw "Deployable working tree is dirty. Commit or set aside changes first:`n$($dirty -join "`n")" }
+if ($dirty.Count -gt 0) { throw "Local directly to Live needs a clean deployable tree. Use Promote approved to Live instead; that uploads the staging-tested candidate and ignores in-progress edits.`nDirty files:`n$($dirty -join "`n")" }
 
 Write-Host "Direct local -> Live preflight: $($deployFiles.Count) deployable files."
 if (-not $Execute) { Write-Host 'DRY-RUN ONLY. Live production was not contacted or changed.'; exit 0 }

@@ -61,6 +61,7 @@ storage/.prod_data_active
 storage/deploy/*.zip
 storage/deploy/manifest_*.txt
 storage/deploy/LAST_DEPLOY.json
+storage/deploy/LIVE_HASHES.json
 storage/deploy/LAST_BUILT.json
 storage/deploy/deploy_file_sizes.json
 storage/deploy/PUSH_HISTORY.jsonl

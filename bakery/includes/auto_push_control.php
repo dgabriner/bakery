@@ -2,10 +2,99 @@
 /**
  * Local-only staging auto-push controls (DreamHost SFTP to staging.sourflour.org).
  * Used by header UI + auto_push_api.php. Safe no-op / refuse outside local.
- * Never calls scripts/push_sftp.ps1 (live /bake).
+ * Sync/hooks never call scripts/push_sftp.ps1. Promote approved to Live uses
+ * promote_release.ps1, which uploads the staging-tested commit only.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
+}
+
+function bakery_json_decode_file($path) {
+    if (!is_file($path)) {
+        return null;
+    }
+    $raw = preg_replace('/^\xEF\xBB\xBF/', '', (string)@file_get_contents($path));
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : null;
+}
+
+function bakery_auto_push_live_fail_message($output) {
+    $out = str_replace("\r\n", "\n", (string)$output);
+    if (stripos($out, 'Deployable working tree is dirty') !== false
+        || stripos($out, 'Local directly to Live needs a clean') !== false) {
+        return 'Local directly to Live needs a clean working tree. Use Promote approved to Live instead — it uploads the staging-tested candidate and ignores in-progress edits.';
+    }
+    if (preg_match('/Staging no longer has the tested bytes for:\s*([^\r\n.]+)/', $out, $m)) {
+        return 'Live promotion failed: staging no longer has the tested bytes for ' . trim($m[1]) . '. A later incremental push overwrote them.';
+    }
+    if (preg_match('/FullyQualifiedErrorId\s*:\s*(.+)/', $out, $m)) {
+        $id = trim($m[1]);
+        if ($id !== '' && strlen($id) < 280) {
+            return 'Live promotion failed: ' . $id;
+        }
+    }
+    return 'Live promotion failed';
+}
+
+function bakery_latest_complete_staging_release($root = null) {
+    $root = $root ?: dirname(__DIR__);
+    $dir = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy'
+        . DIRECTORY_SEPARATOR . 'stage' . DIRECTORY_SEPARATOR . 'releases';
+    $files = glob($dir . DIRECTORY_SEPARATOR . 'release_*.json') ?: [];
+    usort($files, static function ($a, $b) { return filemtime($b) <=> filemtime($a); });
+    $complete = null;
+    foreach ($files as $path) {
+        $data = bakery_json_decode_file($path);
+        if (!is_array($data)) {
+            continue;
+        }
+        if (($data['target'] ?? '') !== 'dreamhost-stage' || ($data['lint'] ?? '') !== 'ok') {
+            continue;
+        }
+        if (($data['mode'] ?? '') !== 'all') {
+            continue;
+        }
+        $count = isset($data['files']) && is_array($data['files']) ? count($data['files']) : (int)($data['file_count'] ?? 0);
+        if ($count < 50) {
+            continue;
+        }
+        $data['_path'] = $path;
+        $complete = $data;
+        break;
+    }
+    if ($complete === null) {
+        return null;
+    }
+    $byPath = [];
+    foreach ($complete['files'] as $entry) {
+        if (!empty($entry['path'])) {
+            $byPath[$entry['path']] = $entry;
+        }
+    }
+    $completeTime = (int)@filemtime($complete['_path']);
+    usort($files, static function ($a, $b) { return filemtime($a) <=> filemtime($b); });
+    foreach ($files as $path) {
+        if ((int)@filemtime($path) <= $completeTime) {
+            continue;
+        }
+        $data = bakery_json_decode_file($path);
+        if (!is_array($data) || ($data['target'] ?? '') !== 'dreamhost-stage' || ($data['lint'] ?? '') !== 'ok') {
+            continue;
+        }
+        $nextFiles = $data['files'] ?? [];
+        foreach ($nextFiles as $entry) {
+            if (!empty($entry['path'])) {
+                $byPath[$entry['path']] = $entry;
+            }
+        }
+        if (!empty($data['git_commit'])) {
+            $complete['git_commit'] = $data['git_commit'];
+        }
+    }
+    $complete['files'] = array_values($byPath);
+    $complete['mode'] = 'effective';
+    $complete['file_count'] = count($complete['files']);
+    return $complete;
 }
 
 function bakery_auto_push_deploy_dir() {
@@ -115,33 +204,57 @@ function bakery_auto_push_run_live_promotion($direct = false) {
     if ($direct) {
         $args[] = '-Execute';
     } else {
-        $candidateDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'releases';
+        $root = dirname(__DIR__);
+        $staging = bakery_latest_complete_staging_release($root);
+        if ($staging === null) {
+            throw new RuntimeException('No complete staging release exists. Sync the full site to staging, phone-test, then approve again.');
+        }
+        $wantCommit = (string)($staging['git_commit'] ?? '');
+        $candidateDir = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'releases';
         $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
-        $repoRoot = dirname(__DIR__, 2);
-        $head = trim((string)@shell_exec('git -C ' . escapeshellarg($repoRoot) . ' rev-parse HEAD 2>NUL'));
-        $candidate = array_values(array_filter($candidate, static function ($path) use ($head) {
-            $json = preg_replace('/^\xEF\xBB\xBF/', '', (string)@file_get_contents($path));
-            $data = json_decode($json, true);
-            return is_array($data) && $head !== '' && (string)($data['git_commit'] ?? '') === $head;
+        $candidate = array_values(array_filter($candidate, static function ($path) use ($wantCommit) {
+            $data = bakery_json_decode_file($path);
+            if (!is_array($data) || ($data['production_status'] ?? '') !== 'not-promoted') {
+                return false;
+            }
+            $files = $data['files'] ?? [];
+            if (!is_array($files) || count($files) < 50) {
+                return false;
+            }
+            return $wantCommit !== '' && (string)($data['git_commit'] ?? '') === $wantCommit;
         }));
         if (!$candidate) {
-            $createScript = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'create_release_candidate.ps1';
+            $createScript = $root . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'create_release_candidate.ps1';
             if (!is_file($createScript)) throw new RuntimeException('Release candidate tool is missing.');
             $createArgs = [$ps, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $createScript, '-StagingTestedBy', 'staging-web-approval'];
-            $createProc = proc_open($createArgs, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $createPipes, dirname(__DIR__), null, ['bypass_shell'=>true]);
+            $createProc = proc_open($createArgs, [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $createPipes, $root, null, ['bypass_shell'=>true]);
             if (!is_resource($createProc)) throw new RuntimeException('Could not create the release candidate.');
             fclose($createPipes[0]);
             $createOut = stream_get_contents($createPipes[1]); $createErr = stream_get_contents($createPipes[2]);
             fclose($createPipes[1]); fclose($createPipes[2]);
             if (proc_close($createProc) !== 0) throw new RuntimeException('Could not create the release candidate: ' . trim($createOut . ' ' . $createErr));
-            $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
+            $created = '';
+            if (preg_match('/^CANDIDATE_PATH=(.+)$/m', $createOut, $m)) {
+                $created = trim($m[1]);
+            }
+            if ($created !== '' && is_file($created)) {
+                $candidate = [$created];
+            } else {
+                $candidate = glob($candidateDir . DIRECTORY_SEPARATOR . 'candidate_*.json') ?: [];
+                $candidate = array_values(array_filter($candidate, static function ($path) use ($wantCommit) {
+                    $data = bakery_json_decode_file($path);
+                    return is_array($data)
+                        && ($data['production_status'] ?? '') === 'not-promoted'
+                        && (string)($data['git_commit'] ?? '') === $wantCommit
+                        && is_array($data['files'] ?? null)
+                        && count($data['files']) >= 50;
+                }));
+            }
         }
         if (!$candidate) throw new RuntimeException('No immutable release candidate could be created from the verified Staging release.');
         usort($candidate, static function ($a, $b) { return filemtime($b) <=> filemtime($a); });
-        $candidateJson = (string)file_get_contents($candidate[0]);
-        $candidateJson = preg_replace('/^\xEF\xBB\xBF/', '', $candidateJson);
-        $data = json_decode($candidateJson, true);
-        $id = (string)($data['release_id'] ?? '');
+        $data = bakery_json_decode_file($candidate[0]);
+        $id = is_array($data) ? (string)($data['release_id'] ?? '') : '';
         if ($id === '') throw new RuntimeException('Latest release candidate is invalid.');
         $args[] = '-Candidate'; $args[] = $candidate[0];
         $args[] = '-Execute'; $args[] = '-ConfirmReleaseId'; $args[] = $id;

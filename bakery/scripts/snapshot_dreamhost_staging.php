@@ -12,7 +12,12 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-$root = dirname(__DIR__);
+$hostedStageRoot = rtrim((string)getenv('BAKERY_HOSTED_STAGE_ROOT'), '/');
+if ($hostedStageRoot !== '' && $hostedStageRoot !== '/home/bakeryOS/staging.sourflour.org') {
+    fwrite(STDERR, "Refusing unexpected hosted Staging application root.\n");
+    exit(1);
+}
+$root = $hostedStageRoot !== '' ? $hostedStageRoot : dirname(__DIR__);
 require_once $root . '/includes/env_loader.php';
 require_once __DIR__ . '/prod_db_cli.php';
 
@@ -23,7 +28,7 @@ if (!$confirm) {
 }
 
 bakery_clear_env_keys(['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS', 'APP_ENV', 'USE_PROD_DB']);
-$envFile = $root . DIRECTORY_SEPARATOR . '.env.staging.dreamhost';
+$envFile = $root . DIRECTORY_SEPARATOR . ($hostedStageRoot !== '' ? '.env' : '.env.staging.dreamhost');
 if (!is_readable($envFile)) {
     fwrite(STDERR, "Missing gitignored .env.staging.dreamhost\n");
     exit(1);
@@ -63,7 +68,12 @@ $cfg = [
     'pass' => $pass,
 ];
 
-$pdo = prod_db_pdo_connect($cfg['host'], $cfg['port'], $cfg['user'], $cfg['pass'], $cfg['name']);
+try {
+    $pdo = prod_db_pdo_connect($cfg['host'], $cfg['port'], $cfg['user'], $cfg['pass'], $cfg['name']);
+} catch (Throwable $e) {
+    fwrite(STDERR, "Cannot connect to bakerysoftware from this machine (production bakerysf was not targeted): " . $e->getMessage() . "\n");
+    exit(2);
+}
 $actual = strtolower((string)$pdo->query('SELECT DATABASE()')->fetchColumn());
 if ($actual !== 'bakerysoftware') {
     fwrite(STDERR, "Refusing: PDO is not connected to bakerysoftware\n");

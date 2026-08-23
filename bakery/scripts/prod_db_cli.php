@@ -101,11 +101,15 @@ function prod_db_pdo_connect($host, $port, $user, $pass, $dbname = null) {
     if ($dbname !== null && $dbname !== '') {
         $dsn .= ";dbname={$dbname}";
     }
-    return new PDO($dsn, $user, $pass, [
+    $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_TIMEOUT => 30,
-    ]);
+    ];
+    if (defined('PDO::MYSQL_ATTR_CONNECT_TIMEOUT')) {
+        $options[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 15;
+    }
+    return new PDO($dsn, $user, $pass, $options);
 }
 
 function prod_db_table_counts(PDO $db, array $tables) {
@@ -133,6 +137,26 @@ function prod_db_ensure_dump_dir($root) {
     return $dumpDir;
 }
 
+/** Read client capabilities once so old DreamHost tools do not receive new-only flags. */
+function prod_db_cli_supports_option(string $binary, string $option): bool {
+    static $helpByBinary = [];
+    if (!array_key_exists($binary, $helpByBinary)) {
+        $proc = proc_open([$binary, '--help'], [
+            0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w'],
+        ], $pipes, null, null, ['bypass_shell' => true]);
+        if (!is_resource($proc)) {
+            $helpByBinary[$binary] = '';
+        } else {
+            fclose($pipes[0]);
+            $helpByBinary[$binary] = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($proc);
+        }
+    }
+    return stripos((string)$helpByBinary[$binary], ltrim($option, '-')) !== false;
+}
+
 /**
  * @return string path to dump file
  */
@@ -148,11 +172,15 @@ function prod_db_mysqldump(array $cfg, $mysqldump, $outFile, array $options = []
         '--triggers',
         '--hex-blob',
         '--default-character-set=utf8mb4',
-        '--skip-ssl-verify-server-cert',
-        '--no-tablespaces',
         '--skip-routines',
         '--add-drop-table',
     ];
+    if (prod_db_cli_supports_option($mysqldump, '--ssl-verify-server-cert')) {
+        $cmd[] = '--skip-ssl-verify-server-cert';
+    }
+    if (prod_db_cli_supports_option($mysqldump, '--no-tablespaces')) {
+        $cmd[] = '--no-tablespaces';
+    }
     foreach ($ignoreTables as $table) {
         $cmd[] = '--ignore-table=' . $cfg['name'] . '.' . $table;
     }
@@ -187,9 +215,11 @@ function prod_db_mysql_import(array $cfg, $mysql, $sqlFile) {
         '--user=' . $cfg['user'],
         '--password=' . $cfg['pass'],
         '--default-character-set=utf8mb4',
-        '--skip-ssl-verify-server-cert',
         $cfg['name'],
     ];
+    if (prod_db_cli_supports_option($mysql, '--ssl-verify-server-cert')) {
+        array_splice($cmd, count($cmd) - 1, 0, ['--skip-ssl-verify-server-cert']);
+    }
     $descriptors = [
         0 => ['file', $sqlFile, 'r'],
         1 => ['pipe', 'w'],

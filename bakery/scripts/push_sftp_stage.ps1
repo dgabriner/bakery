@@ -126,20 +126,15 @@ function Get-BakerySchemaChangePaths {
 function Invoke-BakeryStagingSnapshot {
     param([object[]]$SchemaChanges, [bool]$IsDryRun)
     $paths = @(Get-BakerySchemaChangePaths -SchemaChanges $SchemaChanges)
-    if ($paths.Count -eq 0) { return }
-    Write-Host "Schema SQL changed:"
+    if ($paths.Count -eq 0) { return $true }
+    Write-Host "Additive 050+ schema SQL changed:"
     foreach ($p in $paths) { Write-Host "  - $p" }
     if ($IsDryRun) {
-        Write-Host "Dry run: skipped bakerysoftware snapshot."
-        return
+        Write-Host "Dry run: hosted bakerysoftware checkpoint would run immediately before migrations."
+        return $true
     }
-    $php = Get-BakeryPhpExecutable -BakeryRoot $bakeryRoot
-    $snap = Join-Path $PSScriptRoot "snapshot_dreamhost_staging.php"
-    Write-Host "Snapshot bakerysoftware before staging migrations..."
-    & $php $snap "--confirm-snapshot-staging"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Staging DB snapshot failed (bakerysoftware). Files were not uploaded. Production bakerysf was not targeted."
-    }
+    Write-Host "Hosted bakerysoftware checkpoint is required and will run atomically before the migration command."
+    return $true
 }
 
 function Invoke-BakeryStagingMigrations {
@@ -150,14 +145,9 @@ function Invoke-BakeryStagingMigrations {
         Write-Host "Dry run: skipped --mode=dreamhost-stage."
         return @()
     }
-    $php = Get-BakeryPhpExecutable -BakeryRoot $bakeryRoot
-    $mig = Join-Path $PSScriptRoot "run_migrations.php"
-    Write-Host "Running migrations with --mode=dreamhost-stage (bakerysoftware only)..."
-    $migOut = & $php $mig "--mode=dreamhost-stage" 2>&1
-    Write-Host ($migOut | Out-String)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Staging migrations failed. Production bakerysf was not targeted."
-    }
+    Write-Host "Running checkpoint + migrations on the Staging host (bakerysoftware only)..."
+    $hostedOutput = @(Invoke-BakerySftpPython -ExtraArgs @("--run-hosted-stage-migrations"))
+    foreach ($line in $hostedOutput) { Write-Host $line }
     return $paths
 }
 
@@ -255,13 +245,17 @@ $toUpload = @()
 $mode = "none"
 $schemaChanges = @()
 $hasDeployBaseline = $false
+$schemaSnapshotOk = $true
 
 if (-not $EnvOnly) {
     $baseline = Read-BakeryDeployState -Path $lastDeployPath
     $hasDeployBaseline = [bool]$baseline
     $sinceUtc = [datetime]::MinValue
     if ($baseline -and $baseline.recorded_at) {
-        try { $sinceUtc = [datetime]::Parse($baseline.recorded_at).ToUniversalTime() } catch { }
+        # ConvertFrom-Json already materializes this ISO value as a DateTime.
+        # Parsing it again first strips the UTC marker and can shift the
+        # baseline into the future in a non-UTC workstation time zone.
+        try { $sinceUtc = ([datetime]$baseline.recorded_at).ToUniversalTime() } catch { }
     }
 
     $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc)
@@ -291,15 +285,6 @@ if (-not $EnvOnly) {
         Assert-BakeryPhpLint -RelativePaths $toUpload
         Write-Host "Uploading $($toUpload.Count) file(s):"
         foreach ($rel in $toUpload) { Write-Host "  - $rel" }
-    }
-
-    if ($schemaChanges.Count -gt 0 -and $hasDeployBaseline) {
-        Invoke-BakeryStagingSnapshot -SchemaChanges $schemaChanges -IsDryRun $DryRun
-    } elseif ($schemaChanges.Count -gt 0) {
-        Write-Host "First staging baseline: schema SQL noted; hosted migrations skipped."
-    }
-
-    if ($toUpload.Count -gt 0) {
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllLines($listFile, $toUpload, $utf8NoBom)
         try {
@@ -309,6 +294,20 @@ if (-not $EnvOnly) {
         } finally {
             Remove-Item -Force -ErrorAction SilentlyContinue $listFile
         }
+    }
+
+    foreach ($schemaChange in $schemaChanges) {
+        $migrationPath = Join-Path $bakeryRoot ($schemaChange.path -replace '/', '\\')
+        Write-Host ("Publishing private Staging migration source: {0}" -f $schemaChange.path)
+        $extra = @("--migration-file", $migrationPath)
+        if ($DryRun) { $extra += "--dry-run" }
+        Invoke-BakerySftpPython -ExtraArgs $extra
+    }
+
+    if ($schemaChanges.Count -gt 0 -and $hasDeployBaseline) {
+        $schemaSnapshotOk = [bool](Invoke-BakeryStagingSnapshot -SchemaChanges $schemaChanges -IsDryRun $DryRun)
+    } elseif ($schemaChanges.Count -gt 0) {
+        Write-Host "First staging baseline: schema SQL noted; hosted migrations skipped."
     }
 }
 
@@ -333,8 +332,10 @@ if ($DryRun) {
 }
 
 $migrationsApplied = @()
-if ($EnvOnly -eq $false -and $schemaChanges.Count -gt 0 -and $hasDeployBaseline) {
+if ($EnvOnly -eq $false -and $schemaChanges.Count -gt 0 -and $hasDeployBaseline -and $schemaSnapshotOk) {
     $migrationsApplied = @(Invoke-BakeryStagingMigrations -SchemaChanges $schemaChanges -IsDryRun $false)
+} elseif ($EnvOnly -eq $false -and $schemaChanges.Count -gt 0 -and $hasDeployBaseline -and -not $schemaSnapshotOk) {
+    Write-Host "Skipped hosted Staging migrations because the bakerysoftware checkpoint was not eligible."
 }
 
 Assert-BakeryStagingSmoke
@@ -342,7 +343,15 @@ Assert-BakeryStagingSmoke
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $recordedAt = (Get-Date).ToUniversalTime().ToString("o")
 $gitCommit = Get-BakeryGitCommit -BakeryRoot $bakeryRoot
+# Whitelist snapshot plus every path just uploaded (AlsoInclude root pages must stick
+# in the baseline or later pushes forget them once mtime is older than recorded_at).
 $snapshot = Get-BakeryDeploySnapshot -BakeryRoot $bakeryRoot
+foreach ($rel in $toUpload) {
+    $norm = $rel.Replace('\', '/')
+    if ($snapshot.ContainsKey($norm)) { continue }
+    $fp = Get-BakeryDeployFileFingerprint -BakeryRoot $bakeryRoot -RelativePath $norm
+    if ($null -ne $fp) { $snapshot[$norm] = $fp }
+}
 $hashed = @()
 foreach ($rel in $toUpload) {
     $full = Join-Path $bakeryRoot $rel

@@ -13,12 +13,16 @@ param(
     [switch]$DryRun,
     [switch]$All,
     [switch]$Confirm,
-    [string]$ConfirmText = ""
+    [string]$ConfirmText = "",
+    [string]$UploadList = "",
+    [string]$SourceRoot = "",
+    [string]$RecordedCommit = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $bakeryRoot = Split-Path $PSScriptRoot -Parent
+$uploadRoot = if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $bakeryRoot } else { (Resolve-Path -LiteralPath $SourceRoot).Path }
 $deployDir = Join-Path $bakeryRoot "storage\deploy"
 $historyDir = Join-Path $deployDir "pushes"
 $historyLog = Join-Path $deployDir "PUSH_HISTORY.jsonl"
@@ -109,7 +113,9 @@ function Write-BakeryPushHistory {
         [string]$Method,
         [string]$Mode,
         [string[]]$UploadedFiles,
-        [object[]]$SchemaChanges
+        [object[]]$SchemaChanges,
+        [string]$GitCommit = "",
+        [string]$SnapshotRoot = ""
     )
 
     New-Item -ItemType Directory -Force -Path $DeployDir | Out-Null
@@ -117,8 +123,9 @@ function Write-BakeryPushHistory {
 
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $recordedAt = (Get-Date).ToUniversalTime().ToString("o")
-    $gitCommit = Get-BakeryGitCommit -BakeryRoot $BakeryRoot
-    $snapshot = Get-BakeryDeploySnapshot -BakeryRoot $BakeryRoot
+    $gitCommit = if ([string]::IsNullOrWhiteSpace($GitCommit)) { Get-BakeryGitCommit -BakeryRoot $BakeryRoot } else { $GitCommit }
+    $snapshotFrom = if ([string]::IsNullOrWhiteSpace($SnapshotRoot)) { $BakeryRoot } else { $SnapshotRoot }
+    $snapshot = Get-BakeryDeploySnapshot -BakeryRoot $snapshotFrom
     $schemaPaths = @($SchemaChanges | ForEach-Object { $_.path })
 
     $historyEntry = [ordered]@{
@@ -241,20 +248,25 @@ try {
 $baseline = Read-BakeryDeployState -Path $lastDeployPath
 $sinceUtc = [datetime]::MinValue
 if ($baseline -and $baseline.recorded_at) {
-    try { $sinceUtc = [datetime]::Parse($baseline.recorded_at).ToUniversalTime() } catch { }
+    try { $sinceUtc = ([datetime]$baseline.recorded_at).ToUniversalTime() } catch { }
 }
 
-# Include root web files edited after the last push (covers new pages like test_upload.php)
-$deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc)
-$currentSnapshot = Get-BakeryDeploySnapshot -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc
-$baselineMap = ConvertTo-BakeryDeployBaselineMap -BaselineFiles $(if ($baseline) { $baseline.files } else { $null })
-
-if ($All -or -not $baseline) {
-    $toUpload = @($deployFiles)
-    $mode = if ($All) { "all" } else { "all (first push / no baseline)" }
+if (-not [string]::IsNullOrWhiteSpace($UploadList)) {
+    $toUpload = @([System.IO.File]::ReadAllLines((Resolve-Path -LiteralPath $UploadList).Path) | ForEach-Object { $_.Trim().TrimStart([char]0xFEFF) } | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') })
+    $mode = "candidate"
 } else {
-    $toUpload = @(Get-BakeryChangedDeployPaths -CurrentSnapshot $currentSnapshot -BaselineMap $baselineMap)
-    $mode = "changed"
+    # Include root web files edited after the last push (covers new pages like test_upload.php)
+    $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc)
+    $currentSnapshot = Get-BakeryDeploySnapshot -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc
+    $baselineMap = ConvertTo-BakeryDeployBaselineMap -BaselineFiles $(if ($baseline) { $baseline.files } else { $null })
+
+    if ($All -or -not $baseline) {
+        $toUpload = @($deployFiles)
+        $mode = if ($All) { "all" } else { "all (first push / no baseline)" }
+    } else {
+        $toUpload = @(Get-BakeryChangedDeployPaths -CurrentSnapshot $currentSnapshot -BaselineMap $baselineMap)
+        $mode = "changed"
+    }
 }
 
 $schemaChanges = @(Get-BakerySchemaSqlChanges -BakeryRoot $bakeryRoot -SinceUtc $sinceUtc)
@@ -292,7 +304,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $python = Get-PythonLauncher
 $pyArgs = @()
 if ((Split-Path $python -Leaf) -in @("py.exe", "py")) { $pyArgs += "-3" }
-$pyArgs += @($uploader, "--local-root", $bakeryRoot, "--list", $listFile)
+$pyArgs += @($uploader, "--local-root", $uploadRoot, "--list", $listFile)
 if ($DryRun) { $pyArgs += "--dry-run" }
 
 try {
@@ -316,7 +328,21 @@ $detailPath = Write-BakeryPushHistory `
     -Method "sftp" `
     -Mode $mode `
     -UploadedFiles $toUpload `
-    -SchemaChanges $schemaChanges
+    -SchemaChanges $schemaChanges `
+    -GitCommit $RecordedCommit `
+    -SnapshotRoot $uploadRoot
+
+$uploadedHashes = @(
+    $toUpload | ForEach-Object {
+        $full = Join-Path $uploadRoot ($_ -replace '/', '\')
+        if (Test-Path -LiteralPath $full) {
+            [pscustomobject]@{ path = [string]$_; sha256 = Get-BakeryFileSha256 $full }
+        }
+    }
+)
+if ($uploadedHashes.Count -gt 0) {
+    Merge-BakeryLiveHashIndex -BakeryRoot $bakeryRoot -Files $uploadedHashes -GitCommit $RecordedCommit -Source 'push_sftp.ps1'
+}
 
 Write-Host ""
 Write-Host "Recorded: $detailPath"
