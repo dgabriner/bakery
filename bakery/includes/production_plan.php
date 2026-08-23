@@ -456,6 +456,19 @@ function bakery_production_plan_commit(PDO $db, string $date, ?int $userId): arr
     $productsCount = count($draft);
     $unitsCount = (int)array_sum($draft);
 
+    // Capture the snapshot being replaced so re-commit diffs can be shown to
+    // bakers later (schema 048 keeps a single commit row per delivery date).
+    $previousItems = [];
+    if (bakery_production_plan_commit_items_ready($db)) {
+        $previousStmt = $db->prepare(
+            'SELECT product_id, committed_quantity FROM production_plan_commit_items WHERE delivery_date = ?'
+        );
+        $previousStmt->execute([$date]);
+        foreach ($previousStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $previousItems[(int)$row['product_id']] = (int)$row['committed_quantity'];
+        }
+    }
+
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
         $db->beginTransaction();
@@ -495,12 +508,16 @@ function bakery_production_plan_commit(PDO $db, string $date, ?int $userId): arr
     }
 
     if (function_exists('bakery_record_operational_event') && defined('BAKERY_OP_PRODUCTION_PLAN_COMMITTED')) {
+        $commitMetadata = [
+            'products_count' => $productsCount,
+            'units_count' => $unitsCount,
+        ];
+        if ($previousItems !== []) {
+            $commitMetadata['previous_items'] = $previousItems;
+        }
         bakery_record_operational_event($db, BAKERY_OP_PRODUCTION_PLAN_COMMITTED, 'Manager committed production plan for ' . $date, [
             'operational_date' => $date,
-            'metadata' => [
-                'products_count' => $productsCount,
-                'units_count' => $unitsCount,
-            ],
+            'metadata' => $commitMetadata,
         ]);
     }
 
@@ -534,4 +551,97 @@ function bakery_production_plan_commits_for_dates(PDO $db, array $dates): array
         $out[(string)$row['delivery_date']] = $row;
     }
     return $out;
+}
+
+/**
+ * Per-product deltas between the previous commit and the live commit for a date.
+ *
+ * Schema 048 keeps a single commit row per delivery date, so the replaced
+ * quantities ride in the production_plan_committed event metadata captured at
+ * re-commit time. Dates with fewer than two commits (or committed before that
+ * capture existed) report no diff.
+ *
+ * @return list<array{product_id:int,product_name:string,previous_quantity:int,new_quantity:int}>
+ */
+function bakery_production_commit_diff(PDO $db, string $date): array
+{
+    if (!bakery_production_plan_commits_ready($db) || !bakery_production_plan_commit_items_ready($db)) {
+        return [];
+    }
+    if (!function_exists('bakery_operational_events_ready')
+        || !bakery_operational_events_ready($db)
+        || !defined('BAKERY_OP_PRODUCTION_PLAN_COMMITTED')) {
+        return [];
+    }
+    if (bakery_production_plan_commit_get($db, $date) === null) {
+        return [];
+    }
+
+    $eventStmt = $db->prepare('
+        SELECT metadata
+        FROM operational_events
+        WHERE event_type = ? AND operational_date = ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 50
+    ');
+    $eventStmt->execute([BAKERY_OP_PRODUCTION_PLAN_COMMITTED, $date]);
+    $previousItems = null;
+    foreach ($eventStmt->fetchAll(PDO::FETCH_COLUMN) as $rawMetadata) {
+        $metadata = json_decode((string)$rawMetadata, true);
+        if (is_array($metadata) && is_array($metadata['previous_items'] ?? null) && $metadata['previous_items'] !== []) {
+            $previousItems = $metadata['previous_items'];
+            break;
+        }
+    }
+    if ($previousItems === null) {
+        return [];
+    }
+
+    $itemStmt = $db->prepare(
+        'SELECT product_id, committed_quantity FROM production_plan_commit_items WHERE delivery_date = ?'
+    );
+    $itemStmt->execute([$date]);
+    $currentItems = [];
+    foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $currentItems[(int)$row['product_id']] = (int)$row['committed_quantity'];
+    }
+
+    $productIds = array_values(array_unique(array_merge(
+        array_map('intval', array_keys($previousItems)),
+        array_keys($currentItems)
+    )));
+    if ($productIds === []) {
+        return [];
+    }
+
+    $names = [];
+    try {
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+        $nameStmt = $db->prepare("SELECT id, name FROM products WHERE id IN ({$placeholders})");
+        $nameStmt->execute($productIds);
+        foreach ($nameStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $names[(int)$row['id']] = (string)$row['name'];
+        }
+    } catch (Throwable $e) {
+        // Names are cosmetic; unknown products still render by id.
+    }
+
+    $diff = [];
+    foreach ($productIds as $productId) {
+        $previousQty = (int)($previousItems[$productId] ?? 0);
+        $newQty = (int)($currentItems[$productId] ?? 0);
+        if ($previousQty === $newQty) {
+            continue;
+        }
+        $diff[] = [
+            'product_id' => $productId,
+            'product_name' => $names[$productId] ?? ('#' . $productId),
+            'previous_quantity' => $previousQty,
+            'new_quantity' => $newQty,
+        ];
+    }
+    usort($diff, static function (array $a, array $b): int {
+        return strcasecmp($a['product_name'], $b['product_name']);
+    });
+    return $diff;
 }

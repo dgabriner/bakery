@@ -73,6 +73,21 @@ manager_phone_assert(strpos($phone, 'bakery_customer_save_daily_line') !== false
 manager_phone_assert(strpos($phone, 'bakery_skip_delivery_stop') !== false, 'skip sheet uses the shared skip helper');
 manager_phone_assert(strpos($phone, '<select name="daily_order_id">') === false, 'move and skip sheets use chips, not a native select');
 manager_phone_assert(strpos($phone, "pendingOpen > 0 ? ' is-loud'") === false, 'in-progress score stays quiet during a normal run');
+
+manager_phone_assert(strpos($phone, 'function bakery_manager_phone_render_kitchen') !== false, 'kitchen renderer lives in the manager phone include');
+manager_phone_assert(strpos($phone, 'manager-phone__chip') !== false, 'kitchen renders a committed-state chip row');
+manager_phone_assert(strpos($phone, "function_exists('bakery_production_plan_commits_ready')") !== false, 'committed-state chips are guarded when commit tables are missing');
+manager_phone_assert(strpos($phone, 'bakery_production_plan_state') !== false, 'kitchen derives committed state from the plan-state helper');
+manager_phone_assert(strpos($phone, 'manager_phone.plan_committed_at') !== false, 'committed kitchen state shows the commit time label');
+manager_phone_assert(strpos($phone, 'manager_phone.plan_not_committed') !== false, 'uncommitted kitchen state is loud with its own label');
+manager_phone_assert(strpos($phone, 'manager_phone.plan_drift_count') !== false, 'post-commit drift count renders on the kitchen tab');
+
+$phoneCss = (string)file_get_contents($root . '/css/manager_phone.css');
+manager_phone_assert(strpos($phoneCss, '.manager-phone__chip--loud') !== false, 'loud chip tone exists in manager phone css');
+
+$productionSheet = (string)file_get_contents($root . '/production.php');
+manager_phone_assert(strpos($productionSheet, 'production_sheet.commit_diff_title') !== false, 'bake sheet renders the re-commit diff title');
+manager_phone_assert(strpos($productionSheet, 'bp-commit-diff__chip') !== false, 'bake sheet renders re-commit diff chips');
 manager_phone_assert(
     bakery_manager_phone_tomorrow_needs_work(['state' => 'ready_unconfirmed']) === true,
     'unconfirmed tomorrow demand needs work'
@@ -121,6 +136,11 @@ $requiredKeys = [
     'manager_phone.next_missed',
     'manager_phone.do_not_interrupt',
     'manager_phone.bucket_still_out',
+    'manager_phone.plan_committed_at',
+    'manager_phone.plan_not_committed',
+    'manager_phone.plan_drift_count',
+    'production_sheet.commit_diff_title',
+    'production_sheet.commit_diff_chip',
     'nav.manager_today',
     'nav.manager_routes',
     'nav.manager_kitchen',

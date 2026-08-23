@@ -355,6 +355,30 @@ body.workspace-manager {
   padding-bottom: 0.2rem;
 }
 
+.manager-phone__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.6rem;
+}
+
+.manager-phone__chip {
+  display: inline-block;
+  border: 1px solid var(--sf-border, #d5e0dc);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  background: #fff;
+  color: var(--sf-text-secondary, #536258);
+}
+
+.manager-phone__chip--loud {
+  border-color: var(--sf-danger, #c0392b);
+  color: var(--sf-danger, #c0392b);
+  background: #fdeeec;
+}
+
 @media (min-width: 640px) {
   .manager-phone__adjust {
     grid-template-columns: repeat(3, minmax(0, 1fr));

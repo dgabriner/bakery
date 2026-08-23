@@ -605,8 +605,42 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
     $remaining = (int)($summary['remaining'] ?? 0);
     $percent = $target > 0 ? min(100, (int)round(($produced / $target) * 100)) : 0;
     $shorts = bakery_manager_phone_short_products($ctx['productionRows'] ?? []);
+    $db = $ctx['db'] ?? null;
+    $planStateAvailable = $db instanceof PDO
+        && function_exists('bakery_production_plan_commits_ready')
+        && bakery_production_plan_commits_ready($db);
+    $committedAtLabel = '';
+    $driftCount = 0;
+    if ($planStateAvailable && function_exists('bakery_production_plan_state')) {
+        try {
+            $planState = bakery_production_plan_state($db, $date);
+            if ($planState['commit'] !== null) {
+                $committedTs = strtotime((string)($planState['commit']['committed_at'] ?? ''));
+                $committedAtLabel = bakery_t('manager_phone.plan_committed_at', [
+                    'time' => $committedTs
+                        ? date('g:i A', $committedTs)
+                        : (string)($planState['commit']['committed_at'] ?? ''),
+                ]);
+                $driftCount = (int)($planState['changed_since']['count'] ?? 0);
+            }
+        } catch (Throwable $e) {
+            error_log('manager phone kitchen plan state: ' . $e->getMessage());
+        }
+    }
     ?>
   <p class="manager-phone__cadence"><?php bakery_te('manager_phone.cadence'); ?></p>
+  <?php if ($planStateAvailable): ?>
+    <div class="manager-phone__chips">
+      <?php if ($committedAtLabel === ''): ?>
+        <span class="manager-phone__chip manager-phone__chip--loud"><?php bakery_te('manager_phone.plan_not_committed'); ?></span>
+      <?php else: ?>
+        <span class="manager-phone__chip<?php echo $driftCount > 0 ? ' manager-phone__chip--loud' : ''; ?>"><?php echo $h($committedAtLabel); ?></span>
+        <?php if ($driftCount > 0): ?>
+          <span class="manager-phone__chip manager-phone__chip--loud"><?php echo $h(bakery_t('manager_phone.plan_drift_count', ['count' => $driftCount])); ?></span>
+        <?php endif; ?>
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
   <section class="manager-phone__panel">
     <h2><?php bakery_te('manager_phone.bake'); ?></h2>
     <p class="manager-phone__metric"><?php echo number_format($produced); ?> / <?php echo number_format($target); ?></p>

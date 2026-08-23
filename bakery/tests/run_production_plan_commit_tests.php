@@ -287,6 +287,74 @@ $assert(!$hasDriftAfter, 're-commit clears plan-drift until demand moves again')
 $assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'baker role still cannot open Production Center');
 $assert(in_array('production.php', bakery_baker_scripts(), true), 'baker role still opens Daily Production');
 
+// Re-commit diff helper: bakers see what changed between the previous commit
+// and the live one. Table-missing degradation is asserted as a source
+// contract because bakerysf_test installs the real commit tables.
+$diffSource = (string)file_get_contents($root . '/includes/production_plan.php');
+$assert(strpos($diffSource, 'function bakery_production_commit_diff(PDO $db, string $date)') !== false, 'commit diff helper exists with the canonical signature');
+$assert(strpos($diffSource, "if (!bakery_production_plan_commits_ready(\$db) || !bakery_production_plan_commit_items_ready(\$db))") !== false, 'commit diff returns empty when commit tables are missing');
+$assert(strpos($diffSource, '!bakery_operational_events_ready($db)') !== false, 'commit diff returns empty when operational_events is missing');
+
+$dateB = date('Y-m-d', strtotime('+41 days'));
+echo "Diff test date: $dateB\n";
+$cleanup($db, $dateB);
+bakery_production_plan_commits_ensure($db);
+
+$diffProductIds = array_map('intval', $db->query('SELECT id FROM products ORDER BY id LIMIT 2')->fetchAll(PDO::FETCH_COLUMN));
+$diffProductA = $diffProductIds[0] ?? 0;
+$diffProductB = $diffProductIds[1] ?? 0;
+$assert($diffProductA > 0, 'diff fixture has at least one product');
+
+$assert(bakery_production_commit_diff($db, $dateB) === [], 'zero commits yield an empty re-commit diff');
+
+bakery_production_plan_save_targets(
+    $db,
+    [$dateB => [$diffProductA => 100]],
+    array_fill_keys($diffProductIds, true),
+    null
+);
+bakery_production_plan_commit($db, $dateB, null);
+$assert(bakery_production_commit_diff($db, $dateB) === [], 'a single commit yields an empty re-commit diff');
+
+$secondDraft = [$diffProductA => 80];
+if ($diffProductB > 0) {
+    $secondDraft[$diffProductB] = 30;
+}
+bakery_production_plan_save_targets($db, [$dateB => $secondDraft], array_fill_keys($diffProductIds, true), null);
+bakery_production_plan_commit($db, $dateB, null);
+
+$commitDiff = bakery_production_commit_diff($db, $dateB);
+$diffByProduct = [];
+foreach ($commitDiff as $diffRow) {
+    $diffByProduct[(int)$diffRow['product_id']] = $diffRow;
+}
+$assert(isset($diffByProduct[$diffProductA]), 're-commit diff reports the changed product');
+$assert((int)$diffByProduct[$diffProductA]['previous_quantity'] === 100, 're-commit diff carries the previous quantity');
+$assert((int)$diffByProduct[$diffProductA]['new_quantity'] === 80, 're-commit diff carries the new quantity');
+if ($diffProductB > 0) {
+    $assert(isset($diffByProduct[$diffProductB]), 'product appearing only in the newer commit is reported sanely');
+    $assert((int)$diffByProduct[$diffProductB]['previous_quantity'] === 0, 'newer-only product diffs from zero');
+    $assert((int)$diffByProduct[$diffProductB]['new_quantity'] === 30, 'newer-only product shows its committed quantity');
+    $assert(trim((string)$diffByProduct[$diffProductB]['product_name']) !== '', 'diff rows carry a product name');
+}
+
+if ($diffProductB > 0) {
+    $db->prepare('DELETE FROM production_plan_items WHERE delivery_date=? AND product_id=?')
+        ->execute([$dateB, $diffProductB]);
+    bakery_production_plan_commit($db, $dateB, null);
+    $commitDiffAfterRemoval = bakery_production_commit_diff($db, $dateB);
+    $removalRow = null;
+    foreach ($commitDiffAfterRemoval as $diffRow) {
+        if ((int)$diffRow['product_id'] === $diffProductB) {
+            $removalRow = $diffRow;
+            break;
+        }
+    }
+    $assert($removalRow !== null, 'product removed on re-commit is reported');
+    $assert($removalRow !== null && (int)$removalRow['new_quantity'] === 0, 'removed product diffs down to zero');
+}
+
+$cleanup($db, $dateB);
 $cleanup($db, $date);
 echo "\nPassed: $pass\nFailed: $fail\n";
 exit($fail > 0 ? 1 : 0);

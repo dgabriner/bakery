@@ -512,6 +512,14 @@ $orderSourceLabel = !empty($hasDailyOrders) ? bakery_t('production.from_daily_or
 $planCommitted = !empty($bakeList['committed']);
 $planDriftCount = (int)($bakeList['changed_since']['count'] ?? 0);
 $planAvailable = !empty($bakeList['available']);
+$commitDiff = [];
+if ($planCommitted && function_exists('bakery_production_commit_diff')) {
+    try {
+        $commitDiff = bakery_production_commit_diff($db, $selectedDate);
+    } catch (Throwable $e) {
+        error_log('production commit diff: ' . $e->getMessage());
+    }
+}
 $canOpenProductionCenter = !$isBaker
     && function_exists('bakery_user_has_role')
     && bakery_user_has_role(['administrator', 'manager']);
@@ -639,6 +647,20 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                     <p><?php echo htmlspecialchars(bakery_t('production.baker_drift_detail', ['count' => $planDriftCount]), ENT_QUOTES, 'UTF-8'); ?></p>
                 </details>
             <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($planCommitted && !empty($commitDiff)): ?>
+            <details class="bp-plan-note bp-plan-note--drift">
+                <summary><?php bakery_te('production_sheet.commit_diff_title'); ?></summary>
+                <div class="bp-commit-diff">
+                    <?php foreach ($commitDiff as $diffRow): ?>
+                        <span class="bp-commit-diff__chip"><?php echo htmlspecialchars(
+                            $diffRow['product_name'] . ' ' . bakery_t('production_sheet.commit_diff_chip', [
+                                'from' => number_format((int)$diffRow['previous_quantity']),
+                                'to' => number_format((int)$diffRow['new_quantity']),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php endforeach; ?>
+                </div>
+            </details>
         <?php endif; ?>
         <?php if (!isset($error) && !empty($productionData)): ?>
             <div class="bp-progress" aria-live="polite">
@@ -1049,6 +1071,8 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-plan-note summary { cursor: pointer; font-weight: 700; }
 .bp-plan-note p { margin: 6px 0 0; }
 .bp-plan-note--drift > summary { color: #ffd9a0; }
+.bp-commit-diff { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.bp-commit-diff__chip { background: rgba(255,255,255,.12); border-radius: 999px; padding: 4px 10px; font-weight: 700; color: #ffd9a0; }
 .bp-baker-help { margin: 0 0 14px; border: 1px solid #dbe7df; border-radius: 10px; background: #f8faf9; }
 .bp-baker-help > summary { cursor: pointer; padding: 12px 14px; color: #42545a; font-weight: 700; }
 .bp-baker-help .exception-desk { margin: 0 12px 12px; }
