@@ -88,7 +88,7 @@ function bakery_agent_work_map(): array
             ],
             'bugs' => ['plan-not-on-bake-sheet', 'additive-production'],
             'prompt' => 'docs/prompts/20-commit-production-plan.md',
-            'prompt_status' => 'partial',
+            'prompt_status' => 'shipped',
         ],
         'invoice-send' => [
             'title' => 'Canonical invoice send from Billing Center',
@@ -229,10 +229,13 @@ function bakery_agent_work_map(): array
             'files' => [
                 'includes/twilio_config.php',
                 'includes/text_comms.php',
+                'includes/text_comms_media.php',
                 'text_comms.php',
                 'text_comms_api.php',
+                'text_media.php',
                 'twilio_webhook.php',
                 'database/schema/057_text_messages.sql',
+                'database/schema/058_text_media.sql',
                 'scripts/test_twilio_connection.php',
                 'scripts/deploy_manifest.ps1',
                 '.env.example',
@@ -241,6 +244,7 @@ function bakery_agent_work_map(): array
             ],
             'tests' => [
                 'tests/run_text_comms_tests.php',
+                'tests/run_text_comms_media_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [
@@ -249,6 +253,8 @@ function bakery_agent_work_map(): array
                 'Sending happens only through text_comms.php; the API is read-only',
                 'Webhook signature validation defaults on whenever an auth token exists',
                 'Command Center shows customer, test, and general texts from the same ledger',
+                'MMS media is stored under storage/text_media and served only through role-gated text_media.php',
+                'History sync upserts by twilio sid; re-running never duplicates',
             ],
             'bugs' => [],
         ],
@@ -530,6 +536,7 @@ function bakery_agent_work_map(): array
             'files' => [
                 'customer_portal.php',
                 'customer_portal_tip.php',
+                'customer_upcoming.php',
                 'includes/customer_portal.php',
                 'includes/square_config.php',
                 'customer_login.php',

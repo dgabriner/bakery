@@ -27,3 +27,11 @@ SQUARE_WEBHOOK_SIGNATURE_KEY=
 
 # Staging must never send customer/driver mail or tick the production studio clock.
 BAKERY_SHOW_ERRORS=false
+
+# Twilio — set on the server / gitignored .env.staging.dreamhost, never in git.
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+TWILIO_MESSAGING_SERVICE_SID=
+TWILIO_STATUS_CALLBACK_URL=https://staging.sourflour.org/twilio_webhook.php
+TWILIO_VALIDATE_WEBHOOK=1

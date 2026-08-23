@@ -10,6 +10,7 @@ if (PHP_SAPI !== 'cli') {
 define('ACCESS_ALLOWED', true);
 
 $root = dirname(__DIR__);
+require_once $root . '/tests/isolate_test_db.php';
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';

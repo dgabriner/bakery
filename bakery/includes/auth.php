@@ -46,6 +46,10 @@ function bakery_public_scripts() {
         'customer_portal_login.php',
         'customer_portal_logout.php',
         'login_audit_api.php',
+        // Sender-signed webhooks: no staff session exists; each endpoint
+        // validates its own provider signature before touching anything.
+        'square_webhook.php',
+        'twilio_webhook.php',
     ];
 }
 

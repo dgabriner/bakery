@@ -47,6 +47,32 @@ $date = date('Y-m-d', strtotime('+45 days'));
 $weekday = bakery_standing_day_from_date($date);
 echo "Test date: $date (weekday $weekday) product $productId\n";
 
+// An interrupted earlier run leaves the named fixture customers behind and
+// every rerun then double-counts them. Clear any orphans before inserting.
+$orphanCleanup = static function () use ($db): void {
+    $stale = $db->query(
+        "SELECT id FROM customers WHERE name IN ('Demand Flip Cafe', 'Demand Flip Market')"
+    )->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($stale as $cid) {
+        $cid = (int)$cid;
+        $orderIds = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ?');
+        $orderIds->execute([$cid]);
+        $ids = $orderIds->fetchAll(PDO::FETCH_COLUMN);
+        if ($ids) {
+            $oph = implode(',', array_fill(0, count($ids), '?'));
+            $db->prepare("DELETE FROM daily_order_items WHERE daily_order_id IN ($oph)")->execute($ids);
+            $db->prepare("DELETE FROM daily_orders WHERE id IN ($oph)")->execute($ids);
+        }
+        $db->prepare('DELETE FROM standing_orders WHERE customer_id = ?')->execute([$cid]);
+        $db->prepare('DELETE FROM customers WHERE id = ?')->execute([$cid]);
+    }
+};
+$orphanCleanup();
+
+// The snapshot may already carry real standing demand for this product on
+// this weekday. Assert our fixtures' contribution as a delta, never absolute.
+$baselineQty = (int)(bakery_operating_demand_by_product($db, $date)['by_product'][$productId] ?? 0);
+
 $customerIds = [];
 $cleanup = static function () use ($db, $date, &$customerIds): void {
     if ($customerIds === []) {
@@ -97,7 +123,7 @@ try {
 
     $demand = bakery_operating_demand_by_product($db, $date);
     $got = (int)($demand['by_product'][$productId] ?? 0);
-    $assert($got === 10, 'mixed date uses dated 3 + standing 7, not 3 and not 17 (got ' . $got . ')');
+    $assert($got === $baselineQty + 10, 'mixed date adds dated 3 + standing 7 on top of baseline (got ' . $got . ', baseline ' . $baselineQty . ')');
     $assert(($demand['mix']['mode'] ?? '') === 'merged', 'mix mode is merged when both sources exist');
     $assert(!empty($demand['has_daily']), 'has_daily is true when any dated line exists');
     $assert(($demand['sources'][$productId] ?? '') === 'mixed', 'product source is mixed, not last-write daily');
@@ -129,7 +155,7 @@ try {
             break;
         }
     }
-    $assert($ingQty === 10, 'ingredient demand source uses merged operating demand (got ' . var_export($ingQty, true) . ')');
+    $assert($ingQty === $baselineQty + 10, 'ingredient demand source uses merged operating demand (got ' . var_export($ingQty, true) . ', baseline ' . $baselineQty . ')');
     $assert(
         ($loaded['demand_mode'] ?? '') === 'merged',
         'ingredient demand_mode is merged, not daily_orders-only (got ' . (string)($loaded['demand_mode'] ?? '') . ')'

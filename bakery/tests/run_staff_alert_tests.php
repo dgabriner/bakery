@@ -182,6 +182,10 @@ try {
             }
         }
         if ($serviceAlert) {
+            // An interrupted earlier run can leave this deterministic key
+            // behind; clear it so re-runs against an unwiped DB never collide.
+            $db->prepare('DELETE FROM manager_exception_work WHERE exception_key = ?')
+                ->execute([(string)$serviceAlert['key']]);
             $insertWork = $db->prepare(
                 'INSERT INTO manager_exception_work
                     (exception_key, operating_date, exception_type, exception_category,

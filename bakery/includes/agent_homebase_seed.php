@@ -231,9 +231,9 @@ function bakery_agent_homebase_seed_bugs(): array
         [
             'slug' => 'no-staff-alerts',
             'title' => 'Exceptions have owners but nobody is pinged',
-            'detail' => 'manager_exception_work can ack/assign/complete. Service issues are a real queue. There are no proactive staff alerts. Completing work must not suppress live operational exceptions.',
+            'detail' => 'Shipped: nav alert bell for administrator/manager surfaces live operational facts plus open personal assignments (assigned-first ranking, due labels); read-only summary API is role-gated; scripts/staff_alert_digest.php emails critical/warning digests. Completing work never suppresses a still-true fact; assignments whose fact is gone stay silent.',
             'severity' => 'watch',
-            'status' => 'open',
+            'status' => 'fixed',
             'focus_area' => 'exceptions',
             'source' => 'product-context',
         ],

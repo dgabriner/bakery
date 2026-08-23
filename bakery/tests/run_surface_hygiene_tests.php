@@ -72,6 +72,33 @@ $centerRedirects = file_exists($invoiceCenterPath)
     && (stripos((string)file_get_contents($invoiceCenterPath), 'billing_center') !== false);
 surface_hygiene_assert($centerRedirects, 'invoice_center.php exists and redirects toward Billing Center');
 
+/* 2b. The dead customer_upcoming.php link is repaired as a quarantined portal
+ *     redirect stub (Deliveries tab / dated edit screen) and must stay redirect-only. */
+$upcomingStubPath = $root . '/customer_upcoming.php';
+$upcomingStub = file_exists($upcomingStubPath) ? (string)file_get_contents($upcomingStubPath) : '';
+surface_hygiene_assert($upcomingStub !== '', 'customer_upcoming.php exists as a redirect stub');
+surface_hygiene_assert(
+    $upcomingStub !== '' && strpos($upcomingStub, "header('Location: ')") === false
+        && strpos($upcomingStub, "header('Location: '") !== false
+        && preg_match('/exit\s*;/s', $upcomingStub) === 1,
+    'customer_upcoming.php redirects with Location header and exits'
+);
+surface_hygiene_assert(
+    $upcomingStub !== '' && stripos($upcomingStub, '<!DOCTYPE') === false
+        && stripos($upcomingStub, '<html') === false,
+    'customer_upcoming.php renders no HTML'
+);
+surface_hygiene_assert(
+    strpos($upcomingStub, 'customer_portal_calendar.php') !== false
+        && strpos($upcomingStub, 'customer_upcoming_edit.php') !== false,
+    'customer_upcoming.php targets the live portal deliveries screens'
+);
+$portalListSrc = (string)@file_get_contents($root . '/includes/customer_portal.php');
+surface_hygiene_assert(
+    preg_match("/'customer_upcoming\.php'/", $portalListSrc) === 1,
+    'customer_upcoming.php is registered in bakery_customer_portal_scripts()'
+);
+
 /* 3. Nav link-rot tripwire: every page referenced by the nav includes must exist at the root. */
 $navRefs = [];
 $catalogSrc = (string)@file_get_contents($root . '/includes/navigation_catalog.php');

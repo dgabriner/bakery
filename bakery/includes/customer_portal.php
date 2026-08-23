@@ -27,6 +27,7 @@ function bakery_customer_portal_scripts() {
         'customer_invoice.php',
         'customer_billing_export.php',
         'customer_upcoming_edit.php',
+        'customer_upcoming.php',
         'customer_catalog.php',
         'customer_portal_account.php',
         'customer_portal_notifications.php',

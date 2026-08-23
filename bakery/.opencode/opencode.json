@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/x-preview-f-free",
+  "instructions": [".cursor/rules/*.mdc"],
+  "watcher": {
+    "ignore": ["vendor/**", "logs/**", "uploads/**", "storage/**", "tmp/**"]
+  },
+  "share": "disabled",
+  "permission": {
+    "read": {
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    }
+  }
+}

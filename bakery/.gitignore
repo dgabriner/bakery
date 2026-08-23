@@ -57,6 +57,7 @@ storage/dumps/local-checkpoints/
 storage/dumps/refresh-work/
 storage/dumps/weekly/
 storage/dumps/restore-drills/
+storage/text_media/
 storage/.prod_data_active
 storage/deploy/*.zip
 storage/deploy/manifest_*.txt

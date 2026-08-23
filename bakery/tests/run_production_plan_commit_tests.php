@@ -295,6 +295,32 @@ $assert(strpos($diffSource, 'function bakery_production_commit_diff(PDO $db, str
 $assert(strpos($diffSource, "if (!bakery_production_plan_commits_ready(\$db) || !bakery_production_plan_commit_items_ready(\$db))") !== false, 'commit diff returns empty when commit tables are missing');
 $assert(strpos($diffSource, '!bakery_operational_events_ready($db)') !== false, 'commit diff returns empty when operational_events is missing');
 
+// Baker UX contract: bakers live in the committed plan on their own sheet.
+// The committed bake target sits beside Left/Made only after commit, the
+// fresh-commit stamp names when the manager set the numbers, and an
+// uncommitted date says so plainly instead of a vague manager note.
+$productionSource = (string)file_get_contents($root . '/production.php');
+$assert(strpos($productionSource, "'production.bake_target'") !== false, 'baker qty grid renders the committed bake target label');
+$assert(
+    preg_match('/if \(\$planCommitted\):\s*\?>\s*<div class="bp-qty-target">/', $productionSource) === 1,
+    'bake target cell renders only when the date is committed'
+);
+$assert(strpos($productionSource, 'bp-qty-grid--baker-committed') !== false, 'committed baker grid switches to the three-cell layout');
+$assert(strpos($productionSource, "bakery_t('production.baker_committed_stamp'") !== false, 'baker focus strip stamps when the manager set the numbers');
+$assert(strpos($productionSource, "'production.baker_uncommitted_summary'") !== false, 'uncommitted dates say so on the sheet summary');
+$assert(strpos($productionSource, 'baker_plan_note') === false, 'retired vague plan-note key is gone from the page');
+
+$langEn = require $root . '/lang/en.php';
+$langEs = require $root . '/lang/es.php';
+foreach (['production.bake_target', 'production.baker_committed_stamp', 'production.baker_uncommitted_summary'] as $i18nKey) {
+    $assert(isset($langEn[$i18nKey], $langEs[$i18nKey]), "i18n key present in both languages: $i18nKey");
+}
+$assert(
+    !isset($langEn['production.baker_plan_note'], $langEs['production.baker_plan_note']),
+    'retired plan-note key removed from both languages'
+);
+
+
 $dateB = date('Y-m-d', strtotime('+41 days'));
 echo "Diff test date: $dateB\n";
 $cleanup($db, $dateB);

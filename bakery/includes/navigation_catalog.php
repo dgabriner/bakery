@@ -63,6 +63,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'manager.php', 'label' => 'Bakery Manager', 'description' => 'Command workspace for production, packing, baker activity, routes, and closeout risk.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_run.php', 'label' => 'Daily Run', 'description' => 'Step-by-step operating checklist and end-of-day closeout for the selected date.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_brief.php', 'label' => 'Daily Brief', 'description' => 'One-page shift handoff: changes, production, routes, and exceptions.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
             ],
         ],

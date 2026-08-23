@@ -47,9 +47,11 @@ $groups = bakery_navigation_groups_for_role('manager');
 i18n_assert('Nav groups returned', count($groups) > 0);
 i18n_assert('Spanish nav group label', $groups[0]['label'] === 'Jornada');
 i18n_assert('Spanish driver guides page', bakery_t('page.driver_guides') === 'Guías del repartidor');
+i18n_assert('Spanish common view', bakery_t('common.view') === 'Ver');
 
 $GLOBALS['bakery_i18n_catalog'] = null;
 bakery_set_locale('en', false);
 i18n_assert('English walkthroughs page', bakery_t('page.walkthroughs') === 'Walkthroughs');
+i18n_assert('English common view', bakery_t('common.view') === 'View');
 
 exit($failures > 0 ? 1 : 0);

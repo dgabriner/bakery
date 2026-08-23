@@ -512,6 +512,13 @@ $orderSourceLabel = !empty($hasDailyOrders) ? bakery_t('production.from_daily_or
 $planCommitted = !empty($bakeList['committed']);
 $planDriftCount = (int)($bakeList['changed_since']['count'] ?? 0);
 $planAvailable = !empty($bakeList['available']);
+$bakerCommitStamp = '';
+if ($isBaker && $planCommitted && !empty($bakeList['commit']['committed_at'])) {
+    $commitTs = strtotime((string)$bakeList['commit']['committed_at']);
+    if ($commitTs) {
+        $bakerCommitStamp = bakery_t('production.baker_committed_stamp', ['time' => date('g:i a', $commitTs)]);
+    }
+}
 $commitDiff = [];
 if ($planCommitted && function_exists('bakery_production_commit_diff')) {
     try {
@@ -635,10 +642,13 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
             <div class="bp-baker-focus" role="status">
                 <strong><?php bakery_te('production.baker_focus_title'); ?></strong>
                 <span><?php bakery_te('production.baker_focus_lead'); ?></span>
+                <?php if ($bakerCommitStamp !== ''): ?>
+                    <span class="bp-baker-focus__stamp"><?php echo htmlspecialchars($bakerCommitStamp, ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php endif; ?>
             </div>
             <?php if ($planAvailable && !$planCommitted): ?>
                 <details class="bp-plan-note">
-                    <summary><?php bakery_te('production.baker_plan_note'); ?></summary>
+                    <summary><?php bakery_te('production.baker_uncommitted_summary'); ?></summary>
                     <p><?php bakery_te('production.uncommitted_banner_baker'); ?></p>
                 </details>
             <?php elseif ($planCommitted && $planDriftCount > 0): ?>
@@ -979,9 +989,12 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                             'per_tray' => number_format((int)$panDulceProductHint['pieces_per_tray']),
                                         ]), ENT_QUOTES, 'UTF-8'); ?></p>
                                     <?php endif; ?>
-                                    <dl class="bp-qty-grid<?php echo $isBaker ? ' bp-qty-grid--baker' : ''; ?>">
+                                    <dl class="bp-qty-grid<?php echo $isBaker ? ' bp-qty-grid--baker' : ''; ?><?php echo $isBaker && $planCommitted ? ' bp-qty-grid--baker-committed' : ''; ?>">
                                         <?php if ($isBaker): ?>
                                             <div class="bp-qty-primary"><dt><?php bakery_te('production.left'); ?></dt><dd class="bp-qty-left"><?php echo number_format((int)$product['remaining_quantity']); ?></dd></div>
+                                            <?php if ($planCommitted): ?>
+                                                <div class="bp-qty-target"><dt><?php bakery_te('production.bake_target'); ?></dt><dd><?php echo number_format((int)$product['planned_quantity']); ?></dd></div>
+                                            <?php endif; ?>
                                             <div><dt><?php bakery_te('production.made'); ?></dt><dd class="bp-qty-made"><?php echo number_format((int)$product['made_quantity']); ?></dd></div>
                                         <?php else: ?>
                                             <div><dt><?php bakery_te('production.demand'); ?></dt><dd><?php echo number_format((int)$product['demand_quantity']); ?></dd></div>
@@ -1067,6 +1080,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-alert--error { background: var(--sf-danger-bg, #fdecec); border: 1px solid var(--sf-danger-border, #e7a1a1); color: var(--sf-danger, #7a1f1f); }
 .bp-baker-focus { display: grid; gap: 2px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.12); }
 .bp-baker-focus span { font-size: .9rem; opacity: .92; }
+.bp-baker-focus__stamp { font-weight: 700; color: #d8f0e2; }
 .bp-plan-note { margin-top: 8px; font-size: .85rem; color: #fff3d3; }
 .bp-plan-note summary { cursor: pointer; font-weight: 700; }
 .bp-plan-note p { margin: 6px 0 0; }
@@ -1114,8 +1128,11 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-qty-grid dt { margin: 0; font-size: .78rem; color: #607068; text-transform: uppercase; letter-spacing: .03em; }
 .bp-qty-grid dd { margin: 4px 0 0; font-size: 1.35rem; font-weight: 800; color: #173f3c; }
 .bp-qty-grid--baker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bp-qty-grid--baker.bp-qty-grid--baker-committed { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .bp-qty-grid--baker .bp-qty-primary { background: #e7f3ec; border-color: #8db59a; }
 .bp-qty-grid--baker .bp-qty-primary dd { font-size: 1.8rem; color: #155f36; }
+.bp-qty-grid--baker .bp-qty-target { background: #f3fbf5; }
+.bp-qty-grid--baker .bp-qty-target dd { font-weight: 700; }
 .bp-variance { margin: 8px 0 0; font-size: .85rem; color: #8a4d00; }
 .bp-record__label { display: block; margin-bottom: 8px; font-weight: 700; color: #1f5f32; }
 .bp-waste-label { display: block; margin-top: 10px; font-size: .82rem; font-weight: 700; color: #7a3d21; }

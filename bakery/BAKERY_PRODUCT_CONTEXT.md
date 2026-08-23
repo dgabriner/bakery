@@ -59,9 +59,11 @@ Server-side role enforcement lives in `includes/auth.php`; menu in
 | **Driver / Driver Assistant** | Mobile-first: next stop, compact remaining-stop map (live location + numbered pins) with next-leg, next-three, and full-day views, driving distance/time, delivery-window context, next-three horizon, remembered scope, and zoom controls; then navigate, photo → pieces/credits → COD → invoice preview → confirm. Remaining stops can be reordered on My Route (`Go next` or compact Adjust). A Driver Assistant works the paired driver's route (default or dated pairing), so both update the same stops and delivery records. Driver code login creates a rolling trusted-phone credential that can rebuild a lost PHP session; explicit logout or deactivation revokes access. Sees My Route + Call HQ only. The reference implementation for role UX — study it before building other role flows. |
 | **Customer (portal)** | See/edit upcoming deliveries and standing order, pause weeks, view invoices/statements/photos, report issues. Login: 4-digit code or staff-generated QR. |
 
-Defaults: baker/driver/manager UIs lean Spanish, admin English; i18n is nearly complete
-(~1,170/1,174 keys). If you add user-facing strings, add `lang/en.php` AND `lang/es.php`
-keys — several nav items already show raw keys because this was skipped.
+Defaults: baker/driver/manager UIs lean Spanish, admin English; i18n is complete —
+`lang/en.php` and `lang/es.php` sit at exact key parity (3,052/3,052, verified 2026-08-23),
+with no raw-key references left in any scanned surface. If you add user-facing strings, add
+`lang/en.php` AND `lang/es.php` keys in the same change — Spanish must be a genuine
+translation, never an English copy.
 
 ## 3. Existing strengths — do not casually redesign
 
@@ -92,10 +94,11 @@ keys — several nav items already show raw keys because this was skipped.
   line-filtered per baker, progress from `produced_quantity`. After a manager commits
   the date, bake quantities come from the committed plan snapshot; dated demand stays
   visible beside them. Uncommitted dates show demand and say so — they do not silently
-  treat saved Production Center targets as the bake list. Baker-role presentation stays
-  work-first: amount left and made are primary, formulas open in grams, manager plan notes
-  and shortage reporting are collapsed, and configured Pan Dulce yields translate pieces
-  into bench-language gallon/tray hints. Manager views retain drift and reconciliation detail.
+   treat saved Production Center targets as the bake list. Baker-role presentation stays
+   work-first: amount left and made are primary (the committed bake target rides beside
+   them after commit, so Left always has context), formulas open in grams, manager plan notes
+   and shortage reporting are collapsed, and configured Pan Dulce yields translate pieces
+   into bench-language gallon/tray hints. Manager views retain drift and reconciliation detail.
 - **Driver workflow** (`driver.php` + `complete_delivery.php`). Transactional confirm
   writes assignment status, order status, delivered line quantities, and a pricing snapshot
   in one step; notifies the customer. My Route also shows a compact remaining-stop map
@@ -246,6 +249,7 @@ Compact map — entry points only, not every file.
 | Admin | `users.php`, `login_history.php`, `historical_navigation.php`, `module_guide.php`, `agent_homebase.php` | Identity, audit, retained legacy menu, Agent Learning Studio / Homebase (admin coaching view; agents use `scripts/agent_homebase.php`) |
 | Insights | `customer_overview.php`, `customer_routes.php`, `product_distribution.php` (per-customer demand merge) | Read-only exploration |
 | Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; **no staff alerts exist** |
+| Texting Command Center | `text_comms.php`, `text_comms_api.php`, `includes/text_comms.php`, `includes/twilio_config.php`, `twilio_webhook.php`, schema 057 | One SMS ledger for outbound attempts (live, failed, or recorded-only without credentials), inbound replies linked to customers by phone tail, delivery health, and ops mix. Sending happens only on the Command Center page; the API is read-only. Status callbacks can advance but never regress a row; Twilio retries of recorded inbound messages answer success, not a second row. |
 | Timeline | `operational_timeline.php`, `includes/operational_timeline.php` | Audit/event feed per date/customer/order |
 
 ## 6. Known open loops
@@ -269,15 +273,19 @@ Compact map — entry points only, not every file.
    Post-commit dated-demand changes raise `production_plan_drift`; the bake sheet
    does not auto-rewrite. Re-commit updates baker numbers and does not zero
    `produced_quantity`. Completing exception work never hides still-true drift.
-   When planned or on-hand is below demand, Production Center **Assign to orders**
-   recommends proportional store quantities. Default apply writes standing (and
-   this delivery day's dated line; later same-weekday dated copies of the old
-   standing amount follow). **This delivery only** writes dated quantities and
-   leaves standing alone. Van / delivered orders are skipped.
-   Daily Run **Produce** completion measures against the committed bake when a
-   commit exists (so intentional plan-below-demand does not leave Produce stuck).
-   Production Center is the Production Manager hub (kitchen stage strip + deep
-   links); bakers still do not open it — they stay on Daily Production + Pack List.
+    When planned or on-hand is below demand, Production Center **Assign to orders**
+    recommends proportional store quantities. Default apply writes standing (and
+    this delivery day's dated line; later same-weekday dated copies of the old
+    standing amount follow). **This delivery only** writes dated quantities and
+    leaves standing alone. Van / delivered orders are skipped.
+    Daily Run **Produce** completion measures against the committed bake when a
+    commit exists (so intentional plan-below-demand does not leave Produce stuck).
+    Production Center is the Production Manager hub (kitchen stage strip + deep
+    links); bakers never open it — Daily Production carries the committed plan
+    to them instead: the committed bake target sits beside Left/Made once the
+    date is committed, the focus strip stamps when the manager set the numbers,
+    and an uncommitted date says so plainly on its collapsed note. Re-commit
+    diff chips show every quantity change on both views.
 3. **Route and production waste.** Closed: `route_closeout.php` reconciles loaded = net
    delivered + returned + waste + door credits, while Daily Production records batch waste
    without adding unusable units to sellable FG. Door credits remain FG `return` movements
@@ -317,7 +325,9 @@ a later item.
    (and Daily Run calling the same helper); Daily Production executes the committed
    plan with demand alongside + drift flags; post-commit demand changes raise
    `production_plan_drift`. Production Center can assign the recorded bake to
-   standing (usual) or one-off dated orders. *Bakers still do not open Production Center.*
+   standing (usual) or one-off dated orders. *Bakers live in the committed plan
+   on Daily Production (target cell + set-at stamp + plain uncommitted note);
+   they still never open Production Center.*
 3. **Route closeout/reconciliation** — shipped (`route_closeout.php`): per-driver loaded vs
    delivered vs returned vs wasted; waste + delivery movement types; Daily Run closeout
    requires closed routes.
@@ -330,7 +340,9 @@ a later item.
    open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
    links — do not rebuild standing/pricing/billing editors inside the hub.
 6. **High-value usability fixes** — bulk actions, inline order editing, broken-window batch
-   (leads filter bug, dead `customer_upcoming.php` redirect, missing i18n keys).
+    closed: leads pipeline filter fixed; dead `customer_upcoming.php` link repaired as a
+    quarantined redirect-only stub into the portal deliveries screens; i18n parity verified
+    with zero raw-key references.
    Product Distribution demand is the per-customer merge (dated beats standing). Pack List now has shared check-offs, route/driver
    grouping, and shortage display aligned with dashboard (on-hand + loaded).
 
