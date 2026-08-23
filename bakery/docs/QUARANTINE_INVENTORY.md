@@ -6,7 +6,7 @@
 
 This inventory is **evidence-based** (scanned on disk under `bakery/`). It lists backup copies, experimental variants, diagnostics, test harnesses, orphan invoice scripts, and PII-bearing SQL — not the canonical application pages.
 
-**Related docs:** [CHECKPOINT_0A_REPOSITORY_CLASSIFICATION.md](CHECKPOINT_0A_REPOSITORY_CLASSIFICATION.md), [CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md), [CURRENT_STATE.md](CURRENT_STATE.md)
+**Related docs:** [CHECKPOINT_0A_REPOSITORY_CLASSIFICATION.md](CHECKPOINT_0A_REPOSITORY_CLASSIFICATION.md), [CREDENTIAL_ROTATION_RUNBOOK.md](CREDENTIAL_ROTATION_RUNBOOK.md). Dated status: [archive/CURRENT_STATE.md](archive/CURRENT_STATE.md) (do not brief from it).
 
 ---
 
@@ -173,3 +173,49 @@ Get-ChildItem -Recurse -File |
 1. **No agent may delete** quarantined files during checkpoints 0A–0E.
 2. Prefer **block public access** (auth + `.htaccess`) over deletion during modernization.
 3. Characterization findings (Sunday encoding, zone join, etc.) remain documented bugs — see [CHECKPOINT_0C_CHARACTERIZATION_FINDINGS.md](CHECKPOINT_0C_CHARACTERIZATION_FINDINGS.md); quarantine status does not imply those are fixed.
+
+---
+
+## 2026-08-22 sweep (owner-approved)
+
+Owner authorized cleanup ("zip archive, then delete") beyond checkpoint 0E. Executed by agent session.
+
+**Deleted from repo (tracked via `git rm`, recoverable from history):**
+`blah_blah.php`, `Blah2.php`, `blah3.php`–`blah6.php`, `probe_smoke_20260729.php` (file itself said "delete when done").
+
+**Deleted local-only (untracked/gitignored; archived first to `storage/quarantine/root_scratch_sweep_2026-08-22.zip`, 44 files / 86 KB):**
+all remaining root `debug*.php` / `test_*` pages, `db_test.php`, `simple_performance_test.php`,
+`route_tester.php`, `run_sql_setup.php`, `check_photo_db.php`, `find_photo_ids.php`,
+`standing_routes - Copy.php`, `bread_distribution_{backup,fixed,optimized}.php`,
+`product_distribution_backup.php`, `.htaccess.bak`.
+
+**Stale duplicate tree:** `../sfbake/` (untracked full copy of an older app state, incl. its own `.env`
+credential files) zipped to temp storage outside the repo (`sfbake_stale_copy_2026-08-22.zip`, 686
+entries) and deleted.
+
+**Archive expiry:** local archives self-expire — run
+`php scripts/purge_local_quarantine.php` (dry-run) / `--yes` after **2026-09-05**; pass
+`--path=` to include the temp `sfbake_stale_copy` zip. Marker:
+`storage/quarantine/PURGE_BY_2026-09-05.txt`. Regression gate for this sweep:
+`tests/run_surface_hygiene_tests.php` (filesystem-only).
+
+**Moved:** 7 root one-off SQL patches → [archive/sql-patches/](archive/sql-patches/)
+(`add_coordinates_to_customers`, `add_default_quantity_columns`,
+`assign_dough_types_to_product_lines`, `create_daily_order_assignments_table`,
+`product_lines_setup`, `setup_photo_functionality`,
+`standing_orders_performance_optimization`). Path references updated in
+`setup_directories.php` and `health_prod.php`. Historical-nav/catalog links to the deleted
+`route_tester.php` removed from `includes/nav_historical.php` +
+`includes/navigation_catalog.php`; orphaned `page.route_tester` keys removed from both lang
+files. `.gitignore` now also blocks `storage/quarantine/`, `blah*.php`, `probe_smoke_*.php`.
+
+**Deliberately kept:**
+- Legacy invoice redirects (`generate_invoice*.php`, `simple_invoice.php`, `invoice_center.php`)
+  — required by `tests/run_invoice_send_tests.php`.
+- `products_new.php` (UX merge/retire decision), `get_customers_no_address.php` (audit pending).
+- PII SQL dumps per policy above (gitignored, local only).
+- Duplicate schema prefixes (two `010`s, `021`s, `025`s) — NOT renamed; `run_migrations.php`
+  tracks applied migrations by filename id in `schema_migrations`, so renaming would re-run them.
+- `driver_pages_probe.php`, `trace_driver_list.php`, `ping.php` — deploy-excluded already;
+  `health_deploy.php` asserts on the probe name; revisit in a dedicated pass.
+- `auth.php` debug-page blocklist entries for deleted files left as harmless no-op defense-in-depth.

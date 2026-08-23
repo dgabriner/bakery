@@ -268,7 +268,7 @@ endif;
 
                 <!-- Routes & Delivery Dropdown -->
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link dropdown-toggle <?php echo in_array($current_page, ['standing_routes', 'daily_route', 'driver', 'drivers', 'users', 'customer_routes', 'driver_overview', 'route_manager', 'route_summary', 'map', 'route_tester', 'call_headquarters', 'driver_assignment']) ? 'active' : ''; ?>">
+                    <a href="#" class="nav-link dropdown-toggle <?php echo in_array($current_page, ['standing_routes', 'daily_route', 'driver', 'drivers', 'users', 'customer_routes', 'driver_overview', 'route_manager', 'route_summary', 'map', 'call_headquarters', 'driver_assignment']) ? 'active' : ''; ?>">
                         <i class="nav-icon">🚚</i> <span class="nav-text">Routes</span>
                         <i class="dropdown-arrow">▼</i>
                     </a>
@@ -315,9 +315,6 @@ endif;
                         </a>
                         <a href="<?php echo BASE_URL; ?>map.php" class="dropdown-link <?php echo $current_page === 'map' ? 'active' : ''; ?>">
                             <i class="nav-icon">🗺️</i> Map
-                        </a>
-                        <a href="<?php echo BASE_URL; ?>route_tester.php" class="dropdown-link <?php echo $current_page === 'route_tester' ? 'active' : ''; ?>">
-                            <i class="nav-icon">🧪</i> Route Tester
                         </a>
                         <a href="<?php echo BASE_URL; ?>call_headquarters.php" class="dropdown-link <?php echo $current_page === 'call_headquarters' ? 'active' : ''; ?>">
                             <i class="nav-icon">📞</i> Call HQ
@@ -472,9 +469,6 @@ endif;
                         </a>
                         <a href="<?php echo BASE_URL; ?>map.php" class="nav-link <?php echo $current_page === 'map' ? 'active' : ''; ?>">
                             <i class="nav-icon">🗺️</i> Customer Map
-                        </a>
-                        <a href="<?php echo BASE_URL; ?>route_tester.php" class="nav-link <?php echo $current_page === 'route_tester' ? 'active' : ''; ?>">
-                            <i class="nav-icon">🧪</i> Route Tester
                         </a>
                         <a href="<?php echo BASE_URL; ?>call_headquarters.php" class="nav-link <?php echo $current_page === 'call_headquarters' ? 'active' : ''; ?>">
                             <i class="nav-icon">📞</i> Call HQ

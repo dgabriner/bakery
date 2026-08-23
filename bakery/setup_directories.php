@@ -73,7 +73,7 @@ if (file_put_contents($testFile, 'test')) {
 
 echo "<h2>📋 Next Steps:</h2>";
 echo "<ol>";
-echo "<li>Run the SQL script: <code>setup_photo_functionality.sql</code></li>";
+echo "<li>Run the SQL script: <code>docs/archive/sql-patches/setup_photo_functionality.sql</code></li>";
 echo "<li>Make sure your server has GD extension enabled for image processing</li>";
 echo "<li>The photo functionality is now ready to use!</li>";
 echo "</ol>";

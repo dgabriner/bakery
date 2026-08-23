@@ -1521,7 +1521,6 @@ return [
     'page.driver_list' => 'Lista de rutas',
     'page.driver_assignment' => 'Asignación de repartidores',
     'page.customer_routes' => 'Ver por cliente',
-    'page.route_tester' => 'Probador de rutas',
     'page.users' => 'Gestión de usuarios',
     'users.driver' => 'Repartidor',
     'users.paired_driver' => 'Repartidor asociado',

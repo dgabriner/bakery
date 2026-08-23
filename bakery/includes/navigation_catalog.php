@@ -328,7 +328,6 @@ function bakery_historical_navigation_catalog() {
             ['route_summary.php', 'Route Summary'],
             ['route_closeout.php', 'Route Closeout'],
             ['map.php', 'Map'],
-            ['route_tester.php', 'Route Tester'],
             ['call_headquarters.php', 'Call Headquarters'],
         ],
     ];

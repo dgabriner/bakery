@@ -27,7 +27,7 @@ try {
 
     if (function_exists('table_exists')) {
         $steps[] = 'users table: ' . (table_exists($db, 'users') ? 'yes' : 'MISSING — run 002_auth.sql');
-        $steps[] = 'daily_order_assignments table: ' . (table_exists($db, 'daily_order_assignments') ? 'yes' : 'MISSING — run create_daily_order_assignments_table.sql or baseline');
+        $steps[] = 'daily_order_assignments table: ' . (table_exists($db, 'daily_order_assignments') ? 'yes' : 'MISSING — run docs/archive/sql-patches/create_daily_order_assignments_table.sql or baseline');
         if (table_exists($db, 'drivers') && function_exists('bakery_drivers_support_archive_column')) {
             $steps[] = 'drivers.archived column: ' . (bakery_drivers_support_archive_column($db) ? 'yes' : 'MISSING — run migration 006 in phpMyAdmin');
         }

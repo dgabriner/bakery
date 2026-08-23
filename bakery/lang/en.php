@@ -1652,7 +1652,6 @@ return [
     'page.driver_list' => 'Driver Route List',
     'page.driver_assignment' => 'Driver Assignment',
     'page.customer_routes' => 'View by Customer',
-    'page.route_tester' => 'Route Tester',
     'page.users' => 'User Management',
     'users.driver' => 'Driver',
     'users.paired_driver' => 'Paired driver',

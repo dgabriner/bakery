@@ -101,6 +101,10 @@ storage/demo-recordings/**
 tools/demo-recorder/.venv/
 
 # --- Quarantine / legacy variants (see docs/QUARANTINE_INVENTORY.md) ---
+storage/quarantine/
+blah*.php
+Blah2.php
+probe_smoke_*.php
 .htaccess.bak
 *_backup.php
 *backup.php
