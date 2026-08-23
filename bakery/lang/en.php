@@ -102,6 +102,11 @@ return [
     'alerts.tomorrow' => 'Tomorrow',
     'alerts.overflow_detail' => 'more situations on the dashboard',
 
+    // Staff alerts (cron digest)
+    'staff_alerts.digest_subject' => '[Sour Flour] :count operational alerts need attention',
+    'staff_alerts.digest_heading' => 'Operations alert digest',
+    'staff_alerts.digest_footer' => 'Generated at :datetime',
+
     // Texting Command Center (Twilio)
     'page.text_comms' => 'Texting Command Center',
     'nav.item.text_comms' => 'Text Command Center',

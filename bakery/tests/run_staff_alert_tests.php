@@ -87,11 +87,29 @@ $en = include $root . '/lang/en.php';
 $es = include $root . '/lang/es.php';
 $missingEs = [];
 foreach ($en as $key => $_text) {
-    if ((strpos($key, 'alerts.') === 0 || $key === 'nav.alerts_aria') && !isset($es[$key])) {
+    if ((strpos($key, 'alerts.') === 0 || strpos($key, 'staff_alerts.digest_') === 0 || $key === 'nav.alerts_aria') && !isset($es[$key])) {
         $missingEs[] = $key;
     }
 }
 $assert($missingEs === [], 'Staff alert i18n keys exist in es.php' . ($missingEs ? (' missing: ' . implode(',', $missingEs)) : ''));
+
+// ── Cron digest delivery (source contracts) ──────────────────────────────────
+$digestSource = file_get_contents($root . '/scripts/staff_alert_digest.php');
+$assert($digestSource !== false, 'Digest script exists');
+$assert(strpos($digestSource, "PHP_SAPI !== 'cli'") !== false, 'Digest script is CLI-only like demand_scheduler');
+$assert(strpos($digestSource, 'bakery_demand_scheduler_assert_cli') !== false, 'Digest reuses the demand_scheduler target guard');
+$assert(strpos($digestSource, '--force') !== false, 'Digest local one-shots require --force');
+$assert(strpos($digestSource, '--to=') !== false, 'Digest parses a --to recipient override for testing');
+$assert(strpos($digestSource, "'status' => 'clean'") !== false && strpos($digestSource, 'exit(0)') !== false, 'Digest stays silent when clean (no email, exit 0)');
+$assert(strpos($digestSource, "['critical', 'warning'], true") !== false, 'Digest emails critical/warning only');
+$assert(strpos($digestSource, 'bakery_customer_notification_send_email_message') !== false, 'Digest sends via the customer_notifications mail helper');
+$assert(strpos($digestSource, 'bakery_billing_append_mail_log') !== false, 'MAIL_DRIVER=log digests record to logs/mail.log via the canonical appender');
+$assert(strpos($digestSource, 'bakery_staff_alerts_collect') !== false, 'Digest collects through bakery_staff_alerts_collect');
+$assert(strpos($digestSource, "r.slug IN ('administrator', 'manager')") !== false, 'Digest recipients mirror the alert-eligible roles');
+
+foreach (['staff_alerts.digest_subject', 'staff_alerts.digest_heading', 'staff_alerts.digest_footer'] as $digestKey) {
+    $assert(isset($en[$digestKey], $es[$digestKey]), "Digest key {$digestKey} exists in en.php + es.php");
+}
 
 // ── Live collection against the isolated clone ───────────────────────────────
 $adminStmt = $db->query(
