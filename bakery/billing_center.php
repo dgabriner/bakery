@@ -6,6 +6,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/billing.php';
+require_once __DIR__ . '/includes/billing_aging.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 
 bakery_billing_ensure_invoice_send_schema($db);

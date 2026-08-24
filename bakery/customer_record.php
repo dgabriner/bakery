@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/customer_record.php';
 require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
+require_once __DIR__ . '/includes/billing_aging.php';
 
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
@@ -452,6 +453,12 @@ require_once __DIR__ . '/includes/nav.php';
         $customerNameEnc = rawurlencode($cust['name']);
         $zoneEnc = rawurlencode($cust['zone'] ?? '');
         $recordUrl = bakery_customer_record_url($customerId, $selectedDate);
+        $hubBalance = null;
+        try {
+            $hubBalance = bakery_billing_customer_balance($db, $customerId);
+        } catch (Throwable $e) {
+            error_log('customer_record balance chip: ' . $e->getMessage());
+        }
     ?>
 
     <div class="cr-summary">
@@ -499,6 +506,23 @@ require_once __DIR__ . '/includes/nav.php';
                 <div class="cr-meta-item">
                     <span class="label">Pricing tier</span>
                     <span class="value"><?php echo htmlspecialchars(ucfirst($cust['pricing_tier'] ?? 'retail')); ?></span>
+                </div>
+                <div class="cr-meta-item">
+                    <span class="label"><?php echo htmlspecialchars(bakery_t('hub.balance_label')); ?></span>
+                    <span class="value">
+                        <a href="billing_center.php?panel=customer&amp;customer_id=<?php echo $customerId; ?>">
+                            <?php if ($hubBalance !== null && (int)$hubBalance['outstanding_count'] > 0): ?>
+                            <span class="cr-state-badge state-alert"><?php
+                                echo htmlspecialchars(bakery_t('hub.balance_due', [
+                                    ':total' => '$' . number_format((float)$hubBalance['outstanding_total'], 2),
+                                    ':days' => (int)$hubBalance['oldest_days'],
+                                ]));
+                            ?></span>
+                            <?php else: ?>
+                            <span class="cr-state-badge state-muted"><?php echo htmlspecialchars(bakery_t('hub.balance_current')); ?></span>
+                            <?php endif; ?>
+                        </a>
+                    </span>
                 </div>
             </div>
             <div class="cr-actions">

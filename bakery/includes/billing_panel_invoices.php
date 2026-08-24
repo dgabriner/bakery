@@ -24,6 +24,11 @@ if (!in_array($sortBy, $sortOptions, true)) {
     $sortBy = 'attention';
 }
 
+$balancesFilter = (string)($_GET['balances'] ?? 'all');
+if (!in_array($balancesFilter, ['all', 'outstanding', 'aging30'], true)) {
+    $balancesFilter = 'all';
+}
+
 $orders = bakery_billing_query_orders($db, [
     'start_date' => $startDate,
     'end_date' => $endDate,
@@ -105,6 +110,34 @@ if ($workQueue !== 'all') {
     }));
 }
 
+if ($balancesFilter !== 'all') {
+    $orders = array_values(array_filter($orders, static function ($order) use ($balancesFilter) {
+        $remainder = bakery_billing_order_outstanding($order);
+        if ($remainder <= bakery_billing_outstanding_tolerance()) {
+            return false;
+        }
+        if ($balancesFilter !== 'aging30') {
+            return true;
+        }
+        return !empty($order['delivery_confirmed_at'])
+            && bakery_billing_oldest_days($order['delivery_confirmed_at']) >= 30;
+    }));
+}
+
+$balanceRows = [];
+try {
+    $balanceRows = bakery_billing_customer_balances($db);
+} catch (Throwable $e) {
+    error_log('billing balances strip: ' . $e->getMessage());
+}
+$balanceSummary = ['customers' => 0, 'total' => 0.0, 'deliveries' => 0];
+foreach ($balanceRows as $balanceRow) {
+    $balanceSummary['customers']++;
+    $balanceSummary['total'] += (float)$balanceRow['outstanding_total'];
+    $balanceSummary['deliveries'] += (int)$balanceRow['outstanding_count'];
+}
+$balanceSummary['total'] = round($balanceSummary['total'], 2);
+
 if ($sortBy === 'attention') {
     usort($orders, static function ($a, $b) {
         $pa = (int)($a['attention_priority'] ?? 99);
@@ -175,6 +208,7 @@ $baseQueryParams = [
     'view' => $viewMode,
     'collection' => $collectionFilter,
     'queue' => $workQueue,
+    'balances' => $balancesFilter,
 ];
 if (!$deliveredOnly) {
     $baseQueryParams['show_unconfirmed'] = '1';
@@ -209,6 +243,9 @@ $query = function (array $extra = []) use ($baseQueryParams) {
             unset($merged[$key]);
         }
         if ($key === 'queue' && $value === 'to_send') {
+            unset($merged[$key]);
+        }
+        if ($key === 'balances' && $value === 'all') {
             unset($merged[$key]);
         }
     }
@@ -261,6 +298,9 @@ $formAction = 'billing_center.php?panel=invoices';
 .ic-att--danger{background:#fef2f2;color:#b91c1c}.ic-att--warn{background:#fff7ed;color:#c2410c}
 .ic-att--alert{background:#fffbeb;color:#b45309}.ic-att--ok{background:#ecfdf5;color:#047857}.ic-att--muted{background:#f1f5f9;color:#475569}
 .ic-attention-strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.ic-balance-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.ic-bal-summary{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:#fff7ed;color:#9a3412;font-size:.78rem;font-weight:800}
+.ic-bal-summary.is-none{background:#f1f5f9;color:#64748b;font-weight:650}
 .ic-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:6px 12px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#334155;font-size:.78rem;font-weight:750;text-decoration:none}
 .ic-chip.is-active{border-color:#0f766e;background:#0f766e;color:#fff}
 .ic-exception-box{padding:12px 14px;margin-bottom:14px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;font-size:.84rem}
@@ -320,6 +360,23 @@ $formAction = 'billing_center.php?panel=invoices';
             </div>
         </details>
     </form>
+
+    <nav class="ic-balance-strip" aria-label="<?php echo htmlspecialchars(bakery_t('billing.balances_aria')); ?>">
+        <a class="ic-chip <?php echo $balancesFilter === 'all' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'all', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_all')); ?></a>
+        <a class="ic-chip <?php echo $balancesFilter === 'outstanding' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'outstanding', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_outstanding')); ?></a>
+        <a class="ic-chip <?php echo $balancesFilter === 'aging30' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'aging30', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_aging30')); ?></a>
+        <?php if ($balanceSummary['customers'] > 0): ?>
+            <span class="ic-bal-summary"><?php
+                echo htmlspecialchars(bakery_t('billing.balances_summary', [
+                    ':n' => (int)$balanceSummary['customers'],
+                    ':total' => '$' . number_format($balanceSummary['total'], 2),
+                    ':m' => (int)$balanceSummary['deliveries'],
+                ]));
+            ?></span>
+        <?php else: ?>
+            <span class="ic-bal-summary is-none"><?php echo htmlspecialchars(bakery_t('billing.balances_none')); ?></span>
+        <?php endif; ?>
+    </nav>
 
     <nav class="ic-attention-strip" aria-label="<?php echo htmlspecialchars(bakery_t('billing.queue_aria')); ?>">
         <a class="ic-chip <?php echo $workQueue === 'to_send' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['queue' => 'to_send', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.queue_to_send')); ?> <strong><?php echo (int)$queueCounts['to_send']; ?></strong></a>
