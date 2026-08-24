@@ -392,6 +392,7 @@ function bakery_agent_work_map(): array
                 'tests/run_bread_education_tests.php',
                 'tests/run_bread_education_gating_tests.php',
                 'tests/run_education_copy_parity_tests.php',
+                'tests/run_synthetic_refusal_tests.php',
             ],
             'invariants' => [
                 'One write path: every education mutation goes through includes/sf_baker.php bakery_sfb_* helpers; no second write path',
