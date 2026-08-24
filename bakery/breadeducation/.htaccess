@@ -11,3 +11,37 @@ DirectoryIndex index.html
     Header set Cache-Control "no-cache, must-revalidate"
   </FilesMatch>
 </IfModule>
+
+# ROUND2-FOLDER-301: flat filenames moved into topic folders.
+RedirectMatch 301 ^/breadeducation/first-loaf-shopping\.html$ /breadeducation/start/first-loaf-shopping.html
+RedirectMatch 301 ^/breadeducation/your-first-dutch-oven-bake\.html$ /breadeducation/start/your-first-dutch-oven-bake.html
+RedirectMatch 301 ^/breadeducation/starter-day-one\.html$ /breadeducation/start/starter-day-one.html
+RedirectMatch 301 ^/breadeducation/sourdough\.html$ /breadeducation/sourdough/sourdough.html
+RedirectMatch 301 ^/breadeducation/sf-sourdough\.html$ /breadeducation/sourdough/sf-sourdough.html
+RedirectMatch 301 ^/breadeducation/fermentation\.html$ /breadeducation/sourdough/fermentation.html
+RedirectMatch 301 ^/breadeducation/yeasted\.html$ /breadeducation/technique/yeasted.html
+RedirectMatch 301 ^/breadeducation/formula\.html$ /breadeducation/technique/formula.html
+RedirectMatch 301 ^/breadeducation/bake\.html$ /breadeducation/technique/bake.html
+RedirectMatch 301 ^/breadeducation/whole-grain\.html$ /breadeducation/technique/whole-grain.html
+RedirectMatch 301 ^/breadeducation/scoring-patterns\.html$ /breadeducation/technique/scoring-patterns.html
+RedirectMatch 301 ^/breadeducation/shaping-batards\.html$ /breadeducation/technique/shaping-batards.html
+RedirectMatch 301 ^/breadeducation/steam-without-dutch-oven\.html$ /breadeducation/technique/steam-without-dutch-oven.html
+RedirectMatch 301 ^/breadeducation/cold-retard\.html$ /breadeducation/technique/cold-retard.html
+RedirectMatch 301 ^/breadeducation/hydration-by-feel\.html$ /breadeducation/technique/hydration-by-feel.html
+RedirectMatch 301 ^/breadeducation/focaccia\.html$ /breadeducation/breads/focaccia.html
+RedirectMatch 301 ^/breadeducation/pizza-at-home\.html$ /breadeducation/breads/pizza-at-home.html
+RedirectMatch 301 ^/breadeducation/baguettes\.html$ /breadeducation/breads/baguettes.html
+RedirectMatch 301 ^/breadeducation/pretzels\.html$ /breadeducation/breads/pretzels.html
+RedirectMatch 301 ^/breadeducation/crackers-and-discard\.html$ /breadeducation/breads/crackers-and-discard.html
+RedirectMatch 301 ^/breadeducation/pan-dulce\.html$ /breadeducation/pan-dulce/
+RedirectMatch 301 ^/breadeducation/classes\.html$ /breadeducation/classes/classes.html
+RedirectMatch 301 ^/breadeducation/corporate-workshops\.html$ /breadeducation/classes/corporate-workshops.html
+RedirectMatch 301 ^/breadeducation/private-events\.html$ /breadeducation/classes/private-events.html
+RedirectMatch 301 ^/breadeducation/visit-plan\.html$ /breadeducation/classes/visit-plan.html
+RedirectMatch 301 ^/breadeducation/wholesale\.html$ /breadeducation/sell/wholesale.html
+RedirectMatch 301 ^/breadeducation/find-our-bread\.html$ /breadeducation/sell/find-our-bread.html
+RedirectMatch 301 ^/breadeducation/sf-baker\.html$ /breadeducation/journal/sf-baker.html
+RedirectMatch 301 ^/breadeducation/home-oven-to-market\.html$ /breadeducation/journal/home-oven-to-market.html
+RedirectMatch 301 ^/breadeducation/baking-glossary-printable\.html$ /breadeducation/reference/baking-glossary-printable.html
+RedirectMatch 301 ^/breadeducation/fresh-loaf\.html$ /breadeducation/reference/fresh-loaf.html
+RedirectMatch 301 ^/breadeducation/troubleshooting\.html$ /breadeducation/reference/troubleshooting.html

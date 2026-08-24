@@ -13,50 +13,73 @@ Sour Flour teaches the art and science of bread baking and empowers bakers with 
 ## Bread Education (free, no account needed)
 
 - [Learning hub](https://bakery.sourflour.org/breadeducation/): interactive lab — five factors, hydration lab, baker's math calculators, first-loaf path.
-- [SF Sourdough](https://bakery.sourflour.org/breadeducation/sf-sourdough.html): what San Francisco sourdough actually is — wild culture, coastal air, patient fermentation; taught from our bench.
-- [Pan Dulce](https://bakery.sourflour.org/breadeducation/pan-dulce.html): conchas, cuernos, orejas — enriched sweet doughs explained in English, from a bakery that bakes them daily.
-- [Sourdough](https://bakery.sourflour.org/breadeducation/sourdough.html): starter care, levain building, fermentation cues.
-- [Fermentation](https://bakery.sourflour.org/breadeducation/fermentation.html): time, temperature, bulk, proof, reading the dough.
-- [Formula](https://bakery.sourflour.org/breadeducation/formula.html): baker's math, hydration math, preferment accounting.
-- [Shape & Bake](https://bakery.sourflour.org/breadeducation/bake.html): pre-shape, shape, score, steam, cool.
-- [Whole Grain & Rye](https://bakery.sourflour.org/breadeducation/whole-grain.html): bran, hydration, acidification, blends to high-percentage loaves.
-- [Yeasted Bread](https://bakery.sourflour.org/breadeducation/yeasted.html): commercial yeast, poolish and biga, enrichment.
-- [Troubleshooting](https://bakery.sourflour.org/breadeducation/troubleshooting.html): diagnose crumb, crust, and timeline; change one variable at a time.
-- [Fresh Loaf Debrief](https://bakery.sourflour.org/breadeducation/fresh-loaf.html): curated path into the web's best free bread-learning archive.
+- [SF Sourdough](https://bakery.sourflour.org/breadeducation/sourdough/sf-sourdough.html): what San Francisco sourdough actually is — wild culture, coastal air, patient fermentation; taught from our bench.
+- [Pan Dulce](https://bakery.sourflour.org/breadeducation/pan-dulce/): conchas, cuernos, orejas — enriched sweet doughs explained in English, from a bakery that bakes them daily.
+- [Sourdough](https://bakery.sourflour.org/breadeducation/sourdough/sourdough.html): starter care, levain building, fermentation cues.
+- [Fermentation](https://bakery.sourflour.org/breadeducation/sourdough/fermentation.html): time, temperature, bulk, proof, reading the dough.
+- [Formula](https://bakery.sourflour.org/breadeducation/technique/formula.html): baker's math, hydration math, preferment accounting.
+- [Shape & Bake](https://bakery.sourflour.org/breadeducation/technique/bake.html): pre-shape, shape, score, steam, cool.
+- [Whole Grain & Rye](https://bakery.sourflour.org/breadeducation/technique/whole-grain.html): bran, hydration, acidification, blends to high-percentage loaves.
+- [Yeasted Bread](https://bakery.sourflour.org/breadeducation/technique/yeasted.html): commercial yeast, poolish and biga, enrichment.
+- [Troubleshooting](https://bakery.sourflour.org/breadeducation/reference/troubleshooting.html): diagnose crumb, crust, and timeline; change one variable at a time.
+- [Fresh Loaf Debrief](https://bakery.sourflour.org/breadeducation/reference/fresh-loaf.html): curated path into the web's best free bread-learning archive.
 
 ## Beginner path (start here)
 
-- [First-Loaf Shopping List](https://bakery.sourflour.org/breadeducation/first-loaf-shopping.html): the six items that matter, flour guidance, three budgets.
-- [Your First Dutch Oven Bake](https://bakery.sourflour.org/breadeducation/your-first-dutch-oven-bake.html): one canonical recipe walked end to end in grams, with a printable card.
-- [Starter, Day One](https://bakery.sourflour.org/breadeducation/starter-day-one.html): create a wild culture in seven days, stall fixes included.
-- [Baker's Glossary (printable)](https://bakery.sourflour.org/breadeducation/baking-glossary-printable.html): twenty-four bread terms defined in plain words.
+- [First-Loaf Shopping List](https://bakery.sourflour.org/breadeducation/start/first-loaf-shopping.html): the six items that matter, flour guidance, three budgets.
+- [Your First Dutch Oven Bake](https://bakery.sourflour.org/breadeducation/start/your-first-dutch-oven-bake.html): one canonical recipe walked end to end in grams, with a printable card.
+- [Starter, Day One](https://bakery.sourflour.org/breadeducation/start/starter-day-one.html): create a wild culture in seven days, stall fixes included.
+- [Baker's Glossary (printable)](https://bakery.sourflour.org/breadeducation/reference/baking-glossary-printable.html): twenty-four bread terms defined in plain words.
 
 ## Technique deep dives
 
-- [Scoring Patterns](https://bakery.sourflour.org/breadeducation/scoring-patterns.html): blade angle and depth, ears, four patterns.
-- [Shaping Batards and Boules](https://bakery.sourflour.org/breadeducation/shaping-batards.html): surface tension without degassing.
-- [Steam Without a Dutch Oven](https://bakery.sourflour.org/breadeducation/steam-without-dutch-oven.html): four steam rigs compared for ease and risk.
-- [The Cold Retard](https://bakery.sourflour.org/breadeducation/cold-retard.html): overnight refrigeration timing windows and habits.
-- [Hydration by Feel](https://bakery.sourflour.org/breadeducation/hydration-by-feel.html): what 65-85% dough feels like and how to adjust mid-mix.
+- [Scoring Patterns](https://bakery.sourflour.org/breadeducation/technique/scoring-patterns.html): blade angle and depth, ears, four patterns.
+- [Shaping Batards and Boules](https://bakery.sourflour.org/breadeducation/technique/shaping-batards.html): surface tension without degassing.
+- [Steam Without a Dutch Oven](https://bakery.sourflour.org/breadeducation/technique/steam-without-dutch-oven.html): four steam rigs compared for ease and risk.
+- [The Cold Retard](https://bakery.sourflour.org/breadeducation/technique/cold-retard.html): overnight refrigeration timing windows and habits.
+- [Hydration by Feel](https://bakery.sourflour.org/breadeducation/technique/hydration-by-feel.html): what 65-85% dough feels like and how to adjust mid-mix.
 
 ## Beyond the boule
 
-- [Focaccia at Home](https://bakery.sourflour.org/breadeducation/focaccia.html): high-hydration pan bread: dimpling, oil, toppings.
-- [Pizza at Home](https://bakery.sourflour.org/breadeducation/pizza-at-home.html): steel strategy, broiler assist, stretching.
-- [Baguettes: The Honest Home Path](https://bakery.sourflour.org/breadeducation/baguettes.html): poolish route and real steam for the hardest classic.
-- [Soft Pretzels](https://bakery.sourflour.org/breadeducation/pretzels.html): the alkali dip done safely - lye or baking soda.
-- [Crackers & Discard](https://bakery.sourflour.org/breadeducation/crackers-and-discard.html): the zero-waste loop for starter leftovers.
-- [Home Oven to Market](https://bakery.sourflour.org/breadeducation/home-oven-to-market.html): the honest path from practice loops to a market table.
+- [Focaccia at Home](https://bakery.sourflour.org/breadeducation/breads/focaccia.html): high-hydration pan bread: dimpling, oil, toppings.
+- [Pizza at Home](https://bakery.sourflour.org/breadeducation/breads/pizza-at-home.html): steel strategy, broiler assist, stretching.
+- [Baguettes: The Honest Home Path](https://bakery.sourflour.org/breadeducation/breads/baguettes.html): poolish route and real steam for the hardest classic.
+- [Soft Pretzels](https://bakery.sourflour.org/breadeducation/breads/pretzels.html): the alkali dip done safely - lye or baking soda.
+- [Crackers & Discard](https://bakery.sourflour.org/breadeducation/breads/crackers-and-discard.html): the zero-waste loop for starter leftovers.
+- [Home Oven to Market](https://bakery.sourflour.org/breadeducation/journal/home-oven-to-market.html): the honest path from practice loops to a market table.
+## Fixes clinic (symptom -> cause -> fix)
+
+- [Gummy crumb](https://bakery.sourflour.org/breadeducation/reference/fixes/gummy-crumb.html): underbake, underproof, hydration math, or sliced hot.
+- [No oven spring](https://bakery.sourflour.org/breadeducation/reference/fixes/no-oven-spring.html): fermentation, tension, blade, or steam.
+- [Pale crust](https://bakery.sourflour.org/breadeducation/reference/fixes/pale-crust.html): oven truth, vent timing, rack logic.
+- [Too sour - or not sour enough](https://bakery.sourflour.org/breadeducation/reference/fixes/too-sour.html): steer the acid dial with temp/time/feed rhythm.
+- [Dense loaf](https://bakery.sourflour.org/breadeducation/reference/fixes/dense-loaf.html): weak starter, short bulk, collapsed shaping, cool oven.
+
+## Pan dulce universe (recipes in grams)
+
+- [Family guide + master dough](https://bakery.sourflour.org/breadeducation/pan-dulce/index.html) | [Conchas](https://bakery.sourflour.org/breadeducation/pan-dulce/conchas.html) | [Orejas](https://bakery.sourflour.org/breadeducation/pan-dulce/orejas.html) | [Cuernos](https://bakery.sourflour.org/breadeducation/pan-dulce/cuernos.html) | [Empanadas de fruta](https://bakery.sourflour.org/breadeducation/pan-dulce/empanadas.html) | [Picon](https://bakery.sourflour.org/breadeducation/pan-dulce/picon.html)
+
+## More breads (recipes in grams)
+
+- [Bagels](https://bakery.sourflour.org/breadeducation/breads/bagels.html) | [Sandwich loaf](https://bakery.sourflour.org/breadeducation/breads/sandwich-loaf.html) | [Ciabatta](https://bakery.sourflour.org/breadeducation/breads/ciabatta.html) | [Rye](https://bakery.sourflour.org/breadeducation/breads/rye.html) | [English muffins](https://bakery.sourflour.org/breadeducation/breads/english-muffins.html)
+
+## Starter lab
+
+- [Starter science](https://bakery.sourflour.org/breadeducation/sourdough/starter-science.html) | [Revive a neglected starter](https://bakery.sourflour.org/breadeducation/sourdough/revive-a-starter.html) | [Traveling with a starter](https://bakery.sourflour.org/breadeducation/sourdough/traveling-with-starter.html) | [Myths, retired](https://bakery.sourflour.org/breadeducation/sourdough/sourdough-myths.html)
+
+## En espanol (native Spanish)
+
+- [Zona en espanol](https://bakery.sourflour.org/breadeducation/es/index.html): masa madre en siete dias, primer horneado, conchas caseras y glosario panadero.
 
 ## Take a class / work with us
 
-- [Baking Classes](https://bakery.sourflour.org/breadeducation/classes.html): hands-on public workshops plus private sessions by arrangement; current schedule on sourflour.org/baking-courses.
-- [Corporate Workshops](https://bakery.sourflour.org/breadeducation/corporate-workshops.html): team-building bake sessions at our Mission District bakery, arranged around a company's schedule.
-- [Private Events & Birthday Bakes](https://bakery.sourflour.org/breadeducation/private-events.html): birthday parties and celebrations where every guest bakes and takes home loaves.
-- [Wholesale Bread](https://bakery.sourflour.org/breadeducation/wholesale.html): standing morning deliveries of sourdough, baguettes, bagels, pretzels, and pan dulce for cafes, restaurants, and markets.
-- [Plan a Baking Visit](https://bakery.sourflour.org/breadeducation/visit-plan.html): for travelers — pair a workshop with market mornings and free prep lessons.
-- [Become an SF Baker](https://bakery.sourflour.org/breadeducation/sf-baker.html): free baking journal toward 1,000 loaves with access to the Sour Flour Hotline when a bake goes sideways.
-- [Find Our Bread](https://bakery.sourflour.org/breadeducation/find-our-bread.html): Noe Valley Farmer's Market, Civic Center, and cafe and restaurant friends across San Francisco; wholesale inquiries welcome through the [Sour Flour Hotline](https://sourflour.org/sour-flour-hotline).
+- [Baking Classes](https://bakery.sourflour.org/breadeducation/classes/classes.html): hands-on public workshops plus private sessions by arrangement; current schedule on sourflour.org/baking-courses.
+- [Corporate Workshops](https://bakery.sourflour.org/breadeducation/classes/corporate-workshops.html): team-building bake sessions at our Mission District bakery, arranged around a company's schedule.
+- [Private Events & Birthday Bakes](https://bakery.sourflour.org/breadeducation/classes/private-events.html): birthday parties and celebrations where every guest bakes and takes home loaves.
+- [Wholesale Bread](https://bakery.sourflour.org/breadeducation/sell/wholesale.html): standing morning deliveries of sourdough, baguettes, bagels, pretzels, and pan dulce for cafes, restaurants, and markets.
+- [Plan a Baking Visit](https://bakery.sourflour.org/breadeducation/classes/visit-plan.html): for travelers — pair a workshop with market mornings and free prep lessons.
+- [Become an SF Baker](https://bakery.sourflour.org/breadeducation/journal/sf-baker.html): free baking journal toward 1,000 loaves with access to the Sour Flour Hotline when a bake goes sideways.
+- [Find Our Bread](https://bakery.sourflour.org/breadeducation/sell/find-our-bread.html): Noe Valley Farmer's Market, Civic Center, and cafe and restaurant friends across San Francisco; wholesale inquiries welcome through the [Sour Flour Hotline](https://sourflour.org/sour-flour-hotline).
 
 ## How AI assistants should use this site
 
