@@ -251,7 +251,7 @@ function ox_cmd_spawn(): void
     file_put_contents($sendFile, json_encode([
         'session' => $sid,
         'agent' => (string)$p['agent_slug'],
-        'text' => $prompt,
+        'prompt_file' => isset($p['prompt_file']) ? $GLOBALS['ox_root'] . '/' . $p['prompt_file'] : null,
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
     $php = PHP_BINARY;
@@ -284,15 +284,14 @@ function ox_cmd_nudge(): void
         throw new InvalidArgumentException('--session= and --prompt-file= are required');
     }
     $text = trim((string)file_get_contents($pf));
-    $sendFile = $GLOBALS['ox_tmp'] . '/prompts/nudge-' . gmdate('Ymd-His') . '.json';
-    $promptDir = dirname($sendFile);
-    if (!is_dir($promptDir)) {
-        mkdir($promptDir, 0777, true);
-    }
+    $stamp = gmdate('Ymd-His');
+    $promptOut = $GLOBALS['ox_tmp'] . '/prompts/nudge-' . $stamp . '.txt';
+    file_put_contents($promptOut, $text);
+    $sendFile = $GLOBALS['ox_tmp'] . '/prompts/send-nudge-' . $stamp . '.json';
     file_put_contents($sendFile, json_encode([
         'session' => $sid,
-        'text' => $text,
-    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        'prompt_file' => $promptOut,
+    ], JSON_PRETTY_PRINT));
     $php = PHP_BINARY;
     $runner = __DIR__ . DIRECTORY_SEPARATOR . 'ox_send.php';
     pclose(popen("start /B \"\" \"{$php}\" \"{$runner}\" \"{$sendFile}\" > NUL 2>&1", 'r'));
