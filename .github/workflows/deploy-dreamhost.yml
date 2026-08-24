@@ -10,7 +10,8 @@ name: Deploy DreamHost
 
 on:
   push:
-    branches: [main, live]
+    # Default branch is chore/checkpoint-0a-repo-safety; main/live optional aliases.
+    branches: [chore/checkpoint-0a-repo-safety, main, live]
     paths:
       - "bakery/**"
       - ".github/workflows/deploy-dreamhost.yml"

@@ -30,28 +30,28 @@ Never commit the password. Names must match exactly (no spaces).
 
 If you previously saved blank secret values by clicking Update without pasting, delete those secrets and recreate them, or put host/user/root on the **Variables** tab instead.
 
-### 2. Choose a deploy branch
+### 2. Deploy branch
 
 The workflow [`.github/workflows/deploy-dreamhost.yml`](../../.github/workflows/deploy-dreamhost.yml) runs on push to:
 
+- `chore/checkpoint-0a-repo-safety` (current default)
 - `main`
 - `live`
 
-Your current default branch is `chore/checkpoint-0a-repo-safety`. Either:
+Merge bakery changes into the default branch (or run the workflow manually). Optional: add branch protection + required review before merge.
 
-- Create / use **`main`** or **`live`** as the merge target for production deploys, or
-- Edit the workflow `on.push.branches` list to include the branch you merge into.
+### 3. Confirm SF 2.0 on the cloud site
 
-### 3. (Optional) Protect the branch
+After a successful deploy, open `https://bakery.sourflour.org/bake/login.php` (no login needed). You should see a terracotta **SF 2.0** label under the logos. After login, workspace nav shows a cream **SF 2.0** badge.
 
-On GitHub: branch protection + required PR review before merge, so phone merges are intentional.
+If the marker is missing, the host is still on an older build — re-run **Deploy DreamHost** with mode `all`.
 
 ## Phone / Cloud workflow
 
 1. Cloud agent opens a PR with bakery changes.
-2. You review and **merge** into `main` or `live` (GitHub mobile is fine).
+2. You review and **merge** into `chore/checkpoint-0a-repo-safety` (GitHub mobile is fine).
 3. Actions runs **Deploy DreamHost** and SFTPs changed deployable files.
-4. Check the run log, then open `https://bakery.sourflour.org/bake/login.php`.
+4. Check the run log, then confirm **SF 2.0** on `https://bakery.sourflour.org/bake/login.php`.
 
 ### Manual run (no merge)
 
