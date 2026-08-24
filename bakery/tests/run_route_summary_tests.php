@@ -73,6 +73,22 @@ route_summary_assert(
     bakery_route_summary_pieces($delivered) === 6
 );
 
+$attached = route_manager_attach_pickup_manifests(
+    [7 => ['id' => 7, 'name' => 'Mina', 'deliveries' => []]],
+    [7 => [['name' => 'Concha', 'loaded_quantity' => 40], ['name' => 'Bolillo', 'loaded_quantity' => 12]]]
+);
+route_summary_assert(
+    'pickup manifest counts saved load pieces, not live catalog prices',
+    ($attached[7]['pickup_sku_count'] ?? 0) === 2
+        && ($attached[7]['pickup_piece_count'] ?? 0) === 52
+        && ($attached[7]['pickup_manifest'][0]['name'] ?? '') === 'Concha'
+);
+route_summary_assert(
+    'drivers without a saved load still get an empty pickup manifest',
+    ($attached[7]['pickup_manifest'] ?? null) !== null
+        && route_manager_attach_pickup_manifests([3 => ['deliveries' => []]], [])[3]['pickup_sku_count'] === 0
+);
+
 $snapshotOnly = [
     'delivery_status' => 'delivered',
     'payment_collection' => 'signature',
@@ -172,6 +188,10 @@ $requiredKeys = [
     'route_summary.stat_sold',
     'route_summary.filter_missing',
     'route_summary.no_photo',
+    'route_manager.pickup_manifest',
+    'route_manager.pickup_summary',
+    'route_manager.no_pickup',
+    'route_manager.edit_pickup_loads',
 ];
 foreach ($requiredKeys as $key) {
     route_summary_assert("en has {$key}", isset($english[$key]) && $english[$key] !== '');

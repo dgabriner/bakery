@@ -31,6 +31,91 @@ function bakery_hosted_migration_write_json(string $path, array $data): void
         @unlink($tmp);
         throw new RuntimeException('Cannot write migration status.');
     }
+    if (basename($path) === 'HOSTED_MIGRATION_STATUS.json') {
+        bakery_hosted_status_history_append(dirname($path) . '/HOSTED_MIGRATION_HISTORY.json', $data, 'database');
+    }
+}
+
+/**
+ * Append a terminal Live worker snapshot to a capped JSON history file.
+ *
+ * @return list<array<string,mixed>>
+ */
+function bakery_hosted_status_history_append(string $historyPath, array $snapshot, string $kind, int $max = 200): array
+{
+    $status = (string)($snapshot['status'] ?? '');
+    if (!in_array($status, ['succeeded', 'failed', 'rolled_back'], true)) {
+        return bakery_hosted_status_history_read($historyPath);
+    }
+    $event = bakery_hosted_status_history_compact($snapshot, $kind);
+    $events = bakery_hosted_status_history_read($historyPath);
+    foreach ($events as $existing) {
+        if ((string)($existing['id'] ?? '') === (string)$event['id']) {
+            return $events;
+        }
+    }
+    $events[] = $event;
+    if (count($events) > $max) {
+        $events = array_slice($events, -$max);
+    }
+    $dir = dirname($historyPath);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0750, true);
+    }
+    $tmp = $historyPath . '.tmp.' . bin2hex(random_bytes(3));
+    if (@file_put_contents($tmp, json_encode(['events' => $events], JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) !== false) {
+        @rename($tmp, $historyPath);
+        @unlink($tmp);
+    }
+    return $events;
+}
+
+/** @return list<array<string,mixed>> */
+function bakery_hosted_status_history_read(string $historyPath): array
+{
+    $data = is_file($historyPath) ? json_decode((string)@file_get_contents($historyPath), true) : null;
+    $events = is_array($data) ? ($data['events'] ?? $data) : [];
+    if (!is_array($events)) {
+        return [];
+    }
+    $out = [];
+    foreach ($events as $event) {
+        if (is_array($event) && (string)($event['id'] ?? '') !== '') {
+            $out[] = $event;
+        }
+    }
+    return $out;
+}
+
+/** @param array<string,mixed> $snapshot */
+function bakery_hosted_status_history_compact(array $snapshot, string $kind): array
+{
+    $status = (string)($snapshot['status'] ?? 'unknown');
+    $release = (string)($snapshot['release_id'] ?? '');
+    $when = (string)($snapshot['completed_at'] ?? $snapshot['started_at'] ?? $snapshot['approved_at'] ?? '');
+    $changed = $snapshot['changed_files'] ?? [];
+    if (!is_array($changed)) {
+        $changed = [];
+    }
+    $changed = array_values(array_filter(array_map('strval', $changed), static fn($path) => $path !== ''));
+    return [
+        'id' => $kind . '|' . $release . '|' . $status . '|' . $when,
+        'kind' => $kind,
+        'status' => $status,
+        'release_id' => $release,
+        'migration_id' => (string)($snapshot['migration_id'] ?? ''),
+        'phase' => (string)($snapshot['phase'] ?? ''),
+        'at' => $when,
+        'started_at' => (string)($snapshot['started_at'] ?? ''),
+        'completed_at' => (string)($snapshot['completed_at'] ?? ''),
+        'file_count' => (int)($snapshot['file_count'] ?? 0),
+        'changed_file_count' => (int)($snapshot['changed_file_count'] ?? count($changed)),
+        'statement_count' => (int)($snapshot['statement_count'] ?? 0),
+        'completed_statements' => (int)($snapshot['completed_statements'] ?? 0),
+        'health' => (string)($snapshot['health'] ?? ''),
+        'message' => (string)($snapshot['public_message'] ?? $snapshot['message'] ?? ''),
+        'changed_files' => array_slice($changed, 0, 80),
+    ];
 }
 
 /** Run without shell interpolation and enforce a real wall-clock timeout. */
@@ -176,6 +261,63 @@ function bakery_hosted_migration_sql_safe(string $sql): array
     return [true, 'Additive, cross-version schema change.'];
 }
 
+/**
+ * @param list<array{id:string,sql:string}> $jobs
+ */
+function bakery_hosted_migration_catchup_sql(array $jobs): string
+{
+    $chunks = [];
+    $extraIds = [];
+    foreach ($jobs as $index => $job) {
+        $id = (string)($job['id'] ?? '');
+        if (!preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+            throw new RuntimeException('Catch-up includes an invalid migration id.');
+        }
+        $sql = rtrim((string)($job['sql'] ?? ''));
+        if ($sql === '') {
+            throw new RuntimeException('Catch-up includes an empty migration.');
+        }
+        $chunks[] = '-- catchup ' . $id . "\n" . $sql . (str_ends_with($sql, ';') ? '' : ';') . "\n";
+        if ($index > 0) {
+            $extraIds[] = $id;
+        }
+    }
+    foreach ($extraIds as $id) {
+        $chunks[] = "INSERT IGNORE INTO schema_migrations (id) VALUES ('" . $id . "');\n";
+    }
+    return implode("\n", $chunks);
+}
+
+/** @return list<string> */
+function bakery_hosted_migration_ids_from_approval(array $approval): array
+{
+    $ids = [];
+    foreach ((array)($approval['migration_ids'] ?? []) as $id) {
+        $id = (string)$id;
+        if (preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+            $ids[] = $id;
+        }
+    }
+    foreach ((array)($approval['migrations'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $id = (string)($row['id'] ?? '');
+        if (preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+            $ids[] = $id;
+        }
+    }
+    $primary = (string)($approval['migration_id'] ?? '');
+    if ($ids === [] && preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $primary)) {
+        $ids[] = $primary;
+    }
+    $unique = [];
+    foreach ($ids as $id) {
+        $unique[$id] = true;
+    }
+    return array_keys($unique);
+}
+
 function bakery_hosted_migration_superseded_by(string $sql): ?string
 {
     if (preg_match('/^\s*--\s*superseded-by:\s*(\d{3}_[A-Za-z0-9_]+)\s*$/mi', $sql, $match)) {
@@ -210,6 +352,23 @@ function bakery_hosted_migration_exec_statement(PDO $pdo, string $statement): bo
         }
         throw $error;
     }
+}
+
+/** @return list<string> */
+function bakery_hosted_migration_job_ids(array $approval): array
+{
+    $ids = [];
+    foreach ((array)($approval['migration_ids'] ?? []) as $id) {
+        $id = (string)$id;
+        if (preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+            $ids[] = $id;
+        }
+    }
+    $primary = (string)($approval['migration_id'] ?? '');
+    if ($ids === [] && preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $primary)) {
+        $ids[] = $primary;
+    }
+    return array_values(array_unique($ids));
 }
 
 function bakery_hosted_migration_remove_tree(string $path, string $requiredParent): void
@@ -297,6 +456,11 @@ function bakery_hosted_migration_worker_main(string $configPath): int
                 $status['status'] = 'succeeded'; $status['phase'] = 'complete'; $status['completed_at'] = gmdate('c');
                 $status['public_message'] = 'Migration was already recorded; no schema change was made.';
                 bakery_hosted_migration_write_json($statusPath, $status);
+                if (function_exists('bakery_schema_inventory_cache_path')) {
+                    @unlink(bakery_schema_inventory_cache_path());
+                } else {
+                    @unlink($root . '/storage/deploy/HOSTED_SCHEMA_STATUS.json');
+                }
                 return 0;
             }
         }
@@ -317,6 +481,9 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         if (!defined('ACCESS_ALLOWED')) define('ACCESS_ALLOWED', true);
         require_once $root . '/includes/schema_sql.php';
         $statements = bakery_parse_sql_file($sqlPath);
+        if ($statements === []) {
+            throw new RuntimeException('Migration contained no executable statements.');
+        }
         $status['statement_count'] = count($statements); $status['completed_statements'] = 0;
         foreach ($statements as $index => $statement) {
             bakery_hosted_migration_exec_statement($pdo, $statement);
@@ -325,7 +492,11 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         }
         $mark = $pdo->prepare('INSERT INTO schema_migrations (id) VALUES (?)');
         $mark->execute([$id]);
-        @unlink($root . '/storage/deploy/HOSTED_SCHEMA_STATUS.json');
+        if (function_exists('bakery_schema_inventory_cache_path')) {
+            @unlink(bakery_schema_inventory_cache_path());
+        } else {
+            @unlink($root . '/storage/deploy/HOSTED_SCHEMA_STATUS.json');
+        }
         $status['status'] = 'succeeded'; $status['phase'] = 'complete'; $status['completed_at'] = gmdate('c');
         $status['public_message'] = 'Additive migration ' . $id . ' applied and recorded on Live.';
         bakery_hosted_migration_write_json($statusPath, $status);

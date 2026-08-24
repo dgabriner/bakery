@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Text comms â€” the SMS ledger behind the Texting Command Center.
  *
@@ -57,7 +57,7 @@ function bakery_text_messages_ready(PDO $db): bool
 /** Allowed Command Center dashboard views (same page; GET view=). */
 function bakery_text_views(): array
 {
-    return ['inbox', 'feed', 'delivery', 'ops'];
+    return ['inbox', 'feed', 'delivery', 'ops', 'surveys'];
 }
 
 /** Audience lanes on one ledger: customer, test, or general. */
@@ -114,6 +114,11 @@ function bakery_text_live_ready(): bool
     }
     if (!empty($GLOBALS['bakery_text_force_live_ready'])) {
         return true;
+    }
+    // Process-env seam so CLI subprocesses (scripts/text_send.php smoke tests)
+    // can force the honest record-only path without touching credentials.
+    if (getenv('BAKERY_TEXT_FORCE_RECORD_ONLY') === '1') {
+        return false;
     }
     return twilio_is_configured();
 }

@@ -37,6 +37,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? bakery_portal_sign_in_or_register($db, $phone, $code)
                 : ['success' => bakery_portal_login_by_code($db, $code), 'first_batch' => false];
             if (!empty($result['success'])) {
+                // An education invite claims exactly one new baker.
+                if (!empty($result['first_batch']) && function_exists('bakery_sfb_invite_lookup')) {
+                    require_once __DIR__ . '/includes/sf_baker.php';
+                    $claimedInvite = bakery_sfb_invite_lookup($db, (string)($_POST['invite'] ?? ''));
+                    if ($claimedInvite) {
+                        bakery_sfb_mark_invite_used($db, (int)$claimedInvite['id'], (int)$result['customer']['id']);
+                    }
+                }
                 $dest = $_POST['next'] ?? $next;
                 if (strpos($dest, '/') !== 0) {
                     $dest = BASE_URL . 'sfb_batches.php?welcome=1';
@@ -103,6 +111,7 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
       <?php echo bakery_csrf_field(); ?>
       <input type="hidden" name="next" value="<?php echo htmlspecialchars($next); ?>">
       <input type="hidden" name="mode" id="mode" value="<?php echo $createMode ? 'create' : 'signin'; ?>">
+      <input type="hidden" name="invite" value="<?php echo htmlspecialchars((string)($_GET['invite'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
       <div id="phoneField"<?php echo $createMode ? '' : ' hidden'; ?>>
       <label for="phone">Mobile phone number</label>
       <input type="tel" id="phone" name="phone"<?php echo $createMode ? ' required' : ''; ?>

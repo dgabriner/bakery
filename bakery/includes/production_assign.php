@@ -99,6 +99,121 @@ function bakery_production_assign_recommend(array $customers, int $pool): array
 }
 
 /**
+ * Who is going on this delivery: assigned driver first, else standing route.
+ *
+ * @param list<array<string,mixed>> $rows
+ * @return list<array<string,mixed>>
+ */
+function bakery_production_assign_attach_route_context(PDO $db, string $date, array $rows): array
+{
+    if ($rows === []) {
+        return $rows;
+    }
+    $byCustomer = [];
+    if (table_exists($db, 'daily_order_assignments') && table_exists($db, 'daily_orders')) {
+        $stmt = $db->prepare(
+            "SELECT o.customer_id, doa.driver_id,
+                    COALESCE(d.name, CONCAT('Driver #', doa.driver_id)) AS driver_name
+             FROM daily_order_assignments doa
+             JOIN daily_orders o ON o.id = doa.daily_order_id
+             LEFT JOIN drivers d ON d.id = doa.driver_id
+             WHERE doa.delivery_date = ?
+               AND doa.delivery_status <> 'cancelled'"
+        );
+        $stmt->execute([$date]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cid = (int)$row['customer_id'];
+            if ($cid > 0 && !isset($byCustomer[$cid])) {
+                $byCustomer[$cid] = [
+                    'driver_id' => (int)$row['driver_id'],
+                    'driver_name' => (string)$row['driver_name'],
+                ];
+            }
+        }
+    }
+    if (table_exists($db, 'standing_routes')) {
+        $weekday = bakery_standing_day_from_date($date);
+        $dayClause = bakery_standing_day_in_clause($weekday);
+        $sql = "SELECT sr.customer_id, sr.driver_id,
+                       COALESCE(d.name, CONCAT('Driver #', sr.driver_id)) AS driver_name
+                FROM standing_routes sr
+                LEFT JOIN drivers d ON d.id = sr.driver_id
+                WHERE sr.day_of_week {$dayClause['sql']}";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($dayClause['values']);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cid = (int)$row['customer_id'];
+            if ($cid > 0 && !isset($byCustomer[$cid])) {
+                $byCustomer[$cid] = [
+                    'driver_id' => (int)$row['driver_id'],
+                    'driver_name' => (string)$row['driver_name'],
+                ];
+            }
+        }
+    }
+    foreach ($rows as &$row) {
+        $cid = (int)($row['id'] ?? 0);
+        $info = $byCustomer[$cid] ?? null;
+        $row['driver_id'] = $info ? (int)$info['driver_id'] : 0;
+        $row['driver_name'] = $info ? (string)$info['driver_name'] : '';
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * Split a short bake across a focus set. Locked stores and stores outside
+ * the focus keep their current quantity; those units leave the pool first.
+ * Unlocked stores in focus share what remains and are never raised.
+ *
+ * @param list<array<string,mixed>> $rows
+ * @param list<int>|null $focusIds null = every unlocked store
+ * @return list<array<string,mixed>>
+ */
+function bakery_production_cut_share(array $rows, int $pool, ?array $focusIds = null): array
+{
+    $pool = max(0, $pool);
+    $focusSet = null;
+    if ($focusIds !== null) {
+        $focusSet = [];
+        foreach ($focusIds as $id) {
+            $id = (int)$id;
+            if ($id > 0) {
+                $focusSet[$id] = true;
+            }
+        }
+    }
+
+    $reserved = 0;
+    $share = [];
+    $shareIdx = [];
+    foreach ($rows as $i => $row) {
+        $qty = max(0, (int)($row['quantity'] ?? 0));
+        $locked = !empty($row['locked']);
+        $inFocus = !$locked && ($focusSet === null || isset($focusSet[(int)($row['id'] ?? 0)]));
+        $rows[$i]['in_focus'] = $inFocus;
+        if ($locked || !$inFocus) {
+            $rows[$i]['recommended'] = $qty;
+            $reserved += $qty;
+            continue;
+        }
+        $share[] = $row;
+        $shareIdx[] = $i;
+    }
+
+    $shareTotal = 0;
+    foreach ($share as $row) {
+        $shareTotal += max(0, (int)($row['quantity'] ?? 0));
+    }
+    $effectivePool = min(max(0, $pool - $reserved), $shareTotal);
+    $recommended = bakery_production_assign_recommend($share, $effectivePool);
+    foreach ($shareIdx as $j => $i) {
+        $rows[$i]['recommended'] = (int)($recommended[$j]['recommended'] ?? 0);
+    }
+    return $rows;
+}
+
+/**
  * Units the manager is assigning from: planned target if saved/typed, else on-hand.
  *
  * @param array{hasPlan?:bool,planned?:int,onHand?:int,confirmed?:int} $row
@@ -182,6 +297,8 @@ function bakery_production_assign_preview(PDO $db, string $date, int $productId,
         ];
     }
 
+    $rows = bakery_production_assign_attach_route_context($db, $date, $rows);
+
     $unlocked = [];
     $unlockedIdx = [];
     foreach ($rows as $i => $row) {
@@ -208,30 +325,10 @@ function bakery_production_assign_preview(PDO $db, string $date, int $productId,
  *
  * @return list<array<string,mixed>>
  */
-function bakery_production_cut_preview(PDO $db, string $date, int $productId, int $pool): array
+function bakery_production_cut_preview(PDO $db, string $date, int $productId, int $pool, ?array $focusIds = null): array
 {
     $rows = bakery_production_assign_preview($db, $date, $productId, 0);
-    $lockedUnits = 0;
-    $unlocked = [];
-    $unlockedIdx = [];
-    foreach ($rows as $i => $row) {
-        if (!empty($row['locked'])) {
-            $lockedUnits += max(0, (int)$row['quantity']);
-            continue;
-        }
-        $unlocked[] = $row;
-        $unlockedIdx[] = $i;
-    }
-    $unlockedTotal = 0;
-    foreach ($unlocked as $row) {
-        $unlockedTotal += max(0, (int)$row['quantity']);
-    }
-    $effectivePool = min(max(0, (int)$pool - $lockedUnits), $unlockedTotal);
-    $recommended = bakery_production_assign_recommend($unlocked, $effectivePool);
-    foreach ($unlockedIdx as $j => $i) {
-        $rows[$i]['recommended'] = (int)($recommended[$j]['recommended'] ?? 0);
-    }
-    return $rows;
+    return bakery_production_cut_share($rows, $pool, $focusIds);
 }
 
 /**
@@ -341,6 +438,155 @@ function bakery_production_cut_apply(
     }
 
     return $result;
+}
+
+/**
+ * Products whose saved plan is below operating demand for the day.
+ * Pool is the planned target — the same bake the per-product cut panel uses.
+ *
+ * @param array<int,bool> $allowedProductIds
+ * @return list<array{product_id:int,pool:int,demand:int}>
+ */
+function bakery_production_cut_short_products(PDO $db, string $date, array $allowedProductIds): array
+{
+    $dateObj = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObj || $dateObj->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('Invalid delivery date');
+    }
+    if (!function_exists('table_exists') || !table_exists($db, 'production_plan_items')) {
+        return [];
+    }
+
+    $demand = bakery_operating_demand_by_product($db, $date);
+    $byProduct = $demand['by_product'] ?? [];
+    if ($byProduct === []) {
+        return [];
+    }
+
+    $plans = [];
+    $stmt = $db->prepare(
+        'SELECT product_id, planned_quantity FROM production_plan_items WHERE delivery_date = ?'
+    );
+    $stmt->execute([$date]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $plans[(int)$row['product_id']] = (int)$row['planned_quantity'];
+    }
+
+    $out = [];
+    foreach ($byProduct as $pid => $qty) {
+        $pid = (int)$pid;
+        if ($pid <= 0 || empty($allowedProductIds[$pid]) || !array_key_exists($pid, $plans)) {
+            continue;
+        }
+        $demandQty = max(0, (int)$qty);
+        $planned = max(0, (int)$plans[$pid]);
+        if ($planned < $demandQty) {
+            $out[] = [
+                'product_id' => $pid,
+                'pool' => $planned,
+                'demand' => $demandQty,
+            ];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Apply recommended dated cuts for one product (all unlocked stores).
+ *
+ * @return array{updated:int,skipped:int,cut_units:int,skipped_names:list<string>}
+ */
+function bakery_production_cut_apply_recommended(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $pool,
+    ?int $userId = null
+): array {
+    $preview = bakery_production_cut_preview($db, $date, $productId, $pool, null);
+    $cuts = [];
+    foreach ($preview as $row) {
+        if (!empty($row['locked']) || empty($row['in_focus'])) {
+            continue;
+        }
+        $current = max(0, (int)($row['quantity'] ?? 0));
+        $recommended = max(0, (int)($row['recommended'] ?? $current));
+        if ($recommended < $current) {
+            $cuts[] = [
+                'customer_id' => (int)$row['id'],
+                'quantity' => $recommended,
+            ];
+        }
+    }
+    if ($cuts === []) {
+        return [
+            'updated' => 0,
+            'skipped' => 0,
+            'cut_units' => 0,
+            'skipped_names' => [],
+        ];
+    }
+    return bakery_production_cut_apply($db, $date, $productId, $cuts, $userId);
+}
+
+/**
+ * Apply recommended cuts for every plan-below product on a delivery day.
+ *
+ * @param array<int,bool> $allowedProductIds
+ * @return array{updated:int,skipped:int,cut_units:int,products:int,skipped_names:list<string>}
+ */
+function bakery_production_cut_apply_all_recommended(
+    PDO $db,
+    string $date,
+    array $allowedProductIds,
+    ?int $userId = null
+): array {
+    $products = bakery_production_cut_short_products($db, $date, $allowedProductIds);
+    $totals = [
+        'updated' => 0,
+        'skipped' => 0,
+        'cut_units' => 0,
+        'products' => 0,
+        'skipped_names' => [],
+    ];
+    if ($products === []) {
+        return $totals;
+    }
+
+    $ownTx = !$db->inTransaction();
+    if ($ownTx) {
+        $db->beginTransaction();
+    }
+    try {
+        foreach ($products as $item) {
+            $result = bakery_production_cut_apply_recommended(
+                $db,
+                $date,
+                (int)$item['product_id'],
+                (int)$item['pool'],
+                $userId
+            );
+            $totals['updated'] += (int)$result['updated'];
+            $totals['skipped'] += (int)$result['skipped'];
+            $totals['cut_units'] += (int)$result['cut_units'];
+            if ((int)$result['updated'] > 0) {
+                $totals['products']++;
+            }
+            foreach ($result['skipped_names'] as $name) {
+                $totals['skipped_names'][] = (string)$name;
+            }
+        }
+        if ($ownTx) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    return $totals;
 }
 
 /**
@@ -692,4 +938,291 @@ function bakery_production_assign_follow_standing_horizon(
         $followed++;
     }
     return $followed;
+}
+
+/**
+ * Per-route desired (assigned order qty) vs share of a bake pool.
+ *
+ * @param array<int,int> $bakeByProduct product_id => pieces available from the kitchen note
+ * @return list<array<string,mixed>>
+ */
+function bakery_production_route_desired_vs_bake(PDO $db, string $date, array $bakeByProduct): array
+{
+    if ($bakeByProduct === []) {
+        return [];
+    }
+    $productIds = array_keys($bakeByProduct);
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $sql = "
+        SELECT doa.driver_id,
+               COALESCE(d.name, CONCAT('Driver #', doa.driver_id)) AS driver_name,
+               p.id AS product_id,
+               p.name AS product_name,
+               COALESCE(SUM(doi.quantity), 0) AS desired
+        FROM daily_order_assignments doa
+        JOIN daily_orders do ON do.id = doa.daily_order_id
+        JOIN daily_order_items doi ON doi.daily_order_id = do.id
+        JOIN products p ON p.id = doi.product_id
+        LEFT JOIN drivers d ON d.id = doa.driver_id
+        WHERE doa.delivery_date = ? AND do.order_date = doa.delivery_date
+          AND doa.delivery_status <> 'cancelled'
+          AND p.id IN ($placeholders)
+        GROUP BY doa.driver_id, d.name, p.id, p.name
+        ORDER BY driver_name, p.name
+    ";
+    $stmt = $db->prepare($sql);
+    $stmt->execute(array_merge([$date], $productIds));
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $byProduct = [];
+    foreach ($rows as $row) {
+        $pid = (int)$row['product_id'];
+        $byProduct[$pid][] = $row;
+    }
+
+    $out = [];
+    foreach ($bakeByProduct as $productId => $pool) {
+        $customers = [];
+        foreach ($byProduct[$productId] ?? [] as $row) {
+            $customers[] = [
+                'driver_id' => (int)$row['driver_id'],
+                'driver_name' => (string)$row['driver_name'],
+                'product_id' => $productId,
+                'product_name' => (string)$row['product_name'],
+                'quantity' => (int)$row['desired'],
+            ];
+        }
+        $recommended = bakery_production_assign_recommend($customers, (int)$pool);
+        $demand = 0;
+        foreach ($recommended as $row) {
+            $demand += (int)$row['quantity'];
+            $avail = (int)$row['recommended'];
+            $desired = (int)$row['quantity'];
+            $out[] = [
+                'driver_id' => (int)$row['driver_id'],
+                'driver_name' => (string)$row['driver_name'],
+                'product_id' => $productId,
+                'product_name' => (string)$row['product_name'],
+                'desired' => $desired,
+                'available' => $avail,
+                'bake_pool' => (int)$pool,
+                'gap' => $avail - $desired,
+            ];
+        }
+        if ($recommended === []) {
+            $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ?');
+            $nameStmt->execute([$productId]);
+            $out[] = [
+                'driver_id' => 0,
+                'driver_name' => '',
+                'product_id' => $productId,
+                'product_name' => (string)$nameStmt->fetchColumn(),
+                'desired' => 0,
+                'available' => (int)$pool,
+                'bake_pool' => (int)$pool,
+                'gap' => (int)$pool,
+            ];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Preview how a saved bake would split to stores (does not write orders).
+ *
+ * @param array<int,int> $bakeByProduct product_id => planned pieces
+ * @return list<array<string,mixed>>
+ */
+function bakery_production_store_allocation_from_plan(PDO $db, string $date, array $bakeByProduct): array
+{
+    $out = [];
+    foreach ($bakeByProduct as $productId => $pool) {
+        $productId = (int)$productId;
+        $pool = max(0, (int)$pool);
+        if ($productId <= 0 || $pool <= 0) {
+            continue;
+        }
+        $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ? LIMIT 1');
+        $nameStmt->execute([$productId]);
+        $productName = (string)$nameStmt->fetchColumn();
+        $rows = bakery_production_assign_preview($db, $date, $productId, $pool);
+        if ($rows === []) {
+            $out[] = [
+                'product_id' => $productId,
+                'product_name' => $productName,
+                'customer_id' => 0,
+                'customer_name' => '',
+                'desired' => 0,
+                'from_bake' => $pool,
+                'gap' => $pool,
+                'locked' => false,
+            ];
+            continue;
+        }
+        foreach ($rows as $row) {
+            $desired = (int)($row['quantity'] ?? 0);
+            $fromBake = (int)($row['recommended'] ?? 0);
+            $out[] = [
+                'product_id' => $productId,
+                'product_name' => $productName,
+                'customer_id' => (int)($row['id'] ?? 0),
+                'customer_name' => (string)($row['name'] ?? ''),
+                'desired' => $desired,
+                'from_bake' => $fromBake,
+                'gap' => $fromBake - $desired,
+                'locked' => !empty($row['locked']),
+            ];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Store demand for one SKU on a delivery day, including route/driver when assigned.
+ *
+ * @return list<array<string,mixed>>
+ */
+function bakery_production_store_demand_rows(PDO $db, string $date, int $productId, int $pool = 0): array
+{
+    $rows = bakery_production_assign_preview($db, $date, $productId, max(0, $pool));
+    $drivers = [];
+    if ($rows !== [] && table_exists($db, 'daily_order_assignments')) {
+        $stmt = $db->prepare(
+            "SELECT o.customer_id, COALESCE(d.name, CONCAT('Driver #', doa.driver_id)) AS driver_name
+             FROM daily_order_assignments doa
+             JOIN daily_orders o ON o.id = doa.daily_order_id
+             LEFT JOIN drivers d ON d.id = doa.driver_id
+             WHERE doa.delivery_date = ?
+               AND doa.delivery_status <> 'cancelled'"
+        );
+        $stmt->execute([$date]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cid = (int)$row['customer_id'];
+            if ($cid > 0 && !isset($drivers[$cid])) {
+                $drivers[$cid] = (string)$row['driver_name'];
+            }
+        }
+    }
+    foreach ($rows as &$row) {
+        $cid = (int)($row['id'] ?? 0);
+        $row['driver_name'] = $drivers[$cid] ?? '';
+        $row['editable'] = empty($row['locked']);
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * Staff write of one dated daily-order line from Production Center Store Demand.
+ * Uses van-lock (not portal in-production lock) and does not SMS the store.
+ *
+ * @return array{quantity:int,demand_total:int,customers:list<array<string,mixed>>}
+ */
+function bakery_production_store_demand_save(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $customerId,
+    int $quantity,
+    ?int $userId,
+    int $pool = 0
+): array {
+    $dateObj = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObj || $dateObj->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('Invalid delivery date');
+    }
+    if ($date < date('Y-m-d')) {
+        throw new InvalidArgumentException('Cannot change past deliveries');
+    }
+    $quantity = max(0, $quantity);
+    if ($productId <= 0 || $customerId <= 0) {
+        throw new InvalidArgumentException('Unknown store or product.');
+    }
+
+    $customer = bakery_production_assign_customer_row($db, $customerId);
+    $product = bakery_customer_product_row($db, $productId);
+    if (!$customer || !$product) {
+        throw new InvalidArgumentException('Unknown store or product.');
+    }
+
+    $state = bakery_customer_delivery_state($db, $customerId, $date);
+    if (!empty($state['skipped'])) {
+        throw new InvalidArgumentException('This delivery is skipped.');
+    }
+    if (!empty($state['paused'])) {
+        throw new InvalidArgumentException('Deliveries are paused for this date.');
+    }
+    if (bakery_production_assign_order_is_locked($state['status'] ?? null, $state['assignment_status'] ?? null)) {
+        throw new InvalidArgumentException('This stop is already on the van and cannot be edited here.');
+    }
+
+    $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
+    $stmt = $db->prepare(
+        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
+    );
+    $stmt->execute([$dailyOrderId, $productId]);
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $oldQty = $existing ? (int)$existing['quantity'] : 0;
+    $unitPrice = bakery_resolve_customer_price($db, $customer, $product);
+    $lineTotal = round($quantity * $unitPrice, 2);
+    if ($existing) {
+        $upd = $db->prepare(
+            'UPDATE daily_order_items SET quantity = ?, line_total = ? * unit_price WHERE id = ?'
+        );
+        $upd->execute([$quantity, $quantity, (int)$existing['id']]);
+    } else {
+        $ins = $db->prepare(
+            'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $ins->execute([$dailyOrderId, $productId, $quantity, $unitPrice, $lineTotal]);
+    }
+    bakery_customer_update_daily_total($db, $dailyOrderId);
+    if ($oldQty !== $quantity) {
+        bakery_record_operational_event(
+            $db,
+            BAKERY_OP_DAILY_ORDER_QUANTITY_CHANGED,
+            'Production Center store demand ' . $product['name'] . ' for ' . $customer['name'] . ': ' . $oldQty . ' → ' . $quantity,
+            [
+                'operational_date' => $date,
+                'customer_id' => $customerId,
+                'daily_order_id' => $dailyOrderId,
+                'product_id' => $productId,
+                'actor_user_id' => $userId,
+                'actor_role' => 'staff',
+                'metadata' => [
+                    'product_name' => $product['name'],
+                    'old_quantity' => $oldQty,
+                    'new_quantity' => $quantity,
+                    'source' => 'production_center_store_demand',
+                ],
+            ]
+        );
+    }
+
+    $daily = bakery_customer_daily_order_row($db, $customerId, $date);
+    $stored = 0;
+    if ($daily) {
+        foreach (bakery_customer_daily_items($db, (int)$daily['id']) as $item) {
+            if ((int)$item['product_id'] === $productId) {
+                $stored = (int)$item['quantity'];
+                break;
+            }
+        }
+    }
+    if ($stored !== $quantity) {
+        throw new RuntimeException('Store demand did not persist for this delivery.');
+    }
+
+    $customers = bakery_production_store_demand_rows($db, $date, $productId, max(0, $pool));
+    $demandTotal = 0;
+    foreach ($customers as $row) {
+        $demandTotal += (int)($row['quantity'] ?? 0);
+    }
+
+    return [
+        'quantity' => $stored,
+        'demand_total' => $demandTotal,
+        'customers' => $customers,
+    ];
 }

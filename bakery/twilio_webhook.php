@@ -95,6 +95,11 @@ try {
                 require_once __DIR__ . '/includes/text_comms_media.php';
                 bakery_text_media_capture_inbound($db, $rowId, $messageSid, $params);
             }
+            // Tie the reply to any open text-reply survey from this sender.
+            if ($body !== '' && function_exists('table_exists') && table_exists($db, 'surveys')) {
+                require_once __DIR__ . '/includes/surveys.php';
+                bakery_survey_record_inbound_reply($db, $from, (int)$rowId, $body);
+            }
         } catch (Throwable $dup) {
             // Lost a race against a concurrent retry: the fact is already on
             // the ledger, which is success for the sender.

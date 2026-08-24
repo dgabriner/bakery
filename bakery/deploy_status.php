@@ -18,6 +18,13 @@ if (!is_array($data)) {
     echo json_encode(['status' => 'unavailable', 'message' => 'Promotion status is unavailable.']);
     exit;
 }
+$historyPath = __DIR__ . '/storage/deploy/HOSTED_PROMOTION_HISTORY.json';
+$historyRaw = is_file($historyPath) ? json_decode((string)@file_get_contents($historyPath), true) : null;
+$history = is_array($historyRaw) ? ($historyRaw['events'] ?? []) : [];
+if (!is_array($history)) {
+    $history = [];
+}
+$history = array_slice(array_reverse($history), 0, 40);
 echo json_encode([
     'status' => (string)($data['status'] ?? 'unknown'),
     'release_id' => (string)($data['release_id'] ?? ''),
@@ -28,4 +35,5 @@ echo json_encode([
     'changed_file_count' => (int)($data['changed_file_count'] ?? 0),
     'health' => (string)($data['health'] ?? ''),
     'message' => (string)($data['public_message'] ?? 'Promotion status updated.'),
+    'history' => $history,
 ], JSON_UNESCAPED_SLASHES);

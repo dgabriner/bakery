@@ -521,17 +521,9 @@ if ($selectedDriverId > 0 && $driver) {
         $error = 'Error loading driver data: ' . htmlspecialchars($e->getMessage());
     }
 
-    if (bakery_inventory_ready($db)) {
-        $loadStmt = $db->prepare(
-            'SELECT p.name, li.loaded_quantity
-             FROM driver_loads dl
-             JOIN driver_load_items li ON li.driver_load_id = dl.id
-             JOIN products p ON p.id = li.product_id
-             WHERE dl.driver_id = ? AND dl.delivery_date = ? AND li.loaded_quantity > 0
-             ORDER BY p.name'
-        );
-        $loadStmt->execute([$selectedDriverId, $selectedDate]);
-        $driverLoadItems = $loadStmt->fetchAll(PDO::FETCH_ASSOC);
+    if (bakery_inventory_ready($db) && $selectedDriverId > 0) {
+        $manifests = bakery_inventory_pickup_manifests($db, $selectedDate, [$selectedDriverId]);
+        $driverLoadItems = $manifests[$selectedDriverId] ?? [];
     }
 }
 

@@ -8,6 +8,7 @@ The normal release workflow is:
 4. Do the single **Next** step it names. If Live is behind, apply the exact database migration first. Otherwise send the tested files. Type `confirm` once per queued operation.
 5. Leave the board open. It follows both workers and refreshes the schema comparison after a database update succeeds.
 6. Finish only when the database shows **Match** and the file worker shows **Succeeded**.
+7. Open **History** under the two cards only when you need the trail: each send is a collapsed row with time, success or failure, who queued it, and the exact file list or migration id. Filters keep failures easy to find without filling the board.
 
 No Git commit, Git HEAD match, release ID, localhost PowerShell process, or return trip to localhost is required.
 
@@ -42,8 +43,8 @@ Staging Manager shows a **Staging → Live** board with one Next step. Database 
 
 - **Match** — same tables, columns, and indexes.
 - **Live needs an update** — Staging is a strict additive superset.
-- **Stop — mismatch** — Live has extras or different types.
-- **Can't compare yet** — Staging could not read Live’s report (missing file, timeout, or refused). Refresh. Waiting does not create the report. A succeeded Live migration is not a schema compare.
+- **Stop — mismatch** — Live has extra columns or different types. Extra indexes on Live are shown, but they do not block an additive update.
+- **Can't compare yet** — Staging could not read Live’s report (missing file, timeout, or refused). Refresh. Waiting does not create the report. A succeeded Live migration is not a schema compare. After a succeeded update, Staging must fetch a fresh Live report (`schema_status.php?refresh=1`); an old cached report will still look behind.
 
 Live caches the schema report for a few minutes so Staging is not blocked on a full `INFORMATION_SCHEMA` scan every click. Staging also keeps a short cache after a successful read.
 
@@ -61,9 +62,12 @@ Git records and coordinates development. Commit finished work at sensible checkp
 - Deployable migration runtime: `/home/dh_dp755h/bakery.sourflour.org/bake/includes/hosted_migration_runtime.php`
 - Live worker cron: every minute
 - Live status: `storage/deploy/HOSTED_PROMOTION_STATUS.json`
+- Live promotion history: `storage/deploy/HOSTED_PROMOTION_HISTORY.json`
+- Staging operation history: `/home/bakeryOS/.sourflour-promotion-export/operation_history.json`
 - Non-sensitive status endpoint: `/bake/deploy_status.php`
 - Live schema inventory: `/bake/schema_status.php` (Live host only; no row counts)
 - Live migration status: `/bake/migration_status.php`
+- Live migration history: `storage/deploy/HOSTED_MIGRATION_HISTORY.json`
 - Worker log: `/home/dh_dp755h/bakery-promotion.log`
 - Migration worker log: `/home/dh_dp755h/bakery-migration.log`
 - Pre-promotion file backups: `/home/dh_dp755h/bakery-release-backups/`

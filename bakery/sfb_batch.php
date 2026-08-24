@@ -177,7 +177,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     (string)$customer['name'],
                     (string)($_POST['body'] ?? ''),
                     $messageType,
-                    $customerId
+                    $customerId,
+                    null,
+                    null,
+                    (string)($_POST['phase'] ?? '')
                 );
                 header('Location: sfb_batch.php?batch=' . (int)$batch['id'] . '&saved=discussion#sfb-discussion');
                 exit;
@@ -216,6 +219,25 @@ if ($formulaSnapshot && $formulaSnapshot['target_dough_g'] !== null && $formulaL
         $formulaTarget = bakery_sfb_formula_grams($formulaLines, (float)$formulaRow['target_dough_g']);
         $formulaTarget['target'] = (float)$formulaRow['target_dough_g'];
     }
+}
+
+// Version truth: has the source formula moved since this batch froze its copy?
+$formulaDrift = null;
+$formulaSourceRemoved = false;
+if ($formulaSnapshot && !empty($formulaSnapshot['source_formula_id'])) {
+    $snapshotSourceId = (int)$formulaSnapshot['source_formula_id'];
+    $sourceLines = bakery_sfb_formula_lines($db, $snapshotSourceId);
+    if ($sourceLines && $formulaLines) {
+        $formulaDrift = bakery_sfb_snapshot_drift($formulaLines, $sourceLines);
+    } elseif (!$sourceLines && !bakery_sfb_formula($db, $customerId, $snapshotSourceId)) {
+        $formulaSourceRemoved = true;
+    }
+}
+
+$builderReady = bakery_sfb_builder_ready($db);
+$askPhase = (string)($_GET['ask'] ?? '');
+if (!in_array($askPhase, bakery_sfb_builder_phases(), true)) {
+    $askPhase = '';
 }
 
 $saved = (string)($_GET['saved'] ?? '');
@@ -380,12 +402,70 @@ $portalCustomerName = $customer['name'];
       </section>
     <?php endif; ?>
 
+    <?php if ($builderReady): ?>
+      <?php
+      $builderSteps = [
+          ['phase' => 'mix', 'label' => 'sfb.phase_mix', 'anchor' => 'sfb-mix'],
+          ['phase' => 'development', 'label' => 'sfb.phase_development', 'anchor' => 'sfb-bulk'],
+          ['phase' => 'shape', 'label' => 'sfb.phase_shape', 'anchor' => 'sfb-shape'],
+          ['phase' => 'bake', 'label' => 'sfb.phase_bake', 'anchor' => 'sfb-bake'],
+      ];
+      $stageOrder = array_search($phase, ['mix', 'development', 'shape', 'bake', 'done'], true);
+      ?>
+      <section class="card" aria-labelledby="sfbBuilderSteps">
+        <div class="card-header"><h2 id="sfbBuilderSteps"><?php bakery_te('sfb.builder_steps_title'); ?></h2></div>
+        <div class="card-body">
+          <ul class="line-list">
+            <?php foreach ($builderSteps as $stepIdx => $step): ?>
+              <?php
+              $stepState = 'todo';
+              if ($batch['status'] === 'completed') {
+                  $stepState = 'done';
+              } elseif ($stageOrder !== false && $stepIdx < $stageOrder) {
+                  $stepState = 'done';
+              } elseif ($stageOrder !== false && $stepIdx === $stageOrder) {
+                  $stepState = 'current';
+              }
+              ?>
+              <li>
+                <span>
+                  <span class="badge <?php echo $stepState === 'done' ? 'badge-ok' : ($stepState === 'current' ? 'badge-info' : 'badge-muted'); ?>">
+                    <?php echo bakery_t($stepState === 'done' ? 'sfb.builder_step_done' : ($stepState === 'current' ? 'sfb.builder_step_current' : 'sfb.builder_step_todo')); ?>
+                  </span>
+                  <a href="#<?php echo htmlspecialchars($step['anchor']); ?>" style="color:inherit;"><?php bakery_te($step['label']); ?></a>
+                </span>
+                <span class="line-qty">
+                  <a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=<?php echo $step['phase']; ?>#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a>
+                </span>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      </section>
+    <?php endif; ?>
+
     <?php if ($formulaLines): ?>
       <section class="card">
         <div class="card-header"><h2><?php bakery_te('sfb.formula'); ?><?php echo $formulaTarget ? ' — ' . (int)$formulaTarget['target'] . 'g' : ''; ?></h2></div>
         <div class="card-body">
           <?php if ($formulaSnapshot): ?>
             <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.formula_snapshot'); ?></p>
+          <?php endif; ?>
+          <?php if ($formulaDrift && $formulaDrift['drifted']): ?>
+            <div class="notice notice--warn" style="margin:0 0 12px;">
+              <strong><?php bakery_te('sfb.formula_drift_title'); ?></strong>
+              <?php
+              $driftParts = [];
+              foreach (['changed', 'added', 'removed'] as $driftKind) {
+                  if ($formulaDrift[$driftKind]) {
+                      $driftParts[] = htmlspecialchars(implode(', ', $formulaDrift[$driftKind]));
+                  }
+              }
+              echo implode(' · ', $driftParts);
+              ?>
+            </div>
+          <?php elseif ($formulaSourceRemoved): ?>
+            <p class="muted" style="margin:0 0 12px;"><?php bakery_te('sfb.formula_source_removed'); ?></p>
           <?php endif; ?>
           <ul class="line-list">
             <?php foreach ($formulaTarget ? $formulaTarget['lines'] : $formulaLines as $line): ?>
@@ -402,7 +482,9 @@ $portalCustomerName = $customer['name'];
     <?php endif; ?>
 
     <section id="sfb-mix" class="card sfb-phase <?php echo $phase === 'mix' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>1. <?php bakery_te('sfb.phase_mix'); ?></h2></div>
+      <div class="card-header"><h2>1. <?php bakery_te('sfb.phase_mix'); ?></h2>
+        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=mix#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
+      </div>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -449,7 +531,9 @@ $portalCustomerName = $customer['name'];
     </section>
 
     <section id="sfb-bulk" class="card sfb-phase <?php echo $phase === 'development' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>2. <?php bakery_te('sfb.phase_development'); ?></h2></div>
+      <div class="card-header"><h2>2. <?php bakery_te('sfb.phase_development'); ?></h2>
+        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=development#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
+      </div>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -531,7 +615,9 @@ $portalCustomerName = $customer['name'];
     </section>
 
     <section id="sfb-shape" class="card sfb-phase <?php echo $phase === 'shape' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>3. <?php bakery_te('sfb.phase_shape'); ?></h2></div>
+      <div class="card-header"><h2>3. <?php bakery_te('sfb.phase_shape'); ?></h2>
+        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=shape#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
+      </div>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -566,7 +652,9 @@ $portalCustomerName = $customer['name'];
     </section>
 
     <section id="sfb-bake" class="card sfb-phase <?php echo $phase === 'bake' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>4. <?php bakery_te('sfb.phase_bake'); ?></h2></div>
+      <div class="card-header"><h2>4. <?php bakery_te('sfb.phase_bake'); ?></h2>
+        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=bake#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
+      </div>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -738,6 +826,9 @@ $portalCustomerName = $customer['name'];
                       <?php echo $isResolved ? bakery_t('sfb.answered') : bakery_t('sfb.question'); ?>
                     </span>
                   <?php endif; ?>
+                  <?php if (!empty($message['phase'])): ?>
+                    <span class="badge badge-muted"><?php echo htmlspecialchars(bakery_sfb_phase_label($message['phase']), ENT_QUOTES, 'UTF-8'); ?></span>
+                  <?php endif; ?>
                   <time datetime="<?php echo htmlspecialchars(date('c', strtotime($message['created_at']))); ?>"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($message['created_at']))); ?></time>
                 </div>
                 <p class="sfb-message__body"><?php echo nl2br(htmlspecialchars($message['body'])); ?></p>
@@ -759,6 +850,18 @@ $portalCustomerName = $customer['name'];
         <form method="post" class="inline-form sfb-discussion__composer" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
           <input type="hidden" name="action" value="add_discussion">
+          <?php if ($builderReady): ?>
+            <div class="sfb-field">
+              <label><span><?php bakery_te('sfb.discussion_phase'); ?></span>
+                <select name="phase">
+                  <option value=""><?php bakery_te('sfb.discussion_phase_any'); ?></option>
+                  <?php foreach (bakery_sfb_builder_phases() as $composerPhase): ?>
+                    <option value="<?php echo htmlspecialchars($composerPhase, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $askPhase === $composerPhase ? ' selected' : ''; ?>><?php echo htmlspecialchars(bakery_sfb_phase_label($composerPhase), ENT_QUOTES, 'UTF-8'); ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+            </div>
+          <?php endif; ?>
           <div class="sfb-field">
             <label><span><?php bakery_te('sfb.message_type'); ?></span>
               <select name="message_type">

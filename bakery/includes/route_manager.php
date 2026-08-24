@@ -8,6 +8,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/photo_handler.php';
 require_once __DIR__ . '/route_manager_cash.php';
+require_once __DIR__ . '/product_inventory.php';
 
 /**
  * Parse a YYYY-MM-DD date, falling back to today (or $fallback) when invalid.
@@ -179,6 +180,31 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
         $driversData[$driverId]['cash_summary'] = route_manager_compute_cash_summary($driverData['deliveries']);
     }
 
+    $manifestDriverIds = $driverIds ?: array_map('intval', array_keys($driversData));
+    $manifests = bakery_inventory_pickup_manifests($db, $date, $manifestDriverIds);
+
+    return route_manager_attach_pickup_manifests($driversData, $manifests);
+}
+
+/**
+ * Attach saved pickup-load lines to Route Manager driver groups.
+ *
+ * @param array<int, array<string, mixed>> $driversData
+ * @param array<int, array<int, array<string, mixed>>> $manifestsByDriver
+ * @return array<int, array<string, mixed>>
+ */
+function route_manager_attach_pickup_manifests(array $driversData, array $manifestsByDriver): array
+{
+    foreach ($driversData as $driverId => $driverData) {
+        $items = $manifestsByDriver[(int)$driverId] ?? [];
+        $pieceCount = 0;
+        foreach ($items as $item) {
+            $pieceCount += (int)($item['loaded_quantity'] ?? 0);
+        }
+        $driversData[$driverId]['pickup_manifest'] = $items;
+        $driversData[$driverId]['pickup_sku_count'] = count($items);
+        $driversData[$driverId]['pickup_piece_count'] = $pieceCount;
+    }
     return $driversData;
 }
 

@@ -215,9 +215,10 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
     <div class="route-manager-header">
         <div>
             <h1>Route Manager</h1>
-            <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route. <strong>Cash totals for COD and Pan Dulce deliveries appear below and in each route header.</strong></p>
+            <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route. <strong>Each driver header shows the pickup manifest from Driver Pickup Loads, plus COD cash totals.</strong></p>
         </div>
         <div class="route-manager-actions">
+            <a class="btn btn-secondary" href="driver_load.php?date=<?php echo htmlspecialchars($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.driver_load')); ?></a>
             <a class="btn btn-secondary" href="route_summary.php?date=<?php echo htmlspecialchars($selectedDate); ?>"><?php echo htmlspecialchars(function_exists('bakery_t') ? bakery_t('page.route_summary') : 'Route Summary'); ?></a>
             <a class="btn btn-secondary" href="billing_center.php?panel=invoices&amp;range=custom&amp;start_date=<?php echo htmlspecialchars($selectedDate); ?>&amp;end_date=<?php echo htmlspecialchars($selectedDate); ?>">Invoice reconciliation</a>
         </div>
@@ -314,7 +315,11 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
                 <span class="hint-desktop">Drag the ⋮⋮ handle, or use ↑ ↓, to change stop order.</span>
                 <span class="hint-mobile">Tap ↑ or ↓ to move a stop. Changes save automatically.</span>
             </p>
-            <div id="delivery-list" class="delivery-list">
+            <div id="delivery-list" class="delivery-list"
+                 data-pickup-title="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_manifest'), ENT_QUOTES, 'UTF-8'); ?>"
+                 data-pickup-empty="<?php echo htmlspecialchars(bakery_t('route_manager.no_pickup'), ENT_QUOTES, 'UTF-8'); ?>"
+                 data-pickup-edit="<?php echo htmlspecialchars(bakery_t('route_manager.edit_pickup_loads'), ENT_QUOTES, 'UTF-8'); ?>"
+                 data-pickup-summary="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_summary'), ENT_QUOTES, 'UTF-8'); ?>">
                 <p class="text-muted">Select a date and drivers to load deliveries.</p>
             </div>
         </div>
@@ -876,18 +881,52 @@ function updateLegend() {
         const soldLine = Number(cash.total_sold) > 0
             ? `<div class="legend-details">Sold: ${formatMoney(cash.total_sold)}</div>`
             : '';
+        const pickupLine = (driverData.pickup_sku_count || 0) > 0
+            ? `<div class="legend-details">Pickup: ${driverData.pickup_sku_count} product${driverData.pickup_sku_count === 1 ? '' : 's'} · ${driverData.pickup_piece_count || 0} pcs</div>`
+            : `<div class="legend-details">Pickup: not saved</div>`;
         return `
             <div class="legend-item">
                 <div class="legend-color" style="background-color: ${color};"></div>
                 <div class="legend-info">
                     <strong>${escapeHtml(driverData.name)}</strong>
                     <div class="legend-details">${count} stop${count === 1 ? '' : 's'}</div>
+                    ${pickupLine}
                     ${cashLine}
                     ${soldLine}
                 </div>
             </div>
         `;
     }).join('');
+}
+
+function pickupManifestHtml(listEl, driverData) {
+    const title = listEl.dataset.pickupTitle || 'Pickup manifest';
+    const empty = listEl.dataset.pickupEmpty || 'No pickup load saved yet.';
+    const editLabel = listEl.dataset.pickupEdit || 'Edit pickup loads';
+    const summaryTpl = listEl.dataset.pickupSummary || ':skus products · :pcs pieces';
+    const items = Array.isArray(driverData.pickup_manifest) ? driverData.pickup_manifest : [];
+    const skuCount = Number(driverData.pickup_sku_count) || items.length;
+    const pieceCount = Number(driverData.pickup_piece_count) || items.reduce((n, item) => n + (Number(item.loaded_quantity) || 0), 0);
+    const summary = summaryTpl.replace(':skus', String(skuCount)).replace(':pcs', String(pieceCount));
+    const date = document.getElementById('tracking-date').value || '';
+    const editHref = 'driver_load.php?date=' + encodeURIComponent(date);
+    const body = items.length
+        ? `<ul class="driver-pickup-list">${items.map(item =>
+            `<li><strong>${escapeHtml(String(item.loaded_quantity))}</strong> ${escapeHtml(item.name || '')}</li>`
+          ).join('')}</ul>`
+        : `<p class="driver-pickup-empty">${escapeHtml(empty)}</p>`;
+    return `
+        <details class="driver-pickup-manifest"${items.length ? ' open' : ''}>
+            <summary>
+                <strong>${escapeHtml(title)}</strong>
+                <span>${items.length ? escapeHtml(summary) : escapeHtml(empty)}</span>
+            </summary>
+            <div class="driver-pickup-body">
+                ${body}
+                <a class="driver-pickup-edit" href="${escapeHtml(editHref)}">${escapeHtml(editLabel)}</a>
+            </div>
+        </details>
+    `;
 }
 
 function updateDeliveryList() {
@@ -992,6 +1031,8 @@ function updateDeliveryList() {
                </span>`
             : '';
 
+        const pickupCopy = pickupManifestHtml(listEl, driverData);
+
         return `
             <section class="driver-delivery-group" data-driver-id="${driverId}">
                 <header class="driver-delivery-header">
@@ -1002,6 +1043,7 @@ function updateDeliveryList() {
                         ${cashHeader}
                     </div>
                 </header>
+                ${pickupCopy}
                 <ol class="delivery-stops" data-driver-id="${driverId}">${stopRows}</ol>
             </section>
         `;
@@ -2056,6 +2098,75 @@ document.addEventListener('DOMContentLoaded', function() {
 .driver-cash-meta {
     color: #6c757d;
     font-size: 12px;
+}
+
+.driver-pickup-manifest {
+    margin: 0 0 10px 0;
+    padding: 0;
+    border: 1px solid #b8d8c2;
+    border-radius: 10px;
+    background: #f2fbf4;
+}
+
+.driver-pickup-manifest summary {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.driver-pickup-manifest summary::-webkit-details-marker {
+    display: none;
+}
+
+.driver-pickup-manifest summary strong {
+    color: #1f6637;
+    font-size: 13px;
+}
+
+.driver-pickup-manifest summary span {
+    color: #536258;
+    font-size: 12px;
+}
+
+.driver-pickup-body {
+    padding: 0 12px 10px;
+}
+
+.driver-pickup-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 8px;
+    padding: 0;
+    list-style: none;
+}
+
+.driver-pickup-list li {
+    padding: 5px 8px;
+    background: #fff;
+    border-radius: 8px;
+    color: #34483a;
+    font-size: 13px;
+}
+
+.driver-pickup-list li strong {
+    color: #1f6637;
+}
+
+.driver-pickup-empty {
+    margin: 0 0 8px;
+    color: #536258;
+    font-size: 13px;
+}
+
+.driver-pickup-edit {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1f6f4a;
 }
 
 .status-item--cash .status-value {

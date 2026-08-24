@@ -7,21 +7,16 @@ require_once 'includes/customer_record.php';
 require_once 'includes/sfb_origin.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/operational_exceptions.php';
+require_once 'includes/product_pack_yields.php';
+require_once 'includes/pack_list.php';
 
 $page_title = bakery_t('page.pack_list');
-
-// Persisted pack progress: one row per checked line per date, shared by all staff.
-// Migration 030 owns the schema; an incomplete install degrades honestly here.
-if (!function_exists('bakery_pack_progress_ready')) {
-    function bakery_pack_progress_ready(PDO $db): bool {
-        return function_exists('table_exists') ? table_exists($db, 'pack_progress') : false;
-    }
-}
 
 // AJAX: toggle a pack check for the selected date.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_pack_check') {
     header('Content-Type: application/json');
     bakery_require_login();
+    bakery_require_csrf();
     try {
         $checkDate = trim((string)($_POST['date'] ?? ''));
         $dateObj = DateTime::createFromFormat('!Y-m-d', $checkDate);
@@ -29,21 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
             throw new Exception('Invalid date');
         }
         $lineKey = trim((string)($_POST['line_key'] ?? ''));
-        if ($lineKey === '' || strlen($lineKey) > 64 || !preg_match('/^c\d+_p\d+$/', $lineKey)) {
+        if (!bakery_pack_line_key_valid($lineKey)) {
             throw new Exception('Invalid line');
         }
         $checked = ($_POST['checked'] ?? '0') === '1';
-        if (!bakery_pack_progress_ready($db)) {
-            throw new RuntimeException('Packing check-offs are unavailable until database migrations are complete.');
-        }
-        if ($checked) {
-            $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-            $stmt = $db->prepare('INSERT IGNORE INTO pack_progress (pack_date, line_key, checked_by_user_id) VALUES (?, ?, ?)');
-            $stmt->execute([$checkDate, $lineKey, $user['id'] ?? null]);
-        } else {
-            $stmt = $db->prepare('DELETE FROM pack_progress WHERE pack_date = ? AND line_key = ?');
-            $stmt->execute([$checkDate, $lineKey]);
-        }
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        bakery_pack_set_checked($db, $checkDate, $lineKey, $checked, isset($user['id']) ? (int)$user['id'] : null);
         echo json_encode(['success' => true]);
     } catch (Exception $e) {
         http_response_code(400);
@@ -97,8 +83,8 @@ if (isset($_GET['date'])) {
 }
 
 $selectedDay = bakery_standing_day_from_date($selectedDate);
-$viewRaw = (string)($_GET['view'] ?? 'product');
-$viewMode = in_array($viewRaw, ['customer', 'route'], true) ? $viewRaw : 'product';
+$viewRaw = (string)($_GET['view'] ?? $_POST['view'] ?? 'route');
+$viewMode = in_array($viewRaw, ['product', 'customer', 'route'], true) ? $viewRaw : 'route';
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $pageReturnKey = $returnTarget['key'] ?? null;
 $attentionShortfall = (string)($_GET['attention'] ?? '') === 'shortfall';
@@ -237,6 +223,8 @@ $byCustomer = [];
 $byRoute = []; // driver_id => section (0 = unassigned)
 $productTotals = [];
 $customerTotals = [];
+$allLineKeys = [];
+$lineKeysByDriver = [];
 $totalUnits = 0;
 $shortageProducts = [];
 $shortageUnits = 0;
@@ -260,7 +248,8 @@ foreach ($lineItems as $row) {
     $totalUnits += $qty;
     $productTotals[$productId] = ($productTotals[$productId] ?? 0) + $qty;
     $customerTotals[$customerId] = ($customerTotals[$customerId] ?? 0) + $qty;
-    $lineKey = "c{$customerId}_p{$productId}";
+    $lineKey = bakery_pack_line_key($customerId, $productId);
+    $allLineKeys[$lineKey] = true;
 
     if (!isset($byProduct[$productId])) {
         $byProduct[$productId] = [
@@ -332,6 +321,7 @@ foreach ($lineItems as $row) {
         'quantity' => $qty,
         'line_key' => $lineKey,
     ];
+    $lineKeysByDriver[$driverId][$lineKey] = true;
 
     if (preg_match('/^Customer #\d+$/', $customerName)) {
         $exceptions[] = [
@@ -432,8 +422,63 @@ foreach ($byRouteList as &$routeSection) {
         return strcasecmp($a['customer_name'], $b['customer_name']);
     });
     $routeSection['customers'] = $customers;
+    $productRoll = [];
+    foreach ($customers as $stop) {
+        foreach ($stop['products'] as $prodLine) {
+            $pid = (int)$prodLine['product_id'];
+            if (!isset($productRoll[$pid])) {
+                $productRoll[$pid] = [
+                    'product_id' => $pid,
+                    'product_name' => (string)$prodLine['product_name'],
+                    'dough_type' => (string)$prodLine['dough_type'],
+                    'quantity' => 0,
+                    'stores' => [],
+                ];
+            }
+            $productRoll[$pid]['quantity'] += (int)$prodLine['quantity'];
+            $productRoll[$pid]['stores'][] = [
+                'customer_id' => (int)$stop['customer_id'],
+                'customer_name' => (string)$stop['customer_name'],
+                'zone' => (string)$stop['zone'],
+                'quantity' => (int)$prodLine['quantity'],
+                'line_key' => (string)$prodLine['line_key'],
+            ];
+        }
+    }
+    uasort($productRoll, static function ($a, $b) {
+        return strcasecmp($a['product_name'], $b['product_name']);
+    });
+    $routeSection['product_totals'] = array_values($productRoll);
 }
 unset($routeSection);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pack_all') {
+    bakery_require_login();
+    bakery_require_csrf();
+    $packDate = $selectedDate;
+    $driverFilter = array_key_exists('driver_id', $_POST) && $_POST['driver_id'] !== ''
+        ? (int)$_POST['driver_id']
+        : null;
+    $keys = [];
+    if ($driverFilter === null) {
+        $keys = array_keys($allLineKeys);
+    } elseif (isset($lineKeysByDriver[$driverFilter])) {
+        $keys = array_keys($lineKeysByDriver[$driverFilter]);
+    }
+    try {
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        bakery_pack_mark_keys($db, $packDate, $keys, isset($user['id']) ? (int)$user['id'] : null);
+        $qs = bakery_ops_workflow_query([
+            'date' => $packDate,
+            'view' => $viewMode,
+            'packed' => '1',
+        ]);
+        header('Location: pack_list.php?' . http_build_query($qs));
+        exit;
+    } catch (Throwable $e) {
+        $packDeskError = $e->getMessage();
+    }
+}
 
 // Persisted check-offs for this date (survive refresh and are shared by all staff).
 $checkedMap = [];
@@ -448,6 +493,18 @@ try {
     }
 } catch (Exception $e) {
     error_log('pack_list progress: ' . $e->getMessage());
+}
+
+$totalPackLines = count($allLineKeys);
+$packedLineCount = 0;
+foreach (array_keys($allLineKeys) as $packKey) {
+    if (isset($checkedMap[$packKey])) {
+        $packedLineCount++;
+    }
+}
+$packComplete = $packProgressReady && $totalPackLines > 0 && $packedLineCount >= $totalPackLines;
+if ((string)($_GET['packed'] ?? '') === '1') {
+    $packDeskNotice = bakery_t('pack_list.packed_notice');
 }
 
 $totalCustomers = count($byCustomer);
@@ -989,6 +1046,14 @@ require_once 'includes/nav.php';
     margin-top: 2px;
 }
 
+.pack-line__qtywrap {
+    align-items: flex-end;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 4px;
+}
+
 .pack-line__qty {
     background: var(--pack-qty-bg);
     border-radius: 10px;
@@ -1000,6 +1065,52 @@ require_once 'includes/nav.php';
     min-width: 48px;
     padding: 10px 14px;
     text-align: center;
+}
+
+.pack-convert {
+    color: #45615a;
+    font-size: .75rem;
+    font-weight: 650;
+    max-width: 16rem;
+    text-align: right;
+}
+
+.pack-complete-banner {
+    background: var(--pack-ok-bg);
+    border: 1px solid #b8dfc4;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+}
+
+.pack-complete-banner p { margin: 0 0 8px; color: #1d6534; font-weight: 700; }
+
+.pack-driver-product {
+    border-bottom: 1px solid #edf2f0;
+}
+
+.pack-driver-product > summary {
+    align-items: center;
+    cursor: pointer;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    justify-content: space-between;
+    list-style: none;
+    padding: 12px 14px;
+}
+
+.pack-driver-product > summary::-webkit-details-marker { display: none; }
+
+.pack-driver-product__name {
+    color: #23443f;
+    font-size: 1.02rem;
+    font-weight: 720;
+}
+
+.pack-driver-product__hint {
+    color: #6a7f79;
+    font-size: .8rem;
 }
 
 .pack-zone-badge {
@@ -1050,7 +1161,7 @@ require_once 'includes/nav.php';
 @media print {
     .bakery-nav, .pack-toolbar__actions, .pack-view-toggle, .pack-check,
     .pack-session-note, .pack-date-form, .pack-day-shortcuts, .auth-bar,
-    footer, .pack-btn { display: none !important; }
+    footer, .pack-btn, .pack-all-form { display: none !important; }
     .pack-page { max-width: none; padding: 0; }
     .pack-toolbar { background: none; border: 0; padding: 0 0 8px; }
     .pack-section, .pack-inventory-bar, .pack-totals { break-inside: avoid; }
@@ -1060,7 +1171,7 @@ require_once 'includes/nav.php';
 }
 </style>
 
-<main class="pack-page" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+<main class="pack-page" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <?php if ($error): ?>
         <div class="pack-error" role="alert"><?php echo $error; ?></div>
@@ -1083,9 +1194,17 @@ require_once 'includes/nav.php';
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
                 <?php elseif (!$isDriver): ?>
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
-                    <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>">Driver pickup loads</a>
+                    <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.driver_loads'); ?></a>
                 <?php endif; ?>
-                <button type="button" class="pack-btn pack-btn--primary" onclick="window.print()"><?php bakery_te('pack_list.print'); ?></button>
+                <?php if ($packProgressReady && !empty($allLineKeys) && !$packComplete): ?>
+                    <form method="post" class="pack-all-form">
+                        <?php echo bakery_csrf_field(); ?>
+                        <input type="hidden" name="action" value="pack_all">
+                        <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="pack-btn pack-btn--primary"><?php bakery_te('pack_list.pack_all'); ?></button>
+                    </form>
+                <?php endif; ?>
+                <button type="button" class="pack-btn" onclick="window.print()"><?php bakery_te('pack_list.print'); ?></button>
             </div>
         </div>
         <?php
@@ -1151,7 +1270,21 @@ require_once 'includes/nav.php';
                     <span class="pack-total-card__value"><?php echo number_format($shortageUnits); ?></span>
                 </div>
             <?php endif; ?>
+            <?php if ($packProgressReady && $totalPackLines > 0): ?>
+                <div class="pack-total-card<?php echo $packComplete ? ' pack-total-card--ok' : ''; ?>">
+                    <span class="pack-total-card__label"><?php bakery_te('pack_list.packed_lines'); ?></span>
+                    <span class="pack-total-card__value"><?php echo number_format($packedLineCount); ?>/<?php echo number_format($totalPackLines); ?></span>
+                </div>
+            <?php endif; ?>
         </div>
+        <?php if ($packComplete): ?>
+            <div class="pack-complete-banner" role="status">
+                <p><?php bakery_te('pack_list.ready_to_load'); ?></p>
+                <?php if (!$isBaker): ?>
+                    <a class="pack-btn pack-btn--primary" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.open_driver_loads'); ?></a>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     <?php endif; ?>
 
     <?php if (!$isBaker && !empty($exceptions)): ?>
@@ -1271,6 +1404,12 @@ require_once 'includes/nav.php';
                         </div>
                         <div class="pack-section__totals">
                             <span class="pack-qty-pill pack-qty-pill--big"><?php echo htmlspecialchars(bakery_t('pack_list.total', ['count' => number_format($required)]), ENT_QUOTES, 'UTF-8'); ?></span>
+                            <?php
+                            $prodBreak = bakery_pack_count_breakdown($db, $pid, $required);
+                            if (($prodBreak['trays'] ?? 0) > 0 || ($prodBreak['boxes'] ?? 0) > 0):
+                            ?>
+                                <span class="pack-qty-pill"><?php echo htmlspecialchars($prodBreak['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+                            <?php endif; ?>
                             <?php if ($inventoryReady && !$isBaker): ?>
                                 <span class="pack-qty-pill"><?php echo htmlspecialchars(bakery_t('pack_list.available_count', ['count' => number_format($available)]), ENT_QUOTES, 'UTF-8'); ?></span>
                                 <?php if ($short > 0): ?>
@@ -1294,7 +1433,7 @@ require_once 'includes/nav.php';
                                         <?php endif; ?>
                                     </span>
                                 </div>
-                                <span class="pack-line__qty"><?php echo number_format($line['quantity']); ?></span>
+                                <?php echo bakery_pack_qty_html($db, $pid, (int)$line['quantity']); ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -1335,7 +1474,7 @@ require_once 'includes/nav.php';
                                     <span class="pack-line__label"><?php echo htmlspecialchars($line['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
                                     <span class="pack-line__meta"><?php echo htmlspecialchars($line['dough_type'], ENT_QUOTES, 'UTF-8'); ?></span>
                                 </div>
-                                <span class="pack-line__qty"><?php echo number_format($line['quantity']); ?></span>
+                                <?php echo bakery_pack_qty_html($db, (int)$line['product_id'], (int)$line['quantity']); ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -1359,34 +1498,52 @@ require_once 'includes/nav.php';
                         </div>
                         <div class="pack-section__totals">
                             <span class="pack-qty-pill pack-qty-pill--big"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format($route['total'])]), ENT_QUOTES, 'UTF-8'); ?></span>
+                            <?php if ($packProgressReady && !$packComplete): ?>
+                                <form method="post" class="pack-all-form">
+                                    <?php echo bakery_csrf_field(); ?>
+                                    <input type="hidden" name="action" value="pack_all">
+                                    <input type="hidden" name="view" value="route">
+                                    <input type="hidden" name="driver_id" value="<?php echo (int)$route['driver_id']; ?>">
+                                    <button type="submit" class="pack-btn"><?php bakery_te('pack_list.pack_driver'); ?></button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     </header>
                     <div class="pack-section__body">
-                        <?php foreach ($route['customers'] as $stop): ?>
-                            <div class="pack-stop">
-                                <div class="pack-stop__header">
-                                    <span class="pack-stop__name">
-                                        <?php echo bakery_customer_record_link_html((int)$stop['customer_id'], $stop['customer_name'], $selectedDate, 'pack-customer-link'); ?>
-                                        <?php if ($stop['zone'] !== ''): ?>
-                                            <span class="pack-zone-badge<?php echo $stop['zone'] === 'Ruta Sour Flour' ? ' pack-zone-badge--ruta' : ''; ?>">
-                                                <?php echo htmlspecialchars($stop['zone'], ENT_QUOTES, 'UTF-8'); ?>
-                                            </span>
+                        <?php foreach (($route['product_totals'] ?? []) as $roll):
+                            $rollBreak = bakery_pack_count_breakdown($db, (int)$roll['product_id'], (int)$roll['quantity']);
+                        ?>
+                            <details class="pack-driver-product">
+                                <summary>
+                                    <div>
+                                        <div class="pack-driver-product__name"><?php echo htmlspecialchars($roll['product_name'], ENT_QUOTES, 'UTF-8'); ?></div>
+                                        <div class="pack-driver-product__hint"><?php echo htmlspecialchars(bakery_t('pack_list.expand_stores', ['count' => number_format(count($roll['stores']))]), ENT_QUOTES, 'UTF-8'); ?></div>
+                                    </div>
+                                    <div class="pack-line__qtywrap">
+                                        <span class="pack-line__qty"><?php echo number_format((int)$roll['quantity']); ?></span>
+                                        <?php if (($rollBreak['trays'] ?? 0) > 0 || ($rollBreak['boxes'] ?? 0) > 0): ?>
+                                            <span class="pack-convert"><?php echo htmlspecialchars($rollBreak['label'], ENT_QUOTES, 'UTF-8'); ?></span>
                                         <?php endif; ?>
-                                    </span>
-                                    <span class="pack-stop__units"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format($stop['total'])]), ENT_QUOTES, 'UTF-8'); ?></span>
-                                </div>
-                                <?php foreach ($stop['products'] as $line): ?>
+                                    </div>
+                                </summary>
+                                <?php foreach ($roll['stores'] as $line): ?>
                                     <?php $lineChecked = isset($checkedMap[$line['line_key']]); ?>
                                     <div class="pack-line<?php echo $lineChecked ? ' pack-line--checked' : ''; ?>" data-check-key="<?php echo htmlspecialchars($line['line_key'], ENT_QUOTES, 'UTF-8'); ?>">
                                         <button type="button" class="pack-check<?php echo $lineChecked ? ' is-checked' : ''; ?>" aria-label="<?php bakery_te('pack_list.mark_packed'); ?>" aria-pressed="<?php echo $lineChecked ? 'true' : 'false'; ?>"<?php echo $packProgressReady ? '' : ' disabled'; ?>><?php echo $lineChecked ? '✓' : ' '; ?></button>
                                         <div class="pack-line__main">
-                                            <span class="pack-line__label"><?php echo htmlspecialchars($line['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                            <span class="pack-line__meta"><?php echo htmlspecialchars($line['dough_type'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                            <span class="pack-line__label">
+                                                <?php echo bakery_customer_record_link_html((int)$line['customer_id'], $line['customer_name'], $selectedDate, 'pack-customer-link'); ?>
+                                                <?php if ($line['zone'] !== ''): ?>
+                                                    <span class="pack-zone-badge<?php echo $line['zone'] === 'Ruta Sour Flour' ? ' pack-zone-badge--ruta' : ''; ?>">
+                                                        <?php echo htmlspecialchars($line['zone'], ENT_QUOTES, 'UTF-8'); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </span>
                                         </div>
-                                        <span class="pack-line__qty"><?php echo number_format($line['quantity']); ?></span>
+                                        <?php echo bakery_pack_qty_html($db, (int)$roll['product_id'], (int)$line['quantity']); ?>
                                     </div>
                                 <?php endforeach; ?>
-                            </div>
+                            </details>
                         <?php endforeach; ?>
                     </div>
                 </section>
@@ -1401,6 +1558,7 @@ require_once 'includes/nav.php';
     if (!root) return;
 
     var dateKey = root.getAttribute('data-date') || 'unknown';
+    var csrf = root.getAttribute('data-csrf') || '';
     // Check-offs persist server-side per date; initial state is rendered by PHP.
     var pending = {};
 
@@ -1424,11 +1582,15 @@ require_once 'includes/nav.php';
 
             var body = 'action=toggle_pack_check&date=' + encodeURIComponent(dateKey)
                 + '&line_key=' + encodeURIComponent(key)
-                + '&checked=' + (checked ? '1' : '0');
+                + '&checked=' + (checked ? '1' : '0')
+                + '&csrf_token=' + encodeURIComponent(csrf);
 
             fetch('pack_list.php', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json'
+                },
                 body: body
             })
                 .then(function (res) { return res.json(); })

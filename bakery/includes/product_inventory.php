@@ -11,6 +11,130 @@ function bakery_inventory_ready(PDO $db): bool {
         && table_exists($db, 'driver_load_items');
 }
 
+/**
+ * Pickup quantities already saved on Driver Pickup Loads for a date.
+ *
+ * @param array<int, int> $driverIds Empty means every driver with a positive load that day.
+ * @return array<int, array<int, array{product_id:int,name:string,loaded_quantity:int}>>
+ */
+function bakery_inventory_pickup_manifests(PDO $db, string $date, array $driverIds = []): array
+{
+    if (!bakery_inventory_ready($db)) {
+        return [];
+    }
+    $date = bakery_inventory_validate_date($date);
+    $driverIds = array_values(array_filter(array_map('intval', $driverIds), static function ($id) {
+        return $id > 0;
+    }));
+
+    $sql = 'SELECT dl.driver_id, p.id AS product_id, p.name, li.loaded_quantity
+            FROM driver_loads dl
+            INNER JOIN driver_load_items li ON li.driver_load_id = dl.id
+            INNER JOIN products p ON p.id = li.product_id
+            WHERE dl.delivery_date = ?
+              AND li.loaded_quantity > 0';
+    $params = [$date];
+    if ($driverIds) {
+        $placeholders = implode(',', array_fill(0, count($driverIds), '?'));
+        $sql .= " AND dl.driver_id IN ($placeholders)";
+        foreach ($driverIds as $id) {
+            $params[] = $id;
+        }
+    }
+    $sql .= ' ORDER BY p.name';
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $driverId = (int)$row['driver_id'];
+        $out[$driverId][] = [
+            'product_id' => (int)$row['product_id'],
+            'name' => (string)$row['name'],
+            'loaded_quantity' => (int)$row['loaded_quantity'],
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Assigned order units vs saved pickup, per driver, for one operating date.
+ * A driver is incomplete when they have required units and no load row,
+ * or the saved pickup total is still below assigned units.
+ *
+ * @return array{
+ *   drivers_with_work:int,
+ *   incomplete:list<array{driver_id:int,name:string,required:int,loaded:int,has_load:bool}>
+ * }
+ */
+function bakery_inventory_load_progress(PDO $db, string $date): array
+{
+    $empty = ['drivers_with_work' => 0, 'incomplete' => []];
+    if (!bakery_inventory_ready($db) || !function_exists('table_exists') || !table_exists($db, 'daily_order_assignments')) {
+        return $empty;
+    }
+    $date = bakery_inventory_validate_date($date);
+
+    $reqStmt = $db->prepare(
+        "SELECT doa.driver_id, COALESCE(MAX(d.name), '') AS driver_name,
+                COALESCE(SUM(doi.quantity), 0) AS required_units
+         FROM daily_order_assignments doa
+         JOIN daily_orders do ON do.id = doa.daily_order_id
+         JOIN daily_order_items doi ON doi.daily_order_id = do.id
+         LEFT JOIN drivers d ON d.id = doa.driver_id
+         WHERE doa.delivery_date = ?
+           AND do.order_date = ?
+           AND doa.delivery_status <> 'cancelled'
+         GROUP BY doa.driver_id"
+    );
+    $reqStmt->execute([$date, $date]);
+    $requiredByDriver = [];
+    $names = [];
+    foreach ($reqStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $driverId = (int)$row['driver_id'];
+        $requiredByDriver[$driverId] = (int)$row['required_units'];
+        $names[$driverId] = trim((string)$row['driver_name']);
+    }
+
+    $loadStmt = $db->prepare(
+        "SELECT dl.driver_id,
+                COALESCE(SUM(li.loaded_quantity), 0) AS loaded_units,
+                COUNT(DISTINCT dl.id) AS load_rows
+         FROM driver_loads dl
+         LEFT JOIN driver_load_items li ON li.driver_load_id = dl.id
+         WHERE dl.delivery_date = ?
+         GROUP BY dl.driver_id"
+    );
+    $loadStmt->execute([$date]);
+    $loadedByDriver = [];
+    $driversWithLoadRow = [];
+    foreach ($loadStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $driverId = (int)$row['driver_id'];
+        $loadedByDriver[$driverId] = (int)$row['loaded_units'];
+        $driversWithLoadRow[$driverId] = (int)$row['load_rows'] > 0;
+    }
+
+    $incomplete = [];
+    foreach ($requiredByDriver as $driverId => $required) {
+        $loaded = $loadedByDriver[$driverId] ?? 0;
+        $hasLoad = !empty($driversWithLoadRow[$driverId]);
+        if ($required > 0 && (!$hasLoad || $loaded < $required)) {
+            $incomplete[] = [
+                'driver_id' => $driverId,
+                'name' => $names[$driverId] !== '' ? $names[$driverId] : ('Driver #' . $driverId),
+                'required' => $required,
+                'loaded' => $loaded,
+                'has_load' => $hasLoad,
+            ];
+        }
+    }
+
+    return [
+        'drivers_with_work' => count($requiredByDriver),
+        'incomplete' => $incomplete,
+    ];
+}
+
 /** True when route closeout columns/types (waste + returned tracking) are installed. */
 function bakery_inventory_closeout_ready(PDO $db): bool {
     return bakery_inventory_ready($db)

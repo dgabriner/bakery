@@ -77,6 +77,27 @@ $discrepancyExtra = bakery_schema_inventory_compare(
 );
 $assert(($discrepancyExtra['state'] ?? '') === 'discrepancy', 'Live-only column is a discrepancy');
 
+$extraIndexLive = bakery_schema_inventory_compare(
+    $staging,
+    schema_compare_fixture($baseColumns, $baseIndexes + ['text_messages.uq_text_messages_twilio_sid' => '1:twilio_sid'], ['049_done'])
+);
+$assert(($extraIndexLive['state'] ?? '') === 'equal', 'Live-only index is listed, not Stop');
+$assert(in_array('index:text_messages.uq_text_messages_twilio_sid', $extraIndexLive['extra_on_live'], true), 'Live-only index is named');
+
+$renamedUnique = bakery_schema_inventory_compare(
+    schema_compare_fixture($baseColumns, $baseIndexes + ['text_messages.uq_text_messages_sid' => '1:twilio_sid'], ['049_done']),
+    schema_compare_fixture($baseColumns, $baseIndexes + ['text_messages.uq_text_messages_twilio_sid' => '1:twilio_sid'], ['049_done'])
+);
+$assert(($renamedUnique['state'] ?? '') === 'equal', 'same unique columns under different names are Match');
+$assert(!in_array('index:text_messages.uq_text_messages_sid', $renamedUnique['missing_on_live'] ?? [], true), 'renamed unique is not missing');
+$assert(!in_array('index:text_messages.uq_text_messages_twilio_sid', $renamedUnique['extra_on_live'] ?? [], true), 'renamed unique is not extra');
+
+$behindWithLiveIndex = bakery_schema_inventory_compare(
+    schema_compare_fixture($behindColumns, $baseIndexes, ['049_done', '050_nickname']),
+    schema_compare_fixture($baseColumns, $baseIndexes + ['text_messages.uq_text_messages_twilio_sid' => '1:twilio_sid'], ['049_done'])
+);
+$assert(($behindWithLiveIndex['state'] ?? '') === 'live_behind', 'Live-only index does not hide Staging additions');
+
 $mismatchLive = $baseColumns;
 $mismatchLive['customers.name'] = 'text|NO|';
 $discrepancyType = bakery_schema_inventory_compare(
@@ -131,6 +152,10 @@ $assert(strpos($statusSource, 'bakery_is_live_bakery_host') !== false, 'schema s
 $assert(strpos($statusSource, '$e->getMessage()') === false, 'schema status does not print exception detail');
 
 require_once $root . '/includes/hosted_migration_approval.php';
+require_once $root . '/includes/staging_live_approval.php';
+
+$assert(bakery_pacific_display_time('2026-08-24T01:02:06+00:00') === 'Aug 23, 2026 6:02 PM PDT', 'UTC Live stamp formats as Pacific');
+$assert(bakery_pacific_display_time('2026-08-23T18:01:39-07:00') === 'Aug 23, 2026 6:01 PM PDT', 'already-Pacific stamp stays Pacific and readable');
 
 $assert(bakery_staging_live_next_step('unknown', false, false, 'missing') === 'promote_files', 'unknown schema asks for a file send');
 $assert(bakery_staging_live_next_step('unknown', false, true, 'timeout') === 'retry', 'timeout after applied migration asks for refresh');
@@ -139,6 +164,7 @@ $assert(bakery_staging_live_next_step('live_behind', true) === 'migrate', 'behin
 $assert(bakery_staging_live_next_step('live_behind', false) === 'migrate_missing', 'behind without a file does not invent one');
 $assert(bakery_staging_live_next_step('equal', false) === 'done', 'matching schemas are done');
 $assert(bakery_staging_live_next_step('discrepancy', true) === 'stop', 'mismatch stops a database update');
+$assert(bakery_staging_live_next_step('live_behind', true, true, '', true) === 'retry', 'stale report after apply asks for refresh, not another send');
 $assert(bakery_hosted_schema_unavailable_reason('<html>not found</html>', 404) === 'missing', 'Live 404 is a missing report file');
 $assert(bakery_hosted_schema_unavailable_reason('', 0) === 'timeout', 'empty body is a timeout');
 $assert(bakery_hosted_schema_unavailable_reason('{"status":"unavailable"}', 503) === 'refused', 'Live unavailable JSON is refused');
@@ -167,6 +193,15 @@ $pickedPastSuperseded = bakery_staging_live_recommended_migration(
     ]
 );
 $assert(is_array($pickedPastSuperseded) && $pickedPastSuperseded['file'] === '054_portable.sql', 'unsafe superseded ledger ids do not hide one exact safe migration');
+$pickedFirstSafe = bakery_staging_live_recommended_migration(
+    ['state' => 'live_behind', 'staging_only_migrations' => ['056_square', '057_text', '059_bolillo']],
+    [
+        ['id' => '056_square', 'file' => '056_square.sql', 'safe' => true],
+        ['id' => '057_text', 'file' => '057_text.sql', 'safe' => true],
+        ['id' => '059_bolillo', 'file' => '059_bolillo.sql', 'safe' => true],
+    ]
+);
+$assert(is_array($pickedFirstSafe) && $pickedFirstSafe['file'] === '056_square.sql', 'several safe pending migrations recommend the earliest file, not a greyed-out guess');
 $notPicked = bakery_staging_live_recommended_migration(
     ['state' => 'live_behind', 'staging_only_migrations' => []],
     [['id' => '050_nickname', 'file' => '050_nickname.sql', 'safe' => true]]
@@ -175,7 +210,46 @@ $assert($notPicked === null, 'recommendation is never guessed from the only avai
 
 $assert(strpos($managerSource, 'manager-live-board') !== false, 'Manager shows the Staging to Live board');
 $assert(strpos($managerSource, 'bakery_staging_live_board') !== false, 'Manager uses the live board helper');
+$assert(strpos($managerSource, 'manager-live-history') !== false, 'Manager keeps Staging to Live history collapsed');
 $assert(strpos($managerSource, 'Apply an additive database migration to Live') === false, 'Manager does not hide the status in a collapsed button');
+
+$queued = bakery_staging_live_history_from_approval([
+    'status' => 'approved_for_live',
+    'release_id' => 'stage-20260823-010203-abc123',
+    'approved_at' => '2026-08-23T01:02:03+00:00',
+    'approved_by' => 'test@example.com',
+    'file_count' => 2,
+    'files' => [
+        ['path' => 'manager.php', 'size' => 10, 'sha256' => str_repeat('a', 64)],
+        ['path' => 'includes/foo.php', 'size' => 11, 'sha256' => str_repeat('b', 64)],
+    ],
+], 'files');
+$assert($queued['status'] === 'queued' && count($queued['files']) === 2, 'queued file history keeps the snapshot file list');
+
+$tmpHistory = sys_get_temp_dir() . '/sf-history-' . bin2hex(random_bytes(3)) . '.json';
+$first = bakery_hosted_status_history_append($tmpHistory, [
+    'status' => 'succeeded',
+    'release_id' => 'stage-20260823-010203-abc123',
+    'completed_at' => '2026-08-23T01:03:00+00:00',
+    'file_count' => 400,
+    'changed_file_count' => 2,
+    'changed_files' => ['manager.php', 'css/manager.css'],
+    'public_message' => '2 changed file(s) from the approved Staging version are now Live.',
+], 'files');
+$again = bakery_hosted_status_history_append($tmpHistory, [
+    'status' => 'succeeded',
+    'release_id' => 'stage-20260823-010203-abc123',
+    'completed_at' => '2026-08-23T01:03:00+00:00',
+    'public_message' => 'duplicate',
+], 'files');
+$assert(count($first) === 1 && count($again) === 1, 'Live history dedupes the same terminal snapshot');
+$promoting = bakery_hosted_status_history_append($tmpHistory, [
+    'status' => 'promoting',
+    'release_id' => 'stage-20260823-010204-def456',
+    'started_at' => '2026-08-23T01:04:00+00:00',
+], 'files');
+$assert(count($promoting) === 1, 'in-progress Live status is not stored as history');
+@unlink($tmpHistory);
 
 $en = require $root . '/lang/en.php';
 $es = require $root . '/lang/es.php';
@@ -183,7 +257,9 @@ foreach ([
     'manager.live_title', 'manager.live_db_match', 'manager.live_db_behind', 'manager.live_db_stop', 'manager.live_db_unknown',
     'manager.live_next_retry', 'manager.live_db_unknown_applied', 'manager.live_db_unknown_missing', 'manager.live_db_unknown_timeout',
     'manager.live_retry',
-    'manager.live_no_exact_update', 'manager.live_worker_waiting',
+    'manager.live_no_exact_update', 'manager.live_worker_waiting', 'manager.live_db_extra_ok',
+    'manager.live_next_stale', 'manager.live_db_stale_after_apply', 'manager.live_db_report_at',
+    'manager.live_history', 'manager.live_history_summary', 'manager.live_history_filter_failed',
 ] as $key) {
     $assert(isset($en[$key], $es[$key]) && $en[$key] !== '' && $es[$key] !== '', 'i18n key ' . $key);
 }

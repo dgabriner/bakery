@@ -540,7 +540,10 @@ require_once 'includes/nav.php';
   </header>
 
   <?php if (bakery_staging_live_approval_available()):
-    $liveBoard = bakery_staging_live_board(isset($db) && $db instanceof PDO ? $db : null);
+    $liveBoard = bakery_staging_live_board(
+        isset($db) && $db instanceof PDO ? $db : null,
+        (string)($_GET['schema_compare'] ?? '') === '1'
+    );
     $compare = $liveBoard['compare'];
     $schemaState = (string)($compare['state'] ?? 'unknown');
     $next = (string)$liveBoard['next'];
@@ -563,22 +566,29 @@ require_once 'includes/nav.php';
         (string)($compare['reason'] ?? ''),
         bakery_hosted_migration_succeeded($migrationStatus)
     );
-    $nextKey = 'manager.live_next_' . $next;
+    if (!empty($liveBoard['stale_after_apply'])) {
+        $dbDetail = 'manager.live_db_stale_after_apply';
+        $nextKey = 'manager.live_next_stale';
+    } else {
+        $nextKey = 'manager.live_next_' . $next;
+    }
     $echoNames = static function (array $names) {
         $names = array_values($names);
         if ($names === []) {
             return;
         }
-        $preview = array_slice($names, 0, 12);
-        echo '<ul>';
-        foreach ($preview as $name) {
+        echo '<ul class="manager-live-card__names">';
+        foreach ($names as $name) {
             echo '<li>' . htmlspecialchars((string)$name) . '</li>';
         }
         echo '</ul>';
-        $more = count($names) - count($preview);
-        if ($more > 0) {
-            echo '<small>' . htmlspecialchars(bakery_t('manager.schema_more', ['count' => (string)$more])) . '</small>';
+    };
+    $formatWhen = static function ($iso, $fallback = '') {
+        $iso = trim((string)$iso);
+        if ($iso === '') {
+            return (string)$fallback;
         }
+        return bakery_pacific_display_time($iso);
     };
   ?>
   <section class="manager-live-board" data-schema-state="<?php echo htmlspecialchars($schemaState); ?>">
@@ -597,7 +607,13 @@ require_once 'includes/nav.php';
           <p class="manager-live-card__status" data-live-promotion-status data-status-url="?live_status=1">
             <?php echo htmlspecialchars(bakery_t('manager.live_files_status')); ?>:
             <?php echo htmlspecialchars(ucwords(str_replace('_', ' ', (string)($livePromotion['status'] ?? 'unknown')))); ?>
-            <?php if (!empty($livePromotion['completed_at'])): ?> — <?php echo htmlspecialchars((string)$livePromotion['completed_at']); ?><?php endif; ?>
+            <?php
+              $filesWhen = (string)($livePromotion['completed_at_display'] ?? '');
+              if ($filesWhen === '' && !empty($livePromotion['completed_at'])) {
+                  $filesWhen = $formatWhen($livePromotion['completed_at']);
+              }
+            ?>
+            <?php if ($filesWhen !== ''): ?> — <?php echo htmlspecialchars($filesWhen); ?><?php endif; ?>
             <?php if (!empty($livePromotion['message'])): ?> · <?php echo htmlspecialchars((string)$livePromotion['message']); ?><?php endif; ?>
           </p>
         <?php endif; ?>
@@ -611,7 +627,7 @@ require_once 'includes/nav.php';
           <?php if (is_array($approval)): ?>
             <small><?php echo htmlspecialchars(bakery_t('manager.live_queued')); ?>:
               <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?>
-              — <?php echo htmlspecialchars((string)($approval['approved_at_local'] ?? $approval['approved_at'] ?? '')); ?>
+              — <?php echo htmlspecialchars($formatWhen($approval['approved_at'] ?? '', (string)($approval['approved_at_local'] ?? ''))); ?>
               · <?php echo number_format((int)($approval['file_count'] ?? 0)); ?>
             </small>
           <?php endif; ?>
@@ -622,6 +638,11 @@ require_once 'includes/nav.php';
         <div class="manager-live-state <?php echo htmlspecialchars($dbBadge['class']); ?>" role="status">
           <strong><?php echo htmlspecialchars(bakery_t($dbBadge['key'])); ?></strong>
           <span><?php echo htmlspecialchars(bakery_t($dbDetail, ['id' => (string)($migrationStatus['migration_id'] ?? '')])); ?></span>
+          <?php if (!empty($compare['live_captured_at'])): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_report_at', [
+                'time' => $formatWhen($compare['live_captured_at']),
+            ])); ?></small>
+          <?php endif; ?>
         </div>
         <?php if ($schemaState === 'unknown'): ?>
           <p><a class="sf-btn sf-btn--primary" href="?date=<?php echo urlencode($selectedDate); ?>&amp;schema_compare=1"><?php echo htmlspecialchars(bakery_t('manager.live_retry')); ?></a></p>
@@ -635,7 +656,9 @@ require_once 'includes/nav.php';
           <?php $echoNames($compare['staging_only_migrations']); ?>
         <?php endif; ?>
         <?php if (!empty($compare['extra_on_live'])): ?>
-          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_extra')); ?></small>
+          <small><?php echo htmlspecialchars($schemaState === 'discrepancy'
+              ? bakery_t('manager.live_db_extra')
+              : bakery_t('manager.live_db_extra_ok')); ?></small>
           <?php $echoNames($compare['extra_on_live']); ?>
         <?php endif; ?>
         <?php if (!empty($compare['live_only_migrations'])): ?>
@@ -646,7 +669,7 @@ require_once 'includes/nav.php';
           <small><?php echo htmlspecialchars(bakery_t('manager.live_db_mismatch')); ?></small>
           <?php $echoNames($compare['mismatches']); ?>
         <?php endif; ?>
-        <?php if ($schemaState === 'live_behind'): ?>
+        <?php if ($schemaState === 'live_behind' && empty($liveBoard['stale_after_apply'])): ?>
         <form method="post" class="manager-live-card__form">
           <?php echo bakery_csrf_field(); ?>
           <input type="hidden" name="manager_mutation" value="approve_migration_live">
@@ -666,11 +689,118 @@ require_once 'includes/nav.php';
           <small data-live-migration-status data-status-url="?migration_status=1"
             data-expected-release="<?php echo htmlspecialchars((string)($migrationApproval['release_id'] ?? '')); ?>"><?php echo htmlspecialchars(bakery_t('manager.live_db_worker')); ?>:
             <?php echo htmlspecialchars((string)($migrationStatus['status'] ?? 'unknown')); ?>
+            <?php
+              $dbWhen = (string)($migrationStatus['completed_at_display'] ?? '');
+              if ($dbWhen === '' && !empty($migrationStatus['completed_at'])) {
+                  $dbWhen = $formatWhen($migrationStatus['completed_at']);
+              }
+            ?>
+            <?php if ($dbWhen !== ''): ?> — <?php echo htmlspecialchars($dbWhen); ?><?php endif; ?>
             <?php if (!empty($migrationStatus['message'])): ?> · <?php echo htmlspecialchars((string)$migrationStatus['message']); ?><?php endif; ?>
           </small>
         <?php endif; ?>
       </article>
     </div>
+    <?php
+      $liveHistory = bakery_staging_live_history_board();
+      $historyEvents = $liveHistory['events'];
+      $statusLabel = static function (string $status): string {
+          $key = 'manager.live_history_status_' . $status;
+          $translated = bakery_t($key);
+          return $translated === $key ? ucwords(str_replace('_', ' ', $status)) : $translated;
+      };
+    ?>
+    <details class="manager-live-history">
+      <summary>
+        <strong><?php echo htmlspecialchars(bakery_t('manager.live_history')); ?></strong>
+        <span><?php echo htmlspecialchars(bakery_t('manager.live_history_summary', [
+            'total' => (string)count($historyEvents),
+            'failed' => (string)$liveHistory['failed'],
+        ])); ?></span>
+      </summary>
+      <p><?php echo htmlspecialchars(bakery_t('manager.live_history_help')); ?></p>
+      <?php if ($historyEvents === []): ?>
+        <p><?php echo htmlspecialchars(bakery_t('manager.live_history_empty')); ?></p>
+      <?php else: ?>
+        <div class="manager-live-history__filters" role="tablist">
+          <button type="button" class="is-active" data-history-filter="all"><?php echo htmlspecialchars(bakery_t('manager.live_history_filter_all')); ?></button>
+          <button type="button" data-history-filter="files"><?php echo htmlspecialchars(bakery_t('manager.live_history_filter_files')); ?></button>
+          <button type="button" data-history-filter="database"><?php echo htmlspecialchars(bakery_t('manager.live_history_filter_database')); ?></button>
+          <button type="button" data-history-filter="failed"><?php echo htmlspecialchars(bakery_t('manager.live_history_filter_failed')); ?></button>
+        </div>
+        <ol class="manager-live-history__list">
+          <?php foreach ($historyEvents as $event):
+              $kind = (string)($event['kind'] ?? 'files');
+              $eventStatus = (string)($event['status'] ?? 'unknown');
+              $failedEvent = in_array($eventStatus, ['failed', 'rolled_back'], true);
+              $when = bakery_pacific_display_time((string)($event['at'] ?? $event['completed_at'] ?? $event['started_at'] ?? ''));
+              $files = is_array($event['files'] ?? null) ? $event['files'] : [];
+              $changed = is_array($event['changed_files'] ?? null) ? $event['changed_files'] : [];
+          ?>
+          <li data-history-kind="<?php echo htmlspecialchars($kind); ?>" data-history-failed="<?php echo $failedEvent ? '1' : '0'; ?>">
+            <details>
+              <summary>
+                <span class="manager-live-history__badge is-<?php echo htmlspecialchars($eventStatus); ?>"><?php echo htmlspecialchars($statusLabel($eventStatus)); ?></span>
+                <span class="manager-live-history__kind"><?php echo htmlspecialchars(bakery_t('manager.live_history_kind_' . $kind)); ?></span>
+                <time><?php echo htmlspecialchars($when); ?></time>
+                <?php if (!empty($event['migration_id'])): ?>
+                  <code><?php echo htmlspecialchars((string)$event['migration_id']); ?></code>
+                <?php elseif ((int)($event['file_count'] ?? 0) > 0): ?>
+                  <span><?php echo number_format((int)$event['file_count']); ?></span>
+                <?php endif; ?>
+                <?php if (!empty($event['message'])): ?>
+                  <em><?php echo htmlspecialchars((string)$event['message']); ?></em>
+                <?php endif; ?>
+              </summary>
+              <dl>
+                <?php if (!empty($event['release_id'])): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_history_release')); ?></dt><dd><code><?php echo htmlspecialchars((string)$event['release_id']); ?></code></dd></div>
+                <?php endif; ?>
+                <?php if (!empty($event['approved_by'])): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_history_approved_by')); ?></dt><dd><?php echo htmlspecialchars((string)$event['approved_by']); ?></dd></div>
+                <?php endif; ?>
+                <?php if ((int)($event['changed_file_count'] ?? 0) > 0): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_history_changed_files')); ?></dt><dd><?php echo number_format((int)$event['changed_file_count']); ?></dd></div>
+                <?php endif; ?>
+                <?php if ((int)($event['statement_count'] ?? 0) > 0): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_history_statements')); ?></dt>
+                    <dd><?php echo (int)($event['completed_statements'] ?? 0); ?> / <?php echo (int)$event['statement_count']; ?></dd></div>
+                <?php endif; ?>
+                <?php if (!empty($event['sha256'])): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_history_hash')); ?></dt><dd><code><?php echo htmlspecialchars((string)$event['sha256']); ?></code></dd></div>
+                <?php endif; ?>
+                <?php if (!empty($event['file'])): ?>
+                  <div><dt><?php echo htmlspecialchars(bakery_t('manager.live_database')); ?></dt><dd><code><?php echo htmlspecialchars((string)$event['file']); ?></code></dd></div>
+                <?php endif; ?>
+              </dl>
+              <?php if ($files !== []): ?>
+                <details>
+                  <summary><?php echo htmlspecialchars(bakery_t('manager.live_history_files_sent')); ?> (<?php echo number_format(count($files)); ?>)</summary>
+                  <ul class="manager-live-card__names">
+                    <?php foreach ($files as $fileRow):
+                        $path = is_array($fileRow) ? (string)($fileRow['path'] ?? '') : (string)$fileRow;
+                        $hash = is_array($fileRow) ? (string)($fileRow['sha256'] ?? '') : '';
+                    ?>
+                      <li><code><?php echo htmlspecialchars($path); ?></code><?php if ($hash !== ''): ?> <small><?php echo htmlspecialchars(substr($hash, 0, 12)); ?></small><?php endif; ?></li>
+                    <?php endforeach; ?>
+                  </ul>
+                </details>
+              <?php elseif ($changed !== []): ?>
+                <details>
+                  <summary><?php echo htmlspecialchars(bakery_t('manager.live_history_changed_files')); ?> (<?php echo number_format(count($changed)); ?>)</summary>
+                  <ul class="manager-live-card__names">
+                    <?php foreach ($changed as $path): ?>
+                      <li><code><?php echo htmlspecialchars((string)$path); ?></code></li>
+                    <?php endforeach; ?>
+                  </ul>
+                </details>
+              <?php endif; ?>
+            </details>
+          </li>
+          <?php endforeach; ?>
+        </ol>
+      <?php endif; ?>
+    </details>
   </section>
   <script>
   (function () {
@@ -694,12 +824,14 @@ require_once 'includes/nav.php';
             ? <?php echo json_encode(bakery_t('manager.live_db_worker')); ?>
             : <?php echo json_encode(bakery_t('manager.live_files_status')); ?>;
           var text = prefix + ': ' + label;
-          if (data.completed_at) text += ' — ' + data.completed_at;
+          if (data.completed_at_display || data.completed_at) text += ' — ' + (data.completed_at_display || data.completed_at);
           if (data.message) text += ' · ' + data.message;
           status.textContent = text;
-          if (status.hasAttribute('data-live-migration-status') && data.status === 'succeeded' && prior && prior !== 'succeeded') {
+          if (status.hasAttribute('data-live-migration-status') && data.status === 'succeeded'
+              && data.release_id && expected && data.release_id === expected
+              && window.location.search.indexOf('schema_compare=1') === -1) {
             var separator = window.location.search ? '&' : '?';
-            window.location.href = window.location.href + separator + 'schema_compare=1';
+            window.location.href = window.location.pathname + window.location.search + separator + 'schema_compare=1';
           }
         })
         .catch(function () {});
@@ -707,6 +839,30 @@ require_once 'includes/nav.php';
     function refreshAll() { statuses.forEach(refreshStatus); }
     refreshAll();
     window.setInterval(refreshAll, 5000);
+  }());
+  (function () {
+    var root = document.querySelector('.manager-live-history');
+    if (!root) return;
+    var buttons = Array.prototype.slice.call(root.querySelectorAll('[data-history-filter]'));
+    var rows = Array.prototype.slice.call(root.querySelectorAll('[data-history-kind]'));
+    function applyFilter(filter) {
+      buttons.forEach(function (button) {
+        button.classList.toggle('is-active', button.getAttribute('data-history-filter') === filter);
+      });
+      rows.forEach(function (row) {
+        var kind = row.getAttribute('data-history-kind') || '';
+        var failed = row.getAttribute('data-history-failed') === '1';
+        var show = filter === 'all'
+          || (filter === 'failed' && failed)
+          || kind === filter;
+        row.hidden = !show;
+      });
+    }
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        applyFilter(button.getAttribute('data-history-filter') || 'all');
+      });
+    });
   }());
   </script>
   <?php endif; ?>

@@ -33,6 +33,49 @@ function promotion_write_json(string $path, array $data): void {
     }
 }
 
+function promotion_history_append(string $historyPath, array $snapshot): void {
+    $status = (string)($snapshot['status'] ?? '');
+    if (!in_array($status, ['succeeded', 'failed', 'rolled_back'], true)) {
+        return;
+    }
+    if (function_exists('bakery_hosted_status_history_append')) {
+        bakery_hosted_status_history_append($historyPath, $snapshot, 'files');
+        return;
+    }
+    $when = (string)($snapshot['completed_at'] ?? $snapshot['started_at'] ?? '');
+    $release = (string)($snapshot['release_id'] ?? '');
+    $changed = array_values(array_filter(array_map('strval', (array)($snapshot['changed_files'] ?? []))));
+    $event = [
+        'id' => 'files|' . $release . '|' . $status . '|' . $when,
+        'kind' => 'files',
+        'status' => $status,
+        'release_id' => $release,
+        'at' => $when,
+        'started_at' => (string)($snapshot['started_at'] ?? ''),
+        'completed_at' => (string)($snapshot['completed_at'] ?? ''),
+        'file_count' => (int)($snapshot['file_count'] ?? 0),
+        'changed_file_count' => (int)($snapshot['changed_file_count'] ?? count($changed)),
+        'health' => (string)($snapshot['health'] ?? ''),
+        'message' => (string)($snapshot['public_message'] ?? ''),
+        'changed_files' => array_slice($changed, 0, 80),
+    ];
+    $raw = is_file($historyPath) ? json_decode((string)@file_get_contents($historyPath), true) : null;
+    $events = is_array($raw) ? ($raw['events'] ?? []) : [];
+    if (!is_array($events)) {
+        $events = [];
+    }
+    foreach ($events as $existing) {
+        if (is_array($existing) && (string)($existing['id'] ?? '') === $event['id']) {
+            return;
+        }
+    }
+    $events[] = $event;
+    if (count($events) > 200) {
+        $events = array_slice($events, -200);
+    }
+    promotion_write_json($historyPath, ['events' => $events]);
+}
+
 function promotion_read_json(string $path): ?array {
     $data = is_file($path) ? json_decode((string)file_get_contents($path), true) : null;
     return is_array($data) ? $data : null;
@@ -105,6 +148,11 @@ if ($liveRoot !== '/home/dh_dp755h/bakery.sourflour.org/bake') {
 }
 $statusPath = $liveRoot . '/storage/deploy/HOSTED_PROMOTION_STATUS.json';
 $hashIndexPath = $liveRoot . '/storage/deploy/HOSTED_PROMOTION_FILES.json';
+$historyPath = $liveRoot . '/storage/deploy/HOSTED_PROMOTION_HISTORY.json';
+$runtime = $liveRoot . '/includes/hosted_migration_runtime.php';
+if (is_file($runtime)) {
+    require_once $runtime;
+}
 $lockPath = '/home/dh_dp755h/.bakery-hosted-promotion.lock';
 $lock = fopen($lockPath, 'c');
 if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) exit(0);
@@ -135,7 +183,7 @@ try {
         $path = (string)($entry['path'] ?? '');
         $hash = strtolower((string)($entry['sha256'] ?? ''));
         if (!promotion_safe_path($path) || !preg_match('/^[a-f0-9]{64}$/', $hash) || isset($paths[$path])) {
-            throw new RuntimeException('Staging manifest contains an unsafe file entry.');
+            throw new RuntimeException('Staging manifest contains an unsafe file entry: ' . $path);
         }
         $paths[$path] = $hash;
     }
@@ -155,6 +203,7 @@ try {
         'requested_at' => (string)($approval['approved_at'] ?? ''), 'started_at' => gmdate('c'),
         'file_count' => count($paths), 'changed_file_count' => count($deployPaths), 'health' => 'pending',
         'public_message' => count($deployPaths) . ' changed file(s) are being backed up and verified.',
+        'changed_files' => array_keys($deployPaths),
     ];
     promotion_write_json($statusPath, $status);
 
@@ -167,6 +216,7 @@ try {
         $status['completed_at'] = gmdate('c');
         $status['public_message'] = 'Live already matched the approved Staging version; no files were transferred.';
         promotion_write_json($statusPath, $status);
+        promotion_history_append($historyPath, $status);
         echo "ALREADY_CURRENT {$releaseId}\n";
         exit(0);
     }
@@ -242,6 +292,7 @@ try {
         $status['completed_at'] = gmdate('c');
         $status['public_message'] = 'Promotion failed its safety check and Live was restored automatically.';
         promotion_write_json($statusPath, $status);
+        promotion_history_append($historyPath, $status);
         throw $deployError;
     }
 
@@ -252,6 +303,7 @@ try {
     $status['backup_path'] = $releaseBackup;
     promotion_write_json($hashIndexPath, ['release_id' => $releaseId, 'updated_at' => gmdate('c'), 'files' => $files]);
     promotion_write_json($statusPath, $status);
+    promotion_history_append($historyPath, $status);
     echo "PROMOTED {$releaseId} changed_files=" . count($deployPaths) . " total_files=" . count($paths) . "\n";
 } catch (Throwable $error) {
     @unlink($approvalTemp);
@@ -262,6 +314,7 @@ try {
         $status['public_message'] = 'Promotion stopped safely before completion. Approve Staging again after reviewing the server log.';
         $status['error'] = $error->getMessage();
         promotion_write_json($statusPath, $status);
+        promotion_history_append($historyPath, $status);
     }
     fwrite(STDERR, 'PROMOTION FAILED: ' . $error->getMessage() . "\n");
     exit(1);

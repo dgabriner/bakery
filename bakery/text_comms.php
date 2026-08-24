@@ -93,6 +93,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
     safe_redirect('text_comms.php?' . $qs . '&error=' . $errorCode);
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'survey_send') {
+    bakery_require_csrf();
+
+    $returnView = 'surveys';
+    if (!bakery_text_messages_ready($db)) {
+        safe_redirect('text_comms.php?error=unavailable&view=' . urlencode($returnView));
+    }
+
+    require_once __DIR__ . '/includes/surveys.php';
+    if (!bakery_surveys_ready($db)) {
+        safe_redirect('text_comms.php?error=survey_tables&view=' . urlencode($returnView));
+    }
+
+    try {
+        $survey = bakery_survey_create($db, [
+            'mode' => (string)($_POST['survey_mode'] ?? 'link'),
+            'kind' => (string)($_POST['survey_kind'] ?? 'route_review'),
+            'audience' => (string)($_POST['survey_audience'] ?? 'driver'),
+            'driver_id' => (int)($_POST['driver_id'] ?? 0),
+            'target_phone' => trim((string)($_POST['to_manual'] ?? '')),
+            'question' => (string)($_POST['question'] ?? ''),
+            'delivery_date' => trim((string)($_POST['date'] ?? '')),
+            'created_by' => (int)($user['id'] ?? 0),
+        ]);
+        $result = bakery_survey_send($db, $survey, (int)($user['id'] ?? 0));
+        $flag = !empty($result['send']['ok']) ? 'sent' : (!empty($result['send']['recorded_only']) ? 'recorded' : 'error');
+        safe_redirect('text_comms.php?view=surveys&survey=' . urlencode($flag)
+            . '&token=' . urlencode((string)$survey['token']));
+    } catch (Throwable $e) {
+        error_log('survey_send: ' . $e->getMessage());
+        safe_redirect('text_comms.php?view=surveys&survey=invalid&reason=' . urlencode($e->getMessage()));
+    }
+}
+
 $page_title = (string)bakery_t('page.text_comms');
 
 $date = trim((string)($_GET['date'] ?? $today));
@@ -137,6 +171,25 @@ $delivery = ($tablesReady && $view === 'delivery')
 $ops = ($tablesReady && $view === 'ops')
     ? bakery_text_ops_snapshot($db, $date)
     : ['lanes' => ['customer' => 0, 'test' => 0, 'general' => 0], 'lanes_window' => ['customer' => 0, 'test' => 0, 'general' => 0], 'contexts' => [], 'from_number' => '', 'live' => false];
+
+$surveysReady = false;
+$surveyRows = [];
+$driverChoices = [];
+if ($view === 'surveys') {
+    require_once __DIR__ . '/includes/surveys.php';
+    $surveysReady = bakery_surveys_ready($db);
+    if ($tablesReady) {
+        require_once __DIR__ . '/includes/text_comms.php';
+    }
+    if ($surveysReady) {
+        $surveyRows = $db->query(
+            'SELECT s.*,
+                (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id AND sr.action <> \'sent\') AS response_count
+             FROM surveys s ORDER BY s.id DESC LIMIT 50'
+        )->fetchAll(PDO::FETCH_ASSOC);
+        $driverChoices = bakery_survey_driver_choices($db);
+    }
+}
 
 $composeCustomers = [];
 try {
@@ -184,9 +237,28 @@ if (isset($_GET['sync'])) {
         'missing_body' => 'texts.error_missing_body',
         'unavailable' => 'texts.unavailable_table',
         'send_failed' => 'texts.send_failed',
+        'survey_tables' => 'texts.surveys_unavailable',
     ];
     $errorKey = $errorKeyMap[(string)$_GET['error']] ?? 'texts.send_failed';
     $banner = '<div class="tc-banner tc-banner-error">' . htmlspecialchars((string)bakery_t($errorKey), ENT_QUOTES, 'UTF-8') . '</div>';
+}
+
+if (isset($_GET['survey'])) {
+    $surveyFlag = (string)$_GET['survey'];
+    if ($surveyFlag === 'sent') {
+        $banner .= '<div class="tc-banner tc-banner-ok">' . htmlspecialchars((string)bakery_t('texts.survey_sent_ok'), ENT_QUOTES, 'UTF-8') . '</div>';
+    } elseif ($surveyFlag === 'recorded') {
+        $banner .= '<div class="tc-banner tc-banner-warn">' . htmlspecialchars((string)bakery_t('texts.survey_sent_recorded'), ENT_QUOTES, 'UTF-8') . '</div>';
+    } elseif ($surveyFlag === 'closed') {
+        $banner .= '<div class="tc-banner tc-banner-ok">' . htmlspecialchars((string)bakery_t('texts.survey_closed_ok'), ENT_QUOTES, 'UTF-8') . '</div>';
+    } elseif ($surveyFlag === 'invalid') {
+        $reason = trim((string)($_GET['reason'] ?? ''));
+        $msg = (string)bakery_t('texts.survey_send_invalid');
+        if ($reason !== '') {
+            $msg .= ' (' . $reason . ')';
+        }
+        $banner .= '<div class="tc-banner tc-banner-error">' . htmlspecialchars($msg, ENT_QUOTES, 'UTF-8') . '</div>';
+    }
 }
 
 function bakery_text_status_label_key(string $direction, string $status): string
@@ -435,7 +507,7 @@ require_once __DIR__ . '/includes/nav.php';
 <?php endif; ?>
 
 <nav class="tc-tabs" aria-label="<?php bakery_te('texts.views_label'); ?>">
-    <?php foreach (['inbox' => 'texts.view_inbox', 'feed' => 'texts.view_feed', 'delivery' => 'texts.view_delivery', 'ops' => 'texts.view_ops'] as $viewKey => $viewLabel): ?>
+    <?php foreach (['inbox' => 'texts.view_inbox', 'feed' => 'texts.view_feed', 'delivery' => 'texts.view_delivery', 'ops' => 'texts.view_ops', 'surveys' => 'texts.view_surveys'] as $viewKey => $viewLabel): ?>
         <a class="tc-tab<?php echo $view === $viewKey ? ' is-active' : ''; ?>" href="text_comms.php?<?php echo htmlspecialchars(bakery_text_cc_qs($date, $viewKey, $laneFilter, $selectedPhone), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te($viewLabel); ?></a>
     <?php endforeach; ?>
 </nav>
@@ -596,7 +668,120 @@ require_once __DIR__ . '/includes/nav.php';
                 <div class="tc-panel-head"><?php bakery_te($titleKey); ?> <small><?php echo count($delivery[$bucket]); ?></small></div>
                 <?php if ($delivery[$bucket] === []): ?>
                     <div class="tc-empty"><?php bakery_te('texts.delivery_empty'); ?></div>
-                <?php else: ?>
+<?php elseif ($view === 'surveys'): ?>
+<div class="tc-wide">
+    <?php if (!$surveysReady): ?>
+        <div class="tc-banner tc-banner-warn"><?php bakery_te('texts.surveys_unavailable'); ?></div>
+    <?php else: ?>
+    <div class="tc-cols" style="grid-template-columns: minmax(280px, 420px) 1fr;">
+        <section class="tc-panel">
+            <div class="tc-panel-head">
+                <?php bakery_te('texts.survey_compose_title'); ?>
+                <small><?php bakery_te('texts.hint_record_only' ); ?></small>
+            </div>
+            <form method="post" class="tc-compose" autocomplete="off">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="survey_send">
+                <div class="tc-row">
+                    <div>
+                        <label for="svAudience"><?php bakery_te('texts.survey_audience'); ?></label>
+                        <select id="svAudience" name="survey_audience">
+                            <option value="driver"><?php bakery_te('texts.survey_audience_driver'); ?></option>
+                            <option value="staff"><?php bakery_te('texts.survey_audience_staff'); ?></option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="svDriver"><?php bakery_te('texts.survey_driver'); ?></label>
+                        <select id="svDriver" name="driver_id">
+                            <?php foreach ($driverChoices as $d): ?>
+                                <option value="<?php echo (int)$d['id']; ?>"><?php echo htmlspecialchars((string)$d['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="tc-row">
+                    <div>
+                        <label for="svKind"><?php bakery_te('texts.survey_kind'); ?></label>
+                        <select id="svKind" name="survey_kind">
+                            <option value="route_review"><?php bakery_te('texts.survey_kind_route'); ?></option>
+                            <option value="question"><?php bakery_te('texts.survey_kind_question'); ?></option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="svMode"><?php bakery_te('texts.survey_mode'); ?></label>
+                        <select id="svMode" name="survey_mode">
+                            <option value="link"><?php bakery_te('texts.survey_mode_link'); ?></option>
+                            <option value="text_reply"><?php bakery_te('texts.survey_mode_reply'); ?></option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label for="svPhone"><?php bakery_te('texts.compose_manual'); ?></label>
+                    <input type="text" id="svPhone" name="to_manual" dir="ltr" placeholder="+14155551234" required>
+                </div>
+                <div>
+                    <label for="svDate"><?php bakery_te('common.date'); ?></label>
+                    <input type="date" id="svDate" name="date" value="<?php echo htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>">
+                </div>
+                <div>
+                    <label for="svQuestion"><?php bakery_te('texts.survey_question_label'); ?></label>
+                    <textarea id="svQuestion" name="question" maxlength="500"
+                              placeholder="<?php bakery_te('texts.survey_question_placeholder'); ?>"></textarea>
+                </div>
+                <div class="tc-send-row">
+                    <span class="tc-hint"><?php bakery_te($liveReady && $credsSane ? 'texts.hint_live' : 'texts.hint_record_only'); ?></span>
+                    <button type="submit" class="tc-btn"><?php bakery_te('texts.survey_send_button'); ?></button>
+                </div>
+            </form>
+        </section>
+
+        <section class="tc-panel">
+            <div class="tc-panel-head">
+                <?php bakery_te('texts.surveys_recent_title'); ?>
+                <small><?php echo count($surveyRows); ?></small>
+            </div>
+            <?php if ($surveyRows === []): ?>
+                <div class="tc-empty"><?php bakery_te('texts.surveys_none'); ?></div>
+            <?php else: ?>
+            <ul class="tc-feed">
+                <?php foreach ($surveyRows as $s): ?>
+                    <li>
+                        <div class="tc-feed-top">
+                            <span>
+                                <strong><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : 'texts.survey_kind_question'); ?></strong>
+                                <span class="tc-lane"><?php bakery_te($s['audience'] === 'driver' ? 'texts.survey_audience_driver' : 'texts.survey_audience_staff'); ?></span>
+                                <span class="tc-status"><?php bakery_te($s['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
+                            </span>
+                            <span><?php echo htmlspecialchars(format_date((string)$s['created_at'], 'M j g:i A'), ENT_QUOTES, 'UTF-8'); ?></span>
+                        </div>
+                        <div class="tc-feed-body">
+                            <?php
+                                $line = (string)$s['target_phone'];
+                                if ($s['delivery_date'] !== null && $s['delivery_date'] !== '') {
+                                    $line .= ' · ' . $s['delivery_date'];
+                                }
+                                if (!empty($s['question'])) {
+                                    $line .= ' · ' . mb_substr((string)$s['question'], 0, 80);
+                                }
+                                echo htmlspecialchars($line, ENT_QUOTES, 'UTF-8');
+                            ?>
+                        </div>
+                        <div class="tc-feed-top">
+                            <span class="tc-hint">
+                                <?php echo (int)$s['response_count']; ?> <?php bakery_te('texts.survey_responses_suffix'); ?>
+                                · <a href="<?php echo htmlspecialchars(BASE_URL . 'survey.php?t=' . rawurlencode((string)$s['token']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
+                            </span>
+                        </div>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <?php endif; ?>
+        </section>
+    </div>
+    <?php endif; ?>
+</div>
+
+<?php else: ?>
                     <ul class="tc-feed">
                         <?php foreach ($delivery[$bucket] as $row): ?>
                             <li>

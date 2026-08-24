@@ -40,6 +40,46 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
     }
 };
 
+$shareRows = [
+    ['id' => 1, 'quantity' => 30, 'locked' => false],
+    ['id' => 2, 'quantity' => 20, 'locked' => false],
+    ['id' => 3, 'quantity' => 10, 'locked' => false],
+];
+$shareAll = bakery_production_cut_share($shareRows, 42, null);
+$shareById = [];
+foreach ($shareAll as $row) {
+    $shareById[(int)$row['id']] = $row;
+}
+$assert((int)$shareById[1]['recommended'] === 21 && (int)$shareById[2]['recommended'] === 14 && (int)$shareById[3]['recommended'] === 7, 'overall cut share is 21/14/7 of 42');
+$assert(!empty($shareById[1]['in_focus']) && !empty($shareById[2]['in_focus']), 'overall cut marks unlocked stores in focus');
+
+$shareOne = bakery_production_cut_share($shareRows, 42, [1]);
+$oneById = [];
+foreach ($shareOne as $row) {
+    $oneById[(int)$row['id']] = $row;
+}
+$assert((int)$oneById[1]['recommended'] === 12, 'one store absorbs remaining bake after others keep 30');
+$assert((int)$oneById[2]['recommended'] === 20 && empty($oneById[2]['in_focus']), 'stores outside the focus keep current qty');
+$assert((int)$oneById[3]['recommended'] === 10, 'small cafe outside the focus keeps 10');
+
+$sharePair = bakery_production_cut_share($shareRows, 42, [1, 2]);
+$pairById = [];
+foreach ($sharePair as $row) {
+    $pairById[(int)$row['id']] = $row;
+}
+$assert((int)$pairById[1]['recommended'] === 19 && (int)$pairById[2]['recommended'] === 13, 'two-store focus splits remaining 32 as 19/13');
+$assert((int)$pairById[3]['recommended'] === 10, 'unfocused third store keeps 10');
+
+$shareNone = bakery_production_cut_share($shareRows, 42, []);
+$assert((int)$shareNone[0]['recommended'] === 30 && empty($shareNone[0]['in_focus']), 'empty focus cuts nobody');
+
+$lockedShare = bakery_production_cut_share([
+    ['id' => 1, 'quantity' => 22, 'locked' => true],
+    ['id' => 2, 'quantity' => 18, 'locked' => false],
+], 30, null);
+$assert((int)$lockedShare[0]['recommended'] === 22 && empty($lockedShare[0]['in_focus']), 'locked store is reserved from the pool');
+$assert((int)$lockedShare[1]['recommended'] === 8 && !empty($lockedShare[1]['in_focus']), 'unlocked store takes pool minus locked');
+
 $doughTypeId = (int)$db->query('SELECT id FROM dough_types ORDER BY id LIMIT 1')->fetchColumn();
 if ($doughTypeId <= 0) {
     fwrite(STDERR, "Need at least one dough type on bakerysf_test\n");
@@ -144,6 +184,16 @@ try {
         );
     }
 
+    $focusPreview = bakery_production_cut_preview($db, $date, $productId, 42, [$bigId]);
+    $focusById = [];
+    foreach ($focusPreview as $row) {
+        $focusById[(int)$row['id']] = $row;
+    }
+    $assert((int)$focusById[$bigId]['recommended'] === 12, 'focused preview gives the large cafe the remaining 12');
+    $assert((int)$focusById[$midId]['recommended'] === 20 && empty($focusById[$midId]['in_focus']), 'unfocused mid cafe keeps 20 in preview');
+    $assert((int)$focusById[$smallId]['recommended'] === 10, 'unfocused small cafe keeps 10 in preview');
+    $assert(!empty($focusById[$bigId]['in_focus']), 'focused cafe is marked in focus');
+
     $applied = bakery_production_cut_apply($db, $date, $productId, [
         ['customer_id' => $bigId, 'quantity' => 21],
         ['customer_id' => $midId, 'quantity' => 14],
@@ -220,6 +270,111 @@ try {
     $fail++;
 } finally {
     $cleanup();
+}
+
+$allProductIds = [];
+$allCustomerIds = [];
+$cleanupAll = static function () use ($db, $date, &$allProductIds, &$allCustomerIds): void {
+    if ($allCustomerIds !== []) {
+        $ph = implode(',', array_fill(0, count($allCustomerIds), '?'));
+        $orderIds = $db->prepare("SELECT id FROM daily_orders WHERE customer_id IN ($ph) AND order_date = ?");
+        $orderIds->execute(array_merge($allCustomerIds, [$date]));
+        $ids = $orderIds->fetchAll(PDO::FETCH_COLUMN);
+        if ($ids) {
+            $oph = implode(',', array_fill(0, count($ids), '?'));
+            $db->prepare("DELETE FROM daily_order_items WHERE daily_order_id IN ($oph)")->execute($ids);
+            $db->prepare("DELETE FROM daily_orders WHERE id IN ($oph)")->execute($ids);
+        }
+        $db->prepare("DELETE FROM standing_orders WHERE customer_id IN ($ph)")->execute($allCustomerIds);
+        if (table_exists($db, 'operational_events')) {
+            $db->prepare("DELETE FROM operational_events WHERE customer_id IN ($ph)")->execute($allCustomerIds);
+        }
+        $db->prepare("DELETE FROM customers WHERE id IN ($ph)")->execute($allCustomerIds);
+        $allCustomerIds = [];
+    }
+    if ($allProductIds !== [] && table_exists($db, 'production_plan_items')) {
+        $ph = implode(',', array_fill(0, count($allProductIds), '?'));
+        $db->prepare("DELETE FROM production_plan_items WHERE delivery_date = ? AND product_id IN ($ph)")
+            ->execute(array_merge([$date], $allProductIds));
+    }
+    foreach ($allProductIds as $pid) {
+        if (table_exists($db, 'operational_events')) {
+            $db->prepare('DELETE FROM operational_events WHERE product_id = ?')->execute([$pid]);
+        }
+        $db->prepare('DELETE FROM products WHERE id = ?')->execute([$pid]);
+    }
+    $allProductIds = [];
+};
+
+try {
+    $insertProduct = $db->prepare(
+        'INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES (?, ?, 1.00, 100)'
+    );
+    $insertProduct->execute(['Cut All Bolillo', $doughTypeId]);
+    $p1 = (int)$db->lastInsertId();
+    $insertProduct->execute(['Cut All Concha', $doughTypeId]);
+    $p2 = (int)$db->lastInsertId();
+    $insertProduct->execute(['Cut All Covered', $doughTypeId]);
+    $p3 = (int)$db->lastInsertId();
+    $allProductIds = [$p1, $p2, $p3];
+    $assert($p1 > 0 && $p2 > 0 && $p3 > 0, 'apply-all synthetic products inserted');
+
+    $insertCustomer = $db->prepare(
+        "INSERT INTO customers (name, address, is_active, sfb_origin) VALUES (?, ?, 1, 'human')"
+    );
+    $insertCustomer->execute(['Cut All Cafe One', '20 Bake Lane']);
+    $c1 = (int)$db->lastInsertId();
+    $insertCustomer->execute(['Cut All Cafe Two', '21 Bake Lane']);
+    $c2 = (int)$db->lastInsertId();
+    $allCustomerIds = [$c1, $c2];
+
+    $standing = $db->prepare(
+        'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)'
+    );
+    $standing->execute([$c1, $p1, $weekday, 30]);
+    $standing->execute([$c2, $p1, $weekday, 30]);
+    $standing->execute([$c1, $p2, $weekday, 24]);
+    $standing->execute([$c2, $p2, $weekday, 16]);
+    $standing->execute([$c1, $p3, $weekday, 20]);
+    $standing->execute([$c2, $p3, $weekday, 20]);
+
+    if (!table_exists($db, 'production_plan_items')) {
+        throw new RuntimeException('production_plan_items required for apply-all cuts');
+    }
+    $plan = $db->prepare(
+        'INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity) VALUES (?, ?, ?)'
+    );
+    $plan->execute([$date, $p1, 42]);
+    $plan->execute([$date, $p2, 20]);
+    $plan->execute([$date, $p3, 50]);
+
+    $allowed = [$p1 => true, $p2 => true, $p3 => true];
+    $shorts = bakery_production_cut_short_products($db, $date, $allowed);
+    $shortIds = array_map(static fn($row) => (int)$row['product_id'], $shorts);
+    sort($shortIds);
+    $assert($shortIds === [$p1, $p2], 'apply-all lists only plan-below products');
+    $assert(count($shorts) === 2 && (int)$shorts[0]['pool'] + (int)$shorts[1]['pool'] === 62, 'short product pools are the saved plans');
+
+    $appliedAll = bakery_production_cut_apply_all_recommended($db, $date, $allowed, null);
+    $assert((int)$appliedAll['products'] === 2, 'apply-all writes two short products');
+    $assert((int)$appliedAll['updated'] === 4, 'apply-all writes four dated store lines');
+    $assert((int)$appliedAll['cut_units'] === 38, 'apply-all removes 18 + 20 units');
+
+    $d1 = bakery_operating_demand_by_product($db, $date, ['product_id' => $p1]);
+    $d2 = bakery_operating_demand_by_product($db, $date, ['product_id' => $p2]);
+    $d3 = bakery_operating_demand_by_product($db, $date, ['product_id' => $p3]);
+    $assert((int)($d1['by_product'][$p1] ?? 0) === 42, 'first product demand now matches the 42 plan');
+    $assert((int)($d2['by_product'][$p2] ?? 0) === 20, 'second product demand now matches the 20 plan');
+    $assert((int)($d3['by_product'][$p3] ?? 0) === 40, 'covered product is left at standing 40');
+    $assert(bakery_customer_standing_qty($db, $c1, $p1, $weekday) === 30, 'apply-all does not rewrite standing');
+
+    $again = bakery_production_cut_apply_all_recommended($db, $date, $allowed, null);
+    $assert((int)$again['updated'] === 0 && (int)$again['products'] === 0, 'second apply-all is a no-op once demand matches the plan');
+} catch (Throwable $e) {
+    echo 'FAIL  apply-all exception: ' . $e->getMessage() . "\n";
+    $fail++;
+} finally {
+    $cleanupAll();
 }
 
 echo "\n$pass passed, $fail failed\n";

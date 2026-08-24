@@ -11,6 +11,8 @@ require_once 'includes/production_assign.php';
 require_once 'includes/production_cadence.php';
 require_once 'includes/production_workflow_strip.php';
 require_once 'includes/operational_exceptions.php';
+require_once 'includes/product_pack_yields.php';
+require_once 'includes/schema_sql.php';
 
 function production_center_week_start(string $value): string {
     $date = DateTime::createFromFormat('!Y-m-d', $value);
@@ -106,10 +108,11 @@ function production_center_day_href(string $date, bool $showAll, bool $attention
     return $href;
 }
 
+$defaultDate = date('Y-m-d', strtotime('+1 day'));
 $focus = bakery_production_center_resolve_focus(
     (string)($_GET['date'] ?? $_POST['date'] ?? ''),
     (string)($_GET['week'] ?? $_POST['week'] ?? ''),
-    date('Y-m-d')
+    $defaultDate
 );
 $selectedDate = $focus['date'];
 $weekStart = $focus['week_start'];
@@ -125,6 +128,9 @@ $planTableReady = table_exists($db, 'production_plan_items');
 $inventoryReady = bakery_inventory_ready($db);
 $notice = '';
 $error = '';
+$kitchenParse = null;
+$kitchenNote = trim((string)($_POST['kitchen_note'] ?? ''));
+$routeCapacity = [];
 
 // Same product-line visibility rules as Daily Production (managers see all).
 $bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
@@ -189,6 +195,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                 'ok' => true,
                 'saved' => $saved,
                 'notice' => $notice,
+                'batch_label' => bakery_pack_batch_label($db, $productId, (int)$quantity),
+                'planned_quantity' => (int)$quantity,
             ]);
             exit;
         }
@@ -213,6 +221,144 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
             }
             exit;
         }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['product_formula', 'store_demand', 'save_store_demand'], true)) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        bakery_require_csrf();
+        $action = (string)$_POST['action'];
+        $productId = (int)($_POST['product_id'] ?? 0);
+        if ($productId <= 0 || empty($allowedProductIds[$productId])) {
+            throw new InvalidArgumentException('Unknown product.');
+        }
+        if ($action === 'product_formula') {
+            $pieces = max(0, (int)($_POST['pieces'] ?? 0));
+            echo json_encode(['ok' => true, 'formula' => bakery_pack_formula_sheet($db, $productId, $pieces)]);
+            exit;
+        }
+        $pool = max(0, (int)($_POST['pool'] ?? 0));
+        if ($pool <= 0 && table_exists($db, 'production_plan_items')) {
+            $poolStmt = $db->prepare(
+                'SELECT planned_quantity FROM production_plan_items WHERE delivery_date = ? AND product_id = ? LIMIT 1'
+            );
+            $poolStmt->execute([$selectedDate, $productId]);
+            $pool = max(0, (int)$poolStmt->fetchColumn());
+        }
+        if ($action === 'store_demand') {
+            $customers = bakery_production_store_demand_rows($db, $selectedDate, $productId, $pool);
+            $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ? LIMIT 1');
+            $nameStmt->execute([$productId]);
+            echo json_encode([
+                'ok' => true,
+                'date' => $selectedDate,
+                'product_id' => $productId,
+                'product_name' => (string)$nameStmt->fetchColumn(),
+                'customers' => $customers,
+            ]);
+            exit;
+        }
+        $customerId = (int)($_POST['customer_id'] ?? 0);
+        $quantity = filter_var($_POST['quantity'] ?? null, FILTER_VALIDATE_INT);
+        if ($customerId <= 0 || $quantity === false || $quantity < 0) {
+            throw new InvalidArgumentException('Store quantity must be a whole number of zero or more.');
+        }
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $userId = isset($user['id']) ? (int)$user['id'] : null;
+        $saved = bakery_production_store_demand_save(
+            $db,
+            $selectedDate,
+            $productId,
+            $customerId,
+            (int)$quantity,
+            $userId,
+            $pool
+        );
+        echo json_encode([
+            'ok' => true,
+            'customers' => $saved['customers'],
+            'saved_quantity' => $saved['quantity'],
+            'demand_total' => $saved['demand_total'],
+            'customer_id' => $customerId,
+            'product_id' => $productId,
+            'notice' => bakery_t('production_center.store_demand_saved'),
+        ]);
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        exit;
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['parse_kitchen_note', 'apply_kitchen_note'], true)) {
+    try {
+        if (!bakery_pack_yields_ready($db)) {
+            throw new RuntimeException(bakery_t('pan_dulce.err_pack_not_ready'));
+        }
+        if ($kitchenNote === '') {
+            throw new InvalidArgumentException(bakery_t('production_center.kitchen_empty'));
+        }
+        $kitchenParse = bakery_pack_parse_kitchen_note($db, $kitchenNote);
+        $routeCapacity = bakery_production_route_desired_vs_bake($db, $selectedDate, $kitchenParse['by_product']);
+        if (($_POST['action'] ?? '') === 'apply_kitchen_note') {
+            if ($kitchenParse['by_product'] === []) {
+                throw new InvalidArgumentException(bakery_t('production_center.kitchen_empty'));
+            }
+            if (!$planTableReady) {
+                throw new RuntimeException('Saved production plans are not installed yet. Run scripts/run_migrations.php first.');
+            }
+            $planned = [$selectedDate => $kitchenParse['by_product']];
+            $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+            $userId = isset($user['id']) ? (int)$user['id'] : null;
+            $saved = bakery_production_plan_save_targets($db, $planned, $allowedProductIds, $userId);
+            bakery_record_operational_event($db, BAKERY_OP_PRODUCTION_PLAN_SAVED,
+                'Saved kitchen-note production targets for ' . date('D, M j', strtotime($selectedDate)), [
+                'operational_date' => $selectedDate,
+                'metadata' => [
+                    'targets_saved' => $saved,
+                    'delivery_date' => $selectedDate,
+                    'source' => 'kitchen_note',
+                    'unknown' => $kitchenParse['unknown'],
+                ],
+            ]);
+            $notice = bakery_t('production_center.kitchen_saved', ['count' => $saved]);
+            $notice .= ' ' . bakery_t('production_center.save_is_not_commit');
+            header('Location: production_center.php?date=' . rawurlencode($selectedDate) . '&from_kitchen=1');
+            exit;
+        }
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'cut_apply_all') {
+    try {
+        $cutDate = trim((string)($_POST['delivery_date'] ?? $_POST['date'] ?? $selectedDate));
+        if ($cutDate !== $selectedDate) {
+            throw new InvalidArgumentException('Cut the day you are viewing.');
+        }
+        if ($cutDate < date('Y-m-d')) {
+            throw new InvalidArgumentException('Cannot cut past deliveries');
+        }
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $userId = isset($user['id']) ? (int)$user['id'] : null;
+        $result = bakery_production_cut_apply_all_recommended($db, $cutDate, $allowedProductIds, $userId);
+        if ((int)$result['updated'] === 0) {
+            $notice = bakery_t('production_center.cut_apply_all_none');
+        } else {
+            $notice = bakery_t('production_center.cut_apply_all_saved', [
+                'products' => (int)$result['products'],
+                'count' => (int)$result['updated'],
+                'skipped' => (int)$result['skipped'],
+            ]);
+        }
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        $error = $e->getMessage();
     }
 }
 
@@ -325,6 +471,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'commi
     } catch (Throwable $e) {
         $error = $e->getMessage();
     }
+}
+
+if (($_GET['from_kitchen'] ?? '') === '1' && $notice === '') {
+    $notice = bakery_t('production_center.kitchen_landed');
 }
 
 $standingByWeekday = $actualByDate = $actualDayExists = $inventoryByDate = $plansByDate = [];
@@ -622,6 +772,54 @@ $totals = [
     'shortfall' => (int)($dayView['summary']['shortfall'] ?? 0),
     'attention' => (int)($dayView['summary']['attention'] ?? 0),
 ];
+
+$savedBake = [];
+foreach (($plansByDate[$selectedDate] ?? []) as $pid => $qty) {
+    $pid = (int)$pid;
+    $qty = (int)$qty;
+    if ($pid > 0 && $qty > 0) {
+        $savedBake[$pid] = $qty;
+    }
+}
+$bakeBoard = [];
+foreach ($savedBake as $pid => $pcs) {
+    $pname = '';
+    $dough = '';
+    foreach ($products as $p) {
+        if ((int)$p['id'] === $pid) {
+            $pname = (string)$p['name'];
+            $dough = (string)($p['dough_type_name'] ?? '');
+            break;
+        }
+    }
+    $demandPcs = 0;
+    foreach (($dayView['rows'] ?? []) as $row) {
+        if ((int)$row['productId'] === $pid) {
+            $demandPcs = (int)$row['demand'];
+            break;
+        }
+    }
+    $scale = bakery_pack_input_scale($db, $pid);
+    $bakeBoard[] = [
+        'product_id' => $pid,
+        'name' => $pname !== '' ? $pname : ('#' . $pid),
+        'dough' => $dough,
+        'pieces' => $pcs,
+        'batch' => bakery_pack_batch_label($db, $pid, $pcs),
+        'demand' => $demandPcs,
+        'gap' => $pcs - $demandPcs,
+        'input_unit' => $scale['unit'],
+        'pcs_per' => $scale['pcs_per'],
+        'has_plan' => true,
+    ];
+}
+$storeAlloc = $savedBake !== []
+    ? bakery_production_store_allocation_from_plan($db, $selectedDate, $savedBake)
+    : [];
+if ($routeCapacity === [] && $savedBake !== []) {
+    $routeCapacity = bakery_production_route_desired_vs_bake($db, $selectedDate, $savedBake);
+}
+
 $prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
 $nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 
@@ -763,6 +961,195 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         <p class="pc-assign-lead"><?php bakery_te('production_center.assign_lead'); ?></p>
     </div>
 
+    <form method="post" class="pc-kitchen-form" id="pc-kitchen-form">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
+        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+        <label for="pc-kitchen-note"><strong><?php bakery_te('production_center.kitchen_title'); ?></strong></label>
+        <p class="pc-kitchen-lead"><?php bakery_te('production_center.kitchen_lead'); ?></p>
+        <textarea id="pc-kitchen-note" name="kitchen_note" rows="12" spellcheck="false"><?php echo htmlspecialchars($kitchenNote); ?></textarea>
+        <div class="pc-kitchen-actions">
+            <button class="btn btn-outline" type="submit" name="action" value="parse_kitchen_note"><?php bakery_te('production_center.kitchen_parse'); ?></button>
+            <button class="btn btn-primary" type="submit" name="action" value="apply_kitchen_note"><?php bakery_te('production_center.kitchen_apply'); ?></button>
+        </div>
+        <?php if (is_array($kitchenParse)): ?>
+            <div class="pc-kitchen-preview">
+                <h3><?php bakery_te('production_center.kitchen_preview'); ?></h3>
+                <ul>
+                    <?php foreach ($kitchenParse['lines'] as $kLine): ?>
+                        <li class="<?php echo ($kLine['kind'] ?? '') === 'unknown' ? 'pc-short' : ''; ?>">
+                            <?php
+                            echo htmlspecialchars((string)($kLine['raw'] ?? ''));
+                            if (!empty($kLine['pieces'])) {
+                                echo ' → ' . number_format((int)$kLine['pieces']) . ' pcs';
+                            }
+                            if (!empty($kLine['unit'])) {
+                                echo ' (' . htmlspecialchars((string)$kLine['unit']) . ')';
+                            }
+                            if (!empty($kLine['note'])) {
+                                echo ' — ' . htmlspecialchars((string)$kLine['note']);
+                            }
+                            ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php if (!empty($kitchenParse['by_product'])): ?>
+                    <p><strong><?php bakery_te('production_center.kitchen_totals'); ?></strong></p>
+                    <ul>
+                        <?php
+                        foreach ($kitchenParse['by_product'] as $pid => $pcs) {
+                            $pname = '';
+                            foreach ($products as $p) {
+                                if ((int)$p['id'] === (int)$pid) {
+                                    $pname = (string)$p['name'];
+                                    break;
+                                }
+                            }
+                            echo '<li>' . htmlspecialchars($pname !== '' ? $pname : ('#' . $pid)) . ': ' . number_format((int)$pcs) . '</li>';
+                        }
+                        ?>
+                    </ul>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+    </form>
+
+    <?php if ($bakeBoard): ?>
+        <section class="pc-kitchen-preview pc-bake-board" id="pc-bake-board">
+            <h3><?php bakery_te('production_center.bake_board_title'); ?></h3>
+            <p><?php bakery_te('production_center.bake_board_lead'); ?></p>
+            <div class="pc-table-wrap">
+                <table class="pc-table">
+                    <thead>
+                        <tr>
+                            <th><?php bakery_te('production_center.bake_product'); ?></th>
+                            <th><?php bakery_te('production_center.bake_batch'); ?></th>
+                            <th><?php bakery_te('production_center.bake_pieces'); ?></th>
+                            <th><?php bakery_te('production_center.bake_demand'); ?></th>
+                            <th><?php bakery_te('production_center.route_gap'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($bakeBoard as $item): ?>
+                            <tr class="<?php echo ((int)$item['gap'] < 0) ? 'pc-row-short' : ''; ?>">
+                                <td>
+                                    <button type="button" class="pc-product-open" data-product-id="<?php echo (int)$item['product_id']; ?>" data-pieces="<?php echo (int)$item['pieces']; ?>">
+                                        <strong><?php echo htmlspecialchars((string)$item['name']); ?></strong>
+                                    </button>
+                                    <?php if ($item['dough'] !== ''): ?>
+                                        <small><?php echo htmlspecialchars((string)$item['dough']); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="pc-batch-label"><?php echo htmlspecialchars((string)$item['batch']); ?></td>
+                                <td class="pc-plan-cell">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        inputmode="numeric"
+                                        class="pc-plan-input"
+                                        data-date="<?php echo htmlspecialchars($selectedDate); ?>"
+                                        data-product-id="<?php echo (int)$item['product_id']; ?>"
+                                        data-baseline="<?php echo (int)$item['pieces']; ?>"
+                                        data-has-plan="1"
+                                        data-demand="<?php echo (int)$item['demand']; ?>"
+                                        data-input-unit="<?php echo htmlspecialchars((string)$item['input_unit']); ?>"
+                                        data-pcs-per="<?php echo htmlspecialchars((string)$item['pcs_per']); ?>"
+                                        value="<?php echo (int)$item['pieces']; ?>"
+                                        <?php echo !$planTableReady ? 'disabled' : ''; ?>
+                                        aria-label="<?php echo htmlspecialchars(bakery_t('production_center.bake_pieces') . ' ' . $item['name']); ?>"
+                                    >
+                                </td>
+                                <td>
+                                    <button type="button" class="pc-store-demand-open" data-product-id="<?php echo (int)$item['product_id']; ?>" data-pool="<?php echo (int)$item['pieces']; ?>">
+                                        <?php echo number_format((int)$item['demand']); ?>
+                                    </button>
+                                </td>
+                                <td class="<?php echo ((int)$item['gap'] < 0) ? 'pc-short' : 'pc-covered'; ?>">
+                                    <?php echo ((int)$item['gap'] > 0 ? '+' : '') . number_format((int)$item['gap']); ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    <?php endif; ?>
+
+    <?php if ($storeAlloc): ?>
+        <section class="pc-kitchen-preview" id="pc-store-alloc">
+            <h3>
+                <button type="button" class="pc-store-demand-heading" data-product-id="<?php echo (int)($bakeBoard[0]['product_id'] ?? 0); ?>">
+                    <?php bakery_te('production_center.store_alloc_title'); ?>
+                </button>
+            </h3>
+            <p><?php bakery_te('production_center.store_alloc_lead'); ?></p>
+            <div class="pc-table-wrap">
+                <table class="pc-table">
+                    <thead>
+                        <tr>
+                            <th><?php bakery_te('production_center.assign_customer'); ?></th>
+                            <th><?php bakery_te('production_center.bake_product'); ?></th>
+                            <th><?php bakery_te('production_center.route_desired'); ?></th>
+                            <th><?php bakery_te('production_center.store_from_bake'); ?></th>
+                            <th><?php bakery_te('production_center.route_gap'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($storeAlloc as $row): ?>
+                            <tr class="<?php echo ((int)$row['gap'] < 0) ? 'pc-row-short' : ''; ?>">
+                                <td><?php echo htmlspecialchars((string)($row['customer_name'] !== '' ? $row['customer_name'] : '—')); ?></td>
+                                <td>
+                                    <button type="button" class="pc-store-demand-open" data-product-id="<?php echo (int)$row['product_id']; ?>" data-pool="<?php echo (int)($savedBake[(int)$row['product_id']] ?? 0); ?>">
+                                        <?php echo htmlspecialchars((string)$row['product_name']); ?>
+                                    </button>
+                                </td>
+                                <td><?php echo number_format((int)$row['desired']); ?></td>
+                                <td><?php echo number_format((int)$row['from_bake']); ?></td>
+                                <td class="<?php echo ((int)$row['gap'] < 0) ? 'pc-short' : 'pc-covered'; ?>">
+                                    <?php echo ((int)$row['gap'] > 0 ? '+' : '') . number_format((int)$row['gap']); ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    <?php endif; ?>
+
+    <?php if ($routeCapacity): ?>
+        <section class="pc-kitchen-preview">
+            <h3><?php bakery_te('production_center.route_capacity_title'); ?></h3>
+            <p><?php bakery_te('production_center.route_capacity_lead'); ?></p>
+            <div class="pc-table-wrap">
+                <table class="pc-table">
+                    <thead>
+                        <tr>
+                            <th><?php bakery_te('production_center.route_driver'); ?></th>
+                            <th><?php bakery_te('production_center.bake_product'); ?></th>
+                            <th><?php bakery_te('production_center.route_desired'); ?></th>
+                            <th><?php bakery_te('production_center.route_available'); ?></th>
+                            <th><?php bakery_te('production_center.route_gap'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($routeCapacity as $cap): ?>
+                            <tr class="<?php echo ((int)$cap['gap'] < 0) ? 'pc-row-short' : ''; ?>">
+                                <td><?php echo htmlspecialchars((string)($cap['driver_name'] ?: '—')); ?></td>
+                                <td><?php echo htmlspecialchars((string)$cap['product_name']); ?></td>
+                                <td><?php echo number_format((int)$cap['desired']); ?></td>
+                                <td><?php echo number_format((int)$cap['available']); ?></td>
+                                <td class="<?php echo ((int)$cap['gap'] < 0) ? 'pc-short' : 'pc-covered'; ?>">
+                                    <?php echo ((int)$cap['gap'] > 0 ? '+' : '') . number_format((int)$cap['gap']); ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    <?php endif; ?>
+
     <form method="post" class="pc-plan-form" id="pc-plan-form" novalidate>
         <?php echo bakery_csrf_field(); ?>
         <input type="hidden" name="action" value="save_plan">
@@ -836,6 +1223,23 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                         <?php endif; ?>
                         <a class="pc-day-link" href="<?php echo htmlspecialchars($dayHref); ?>">Daily Production →</a>
                         <a class="pc-day-link" href="ingredient_requirements.php?date=<?php echo urlencode($dayDate); ?>&amp;source=plan">Ingredient Planner →</a>
+                        <?php
+                        $dayCutProducts = 0;
+                        foreach ($day['rows'] as $cutRow) {
+                            foreach ($cutRow['statuses'] as $cutSt) {
+                                if (($cutSt['code'] ?? '') === 'plan_below') {
+                                    $dayCutProducts++;
+                                    break;
+                                }
+                            }
+                        }
+                        ?>
+                        <?php if ($dayCutProducts > 0): ?>
+                            <button type="submit" class="pc-day-link pc-cut-all-btn" form="pc-cut-all-<?php echo htmlspecialchars($dayDate); ?>"
+                                    onclick="return confirm(<?php echo json_encode(bakery_t('production_center.cut_apply_all_confirm', ['count' => $dayCutProducts])); ?>);">
+                                <?php bakery_te('production_center.cut_apply_all'); ?>
+                            </button>
+                        <?php endif; ?>
                         <?php if ($commitsReady && $planTableReady): ?>
                             <button type="submit" class="pc-day-link pc-commit-btn" form="pc-commit-<?php echo htmlspecialchars($dayDate); ?>"
                                     onclick="return confirm(<?php echo json_encode(bakery_t($day['commit'] ? 'production_center.commit_again_prompt' : 'production_center.commit_prompt')); ?>);">
@@ -879,7 +1283,9 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                 ?>
                                 <tr class="<?php echo $rowClass; ?>" id="pc-<?php echo htmlspecialchars($dayDate); ?>-<?php echo (int)$row['productId']; ?>">
                                     <td>
-                                        <strong><?php echo htmlspecialchars($row['product']['name']); ?></strong>
+                                        <button type="button" class="pc-product-open" data-product-id="<?php echo (int)$row['productId']; ?>" data-pieces="<?php echo (int)$row['planned']; ?>">
+                                            <strong><?php echo htmlspecialchars($row['product']['name']); ?></strong>
+                                        </button>
                                         <?php
                                         if ($pageExceptionsDate === $dayDate) {
                                             $pcFlags = [];
@@ -972,13 +1378,21 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                             data-date="<?php echo htmlspecialchars($dayDate); ?>"
                                             data-product-id="<?php echo (int)$row['productId']; ?>"
                                             data-baseline="<?php echo (int)$row['inputBaseline']; ?>"
-                                            data-has-plan="<?php echo $row['hasPlan'] ? '1' : '0'; ?>"
-                                            data-demand="<?php echo (int)$row['demand']; ?>"
-                                            value="<?php echo (int)$row['planned']; ?>"
+                                        data-has-plan="<?php echo $row['hasPlan'] ? '1' : '0'; ?>"
+                                        data-demand="<?php echo (int)$row['demand']; ?>"
+                                        <?php
+                                        $rowScale = bakery_pack_input_scale($db, (int)$row['productId']);
+                                        ?>
+                                        data-input-unit="<?php echo htmlspecialchars((string)$rowScale['unit']); ?>"
+                                        data-pcs-per="<?php echo htmlspecialchars((string)$rowScale['pcs_per']); ?>"
+                                        value="<?php echo (int)$row['planned']; ?>"
                                             <?php echo !$planTableReady ? 'disabled' : ''; ?>
                                             aria-label="Planned finished-goods total for <?php echo htmlspecialchars($row['product']['name']); ?> on <?php echo htmlspecialchars($dayDate); ?>"
                                         >
                                         <small class="pc-plan-meta"><?php echo $row['hasPlan'] ? 'saved target' : 'unsaved · defaults to demand'; ?></small>
+                                        <?php if ($row['hasPlan']): ?>
+                                            <small class="pc-batch-label"><?php echo htmlspecialchars(bakery_pack_batch_label($db, (int)$row['productId'], (int)$row['planned'])); ?></small>
+                                        <?php endif; ?>
                                         <?php if ($planTableReady): ?>
                                             <button type="button" class="pc-set-demand" title="Set planned equal to demand">= demand</button>
                                         <?php endif; ?>
@@ -1062,6 +1476,13 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             </noscript>
         <?php endif; ?>
     </form>
+    <form method="post" id="pc-cut-all-<?php echo htmlspecialchars($selectedDate); ?>" class="pc-commit-form">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="cut_apply_all">
+        <input type="hidden" name="week" value="<?php echo htmlspecialchars($weekStart); ?>">
+        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+        <input type="hidden" name="delivery_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+    </form>
     <?php if (!empty($commitsReady) && $planTableReady): ?>
         <form method="post" id="pc-commit-<?php echo htmlspecialchars($selectedDate); ?>" class="pc-commit-form">
             <?php echo bakery_csrf_field(); ?>
@@ -1071,10 +1492,29 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             <input type="hidden" name="delivery_date" value="<?php echo htmlspecialchars($selectedDate); ?>">
         </form>
     <?php endif; ?>
+    <dialog class="pc-dialog" id="pc-formula-dialog">
+        <form method="dialog" class="pc-dialog-close"><button type="submit"><?php bakery_te('production_center.assign_close'); ?></button></form>
+        <div id="pc-formula-body"></div>
+    </dialog>
+    <dialog class="pc-dialog" id="pc-store-dialog">
+        <form method="dialog" class="pc-dialog-close"><button type="submit"><?php bakery_te('production_center.assign_close'); ?></button></form>
+        <div id="pc-store-body"></div>
+    </dialog>
 </main>
 <style>
 .production-center{max-width:1480px;padding-bottom:56px}
 .pc-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin:28px 0 18px}
+.pc-product-open,.pc-store-demand-open,.pc-store-demand-heading{display:inline;margin:0;padding:0;border:0;background:none;color:#1f6b35;font:inherit;font-weight:700;cursor:pointer;text-align:left;text-decoration:underline;text-underline-offset:2px}
+.pc-store-demand-heading{font-size:inherit;color:#193b2a}
+.pc-product-open:hover,.pc-store-demand-open:hover,.pc-store-demand-heading:hover{color:#154e2a}
+.pc-dialog{max-width:720px;width:calc(100% - 24px);border:1px solid #c5d9cb;border-radius:12px;padding:16px 18px 20px;box-shadow:0 12px 40px rgba(21,48,33,.18)}
+.pc-dialog::backdrop{background:rgba(20,40,28,.35)}
+.pc-dialog-close{display:flex;justify-content:flex-end;margin:0 0 8px}
+.pc-dialog-close button{border:1px solid #b7d4bf;background:#f3fbf5;color:#1f6b35;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer}
+.pc-formula-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}
+.pc-formula-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;background:#f7faf7;border:1px solid #e1e9e2;border-radius:8px}
+.pc-store-qty{width:5.5rem;padding:6px 8px;border:1px solid #cbd7cf;border-radius:5px}
+.pc-store-status{min-height:1.2em;margin:10px 0;color:#1f6b35;font-weight:600}
 .pc-heading h1{margin:0;color:#193b2a}
 .pc-heading p{margin:6px 0 0;color:#586b60;max-width:760px}
 .pc-heading-actions{display:flex;flex-wrap:wrap;gap:8px}
@@ -1115,13 +1555,31 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
 .pc-summary span,.pc-summary small{display:block;color:#64756a;font-size:.8rem}
 .pc-summary strong{display:block;font-size:1.45rem;color:#1d3f2c;margin:3px 0}
 .pc-explainer{background:#eef7ef;border-left:4px solid #398451;padding:13px 16px;color:#3f5948;margin:18px 0 22px;line-height:1.45}
+.pc-kitchen-form{background:#f7f4ee;border:1px solid #e2d9c8;border-radius:12px;padding:16px 18px;margin:0 0 22px}
+.pc-kitchen-form textarea{width:100%;max-width:720px;font:inherit;padding:10px 12px;border:1px solid #cfc4ae;border-radius:8px}
+.pc-kitchen-lead{margin:6px 0 10px;color:#5a6d61;max-width:760px}
+.pc-kitchen-actions{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.pc-kitchen-preview{margin-top:14px}
+.pc-kitchen-preview ul{margin:8px 0 0;padding-left:18px}
 .pc-assign-lead{margin:8px 0 0;color:#3f5948}
 .pc-assign-open{display:inline-block;margin-top:6px;border:1px solid #b7d4bf;background:#f3fbf5;color:#1f6b35;font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit}
 .pc-assign-open:hover{background:#e5f5ea}
 .pc-assign-open-needed{background:#fff3d3;border-color:#e2b46a;color:#80590d}
+.pc-cut-all-btn{border-color:#e2b46a;background:#fff3d3;color:#80590d}
+.pc-cut-all-btn:hover{background:#fdeac2}
 .pc-cut-open{display:inline-block;margin:6px 0 0 6px;border:1px solid #e2b46a;background:#fff3d3;color:#80590d;font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit}
 .pc-cut-open:hover{background:#fdeac2}
 .pc-cut-open[aria-expanded="true"]{background:#80590d;border-color:#80590d;color:#fff}
+.pc-cut-focus{margin:10px 0;padding:10px 12px;border:1px solid #e2d3b0;border-radius:8px;background:#fffaf0}
+.pc-cut-focus-label{margin:0 0 8px;font-size:.82rem;font-weight:700;color:#80590d}
+.pc-cut-focus-choices{display:flex;flex-wrap:wrap;gap:10px 16px;margin:0 0 8px}
+.pc-cut-focus-choices label{display:flex;gap:6px;align-items:center;font-size:.88rem;color:#254632}
+.pc-cut-focus-picks{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.pc-cut-focus-picks label{font-size:.85rem;color:#254632;font-weight:600}
+.pc-cut-focus-picks select{min-width:10rem;padding:5px 8px;border:1px solid #cbd7cf;border-radius:5px}
+.pc-cut-focus-note{margin:8px 0 0;font-size:.82rem;color:#66786c}
+.pc-assign-table tr.pc-cut-dim td{color:#8a968d}
+.pc-assign-table .pc-cut-pick{width:auto}
 .pc-assign-row td{background:#f4f8f4;padding:0 12px 14px}
 .pc-assign-panel{padding:12px 4px 8px;max-width:920px}
 .pc-assign-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
@@ -1214,7 +1672,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
     var saveState = document.getElementById('pc-save-state');
     var saveDetail = document.getElementById('pc-save-detail');
     var note = document.getElementById('pc-autosave-note');
-    var inputs = Array.prototype.slice.call(form.querySelectorAll('.pc-plan-input'));
+    var inputs = Array.prototype.slice.call(document.querySelectorAll('.pc-plan-input'));
     var timers = {};
     var inflight = 0;
     var copy = {
@@ -1234,6 +1692,38 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         if (trimmed === '') return null;
         if (!/^\d+$/.test(trimmed)) return NaN;
         return parseInt(trimmed, 10);
+    }
+
+    function formatBatchQty(n) {
+        var s = String(Math.round(n * 100) / 100);
+        if (s.indexOf('.') !== -1) s = s.replace(/0+$/, '').replace(/\.$/, '');
+        return s;
+    }
+
+    function refreshBatchLabel(input) {
+        var qty = parseQty(input.value);
+        var unit = input.getAttribute('data-input-unit') || '';
+        var pcsPer = parseFloat(input.getAttribute('data-pcs-per') || '0');
+        var row = input.closest('tr');
+        var label = row ? row.querySelector('.pc-batch-label') : null;
+        if (!label || qty === null || isNaN(qty) || qty < 0) return;
+        if (!pcsPer || pcsPer <= 0 || unit === 'piece') {
+            label.textContent = String(qty) + ' pcs';
+            return;
+        }
+        if (unit === 'tray') {
+            var trays = Math.floor(qty / pcsPer);
+            var loose = qty % pcsPer;
+            var text = trays + ' tray' + (trays === 1 ? '' : 's');
+            if (loose > 0) text += ' + ' + loose + ' pcs';
+            label.textContent = text + ' · ' + qty.toLocaleString() + ' pcs';
+            return;
+        }
+        if (unit === 'barra') {
+            label.textContent = qty.toLocaleString() + ' barras';
+            return;
+        }
+        label.textContent = formatBatchQty(qty / pcsPer) + ' gal · ' + qty.toLocaleString() + ' pcs';
     }
 
     function csrfToken() {
@@ -1336,6 +1826,17 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             }
             var meta = input.parentElement.querySelector('.pc-plan-meta');
             if (meta) meta.textContent = copy.savedTarget;
+            if (result.data.batch_label) {
+                var batchEl = input.closest('tr') ? input.closest('tr').querySelector('.pc-batch-label') : null;
+                if (batchEl) batchEl.textContent = result.data.batch_label;
+            }
+            var row = input.closest('tr');
+            if (row) {
+                var productBtn = row.querySelector('.pc-product-open');
+                if (productBtn) productBtn.setAttribute('data-pieces', String(qty));
+                var demandBtn = row.querySelector('.pc-store-demand-open');
+                if (demandBtn) demandBtn.setAttribute('data-pool', String(qty));
+            }
             if (inflight === 0) setStatus('saved', copy.saved, copy.hint);
         }).catch(function () {
             inflight = Math.max(0, inflight - 1);
@@ -1359,6 +1860,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             var baseline = String(input.getAttribute('data-baseline'));
             var current = String(input.value).trim();
             refreshMakeNeed(input);
+            refreshBatchLabel(input);
             if (qty === null || isNaN(qty) || qty < 0) {
                 markInput(input, 'invalid');
                 setStatus('error', copy.invalid, '');
@@ -1465,7 +1967,19 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         cutTitle: <?php echo json_encode(bakery_t('production_center.cut_title')); ?>,
         cutHint: <?php echo json_encode(bakery_t('production_center.cut_hint')); ?>,
         cutAfter: <?php echo json_encode(bakery_t('production_center.cut_after')); ?>,
-        cutApply: <?php echo json_encode(bakery_t('production_center.cut_apply')); ?>
+        cutApply: <?php echo json_encode(bakery_t('production_center.cut_apply')); ?>,
+        cutFocus: <?php echo json_encode(bakery_t('production_center.cut_focus')); ?>,
+        cutFocusAll: <?php echo json_encode(bakery_t('production_center.cut_focus_all')); ?>,
+        cutFocusZone: <?php echo json_encode(bakery_t('production_center.cut_focus_zone')); ?>,
+        cutFocusDriver: <?php echo json_encode(bakery_t('production_center.cut_focus_driver')); ?>,
+        cutFocusChecked: <?php echo json_encode(bakery_t('production_center.cut_focus_checked')); ?>,
+        cutZone: <?php echo json_encode(bakery_t('production_center.cut_zone')); ?>,
+        cutDriver: <?php echo json_encode(bakery_t('production_center.cut_driver')); ?>,
+        cutPick: <?php echo json_encode(bakery_t('production_center.cut_pick')); ?>,
+        cutFill: <?php echo json_encode(bakery_t('production_center.cut_fill')); ?>,
+        cutApplyRecommended: <?php echo json_encode(bakery_t('production_center.cut_apply_recommended')); ?>,
+        cutOutsideKeep: <?php echo json_encode(bakery_t('production_center.cut_outside_keep')); ?>,
+        cutNoFocus: <?php echo json_encode(bakery_t('production_center.cut_no_focus')); ?>
     };
 
     function csrfToken() {
@@ -1547,6 +2061,131 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         });
     }
 
+    function uniqueSorted(values) {
+        var seen = {};
+        var out = [];
+        values.forEach(function (value) {
+            var key = String(value);
+            if (key === '' || seen[key]) return;
+            seen[key] = true;
+            out.push(value);
+        });
+        out.sort(function (a, b) {
+            return String(a).localeCompare(String(b));
+        });
+        return out;
+    }
+
+    function cutRecommend(customers, pool) {
+        var n = customers.length;
+        if (!n) return customers;
+        var total = 0;
+        customers.forEach(function (row) {
+            total += Math.max(0, parseInt(row.quantity, 10) || 0);
+        });
+        if (total <= 0 || pool <= 0) {
+            return customers.map(function (row) {
+                var copyRow = Object.assign({}, row);
+                copyRow.recommended = 0;
+                return copyRow;
+            });
+        }
+        var shares = [];
+        var used = 0;
+        var remainders = [];
+        customers.forEach(function (row, i) {
+            var qty = Math.max(0, parseInt(row.quantity, 10) || 0);
+            var raw = (qty / total) * pool;
+            var floor = Math.floor(raw);
+            shares[i] = floor;
+            used += floor;
+            remainders.push({ i: i, rem: raw - floor });
+        });
+        remainders.sort(function (a, b) {
+            if (b.rem === a.rem) return a.i - b.i;
+            return b.rem - a.rem;
+        });
+        var left = pool - used;
+        remainders.forEach(function (item) {
+            if (left <= 0) return;
+            shares[item.i]++;
+            left--;
+        });
+        return customers.map(function (row, i) {
+            var copyRow = Object.assign({}, row);
+            copyRow.recommended = shares[i];
+            return copyRow;
+        });
+    }
+
+    function cutShare(rows, pool, focusIds) {
+        var focusSet = null;
+        if (focusIds !== null && focusIds !== undefined) {
+            focusSet = {};
+            focusIds.forEach(function (id) {
+                var n = parseInt(id, 10);
+                if (n > 0) focusSet[n] = true;
+            });
+        }
+        var reserved = 0;
+        var share = [];
+        var shareIdx = [];
+        var out = rows.map(function (row, i) {
+            var copyRow = Object.assign({}, row);
+            var qty = Math.max(0, parseInt(copyRow.quantity, 10) || 0);
+            var locked = !!copyRow.locked;
+            var inFocus = !locked && (focusSet === null || focusSet[parseInt(copyRow.id, 10)]);
+            copyRow.in_focus = inFocus;
+            if (locked || !inFocus) {
+                copyRow.recommended = qty;
+                reserved += qty;
+            } else {
+                share.push(copyRow);
+                shareIdx.push(i);
+            }
+            return copyRow;
+        });
+        var shareTotal = 0;
+        share.forEach(function (row) {
+            shareTotal += Math.max(0, parseInt(row.quantity, 10) || 0);
+        });
+        var effective = Math.min(Math.max(0, pool - reserved), shareTotal);
+        var recommended = cutRecommend(share, effective);
+        shareIdx.forEach(function (i, j) {
+            out[i].recommended = recommended[j] ? recommended[j].recommended : 0;
+        });
+        return { rows: out, focusPool: effective };
+    }
+
+    function cutFocusIds(panel, customers) {
+        var modeEl = panel.querySelector('input[name="pc-cut-focus"]:checked');
+        var mode = modeEl ? modeEl.value : 'all';
+        if (mode === 'all') return null;
+        if (mode === 'zone') {
+            var zone = panel.querySelector('[data-cut-zone]');
+            var zoneVal = zone ? zone.value : '';
+            return customers.filter(function (row) {
+                return !row.locked && String(row.zone || '') === zoneVal;
+            }).map(function (row) { return row.id; });
+        }
+        if (mode === 'driver') {
+            var driver = panel.querySelector('[data-cut-driver]');
+            var driverVal = driver ? driver.value : '';
+            return customers.filter(function (row) {
+                return !row.locked && String(row.driver_id || 0) === driverVal;
+            }).map(function (row) { return row.id; });
+        }
+        var ids = [];
+        panel.querySelectorAll('.pc-cut-pick:checked').forEach(function (box) {
+            ids.push(parseInt(box.getAttribute('data-customer-id'), 10));
+        });
+        return ids;
+    }
+
+    function cutOutsideKeepNote(pool) {
+        return String(copy.cutOutsideKeep).replace(':pool', String(pool));
+    }
+
     function renderPanel(btn, data, mode) {
         mode = mode === 'cut' ? 'cut' : 'assign';
         closePanel();
@@ -1561,13 +2200,28 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         var cell = document.createElement('td');
         cell.colSpan = row.children.length;
         var customers = data.customers || [];
+        var zones = uniqueSorted(customers.map(function (c) { return c.zone || ''; }));
+        var drivers = [];
+        var driverSeen = {};
+        customers.forEach(function (c) {
+            var id = parseInt(c.driver_id, 10) || 0;
+            if (!id || driverSeen[id]) return;
+            driverSeen[id] = true;
+            drivers.push({ id: id, name: c.driver_name || ('#' + id) });
+        });
+        drivers.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
         var rowsHtml = customers.map(function (customer) {
             var locked = !!customer.locked;
             var rec = customer.recommended != null ? customer.recommended : customer.quantity;
-            return '<tr>' +
+            var pick = mode === 'cut' && !locked
+                ? '<td><input type="checkbox" class="pc-cut-pick" data-customer-id="' + String(customer.id) + '" aria-label="' + escapeHtml(copy.cutPick) + '"></td>'
+                : (mode === 'cut' ? '<td></td>' : '');
+            return '<tr data-customer-id="' + String(customer.id) + '">' +
+                pick +
                 '<td>' + escapeHtml(customer.name || '') +
                 (customer.zone ? '<small>' + escapeHtml(customer.zone) + '</small>' : '') +
                 '</td>' +
+                (mode === 'cut' ? '<td>' + escapeHtml(customer.driver_name || '—') + '</td>' : '') +
                 '<td>' + escapeHtml(sourceLabel(customer.source)) +
                 '<small>now ' + String(customer.quantity) +
                 (customer.standing_qty != null ? ' · stand ' + String(customer.standing_qty) : '') +
@@ -1575,11 +2229,34 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                 '<td><input class="pc-assign-qty" inputmode="numeric" min="0" step="1" max="' +
                 String(mode === 'cut' ? customer.quantity : '') +
                 '" data-customer-id="' + String(customer.id) + '" data-current="' + String(customer.quantity) + '" ' +
-                'data-recommended="' + String(rec) + '" value="' + String(mode === 'cut' ? rec : customer.quantity) + '"' +
+                'data-recommended="' + String(rec) + '" data-in-focus="1" value="' + String(mode === 'cut' ? rec : customer.quantity) + '"' +
                 (locked ? ' disabled' : '') + '>' +
                 (locked ? '<div class="pc-assign-locked">' + escapeHtml(copy.locked) + '</div>' : '') +
                 '</td></tr>';
         }).join('');
+        var zoneOptions = zones.map(function (zone) {
+            return '<option value="' + escapeHtml(zone) + '">' + escapeHtml(zone) + '</option>';
+        }).join('');
+        var driverOptions = drivers.map(function (driver) {
+            return '<option value="' + String(driver.id) + '">' + escapeHtml(driver.name) + '</option>';
+        }).join('');
+        var cutFocusHtml = mode !== 'cut' ? '' :
+            '<div class="pc-cut-focus">' +
+            '<p class="pc-cut-focus-label">' + escapeHtml(copy.cutFocus) + '</p>' +
+            '<div class="pc-cut-focus-choices">' +
+            '<label><input type="radio" name="pc-cut-focus" value="all" checked> ' + escapeHtml(copy.cutFocusAll) + '</label>' +
+            '<label><input type="radio" name="pc-cut-focus" value="zone"' + (zones.length ? '' : ' disabled') + '> ' + escapeHtml(copy.cutFocusZone) + '</label>' +
+            '<label><input type="radio" name="pc-cut-focus" value="driver"' + (drivers.length ? '' : ' disabled') + '> ' + escapeHtml(copy.cutFocusDriver) + '</label>' +
+            '<label><input type="radio" name="pc-cut-focus" value="checked"> ' + escapeHtml(copy.cutFocusChecked) + '</label>' +
+            '</div>' +
+            '<div class="pc-cut-focus-picks">' +
+            '<label data-cut-zone-wrap hidden>' + escapeHtml(copy.cutZone) +
+            ' <select data-cut-zone>' + zoneOptions + '</select></label>' +
+            '<label data-cut-driver-wrap hidden>' + escapeHtml(copy.cutDriver) +
+            ' <select data-cut-driver>' + driverOptions + '</select></label>' +
+            '</div>' +
+            '<p class="pc-cut-focus-note" data-cut-note></p>' +
+            '</div>';
         var scopeHtml = mode === 'cut'
             ? ''
             : '<div class="pc-assign-scope">' +
@@ -1591,6 +2268,19 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         var hintHtml = mode === 'cut'
             ? '<p class="pc-assign-msg">' + escapeHtml(copy.cutHint) + '</p>'
             : '';
+        var cutHead = mode === 'cut'
+            ? '<th>' + escapeHtml(copy.cutPick) + '</th><th>' + escapeHtml(copy.customer) + '</th><th>' + escapeHtml(copy.cutDriver) + '</th>'
+            : '<th>' + escapeHtml(copy.customer) + '</th>';
+        var actionsHtml = mode === 'cut'
+            ? '<div class="pc-assign-actions">' +
+              '<button type="button" class="btn btn-outline pc-assign-recommend">' + escapeHtml(copy.cutFill) + '</button>' +
+              '<button type="button" class="btn btn-primary pc-cut-apply-recommended">' + escapeHtml(copy.cutApplyRecommended) + '</button>' +
+              '<button type="button" class="btn btn-outline pc-assign-apply">' + escapeHtml(copy.cutApply) + '</button>' +
+              '</div>'
+            : '<div class="pc-assign-actions">' +
+              '<button type="button" class="btn btn-outline pc-assign-recommend">' + escapeHtml(copy.recommend) + '</button>' +
+              '<button type="button" class="btn btn-primary pc-assign-apply">' + escapeHtml(copy.apply) + '</button>' +
+              '</div>';
         cell.innerHTML =
             '<div class="pc-assign-panel" data-pool="' + String(data.pool) + '" data-demand="' + String(data.demand) +
             '" data-pool-source="' + escapeHtml(poolSource) +
@@ -1603,13 +2293,11 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             '</div>' +
             '<div class="pc-assign-meter" data-meter></div>' +
             hintHtml +
+            cutFocusHtml +
             scopeHtml +
-            '<div class="pc-assign-actions">' +
-            '<button type="button" class="btn btn-outline pc-assign-recommend">' + escapeHtml(copy.recommend) + '</button>' +
-            '<button type="button" class="btn btn-primary pc-assign-apply">' + escapeHtml(mode === 'cut' ? copy.cutApply : copy.apply) + '</button>' +
-            '</div>' +
+            actionsHtml +
             (customers.length
-                ? '<table class="pc-assign-table"><thead><tr><th>' + escapeHtml(copy.customer) + '</th><th>' +
+                ? '<table class="pc-assign-table"><thead><tr>' + cutHead + '<th>' +
                   escapeHtml(copy.now) + '</th><th>' + escapeHtml(copy.qty) + '</th></tr></thead><tbody>' +
                   rowsHtml + '</tbody></table>'
                 : '<p class="pc-assign-msg">' + escapeHtml(copy.empty) + '</p>') +
@@ -1619,12 +2307,42 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         row.parentNode.insertBefore(panelRow, row.nextSibling);
         btn.setAttribute('aria-expanded', 'true');
         var panel = cell.querySelector('.pc-assign-panel');
+        function fillCutFocus() {
+            var ids = cutFocusIds(panel, customers);
+            var shared = cutShare(customers, parseInt(panel.getAttribute('data-pool'), 10) || 0, ids);
+            var note = panel.querySelector('[data-cut-note]');
+            if (note) {
+                note.textContent = (ids !== null && !ids.length)
+                    ? copy.cutNoFocus
+                    : cutOutsideKeepNote(shared.focusPool);
+            }
+            var modeEl = panel.querySelector('input[name="pc-cut-focus"]:checked');
+            var focusMode = modeEl ? modeEl.value : 'all';
+            var zoneWrap = panel.querySelector('[data-cut-zone-wrap]');
+            var driverWrap = panel.querySelector('[data-cut-driver-wrap]');
+            if (zoneWrap) zoneWrap.hidden = focusMode !== 'zone';
+            if (driverWrap) driverWrap.hidden = focusMode !== 'driver';
+            shared.rows.forEach(function (item) {
+                var input = panel.querySelector('.pc-assign-qty[data-customer-id="' + String(item.id) + '"]');
+                var tr = panel.querySelector('tr[data-customer-id="' + String(item.id) + '"]');
+                if (tr) tr.classList.toggle('pc-cut-dim', !item.in_focus);
+                if (!input || input.disabled) return;
+                input.setAttribute('data-recommended', String(item.recommended));
+                input.setAttribute('data-in-focus', item.in_focus ? '1' : '0');
+                input.value = String(item.in_focus ? item.recommended : item.quantity);
+            });
+            updateMeter(panel);
+        }
         updateMeter(panel);
         panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
             input.addEventListener('input', function () { updateMeter(panel); });
         });
         panel.querySelector('.pc-assign-close').addEventListener('click', closePanel);
         panel.querySelector('.pc-assign-recommend').addEventListener('click', function () {
+            if (mode === 'cut') {
+                fillCutFocus();
+                return;
+            }
             panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
                 if (input.disabled) return;
                 input.value = String(parseInt(input.getAttribute('data-recommended'), 10) || 0);
@@ -1634,6 +2352,17 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         panel.querySelector('.pc-assign-apply').addEventListener('click', function () {
             applyPanel(panel, btn, mode);
         });
+        var applyRec = panel.querySelector('.pc-cut-apply-recommended');
+        if (applyRec) {
+            applyRec.addEventListener('click', function () {
+                fillCutFocus();
+                applyPanel(panel, btn, 'cut');
+            });
+        }
+        panel.querySelectorAll('input[name="pc-cut-focus"], [data-cut-zone], [data-cut-driver], .pc-cut-pick').forEach(function (el) {
+            el.addEventListener('change', fillCutFocus);
+        });
+        if (mode === 'cut') fillCutFocus();
     }
 
     function applyPanel(panel, btn, mode) {
@@ -1642,6 +2371,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         var assignments = [];
         panel.querySelectorAll('.pc-assign-qty').forEach(function (input) {
             if (input.disabled) return;
+            if (mode === 'cut' && input.getAttribute('data-in-focus') !== '1') return;
             assignments.push({
                 customer_id: parseInt(input.getAttribute('data-customer-id'), 10),
                 quantity: parseQty(input.value)
@@ -1650,7 +2380,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         if (!assignments.length) {
             msg.hidden = false;
             msg.className = 'pc-assign-msg is-error';
-            msg.textContent = copy.empty;
+            msg.textContent = mode === 'cut' ? copy.cutNoFocus : copy.empty;
             return;
         }
         var scopeEl = panel.querySelector('input[name="pc-assign-scope"]:checked');
@@ -1666,7 +2396,9 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             body.set('scope', scopeEl ? scopeEl.value : 'standing');
         }
         body.set('assignments', JSON.stringify(assignments));
-        panel.querySelector('.pc-assign-apply').disabled = true;
+        panel.querySelectorAll('.pc-assign-apply, .pc-cut-apply-recommended').forEach(function (el) {
+            el.disabled = true;
+        });
         fetch('production_center.php?date=' + encodeURIComponent(panel.getAttribute('data-date')), {
             method: 'POST',
             headers: {
@@ -1680,7 +2412,9 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             return res.json().then(function (data) { return { okHttp: res.ok, data: data }; });
         }).then(function (result) {
             if (!result.data || result.data.ok !== true) {
-                panel.querySelector('.pc-assign-apply').disabled = false;
+                panel.querySelectorAll('.pc-assign-apply, .pc-cut-apply-recommended').forEach(function (el) {
+                    el.disabled = false;
+                });
                 msg.hidden = false;
                 msg.className = 'pc-assign-msg is-error';
                 msg.textContent = (result.data && result.data.error) ? result.data.error : copy.error;
@@ -1688,7 +2422,9 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             }
             window.location.reload();
         }).catch(function () {
-            panel.querySelector('.pc-assign-apply').disabled = false;
+            panel.querySelectorAll('.pc-assign-apply, .pc-cut-apply-recommended').forEach(function (el) {
+                el.disabled = false;
+            });
             msg.hidden = false;
             msg.className = 'pc-assign-msg is-error';
             msg.textContent = copy.error;
@@ -1732,6 +2468,251 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             }).catch(function () {
                 window.alert(copy.error);
             });
+        });
+    });
+})();
+</script>
+<script>
+(function () {
+    var dateField = document.querySelector('#pc-plan-form input[name="date"]');
+    var csrfField = document.querySelector('#pc-plan-form input[name="csrf_token"]');
+    if (!dateField || !csrfField) return;
+    var formulaDialog = document.getElementById('pc-formula-dialog');
+    var storeDialog = document.getElementById('pc-store-dialog');
+    var formulaBody = document.getElementById('pc-formula-body');
+    var storeBody = document.getElementById('pc-store-body');
+    var copy = {
+        formulaTitle: <?php echo json_encode(bakery_t('production_center.formula_title')); ?>,
+        formulaEmpty: <?php echo json_encode(bakery_t('production_center.formula_empty')); ?>,
+        pct: <?php echo json_encode(bakery_t('production_center.formula_pct')); ?>,
+        storeTitle: <?php echo json_encode(bakery_t('production_center.store_demand_title')); ?>,
+        storeLead: <?php echo json_encode(bakery_t('production_center.store_demand_lead')); ?>,
+        storeZone: <?php echo json_encode(bakery_t('production_center.store_demand_zone')); ?>,
+        storeGoing: <?php echo json_encode(bakery_t('production_center.store_demand_going')); ?>,
+        storeQty: <?php echo json_encode(bakery_t('production_center.store_demand_qty')); ?>,
+        storeLocked: <?php echo json_encode(bakery_t('production_center.store_demand_locked')); ?>,
+        storeSave: <?php echo json_encode(bakery_t('production_center.store_demand_save')); ?>,
+        storeSaving: <?php echo json_encode(bakery_t('production_center.store_demand_saving')); ?>,
+        storeSaved: <?php echo json_encode(bakery_t('production_center.store_demand_saved')); ?>,
+        customer: <?php echo json_encode(bakery_t('production_center.assign_customer')); ?>,
+        error: <?php echo json_encode(bakery_t('production_center.assign_error')); ?>
+    };
+
+    function post(action, extra) {
+        var body = new URLSearchParams();
+        body.set('action', action);
+        body.set('csrf_token', csrfField.value);
+        body.set('date', dateField.value);
+        Object.keys(extra || {}).forEach(function (key) {
+            body.set(key, String(extra[key]));
+        });
+        return fetch('production_center.php?date=' + encodeURIComponent(dateField.value), {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-CSRF-TOKEN': csrfField.value
+            },
+            body: body.toString(),
+            credentials: 'same-origin'
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                return { okHttp: res.ok, data: data };
+            });
+        });
+    }
+
+    function openFormula(productId, pieces) {
+        if (!formulaDialog || !formulaBody) return;
+        formulaBody.textContent = '…';
+        if (formulaDialog.showModal) formulaDialog.showModal();
+        post('product_formula', { product_id: productId, pieces: pieces || 0 }).then(function (result) {
+            if (!result.data || !result.data.ok) {
+                formulaBody.textContent = (result.data && result.data.error) ? result.data.error : copy.error;
+                return;
+            }
+            var f = result.data.formula;
+            var html = '<h3>' + copy.formulaTitle + ' — ' + String(f.product || '') + '</h3>';
+            if (f.dough) html += '<p>' + copy.formulaTitle + ': ' + String(f.dough) + '</p>';
+            if (f.dough_grams > 0) {
+                html += '<p>' + String(f.pieces) + ' × ' + String(f.piece_weight_grams) + ' g = ' + String(f.dough_grams) + ' g</p>';
+            }
+            if (!f.lines || !f.lines.length) {
+                html += '<p>' + copy.formulaEmpty + '</p>';
+            } else {
+                html += '<ul class="pc-formula-list">';
+                f.lines.forEach(function (line) {
+                    html += '<li><span>' + String(line.name) + '</span><strong>' + String(line.percentage) + copy.pct;
+                    if (line.grams > 0) html += ' · ' + String(line.grams) + ' g';
+                    html += '</strong></li>';
+                });
+                html += '</ul>';
+            }
+            formulaBody.innerHTML = html;
+        }).catch(function () {
+            formulaBody.textContent = copy.error;
+        });
+    }
+
+    function jsonError(result) {
+        if (result && result.data) {
+            if (result.data.error) return result.data.error;
+            if (result.data.ok === false) return copy.error;
+        }
+        return copy.error;
+    }
+
+    function updateBakeDemand(productId, demandTotal) {
+        var btn = document.querySelector('.pc-store-demand-open[data-product-id="' + String(productId) + '"]');
+        if (!btn) return;
+        btn.textContent = Number(demandTotal).toLocaleString();
+        var row = btn.closest('tr');
+        if (!row) return;
+        var piecesInput = row.querySelector('.pc-plan-input');
+        var gapCell = row.querySelector('td.pc-short, td.pc-covered');
+        if (!piecesInput || !gapCell) return;
+        var pieces = parseInt(String(piecesInput.value), 10);
+        if (isNaN(pieces)) return;
+        var gap = pieces - Number(demandTotal);
+        gapCell.textContent = (gap > 0 ? '+' : '') + Number(gap).toLocaleString();
+        gapCell.className = gap < 0 ? 'pc-short' : 'pc-covered';
+    }
+
+    function renderStore(data) {
+        var html = '<h3>' + copy.storeTitle + ' — ' + String(data.product_name || '') + '</h3>';
+        html += '<p>' + copy.storeLead + '</p>';
+        var rows = data.customers || [];
+        if (!rows.length) {
+            html += '<p>' + copy.error + '</p>';
+            storeBody.innerHTML = html;
+            return;
+        }
+        html += '<form id="pc-store-form">';
+        html += '<table class="pc-assign-table"><thead><tr><th>' + copy.customer + '</th><th>' + copy.storeZone + '</th><th>' + copy.storeGoing + '</th><th>' + copy.storeQty + '</th></tr></thead><tbody>';
+        rows.forEach(function (row) {
+            var locked = !!row.locked;
+            html += '<tr><td>' + String(row.name || '') + '</td><td>' + String(row.zone || '—') + '</td><td>' + String(row.driver_name || '—') + '</td><td>';
+            if (locked) {
+                html += String(row.quantity) + ' <small>' + copy.storeLocked + '</small>';
+            } else {
+                html += '<input class="pc-store-qty" type="number" min="0" step="1" inputmode="numeric" data-customer-id="' + String(row.id) + '" data-product-id="' + String(data.product_id) + '" data-saved="' + String(row.quantity) + '" value="' + String(row.quantity) + '">';
+            }
+            html += '</td></tr>';
+        });
+        html += '</tbody></table>';
+        html += '<p id="pc-store-status" class="pc-store-status"></p>';
+        html += '<button type="submit" class="button" id="pc-store-save">' + copy.storeSave + '</button>';
+        html += '</form>';
+        storeBody.innerHTML = html;
+        var form = storeBody.querySelector('#pc-store-form');
+        var statusEl = storeBody.querySelector('#pc-store-status');
+        var saveBtn = storeBody.querySelector('#pc-store-save');
+        var saving = false;
+
+        function setStatus(text) {
+            if (statusEl) statusEl.textContent = text || '';
+        }
+
+        function saveInput(input) {
+            var qty = String(input.value).trim();
+            if (!/^\d+$/.test(qty)) {
+                setStatus(copy.error);
+                return Promise.resolve(false);
+            }
+            if (String(input.getAttribute('data-saved')) === qty) {
+                return Promise.resolve(true);
+            }
+            input.disabled = true;
+            return post('save_store_demand', {
+                product_id: input.getAttribute('data-product-id'),
+                customer_id: input.getAttribute('data-customer-id'),
+                quantity: qty,
+                pool: '0'
+            }).then(function (result) {
+                input.disabled = false;
+                if (!result.okHttp || !result.data || !result.data.ok) {
+                    setStatus(jsonError(result));
+                    return false;
+                }
+                input.setAttribute('data-saved', String(result.data.saved_quantity != null ? result.data.saved_quantity : qty));
+                input.value = input.getAttribute('data-saved');
+                if (result.data.demand_total != null) {
+                    updateBakeDemand(input.getAttribute('data-product-id'), result.data.demand_total);
+                }
+                setStatus(result.data.notice || copy.storeSaved);
+                return true;
+            }).catch(function () {
+                input.disabled = false;
+                setStatus(copy.error);
+                return false;
+            });
+        }
+
+        Array.prototype.slice.call(storeBody.querySelectorAll('.pc-store-qty')).forEach(function (input) {
+            input.addEventListener('change', function () {
+                saveInput(input);
+            });
+        });
+        if (form) {
+            form.addEventListener('submit', function (ev) {
+                ev.preventDefault();
+                if (saving) return;
+                var inputs = Array.prototype.slice.call(storeBody.querySelectorAll('.pc-store-qty'));
+                var dirty = inputs.filter(function (input) {
+                    return String(input.value).trim() !== String(input.getAttribute('data-saved'));
+                });
+                if (!dirty.length) {
+                    setStatus(copy.storeSaved);
+                    return;
+                }
+                saving = true;
+                if (saveBtn) {
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = copy.storeSaving;
+                }
+                var chain = Promise.resolve(true);
+                dirty.forEach(function (input) {
+                    chain = chain.then(function (ok) {
+                        if (!ok) return false;
+                        return saveInput(input);
+                    });
+                });
+                chain.then(function () {
+                    saving = false;
+                    if (saveBtn) {
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = copy.storeSave;
+                    }
+                });
+            });
+        }
+    }
+
+    function openStore(productId, pool) {
+        if (!storeDialog || !storeBody || !productId) return;
+        storeBody.textContent = '…';
+        if (storeDialog.showModal) storeDialog.showModal();
+        post('store_demand', { product_id: productId, pool: pool || 0 }).then(function (result) {
+            if (!result.data || !result.data.ok) {
+                storeBody.textContent = (result.data && result.data.error) ? result.data.error : copy.error;
+                return;
+            }
+            renderStore(result.data);
+        }).catch(function () {
+            storeBody.textContent = copy.error;
+        });
+    }
+
+    document.querySelectorAll('.pc-product-open').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            openFormula(btn.getAttribute('data-product-id'), btn.getAttribute('data-pieces'));
+        });
+    });
+    document.querySelectorAll('.pc-store-demand-open, .pc-store-demand-heading').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var pid = btn.getAttribute('data-product-id');
+            var pool = btn.getAttribute('data-pool') || '0';
+            openStore(pid, pool);
         });
     });
 })();

@@ -263,6 +263,59 @@ try {
     ], 'standing', null);
     $assert((int)$lockedApply['updated'] === 0 && (int)$lockedApply['skipped'] === 1, 'van-locked order is skipped');
     $assert(bakery_customer_standing_qty($db, $lockedId, $productId, $weekday) === 22, 'locked standing is unchanged');
+    $demandRows = bakery_production_store_demand_rows($db, $date, $productId, 10);
+    $assert(is_array($demandRows), 'store demand rows is a list');
+
+    $cleanupCustomers();
+    $insertCustomer->execute(['Store Demand Kitchen Cafe', '7 Bake Lane']);
+    $sdId = (int)$db->lastInsertId();
+    $customerIds = [$sdId];
+    $standing->execute([$sdId, $productId, $weekday, 18]);
+    $ensure($db, $sdId, $date, $productId, 18);
+    $db->prepare("UPDATE daily_orders SET status = 'in_production' WHERE customer_id = ? AND order_date = ?")
+        ->execute([$sdId, $date]);
+    $kitchenLocked = false;
+    try {
+        bakery_customer_save_daily_line(
+            $db,
+            bakery_production_assign_customer_row($db, $sdId),
+            $date,
+            $productId,
+            9
+        );
+    } catch (Throwable $portalLock) {
+        $kitchenLocked = strpos($portalLock->getMessage(), 'locked') !== false;
+    }
+    $assert($kitchenLocked, 'portal daily save locks in-production kitchen orders');
+    $savedDemand = bakery_production_store_demand_save($db, $date, $productId, $sdId, 9, null, 0);
+    $assert((int)$savedDemand['quantity'] === 9, 'store demand save writes 9 on in-production order');
+    $sdQty = 0;
+    foreach (bakery_operating_demand_customers_for_product($db, $date, $productId) as $line) {
+        if ((int)$line['id'] === $sdId) {
+            $sdQty = (int)$line['quantity'];
+        }
+    }
+    $assert($sdQty === 9, 'operating demand rereads store demand 9');
+    $reopen = bakery_production_store_demand_rows($db, $date, $productId, 0);
+    $reopenQty = 0;
+    foreach ($reopen as $row) {
+        if ((int)$row['id'] === $sdId) {
+            $reopenQty = (int)$row['quantity'];
+        }
+    }
+    $assert($reopenQty === 9, 'store demand dialog rereads 9');
+    $standingStill = bakery_customer_standing_qty($db, $sdId, $productId, $weekday);
+    $assert($standingStill === 18, 'store demand save does not rewrite standing');
+
+    $vanBlocked = false;
+    $db->prepare("UPDATE daily_orders SET status = 'out_for_delivery' WHERE customer_id = ? AND order_date = ?")
+        ->execute([$sdId, $date]);
+    try {
+        bakery_production_store_demand_save($db, $date, $productId, $sdId, 1, null, 0);
+    } catch (Throwable $van) {
+        $vanBlocked = true;
+    }
+    $assert($vanBlocked, 'store demand save refuses van-locked stops');
 } catch (Throwable $e) {
     echo 'FAIL  exception: ' . $e->getMessage() . "\n";
     $fail++;

@@ -185,6 +185,24 @@ $daySummary = [
     'remaining_units' => 0,
     'inventory_blocked' => 0,
 ];
+$loadProgress = ['drivers_with_work' => 0, 'incomplete' => []];
+$todayDate = date('Y-m-d');
+$todayProgress = ['drivers_with_work' => 0, 'incomplete' => []];
+$todayIncompleteHref = '';
+if ($inventoryReady && function_exists('bakery_inventory_load_progress')) {
+    $loadProgress = bakery_inventory_load_progress($db, $selectedDate);
+    $todayProgress = $selectedDate === $todayDate
+        ? $loadProgress
+        : bakery_inventory_load_progress($db, $todayDate);
+    if ($todayProgress['incomplete'] !== []) {
+        $todayFocus = $todayProgress['incomplete'][0];
+        $todayParams = ['attention' => 'incomplete'];
+        if (count($todayProgress['incomplete']) === 1) {
+            $todayParams['driver_id'] = (int)$todayFocus['driver_id'];
+        }
+        $todayIncompleteHref = bakery_ops_link_driver_load($todayDate, $todayParams, $pageReturnKey);
+    }
+}
 
 if ($inventoryReady) {
     $zoneJoin = function_exists('bakery_customer_zone_join_sql')
@@ -455,7 +473,7 @@ try {
     <div class="load-heading">
         <div>
             <h1>Load &amp; Dispatch</h1>
-            <p>See what each driver needs, what is already on the van, and what is still missing. Enter pickup quantities for each product, then save — you can load the full order need even if warehouse stock is short.</p>
+            <p><?php bakery_te('driver_load.lead'); ?></p>
         </div>
         <div class="load-heading-actions">
             <a class="btn btn-outline" href="inventory.php?date=<?php echo urlencode($selectedDate); ?>">Inventory board</a>
@@ -466,6 +484,43 @@ try {
 
     <?php if ($notice): ?><div class="load-notice success" role="status"><?php echo htmlspecialchars($notice); ?></div><?php endif; ?>
     <?php if ($error): ?><div class="load-notice error" role="alert"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+    <?php
+    $selectedIncomplete = $loadProgress['incomplete'] ?? [];
+    $todayIncomplete = $todayProgress['incomplete'] ?? [];
+    if ($selectedDate !== $todayDate && $todayIncomplete !== []):
+        $todayNames = implode(', ', array_map(static function ($row) {
+            return (string)$row['name'];
+        }, $todayIncomplete));
+        ?>
+        <div class="load-notice warn" role="status">
+            <?php echo htmlspecialchars(bakery_t('driver_load.today_still_open', [
+                'date' => date('D, M j', strtotime($todayDate)),
+                'count' => (string)count($todayIncomplete),
+                'drivers' => $todayNames,
+            ])); ?>
+            <?php if ($todayIncompleteHref !== ''): ?>
+                <a href="<?php echo htmlspecialchars($todayIncompleteHref); ?>"><?php bakery_te('driver_load.open_today'); ?></a>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+    <?php if ($selectedIncomplete !== []):
+        $focus = $selectedIncomplete[0];
+        $short = count($selectedIncomplete) === 1
+            ? bakery_t('driver_load.finish_one', [
+                'name' => (string)$focus['name'],
+                'required' => number_format((int)$focus['required']),
+                'loaded' => number_format((int)$focus['loaded']),
+            ])
+            : bakery_t('driver_load.finish_many', [
+                'count' => (string)count($selectedIncomplete),
+            ]);
+        ?>
+        <div class="load-notice warn" role="status" data-load-finish-hint>
+            <?php echo htmlspecialchars($short); ?>
+            <?php bakery_te('driver_load.finish_how'); ?>
+        </div>
+    <?php endif; ?>
 
     <form method="get" class="load-selector">
         <?php if ($pageReturnKey): ?><input type="hidden" name="return" value="<?php echo htmlspecialchars((string)$pageReturnKey); ?>"><?php endif; ?>
@@ -853,6 +908,8 @@ try {
 .load-notice{padding:11px 14px;border-radius:6px;margin:12px 0}
 .load-notice.success{background:#e7f6ea;color:#1d6534}
 .load-notice.error{background:#fdecec;color:#9b2525}
+.load-notice.warn{background:#fff6e5;color:#8a5a12}
+.load-notice.warn a{color:#6a4308;font-weight:800}
 .load-empty,.load-empty-inline{padding:18px;background:var(--load-bg);border-radius:8px;color:var(--load-muted)}
 .load-optional{margin:14px 0;border:1px dashed #c5d0c9;border-radius:8px;background:#fbfcfb}
 .load-optional summary{cursor:pointer;padding:10px 12px;font-weight:700;color:var(--load-ink)}
@@ -1054,8 +1111,11 @@ try {
             }
 
             if (overrideLines.length > 0) {
-                var msg = 'Some lines exceed finished-goods stock:\n\n' + overrideLines.join('\n')
-                    + '\n\nSave anyway? Pickup will be recorded as entered.';
+                var notProduced = form.querySelectorAll('[data-not-produced="1"]').length > 0;
+                var msg = notProduced
+                    ? <?php echo json_encode(bakery_t('driver_load.override_confirm_no_production'), JSON_UNESCAPED_UNICODE); ?>
+                    : <?php echo json_encode(bakery_t('driver_load.override_confirm'), JSON_UNESCAPED_UNICODE); ?>;
+                msg += '\n\n' + overrideLines.join('\n');
                 if (!window.confirm(msg)) {
                     event.preventDefault();
                     return;

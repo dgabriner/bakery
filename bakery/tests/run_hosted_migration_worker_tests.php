@@ -13,8 +13,12 @@ $assert = static function (bool $ok, string $label) use (&$failed): void {
 [$safe053, $message053] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/053_live_product_pack_yields.sql'));
 $assert(!$safe053 && stripos($message053, 'TEXT/BLOB') !== false, 'the original 053 Live compatibility failure is rejected before approval');
 $assert(bakery_hosted_migration_superseded_by((string)file_get_contents($root . '/database/schema/053_live_product_pack_yields.sql')) === '054_live_product_pack_yields_mysql_compat', '053 explicitly names its portable successor');
-[$safe054] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/054_live_product_pack_yields_mysql_compat.sql'));
-$assert($safe054, 'the portable 054 successor remains eligible');
+[$safe059] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/059_bolillo_and_gallon_estimates.sql'));
+$assert($safe059, '059 bolillo catalog seed is hosted-safe');
+[$safe060] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/060_mantecada_batch_and_piece_weights.sql'));
+$assert($safe060, '060 mantecada formula and piece weights is hosted-safe');
+[$safe065] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/065_product_pack_boxes.sql'));
+$assert($safe065, '065 pack box conversion column is hosted-safe');
 [$dropSafe] = bakery_hosted_migration_sql_safe('DROP TABLE customers;');
 $assert(!$dropSafe, 'destructive SQL remains refused');
 
@@ -86,8 +90,17 @@ $assert(strpos($runtime, 'Migration stopped while applying schema') !== false, '
 $assert(strpos($manager, 'bakery_hosted_migration_approve_recommended') !== false, 'Manager can approve only the exact recommended migration');
 $assert(strpos($manager, '<select name="migration_file"') === false, 'Manager no longer asks the operator to guess among migrations');
 $assert(strpos($manager, '[data-live-promotion-status], [data-live-migration-status]') !== false, 'Manager polls both file and database workers');
+$assert(strpos($manager, 'manager-live-history') !== false, 'Manager history is collapsed under the live board');
 $assert(strpos($status, "'release_id'") !== false && strpos($status, "'completed_statements'") !== false, 'public status identifies the queued release and progress');
-$assert(strpos($runner, '$number >= 55') !== false && strpos($runner, 'bakery_hosted_migration_sql_safe') !== false, 'future migrations must pass the Live policy before Staging accepts them');
+$assert(strpos($status, "'history'") !== false, 'public migration status includes compact history');
+$assert(strpos($runtime, 'bakery_hosted_status_history_append') !== false, 'migration worker appends terminal outcomes to history');
+[$safe061] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/061_surveys.sql'));
+$assert($safe061, '061 surveys CREATE TABLE is hosted-safe');
+$assert(strpos($runtime, 'bakery_schema_inventory_cache_path') !== false, 'worker busts the Live schema report cache after apply');
+$assert(strpos($runtime, 'contained no executable statements') !== false, 'worker refuses to record an empty SQL file');
+$assert(strpos($manager, 'schema_compare=1') !== false && strpos($manager, 'stale_after_apply') !== false, 'Manager refreshes Live schema after a succeeded update');
+$approvalSource = (string)file_get_contents($root . '/includes/hosted_migration_approval.php');
+$assert(strpos($approvalSource, '?refresh=1') !== false, 'Staging asks Live to rebuild the schema report after an update');
 
 echo "{$failed} failed" . PHP_EOL;
 exit($failed === 0 ? 0 : 1);

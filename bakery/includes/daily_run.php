@@ -926,6 +926,18 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 . ($incompleteLoads === 1 ? '' : 's') . ' incomplete';
         }
         $dispatchStage['summary'] = implode(' · ', $parts);
+        if ($unassigned > 0) {
+            $dispatchStage['action_label'] = 'Open Driver Assignment';
+            $dispatchStage['href'] = $links['driver_assignment'];
+        } else {
+            $loadParams = ['attention' => 'incomplete'];
+            $focusDriverId = (int)($ccStages['load']['focus_driver_id'] ?? 0);
+            if ($focusDriverId > 0) {
+                $loadParams['driver_id'] = $focusDriverId;
+            }
+            $dispatchStage['action_label'] = 'Open Driver Pickup Loads';
+            $dispatchStage['href'] = bakery_ops_link_driver_load($date, $loadParams, 'daily_run');
+        }
     } elseif ($inTransit > 0) {
         $dispatchStage['ui_state'] = 'in_progress';
         $dispatchStage['summary'] = $driversWithWork . ' driver'

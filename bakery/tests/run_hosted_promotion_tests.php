@@ -15,10 +15,14 @@ foreach ($files as $entry) {
     $hash = (string)($entry['sha256'] ?? '');
     if ($path === '' || isset($seen[$path])) $failed[] = 'empty or duplicate path';
     if (!preg_match('/^[a-f0-9]{64}$/', $hash)) $failed[] = 'invalid hash for ' . $path;
+    if (!bakery_promotion_live_safe_relpath($path)) $failed[] = 'Live worker would refuse: ' . $path;
     if (preg_match('#^(storage|database|scripts|tests|docs|uploads)(/|$)#', $path)) $failed[] = 'unsafe tree included: ' . $path;
     if (strpos($path, '..') !== false || strpos($path, '.env') !== false) $failed[] = 'unsafe path included: ' . $path;
     $seen[$path] = true;
 }
+if (!bakery_promotion_live_safe_relpath('includes/foo.php')) $failed[] = 'safe helper rejected a normal include';
+if (bakery_promotion_live_safe_relpath('includes/foo (1).php')) $failed[] = 'safe helper accepted a spaced duplicate';
+if (bakery_promotion_live_safe_relpath('database/schema/059.sql')) $failed[] = 'safe helper accepted a database path';
 if ($failed) {
     fwrite(STDERR, "FAIL\n - " . implode("\n - ", array_unique($failed)) . "\n");
     exit(1);

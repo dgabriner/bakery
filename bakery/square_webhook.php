@@ -44,7 +44,15 @@ if (!is_array($payload)) {
 }
 
 try {
-    $result = bakery_square_handle_webhook($db, $payload);
+    // Type-based routing: invoice events keep their wholesale handler and
+    // semantics; payment/refund/checkout events belong to education purchases.
+    $eventType = (string)($payload['type'] ?? '');
+    if (strpos($eventType, 'invoice.') === 0) {
+        $result = bakery_square_handle_webhook($db, $payload);
+    } else {
+        require_once __DIR__ . '/includes/sf_baker.php';
+        $result = bakery_sfb_handle_education_webhook($db, $payload);
+    }
     echo json_encode($result);
 } catch (Throwable $e) {
     error_log('square_webhook: ' . $e->getMessage());

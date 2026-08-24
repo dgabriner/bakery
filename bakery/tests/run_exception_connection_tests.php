@@ -114,5 +114,24 @@ $matched = bakery_ops_chips_for_row([
 ], ['customer_id' => 12, 'flags' => ['missing_daily' => true]]);
 $assert(count($matched) === 1, 'chip helper matches a row that caused the exception');
 
+$dailyRunSrc = (string)file_get_contents($root . '/includes/daily_run.php');
+$assert(
+    strpos($dailyRunSrc, "\$dispatchStage['action_label'] = 'Open Driver Pickup Loads'") !== false
+        && strpos($dailyRunSrc, "'attention' => 'incomplete'") !== false,
+    'Assign/Load/Dispatch with only incomplete loads opens Driver Pickup Loads'
+);
+$ccSrc = (string)file_get_contents($root . '/includes/dashboard_command_center.php');
+$assert(
+    strpos($ccSrc, 'bakery_inventory_load_progress') !== false
+        && strpos($ccSrc, "\$loadParams['driver_id'] = \$focusDriverId") !== false,
+    'a single incomplete load deep-links to that driver'
+);
+$loadSrc = (string)file_get_contents($root . '/driver_load.php');
+$assert(
+    strpos($loadSrc, 'data-load-finish-hint') !== false
+        && strpos($loadSrc, 'driver_load.today_still_open') !== false,
+    'Driver Pickup Loads names the stuck load and warns when Daily Run is a different day'
+);
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail === 0 ? 0 : 1);

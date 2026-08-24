@@ -198,6 +198,7 @@ $savedMessages = [
     'deleted' => 'Formula deleted.',
     'line_added' => 'Ingredient added to the formula.',
     'ingredient_created' => 'Custom ingredient added — select it below to add to your formula.',
+    'remixed' => bakery_t('sfb.saved_remixed'),
 ];
 
 $page_title = 'SF Baker — Formulas';
@@ -241,6 +242,9 @@ $portalCustomerName = $customer['name'];
                   </a>
                   <?php if ($selectedFormula && (int)$selectedFormula['id'] === (int)$formula['id']): ?>
                     <span class="badge badge-ok"><?php bakery_te('sfb.selected'); ?></span>
+                  <?php endif; ?>
+                  <?php if (!empty($formula['remixed_from_batch_id'])): ?>
+                    <a class="badge badge-info" href="sfb_shared_batch.php?batch=<?php echo (int)$formula['remixed_from_batch_id']; ?>" style="color:inherit;"><?php bakery_te('sfb.formula_remixed'); ?></a>
                   <?php endif; ?>
                 </span>
               </li>

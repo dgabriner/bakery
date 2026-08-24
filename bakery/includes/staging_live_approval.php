@@ -75,10 +75,25 @@ function bakery_staging_live_skip_name(string $name): bool {
         'driver_pages_probe.php', 'trace_driver_list.php', 'ping.php', 'run_sql_setup.php',
         'db_test.php', 'setup_directories.php', 'oauth_setup.php', 'auto_push_api.php',
         'sourflour.html', 'tmp_*.php', 'tmp_*.js', 'tmp_*.txt',
+        '.DS_Store', 'Thumbs.db', 'desktop.ini', '*.bak', '*~', '._*', '* (*).*',
     ] as $pattern) {
         if (fnmatch($pattern, $name, FNM_CASEFOLD)) return true;
     }
     return false;
+}
+
+/**
+ * Same allow-list as scripts/hosted_promotion_worker.php promotion_safe_path().
+ * The Live worker lives outside the web root and is not updated by file promotion,
+ * so Staging must never put a rejected path in ready_for_live.json.
+ */
+function bakery_promotion_live_safe_relpath(string $path): bool
+{
+    return $path !== '' && strlen($path) <= 300 && $path[0] !== '/'
+        && strpos($path, '..') === false && strpos($path, "\0") === false
+        && (bool)preg_match('#^(?:\.htaccess|[A-Za-z0-9][A-Za-z0-9._/-]*)$#', $path)
+        && !preg_match('#^(?:storage|database|scripts|tests|docs)(?:/|$)#', $path)
+        && !preg_match('#(?:^|/)(?:\.env|\.git)(?:/|$)#', $path);
 }
 
 function bakery_staging_live_add_tree(array &$paths, string $root, string $relativeRoot, ?array $onlyNames = null): void {
@@ -91,6 +106,9 @@ function bakery_staging_live_add_tree(array &$paths, string $root, string $relat
         if (!$file->isFile() || $file->isLink() || bakery_staging_live_skip_name($file->getFilename())) continue;
         if ($onlyNames !== null && !in_array($file->getFilename(), $onlyNames, true)) continue;
         $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
+        if (!bakery_promotion_live_safe_relpath($relative)) {
+            continue;
+        }
         $paths[$relative] = $file->getPathname();
     }
 }
@@ -99,6 +117,9 @@ function bakery_staging_live_snapshot_files(): array {
     $root = dirname(__DIR__);
     $paths = [];
     foreach (bakery_staging_live_root_files() as $relative) {
+        if (!bakery_promotion_live_safe_relpath($relative)) {
+            continue;
+        }
         $absolute = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
         if (is_file($absolute) && !is_link($absolute)) $paths[$relative] = $absolute;
     }
@@ -117,16 +138,217 @@ function bakery_staging_live_snapshot_files(): array {
         if ($size > 50 * 1024 * 1024 || $totalBytes > 500 * 1024 * 1024) {
             throw new RuntimeException('Staging file snapshot exceeds the promotion safety limit.');
         }
-        $files[] = ['path' => $relative, 'size' => $size, 'sha256' => hash_file('sha256', $absolute)];
+        $hash = hash_file('sha256', $absolute);
+        if (!is_string($hash) || !preg_match('/^[a-f0-9]{64}$/', $hash)) {
+            continue;
+        }
+        $files[] = ['path' => $relative, 'size' => $size, 'sha256' => $hash];
+    }
+    if (count($files) < 50) {
+        throw new RuntimeException('Staging file snapshot is incomplete or unexpectedly large. Promotion was not queued.');
     }
     return $files;
+}
+
+function bakery_pacific_display_time(string $value): string {
+    $raw = trim($value);
+    if ($raw === '') {
+        return '';
+    }
+    try {
+        $dt = new DateTimeImmutable($raw);
+        return $dt->setTimezone(new DateTimeZone('America/Los_Angeles'))->format('M j, Y g:i A T');
+    } catch (Throwable $e) {
+        return $raw;
+    }
+}
+
+function bakery_staging_live_decorate_status(?array $data): ?array {
+    if (!is_array($data)) {
+        return null;
+    }
+    foreach (['completed_at', 'started_at', 'approved_at', 'updated_at'] as $key) {
+        if (!empty($data[$key]) && is_string($data[$key])) {
+            $data[$key . '_display'] = bakery_pacific_display_time($data[$key]);
+        }
+    }
+    return $data;
 }
 
 function bakery_staging_live_status(): ?array {
     $context = stream_context_create(['http' => ['timeout' => 3, 'ignore_errors' => true]]);
     $raw = @file_get_contents('https://bakery.sourflour.org/bake/deploy_status.php', false, $context);
     $data = is_string($raw) ? json_decode($raw, true) : null;
-    return is_array($data) ? $data : null;
+    $status = bakery_staging_live_decorate_status(is_array($data) ? $data : null);
+    if (is_array($status)) {
+        bakery_staging_live_history_ingest_live($status, 'files');
+    }
+    return $status;
+}
+
+function bakery_staging_live_history_path(): string {
+    return bakery_staging_live_export_root() . DIRECTORY_SEPARATOR . 'operation_history.json';
+}
+
+/** @return list<array<string,mixed>> */
+function bakery_staging_live_history_read(): array {
+    $path = bakery_staging_live_history_path();
+    $data = is_file($path) ? json_decode((string)@file_get_contents($path), true) : null;
+    $events = is_array($data) ? ($data['events'] ?? []) : [];
+    return is_array($events) ? array_values(array_filter($events, 'is_array')) : [];
+}
+
+/** @param array<string,mixed> $event */
+function bakery_staging_live_history_append(array $event): void {
+    $events = bakery_staging_live_history_read();
+    $id = (string)($event['id'] ?? '');
+    if ($id === '') {
+        return;
+    }
+    foreach ($events as $existing) {
+        if ((string)($existing['id'] ?? '') === $id) {
+            return;
+        }
+    }
+    $events[] = $event;
+    if (count($events) > 400) {
+        $events = array_slice($events, -400);
+    }
+    $path = bakery_staging_live_history_path();
+    $dir = dirname($path);
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+        return;
+    }
+    $tmp = $path . '.tmp.' . bin2hex(random_bytes(3));
+    if (@file_put_contents($tmp, json_encode(['events' => $events], JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) !== false) {
+        @rename($tmp, $path);
+        @unlink($tmp);
+    }
+}
+
+/** @param array<string,mixed> $record */
+function bakery_staging_live_history_from_approval(array $record, string $kind): array {
+    $status = (string)($record['status'] ?? 'queued');
+    if ($status === 'approved_for_live') {
+        $status = 'queued';
+    }
+    $release = (string)($record['release_id'] ?? '');
+    $when = (string)($record['approved_at'] ?? $record['completed_at'] ?? $record['started_at'] ?? '');
+    $files = [];
+    foreach ((array)($record['files'] ?? []) as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $path = (string)($entry['path'] ?? '');
+        if ($path === '') {
+            continue;
+        }
+        $files[] = [
+            'path' => $path,
+            'size' => (int)($entry['size'] ?? 0),
+            'sha256' => (string)($entry['sha256'] ?? ''),
+        ];
+    }
+    return [
+        'id' => $kind . '|' . $release . '|' . $status . '|' . $when,
+        'kind' => $kind,
+        'status' => $status,
+        'release_id' => $release,
+        'migration_id' => (string)($record['migration_id'] ?? ''),
+        'file' => (string)($record['file'] ?? ''),
+        'approved_by' => (string)($record['approved_by'] ?? ''),
+        'at' => $when,
+        'file_count' => (int)($record['file_count'] ?? count($files)),
+        'sha256' => (string)($record['sha256'] ?? ''),
+        'message' => (string)($record['public_message'] ?? $record['message'] ?? $record['classification'] ?? ''),
+        'source' => 'staging',
+        'files' => $files,
+    ];
+}
+
+/** @param array<string,mixed> $status */
+function bakery_staging_live_history_ingest_live(array $status, string $kind): void {
+    $compact = function_exists('bakery_hosted_status_history_compact')
+        ? bakery_hosted_status_history_compact($status, $kind)
+        : null;
+    if (is_array($compact) && in_array((string)($compact['status'] ?? ''), ['succeeded', 'failed', 'rolled_back'], true)
+        && (string)($compact['release_id'] ?? '') !== '') {
+        $compact['source'] = 'live';
+        bakery_staging_live_history_append($compact);
+    }
+    foreach ((array)($status['history'] ?? []) as $event) {
+        if (!is_array($event)) {
+            continue;
+        }
+        $event['kind'] = (string)($event['kind'] ?? $kind);
+        $event['source'] = (string)($event['source'] ?? 'live');
+        if ((string)($event['id'] ?? '') === '') {
+            $event['id'] = $event['kind'] . '|' . ($event['release_id'] ?? '') . '|' . ($event['status'] ?? '') . '|' . ($event['at'] ?? $event['completed_at'] ?? '');
+        }
+        bakery_staging_live_history_append($event);
+    }
+}
+
+function bakery_staging_live_history_scan_releases(string $root, string $kind): void {
+    $releases = $root . DIRECTORY_SEPARATOR . 'releases';
+    if (!is_dir($releases)) {
+        return;
+    }
+    foreach (scandir($releases) ?: [] as $name) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        $json = $releases . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'release.json';
+        if (!is_file($json)) {
+            continue;
+        }
+        $record = json_decode((string)@file_get_contents($json), true);
+        if (is_array($record)) {
+            bakery_staging_live_history_append(bakery_staging_live_history_from_approval($record, $kind));
+        }
+    }
+}
+
+/** @return array{events:list<array<string,mixed>>,failed:int,files:int,database:int} */
+function bakery_staging_live_history_board(): array {
+    bakery_staging_live_history_scan_releases(bakery_staging_live_export_root(), 'files');
+    if (function_exists('bakery_hosted_migration_export_root')) {
+        bakery_staging_live_history_scan_releases(bakery_hosted_migration_export_root(), 'database');
+    }
+    $latestFiles = bakery_staging_live_approval_latest();
+    if (is_array($latestFiles)) {
+        bakery_staging_live_history_append(bakery_staging_live_history_from_approval($latestFiles, 'files'));
+    }
+    if (function_exists('bakery_hosted_migration_latest')) {
+        $latestMigration = bakery_hosted_migration_latest();
+        if (is_array($latestMigration)) {
+            bakery_staging_live_history_append(bakery_staging_live_history_from_approval($latestMigration, 'database'));
+        }
+    }
+    $events = bakery_staging_live_history_read();
+    usort($events, static function ($a, $b) {
+        return strcmp((string)($b['at'] ?? $b['completed_at'] ?? ''), (string)($a['at'] ?? $a['completed_at'] ?? ''));
+    });
+    $failed = 0;
+    $files = 0;
+    $database = 0;
+    foreach ($events as $event) {
+        $kind = (string)($event['kind'] ?? '');
+        if ($kind === 'files') {
+            $files++;
+        } elseif ($kind === 'database') {
+            $database++;
+        }
+        if (in_array((string)($event['status'] ?? ''), ['failed', 'rolled_back'], true)) {
+            $failed++;
+        }
+    }
+    return [
+        'events' => $events,
+        'failed' => $failed,
+        'files' => $files,
+        'database' => $database,
+    ];
 }
 
 function bakery_staging_live_approval_submit(string $releaseId = '', string $commit = ''): array {
@@ -185,5 +407,6 @@ function bakery_staging_live_approval_submit(string $releaseId = '', string $com
         @unlink($tmp);
         throw new RuntimeException('Could not queue the Staging promotion.');
     }
+    bakery_staging_live_history_append(bakery_staging_live_history_from_approval($record, 'files'));
     return $record;
 }

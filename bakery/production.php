@@ -64,6 +64,32 @@ if (!function_exists('bakery_production_pan_dulce_product_hint')) {
     }
 }
 
+if (!function_exists('bakery_production_echo_formula_items')) {
+    /** Shared baker mix list: ingredient name + scaled amount. */
+    function bakery_production_echo_formula_items(array $ingredients, float $totalFlourGrams, float $totalDoughGrams, bool $isBaker): void {
+        $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
+        echo '<ul class="bp-formula__list" data-formula-units data-unit-mode="'
+            . htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8')
+            . '">';
+        foreach ($ingredients as $ingredient) {
+            $amount = $totalFlourGrams * (((float)($ingredient['percentage'] ?? 0)) / 100);
+            $classification = bakery_formula_classify_ingredient($ingredient['name'] ?? '', $ingredient['unit'] ?? '');
+            echo '<li class="' . (!empty($classification['liquid']) ? 'is-liquid' : '') . '"'
+                . ' data-grams="' . htmlspecialchars((string) $amount, ENT_QUOTES, 'UTF-8') . '"'
+                . ' data-liquid="' . (!empty($classification['liquid']) ? '1' : '0') . '"';
+            if (!empty($classification['density_lb_per_gal'])) {
+                echo ' data-density="' . htmlspecialchars((string) $classification['density_lb_per_gal'], ENT_QUOTES, 'UTF-8') . '"';
+            }
+            echo '><span>' . htmlspecialchars((string)$ingredient['name'], ENT_QUOTES, 'UTF-8') . '</span>'
+                . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($amount, $classification) . '</strong></li>';
+        }
+        echo '<li class="bp-formula-total" data-grams="' . htmlspecialchars((string) $totalDoughGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'
+            . '<span>' . htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8') . '</span>'
+            . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($totalDoughGrams, $doughClassification) . '</strong></li>';
+        echo '</ul>';
+    }
+}
+
 // Date picker (default: tomorrow — bake for the next day)
 $defaultProductionDate = date('Y-m-d', strtotime('+1 day'));
 $selectedDate = isset($_GET['date']) ? trim((string)$_GET['date']) : $defaultProductionDate;
@@ -574,6 +600,27 @@ if ($attentionShortfall && !empty($groupedData) && is_array($groupedData)) {
     });
 }
 
+if (!empty($groupedData) && is_array($groupedData)) {
+    $ingredientLoad = $db->prepare("
+        SELECT i.name, i.unit, fi.percentage
+        FROM formula_ingredients fi
+        JOIN ingredients i ON fi.ingredient_id = i.id
+        WHERE fi.dough_type_id = ?
+        ORDER BY fi.percentage DESC
+    ");
+    foreach ($groupedData as &$groupRow) {
+        $groupRow['ingredients'] = [];
+        $dtId = (int)($groupRow['dough_type_id'] ?? 0);
+        $totalPct = (float)($groupRow['formula']['total_percentage'] ?? 0);
+        if ($dtId <= 0 || $totalPct <= 0) {
+            continue;
+        }
+        $ingredientLoad->execute([$dtId]);
+        $groupRow['ingredients'] = $ingredientLoad->fetchAll(PDO::FETCH_ASSOC);
+    }
+    unset($groupRow);
+}
+
 // Set page title
 $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.production');
 ?>
@@ -591,6 +638,9 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                 <a class="bp-pack-link<?php echo $allProductionComplete ? ' bp-pack-link--ready' : ''; ?>" href="<?php echo htmlspecialchars($packListHref, ENT_QUOTES, 'UTF-8'); ?>">
                     <?php bakery_te('nav.pack_list'); ?>
                 </a>
+                <?php if (!empty($groupedData)): ?>
+                    <a class="bp-pack-link" href="#bp-mix-overview"><?php bakery_te('production.mix_overview_link'); ?></a>
+                <?php endif; ?>
             </div>
         </div>
         <?php if (!$isBaker): ?>
@@ -873,6 +923,49 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
+
+            <details class="bp-mix-overview" id="bp-mix-overview">
+                <summary class="bp-mix-overview__summary"><?php bakery_te('production.mix_overview_title'); ?></summary>
+                <p class="bp-mix-overview__lead"><?php bakery_te('production.mix_overview_lead'); ?></p>
+                <div class="bp-mix-grid">
+                    <?php foreach ($groupedData as $doughType => $overviewData):
+                        $overviewId = (int)($overviewData['dough_type_id'] ?? 0);
+                        $overviewKey = $overviewId > 0 ? ('batch-' . $overviewId) : ('batch-' . preg_replace('/[^a-z0-9]+/i', '-', (string)$doughType));
+                        $overviewPlanned = 0;
+                        $overviewMade = 0;
+                        $overviewLeft = 0;
+                        foreach ($overviewData['products'] as $overviewProduct) {
+                            $overviewPlanned += (int)$overviewProduct['planned_quantity'];
+                            $overviewMade += (int)$overviewProduct['made_quantity'];
+                            $overviewLeft += (int)$overviewProduct['remaining_quantity'];
+                        }
+                        $overviewHasFormula = !empty($overviewData['ingredients'])
+                            && (float)($overviewData['formula']['total_percentage'] ?? 0) > 0
+                            && $overviewId > 0;
+                    ?>
+                        <article class="bp-mix-card">
+                            <h3 class="bp-mix-card__title"><?php echo htmlspecialchars((string)$doughType, ENT_QUOTES, 'UTF-8'); ?></h3>
+                            <p class="bp-mix-card__meta"><?php echo htmlspecialchars(bakery_t('production.line_meta', [
+                                'planned' => number_format($overviewPlanned),
+                                'made' => number_format($overviewMade),
+                                'left' => number_format($overviewLeft),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php if ($overviewHasFormula):
+                                $overviewFlour = $overviewData['total_weight_grams'] / ($overviewData['formula']['total_percentage'] / 100);
+                                bakery_production_echo_formula_items(
+                                    $overviewData['ingredients'],
+                                    (float)$overviewFlour,
+                                    (float)$overviewData['total_weight_grams'],
+                                    $isBaker
+                                );
+                            else: ?>
+                                <p class="bp-mix-card__empty"><?php bakery_te('production.mix_no_formula'); ?></p>
+                            <?php endif; ?>
+                            <a class="bp-mix-card__jump" href="#<?php echo htmlspecialchars($overviewKey, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.mix_work_this'); ?></a>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            </details>
 
             <?php foreach ($groupedData as $doughType => $data):
                 $doughTypeId = $data['dough_type_id'] ?? null;

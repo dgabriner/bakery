@@ -53,6 +53,19 @@ function bakery_sfb_community_ready(PDO $db) {
         && table_exists($db, 'sfb_batch_shares');
 }
 
+/** Whether the Batch Builder additions from migration 062 are applied. */
+function bakery_sfb_builder_ready(PDO $db) {
+    return bakery_sfb_formula_snapshots_ready($db)
+        && bakery_sfb_discussion_ready($db)
+        && column_exists($db, 'sfb_formulas', 'remixed_from_batch_id')
+        && column_exists($db, 'sfb_batch_messages', 'phase');
+}
+
+/** Phases a batch question or photo can attach to. */
+function bakery_sfb_builder_phases() {
+    return ['starter', 'mix', 'development', 'shape', 'bake', 'final'];
+}
+
 /** Public circle pages: portal bakers and staff coaches share these URLs. */
 function bakery_sfb_community_scripts() {
     return [
@@ -702,8 +715,9 @@ function bakery_sfb_formulas(PDO $db, $customerId) {
     if (!table_exists($db, 'sfb_formulas')) {
         return [];
     }
+    $remixColumn = column_exists($db, 'sfb_formulas', 'remixed_from_batch_id') ? ', remixed_from_batch_id' : '';
     $stmt = $db->prepare(
-        'SELECT id, name, description, target_dough_g, notes, is_template, updated_at
+        'SELECT id, name, description, target_dough_g, notes, is_template, updated_at' . $remixColumn . '
          FROM sfb_formulas WHERE customer_id = ? ORDER BY updated_at DESC, id DESC'
     );
     $stmt->execute([(int)$customerId]);
@@ -748,8 +762,9 @@ function bakery_sfb_formula(PDO $db, $customerId, $formulaId) {
     if (!table_exists($db, 'sfb_formulas')) {
         return null;
     }
+    $remixColumn = column_exists($db, 'sfb_formulas', 'remixed_from_batch_id') ? ', remixed_from_batch_id' : '';
     $stmt = $db->prepare(
-        'SELECT id, customer_id, name, description, target_dough_g, is_template, notes, updated_at
+        'SELECT id, customer_id, name, description, target_dough_g, is_template, notes, updated_at' . $remixColumn . '
          FROM sfb_formulas
          WHERE id = ? AND (customer_id = ? OR (customer_id IS NULL AND is_template = 1))
          LIMIT 1'
@@ -1286,7 +1301,8 @@ function bakery_sfb_add_batch_message(
     $messageType = 'comment',
     $authorCustomerId = null,
     $authorUserId = null,
-    $parentMessageId = null
+    $parentMessageId = null,
+    $phase = null
 ) {
     if (!bakery_sfb_discussion_ready($db)) {
         throw new RuntimeException('Batch discussions are not ready yet');
@@ -1298,9 +1314,16 @@ function bakery_sfb_add_batch_message(
     $body = trim((string)$body);
     $messageType = (string)$messageType;
     $parentMessageId = (int)$parentMessageId;
+    $phase = trim((string)$phase);
 
     if ($batchId <= 0 || !in_array($authorType, ['baker', 'admin'], true)) {
         throw new InvalidArgumentException('Invalid batch discussion message');
+    }
+    if ($phase !== '' && !in_array($phase, bakery_sfb_builder_phases(), true)) {
+        throw new InvalidArgumentException('Unknown batch phase');
+    }
+    if ($phase !== '' && !column_exists($db, 'sfb_batch_messages', 'phase')) {
+        throw new RuntimeException('Batch phases need a database update (migration 062)');
     }
     if ($authorName === '' || strlen($authorName) > 120) {
         throw new InvalidArgumentException('A valid author name is required');
@@ -1330,12 +1353,17 @@ function bakery_sfb_add_batch_message(
 
     $customerId = (int)$authorCustomerId;
     $userId = (int)$authorUserId;
+    $phaseColumn = column_exists($db, 'sfb_batch_messages', 'phase');
     $stmt = $db->prepare(
-        'INSERT INTO sfb_batch_messages
-         (batch_id, parent_message_id, author_customer_id, author_user_id, author_type, author_name, message_type, body)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        $phaseColumn
+            ? 'INSERT INTO sfb_batch_messages
+                 (batch_id, parent_message_id, author_customer_id, author_user_id, author_type, author_name, message_type, body, phase)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            : 'INSERT INTO sfb_batch_messages
+                 (batch_id, parent_message_id, author_customer_id, author_user_id, author_type, author_name, message_type, body)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->execute([
+    $params = [
         $batchId,
         $parentMessageId > 0 ? $parentMessageId : null,
         $customerId > 0 ? $customerId : null,
@@ -1344,7 +1372,11 @@ function bakery_sfb_add_batch_message(
         $authorName,
         $messageType,
         $body,
-    ]);
+    ];
+    if ($phaseColumn) {
+        $params[] = $phase !== '' ? $phase : null;
+    }
+    $stmt->execute($params);
     $messageId = (int)$db->lastInsertId();
 
     if ($authorType === 'admin' && $parent && $parent['message_type'] === 'question') {
@@ -1376,10 +1408,11 @@ function bakery_sfb_batch_messages(PDO $db, $batchId) {
     if (!bakery_sfb_discussion_ready($db)) {
         return [];
     }
+    $phaseColumn = column_exists($db, 'sfb_batch_messages', 'phase') ? ', phase' : '';
     $stmt = $db->prepare(
         'SELECT id, batch_id, parent_message_id, author_customer_id, author_user_id,
                 author_type, author_name, message_type, body, is_resolved,
-                resolved_at, resolved_by_user_id, created_at, updated_at
+                resolved_at, resolved_by_user_id, created_at, updated_at' . $phaseColumn . '
          FROM sfb_batch_messages
          WHERE batch_id = ?
          ORDER BY COALESCE(parent_message_id, id), parent_message_id IS NOT NULL, created_at, id'
@@ -1401,6 +1434,984 @@ function bakery_sfb_message_threads(array $messages) {
         }
     }
     return ['roots' => $roots, 'replies' => $replies];
+}
+
+/**
+ * Resolved coach answers on a bake: the worked examples a shared bake card
+ * shows. Unresolved questions stay private to the baker and the coach.
+ */
+function bakery_sfb_batch_resolved_qna(PDO $db, $batchId, $limit = 10) {
+    $threads = bakery_sfb_message_threads(bakery_sfb_batch_messages($db, $batchId));
+    $out = [];
+    foreach ($threads['roots'] as $root) {
+        if ($root['message_type'] !== 'question' || (int)$root['is_resolved'] !== 1) {
+            continue;
+        }
+        $root['replies'] = $threads['replies'][(int)$root['id']] ?? [];
+        $out[] = $root;
+        if (count($out) >= max(1, (int)$limit)) {
+            break;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Compare the frozen snapshot lines against the live source formula lines.
+ * Pure function; percentage drift is judged at 0.01 tolerance.
+ *
+ * @return array{drifted: bool, changed: array, added: array, removed: array}
+ */
+function bakery_sfb_snapshot_drift(array $snapshotLines, array $currentLines) {
+    $snap = [];
+    foreach ($snapshotLines as $line) {
+        $snap[mb_strtolower(trim((string)$line['line_name']))] = (float)$line['percentage'];
+    }
+    $cur = [];
+    foreach ($currentLines as $line) {
+        $name = isset($line['line_name']) ? $line['line_name'] : '';
+        $pct = isset($line['percentage']) ? (float)$line['percentage'] : 0.0;
+        $key = mb_strtolower(trim((string)($line['line_name'] ?? $name)));
+        $cur[$key] = $pct;
+    }
+    $changed = [];
+    $added = [];
+    foreach ($cur as $key => $pct) {
+        if (!array_key_exists($key, $snap)) {
+            $added[] = $key;
+        } elseif (abs($snap[$key] - $pct) >= 0.01) {
+            $changed[] = $key;
+        }
+    }
+    $removed = array_values(array_diff(array_keys($snap), array_keys($cur)));
+    return [
+        'drifted' => $changed || $added || $removed,
+        'changed' => $changed,
+        'added' => $added,
+        'removed' => $removed,
+    ];
+}
+
+/**
+ * Copy a shared bake's frozen formula into a baker's own journal.
+ * Snapshot lines carry names only, so lines are re-attached by name:
+ * standard library ingredients match exactly, unknown ones become custom
+ * ingredients owned by the remixer, and the original baker's starter line is
+ * replaced with the remixer's own starter. Provenance lands on
+ * sfb_formulas.remixed_from_batch_id so credit travels with the formula.
+ */
+function bakery_sfb_remix_shared_formula(PDO $db, $customerId, $batchId) {
+    if (!bakery_sfb_community_ready($db)) {
+        throw new RuntimeException('The community forum is not ready yet');
+    }
+    if (!bakery_sfb_builder_ready($db)) {
+        throw new RuntimeException('Formula remix needs a database update (migration 062)');
+    }
+    $customerId = (int)$customerId;
+    $batchId = (int)$batchId;
+
+    $shared = bakery_sfb_shared_batch($db, $batchId);
+    if (!$shared) {
+        throw new InvalidArgumentException('That bake has not been shared');
+    }
+    $snapshot = bakery_sfb_batch_formula_snapshot($db, $batchId);
+    $snapshotLines = bakery_sfb_batch_formula_snapshot_lines($db, $batchId);
+    if (!$snapshot || !$snapshotLines) {
+        throw new InvalidArgumentException('This bake has no frozen formula to copy');
+    }
+
+    // Standard ingredient lookup by exact name (shared library only).
+    $standardByName = [];
+    foreach ($db->query(
+        'SELECT id, name FROM sfb_ingredients WHERE customer_id IS NULL'
+    ) as $row) {
+        $standardByName[mb_strtolower(trim((string)$row['name']))] = (int)$row['id'];
+    }
+    // Custom ingredients already owned by the remixer.
+    $ownByName = [];
+    foreach (bakery_sfb_custom_ingredients($db, $customerId, false) as $row) {
+        $ownByName[mb_strtolower(trim((string)$row['name']))] = (int)$row['id'];
+    }
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $ins = $db->prepare(
+            'INSERT INTO sfb_formulas (customer_id, name, description, target_dough_g, is_template, remixed_from_batch_id)
+             VALUES (?, ?, ?, ?, 0, ?)'
+        );
+        $ins->execute([
+            $customerId,
+            (string)$snapshot['formula_name'],
+            $snapshot['description'] !== null && (string)$snapshot['description'] !== '' ? (string)$snapshot['description'] : null,
+            $snapshot['target_dough_g'],
+            $batchId,
+        ]);
+        $formulaId = (int)$db->lastInsertId();
+
+        $lineIns = $db->prepare(
+            'INSERT INTO sfb_formula_ingredients (formula_id, ingredient_id, starter_id, percentage, sort_order)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $starterId = null;
+        $sort = 0;
+        foreach ($snapshotLines as $line) {
+            $sort++;
+            $kind = (string)$line['line_kind'];
+            $percentage = (float)$line['percentage'];
+            if ($kind === 'starter') {
+                // The original starter belongs to another baker; use mine.
+                if ($starterId === null) {
+                    $starter = bakery_sfb_ensure_starter($db, $customerId);
+                    $starterId = (int)$starter['id'];
+                }
+                $lineIns->execute([$formulaId, null, $starterId, $percentage, $sort]);
+                continue;
+            }
+            $key = mb_strtolower(trim((string)$line['line_name']));
+            $ingredientId = $standardByName[$key] ?? ($ownByName[$key] ?? null);
+            if ($ingredientId === null) {
+                $category = in_array($kind, array_keys(bakery_sfb_ingredient_categories()), true) ? $kind : 'other';
+                $ingredientId = bakery_sfb_create_ingredient($db, $customerId, mb_substr((string)$line['line_name'], 0, 100), $category);
+                $ownByName[$key] = (int)$ingredientId;
+            }
+            $lineIns->execute([$formulaId, (int)$ingredientId, null, $percentage, $sort]);
+        }
+
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $formulaId;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/* ── Learning Center (Prompt 24) ──────────────────────────────────────── */
+
+/** Whether the learning-center tables from migration 063 exist. */
+function bakery_sfb_learning_ready(PDO $db) {
+    return table_exists($db, 'sfb_courses')
+        && table_exists($db, 'sfb_course_lessons')
+        && table_exists($db, 'sfb_lesson_steps')
+        && table_exists($db, 'sfb_lesson_progress');
+}
+
+/** Courses with lesson counts; inactive courses only when asked (admin views). */
+function bakery_sfb_courses(PDO $db, $includeInactive = false) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return [];
+    }
+    $sql = 'SELECT c.id, c.title, c.description, c.sort_order, c.is_active,
+                   (SELECT COUNT(*) FROM sfb_course_lessons l WHERE l.course_id = c.id AND l.is_active = 1) AS lesson_count
+            FROM sfb_courses c';
+    if (!$includeInactive) {
+        $sql .= ' WHERE c.is_active = 1';
+    }
+    $sql .= ' ORDER BY c.sort_order, c.id';
+    return $db->query($sql)->fetchAll();
+}
+
+function bakery_sfb_course(PDO $db, $courseId) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare('SELECT id, title, description, sort_order, is_active FROM sfb_courses WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$courseId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_create_course(PDO $db, $title, $description = '') {
+    if (!bakery_sfb_learning_ready($db)) {
+        throw new RuntimeException('The learning center needs a database update (migration 063)');
+    }
+    $title = trim((string)$title);
+    if ($title === '' || mb_strlen($title) > 150) {
+        throw new InvalidArgumentException('Course title is required (150 characters max)');
+    }
+    $description = trim((string)$description);
+    $next = (int)$db->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sfb_courses')->fetchColumn();
+    $ins = $db->prepare('INSERT INTO sfb_courses (title, description, sort_order) VALUES (?, ?, ?)');
+    $ins->execute([$title, $description !== '' ? $description : null, $next]);
+    return (int)$db->lastInsertId();
+}
+
+function bakery_sfb_toggle_course(PDO $db, $courseId) {
+    $stmt = $db->prepare('UPDATE sfb_courses SET is_active = 1 - is_active WHERE id = ?');
+    $stmt->execute([(int)$courseId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** Lessons of a course, ordered. Inactive lessons included only for staff. */
+function bakery_sfb_course_lessons(PDO $db, $courseId, $includeInactive = false) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return [];
+    }
+    $sql = 'SELECT id, course_id, title, summary, external_url, sort_order, is_active
+            FROM sfb_course_lessons WHERE course_id = ?';
+    if (!$includeInactive) {
+        $sql .= ' AND is_active = 1';
+    }
+    $sql .= ' ORDER BY sort_order, id';
+    $stmt = $db->prepare($sql);
+    $stmt->execute([(int)$courseId]);
+    return $stmt->fetchAll();
+}
+
+/** One lesson plus its course context. */
+function bakery_sfb_lesson(PDO $db, $lessonId) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT l.id, l.course_id, l.title, l.summary, l.external_url, l.sort_order, l.is_active,
+                c.title AS course_title
+         FROM sfb_course_lessons l
+         JOIN sfb_courses c ON c.id = l.course_id
+         WHERE l.id = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$lessonId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_create_lesson(PDO $db, $courseId, $title, $summary = '', $externalUrl = '') {
+    if (!bakery_sfb_learning_ready($db)) {
+        throw new RuntimeException('The learning center needs a database update (migration 063)');
+    }
+    if (!bakery_sfb_course($db, $courseId)) {
+        throw new InvalidArgumentException('Course not found');
+    }
+    $title = trim((string)$title);
+    if ($title === '' || mb_strlen($title) > 150) {
+        throw new InvalidArgumentException('Lesson title is required (150 characters max)');
+    }
+    $summary = trim((string)$summary);
+    $externalUrl = trim((string)$externalUrl);
+    if ($externalUrl !== '' && !preg_match('#^https?://#i', $externalUrl)) {
+        throw new InvalidArgumentException('External links must start with http:// or https://');
+    }
+    $count = $db->prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sfb_course_lessons WHERE course_id = ?');
+    $count->execute([(int)$courseId]);
+    $next = (int)$count->fetchColumn();
+    $ins = $db->prepare(
+        'INSERT INTO sfb_course_lessons (course_id, title, summary, external_url, sort_order)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $ins->execute([
+        (int)$courseId,
+        $title,
+        $summary !== '' ? $summary : null,
+        $externalUrl !== '' ? $externalUrl : null,
+        $next,
+    ]);
+    return (int)$db->lastInsertId();
+}
+
+function bakery_sfb_toggle_lesson(PDO $db, $lessonId) {
+    $stmt = $db->prepare('UPDATE sfb_course_lessons SET is_active = 1 - is_active WHERE id = ?');
+    $stmt->execute([(int)$lessonId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** Steps of a lesson in teaching order. */
+function bakery_sfb_lesson_steps(PDO $db, $lessonId) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT id, lesson_id, body_text, media_path, media_kind, sort_order
+         FROM sfb_lesson_steps WHERE lesson_id = ? ORDER BY sort_order, id'
+    );
+    $stmt->execute([(int)$lessonId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Store an uploaded photo/video for a lesson step under storage/sfb_media/.
+ * Returns the relative path and kind, or throws on invalid input.
+ */
+function bakery_sfb_save_education_media($file) {
+    if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new InvalidArgumentException('Upload failed — try again');
+    }
+    if ($file['size'] <= 0 || $file['size'] > 256 * 1024 * 1024) {
+        throw new InvalidArgumentException('Media must be between 1 byte and 256 MB');
+    }
+
+    $extension = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
+    $imageTypes = [
+        'jpg' => 'photo', 'jpeg' => 'photo', 'png' => 'photo',
+        'gif' => 'photo', 'webp' => 'photo',
+    ];
+    $videoTypes = [
+        'mp4' => 'video', 'webm' => 'video', 'm4v' => 'video', 'mov' => 'video',
+    ];
+    $kind = $imageTypes[$extension] ?? ($videoTypes[$extension] ?? null);
+    if ($kind === null) {
+        throw new InvalidArgumentException('Use a photo (jpg, png, gif, webp) or video (mp4, webm, m4v, mov)');
+    }
+
+    // Trust the real bytes over the browser's claimed type.
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $detected = (string)finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        if ($kind === 'photo' && strpos($detected, 'image/') !== 0) {
+            throw new InvalidArgumentException('That file is not an image');
+        }
+        if ($kind === 'video' && strpos($detected, 'video/') !== 0 && strpos($detected, 'application/octet-stream') !== 0) {
+            throw new InvalidArgumentException('That file is not a video');
+        }
+    }
+
+    $subDir = date('Y') . '/' . date('m');
+    $targetDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'sfb_media'
+        . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $subDir);
+    if (!is_dir($targetDir) && !@mkdir($targetDir, 0755, true)) {
+        throw new RuntimeException('Could not create the media folder');
+    }
+    $unique = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
+    $filename = date('Ymd_His') . '_' . $unique . '.' . $extension;
+    $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+    if (!@move_uploaded_file($file['tmp_name'], $targetPath)) {
+        throw new RuntimeException('Could not store the uploaded file');
+    }
+    return ['path' => $subDir . '/' . $filename, 'kind' => $kind];
+}
+
+function bakery_sfb_media_path_safe($relativePath) {
+    $relativePath = (string)$relativePath;
+    if ($relativePath === '' || strpos($relativePath, '..') !== false) {
+        return false;
+    }
+    if (!preg_match('/^[A-Za-z0-9._\-\/]+$/', $relativePath)) {
+        return false;
+    }
+    $extension = strtolower(pathinfo($relativePath, PATHINFO_EXTENSION));
+    $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'm4v', 'mov'];
+    return in_array($extension, $allowed, true);
+}
+
+function bakery_sfb_media_content_type($relativePath) {
+    static $types = [
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
+        'gif' => 'image/gif', 'webp' => 'image/webp',
+        'mp4' => 'video/mp4', 'webm' => 'video/webm', 'm4v' => 'video/mp4',
+        'mov' => 'video/quicktime',
+    ];
+    $extension = strtolower(pathinfo((string)$relativePath, PATHINFO_EXTENSION));
+    return $types[$extension] ?? 'application/octet-stream';
+}
+
+/** Gated streaming URL — never a direct storage path. */
+function bakery_sfb_media_url($relativePath) {
+    return BASE_URL . 'sfb_media.php?f=' . rawurlencode((string)$relativePath);
+}
+
+function bakery_sfb_add_lesson_step(PDO $db, $lessonId, $bodyText, $mediaPath = '', $mediaKind = 'photo') {
+    if (!bakery_sfb_learning_ready($db)) {
+        throw new RuntimeException('The learning center needs a database update (migration 063)');
+    }
+    $lesson = bakery_sfb_lesson($db, $lessonId);
+    if (!$lesson) {
+        throw new InvalidArgumentException('Lesson not found');
+    }
+    $bodyText = trim((string)$bodyText);
+    $mediaPath = trim((string)$mediaPath);
+    if ($bodyText === '' && $mediaPath === '') {
+        throw new InvalidArgumentException('A step needs words, a photo, or a video');
+    }
+    if ($mediaPath !== '' && !in_array($mediaKind, ['photo', 'video'], true)) {
+        throw new InvalidArgumentException('Unknown media kind');
+    }
+    $count = $db->prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sfb_lesson_steps WHERE lesson_id = ?');
+    $count->execute([(int)$lessonId]);
+    $ins = $db->prepare(
+        'INSERT INTO sfb_lesson_steps (lesson_id, body_text, media_path, media_kind, sort_order)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $ins->execute([
+        (int)$lessonId,
+        $bodyText !== '' ? $bodyText : null,
+        $mediaPath !== '' ? $mediaPath : null,
+        $mediaPath !== '' ? $mediaKind : 'photo',
+        (int)$count->fetchColumn(),
+    ]);
+    return (int)$db->lastInsertId();
+}
+
+/** Delete a step row and its stored media file. */
+function bakery_sfb_delete_lesson_step(PDO $db, $stepId) {
+    $stmt = $db->prepare('SELECT id, media_path FROM sfb_lesson_steps WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$stepId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        throw new InvalidArgumentException('Step not found');
+    }
+    $db->prepare('DELETE FROM sfb_lesson_steps WHERE id = ?')->execute([(int)$row['id']]);
+    $relative = (string)($row['media_path'] ?? '');
+    if ($relative !== '' && bakery_sfb_media_path_safe($relative)) {
+        $absolute = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'sfb_media'
+            . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+        $realBase = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'sfb_media');
+        $realFile = realpath($absolute);
+        if ($realBase !== false && $realFile !== false && strpos($realFile, $realBase) === 0 && is_file($realFile)) {
+            @unlink($realFile);
+        }
+    }
+    return true;
+}
+
+/** Swap a step one position up or down within its lesson. */
+function bakery_sfb_move_lesson_step(PDO $db, $lessonId, $stepId, $direction) {
+    $steps = bakery_sfb_lesson_steps($db, $lessonId);
+    $index = null;
+    foreach ($steps as $i => $step) {
+        if ((int)$step['id'] === (int)$stepId) {
+            $index = $i;
+            break;
+        }
+    }
+    if ($index === null) {
+        throw new InvalidArgumentException('Step not found in this lesson');
+    }
+    $swapWith = $direction === 'up' ? $index - 1 : $index + 1;
+    if ($swapWith < 0 || $swapWith >= count($steps)) {
+        return false;
+    }
+    $upd = $db->prepare('UPDATE sfb_lesson_steps SET sort_order = ? WHERE id = ?');
+    $upd->execute([$index + 1, (int)$steps[$swapWith]['id']]);
+    $upd->execute([$swapWith + 1, (int)$steps[$index]['id']]);
+    return true;
+}
+
+/** Completed step ids for one baker on one lesson. */
+function bakery_sfb_lesson_progress(PDO $db, $customerId, $lessonId) {
+    if (!bakery_sfb_learning_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT step_id FROM sfb_lesson_progress WHERE customer_id = ? AND lesson_id = ?'
+    );
+    $stmt->execute([(int)$customerId, (int)$lessonId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $stepId) {
+        $out[] = (int)$stepId;
+    }
+    return $out;
+}
+
+/** Toggle one step checkmark; returns true when the step is now complete. */
+function bakery_sfb_toggle_lesson_progress(PDO $db, $customerId, $lessonId, $stepId) {
+    if (!bakery_sfb_learning_ready($db)) {
+        throw new RuntimeException('The learning center needs a database update (migration 063)');
+    }
+    $stepOk = $db->prepare('SELECT 1 FROM sfb_lesson_steps WHERE id = ? AND lesson_id = ? LIMIT 1');
+    $stepOk->execute([(int)$stepId, (int)$lessonId]);
+    if (!$stepOk->fetchColumn()) {
+        throw new InvalidArgumentException('Step not found in this lesson');
+    }
+    $del = $db->prepare('DELETE FROM sfb_lesson_progress WHERE customer_id = ? AND lesson_id = ? AND step_id = ?');
+    $del->execute([(int)$customerId, (int)$lessonId, (int)$stepId]);
+    if ($del->rowCount() > 0) {
+        return false;
+    }
+    $ins = $db->prepare('INSERT IGNORE INTO sfb_lesson_progress (customer_id, lesson_id, step_id) VALUES (?, ?, ?)');
+    $ins->execute([(int)$customerId, (int)$lessonId, (int)$stepId]);
+    return true;
+}
+
+/** [completed steps, total steps] across a course's active lessons for one baker. */
+function bakery_sfb_course_progress(PDO $db, $customerId, $courseId) {
+    $total = 0;
+    foreach (bakery_sfb_course_lessons($db, $courseId) as $lesson) {
+        $total += count(bakery_sfb_lesson_steps($db, (int)$lesson['id']));
+    }
+    if ($total === 0) {
+        return [0, 0];
+    }
+    $done = 0;
+    foreach (bakery_sfb_course_lessons($db, $courseId) as $lesson) {
+        $done += count(bakery_sfb_lesson_progress($db, $customerId, (int)$lesson['id']));
+    }
+    return [$done, $total];
+}
+
+/* ── Home Base Onboarding (Prompt 25) ─────────────────────────────────── */
+
+/** Whether the invite table from migration 064 exists. */
+function bakery_sfb_invites_ready(PDO $db) {
+    return table_exists($db, 'sfb_invites');
+}
+
+/**
+ * Mint an invite code. Codes avoid ambiguous characters and are stored
+ * uppercase; lookup normalizes before matching.
+ */
+function bakery_sfb_create_invite(PDO $db, $intent = 'learn', $label = '', $createdByUserId = null) {
+    if (!bakery_sfb_invites_ready($db)) {
+        throw new RuntimeException('Invites need a database update (migration 064)');
+    }
+    $intent = $intent === 'share' ? 'share' : 'learn';
+    $label = trim((string)$label);
+    if ($label !== '' && mb_strlen($label) > 150) {
+        throw new InvalidArgumentException('Invite label must be 150 characters or fewer');
+    }
+    $alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        $code = 'SFB-';
+        for ($i = 0; $i < 6; $i++) {
+            $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+        try {
+            $ins = $db->prepare(
+                'INSERT INTO sfb_invites (code, intent, label, created_by_user_id) VALUES (?, ?, ?, ?)'
+            );
+            $userId = (int)$createdByUserId;
+            $ins->execute([$code, $intent, $label !== '' ? $label : null, $userId > 0 ? $userId : null]);
+            return bakery_sfb_invite_lookup($db, $code);
+        } catch (PDOException $e) {
+            // Unique-key collision on the code: draw another one.
+            if (strpos($e->getMessage(), '1062') === false && strpos($e->getMessage(), 'uq_sfb_invites_code') === false) {
+                throw $e;
+            }
+        }
+    }
+    throw new RuntimeException('Could not generate a unique invite code');
+}
+
+function bakery_sfb_normalize_invite_code($code) {
+    return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', trim((string)$code)));
+}
+
+/** An unused invite row for the given code, or null. */
+function bakery_sfb_invite_lookup(PDO $db, $code) {
+    if (!bakery_sfb_invites_ready($db)) {
+        return null;
+    }
+    $normalized = bakery_sfb_normalize_invite_code($code);
+    if (strlen($normalized) < 4) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, code, intent, label FROM sfb_invites
+         WHERE REPLACE(code, "-", "") = ? AND used_by_customer_id IS NULL LIMIT 1'
+    );
+    $stmt->execute([$normalized]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/** Claim an invite for one customer. Returns true only for the first claim. */
+function bakery_sfb_mark_invite_used(PDO $db, $inviteId, $customerId) {
+    if (!bakery_sfb_invites_ready($db)) {
+        return false;
+    }
+    $stmt = $db->prepare(
+        'UPDATE sfb_invites
+         SET used_by_customer_id = ?, used_at = NOW()
+         WHERE id = ? AND used_by_customer_id IS NULL'
+    );
+    $stmt->execute([(int)$customerId, (int)$inviteId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** Recent invites, newest first, for the staff authoring screen. */
+function bakery_sfb_recent_invites(PDO $db, $limit = 12) {
+    if (!bakery_sfb_invites_ready($db)) {
+        return [];
+    }
+    return $db->query(
+        'SELECT id, code, intent, label, used_by_customer_id, used_at, created_at
+         FROM sfb_invites ORDER BY id DESC LIMIT ' . max(1, (int)$limit)
+    )->fetchAll();
+}
+
+/**
+ * First-run next actions for a brand-new baker's home base.
+ * Each action carries a done flag so the welcome strip can retire steps
+ * as they happen. Lesson action is present only when a course exists.
+ */
+function bakery_sfb_first_run_actions(PDO $db, $customerId) {
+    $customerId = (int)$customerId;
+    $hasStarter = count(bakery_sfb_starters($db, $customerId)) > 0;
+    $hasFormula = count(bakery_sfb_formulas($db, $customerId)) > 0;
+    $firstLesson = null;
+    foreach (bakery_sfb_courses($db) as $course) {
+        foreach (bakery_sfb_course_lessons($db, (int)$course['id']) as $lesson) {
+            $firstLesson = $lesson;
+            break 2;
+        }
+    }
+    $actions = [
+        ['key' => 'starter', 'done' => $hasStarter],
+        ['key' => 'formula', 'done' => $hasFormula],
+        ['key' => 'lesson', 'done' => false, 'lesson_id' => $firstLesson !== null ? (int)$firstLesson['id'] : null,
+         'lesson_title' => $firstLesson !== null ? (string)$firstLesson['title'] : ''],
+    ];
+    return $actions;
+}
+
+/* ── Education Payments (Prompt 26) ───────────────────────────────────── */
+
+/** Whether the offerings and purchases tables from migration 066 exist. */
+function bakery_sfb_payments_ready(PDO $db) {
+    return table_exists($db, 'sfb_offerings')
+        && table_exists($db, 'sfb_offering_purchases');
+}
+
+function bakery_sfb_offerings(PDO $db, $includeInactive = false) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return [];
+    }
+    $sql = 'SELECT id, title, description, price_cents, currency, kind, entitlement_days, sort_order, is_active
+            FROM sfb_offerings';
+    if (!$includeInactive) {
+        $sql .= ' WHERE is_active = 1';
+    }
+    $sql .= ' ORDER BY sort_order, id';
+    return $db->query($sql)->fetchAll();
+}
+
+function bakery_sfb_offering(PDO $db, $offeringId) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare('SELECT id, title, description, price_cents, currency, kind, entitlement_days, is_active FROM sfb_offerings WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$offeringId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_create_offering(PDO $db, $title, $priceDollars, $kind = 'class', $description = '', $entitlementDays = null) {
+    if (!bakery_sfb_payments_ready($db)) {
+        throw new RuntimeException('Education payments need a database update (migration 066)');
+    }
+    if (!in_array((string)$kind, ['class', 'membership', 'kit'], true)) {
+        throw new InvalidArgumentException('Choose class, membership, or kit');
+    }
+    $title = trim((string)$title);
+    if ($title === '' || mb_strlen($title) > 150) {
+        throw new InvalidArgumentException('Offering title is required (150 characters max)');
+    }
+    $priceCents = (int)round(((float)$priceDollars) * 100);
+    if ($priceCents < 0 || $priceCents > 100000000) {
+        throw new InvalidArgumentException('Price must be between 0 and 1,000,000 dollars');
+    }
+    $days = $entitlementDays === null ? null : max(0, (int)$entitlementDays);
+    $description = trim((string)$description);
+    $next = (int)$db->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sfb_offerings')->fetchColumn();
+    $ins = $db->prepare(
+        'INSERT INTO sfb_offerings (title, description, price_cents, currency, kind, entitlement_days, sort_order)
+         VALUES (?, ?, ?, "USD", ?, ?, ?)'
+    );
+    $ins->execute([$title, $description !== '' ? $description : null, $priceCents, $kind, $days, $next]);
+    return (int)$db->lastInsertId();
+}
+
+function bakery_sfb_toggle_offering(PDO $db, $offeringId) {
+    $stmt = $db->prepare('UPDATE sfb_offerings SET is_active = 1 - is_active WHERE id = ?');
+    $stmt->execute([(int)$offeringId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** One purchase attempt with the offering's title and price frozen in. */
+function bakery_sfb_record_purchase_intent(PDO $db, $customerId, $offeringId) {
+    if (!bakery_sfb_payments_ready($db)) {
+        throw new RuntimeException('Education payments need a database update (migration 066)');
+    }
+    $offering = bakery_sfb_offering($db, $offeringId);
+    if (!$offering || (int)$offering['is_active'] !== 1) {
+        throw new InvalidArgumentException('That offering is not available');
+    }
+    $ins = $db->prepare(
+        'INSERT INTO sfb_offering_purchases
+            (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
+         VALUES (?, ?, ?, ?, ?, "intent")'
+    );
+    $ins->execute([
+        (int)$customerId,
+        (int)$offering['id'],
+        (string)$offering['title'],
+        (int)$offering['price_cents'],
+        (string)$offering['currency'],
+    ]);
+    return (int)$db->lastInsertId();
+}
+
+function bakery_sfb_purchase(PDO $db, $purchaseId) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT p.*, o.entitlement_days
+         FROM sfb_offering_purchases p
+         LEFT JOIN sfb_offerings o ON o.id = p.offering_id
+         WHERE p.id = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$purchaseId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Create a Square hosted checkout link for a recorded intent.
+ * Requires credentials or the test handler seam; on success the attempt
+ * moves to pending. Never invents a paid state.
+ */
+function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
+    if (!square_is_configured() && !isset($GLOBALS['bakery_square_api_handler'])) {
+        throw new RuntimeException('Square is not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID.');
+    }
+    require_once __DIR__ . '/square_config.php';
+    $purchase = bakery_sfb_purchase($db, $purchaseId);
+    if (!$purchase) {
+        throw new InvalidArgumentException('Purchase not found');
+    }
+    if (!in_array((string)$purchase['status'], ['intent', 'failed'], true)) {
+        throw new InvalidArgumentException('This purchase already has a checkout');
+    }
+
+    $resp = square_api_request('POST', '/v2/online-checkout/payment-links', [
+        'idempotency_key' => 'os-edu-purchase-' . (int)$purchase['id'] . '-' . date('Ymd'),
+        'order' => [
+            'location_id' => defined('SQUARE_LOCATION_ID') && SQUARE_LOCATION_ID !== '' ? SQUARE_LOCATION_ID : 'test-location',
+            'reference_id' => 'os-edu-' . (int)$purchase['id'],
+            'line_items' => [[
+                'name' => mb_substr((string)$purchase['offering_title_snapshot'], 0, 100),
+                'quantity' => '1',
+                'base_price_money' => [
+                    'amount' => (int)$purchase['price_cents_snapshot'],
+                    'currency' => (string)$purchase['currency_snapshot'],
+                ],
+            ]],
+        ],
+        'checkout_options' => [
+            'redirect_url' => rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/') . 'sfb_offerings.php?purchased=' . (int)$purchase['id'],
+        ],
+    ]);
+    $link = $resp['payment_link'] ?? [];
+    $url = (string)($link['url'] ?? '');
+    $orderIds = array_map('strval', (array)($link['order_ids'] ?? []));
+    if ($url === '') {
+        throw new RuntimeException('Square did not return a checkout link.');
+    }
+
+    $upd = $db->prepare(
+        'UPDATE sfb_offering_purchases
+         SET status = "pending", square_payment_link_id = ?, square_order_id = ?, checkout_url = ?
+         WHERE id = ?'
+    );
+    $upd->execute([
+        (string)($link['id'] ?? ''),
+        $orderIds[0] ?? null,
+        $url,
+        (int)$purchase['id'],
+    ]);
+    return ['url' => $url, 'payment_link_id' => (string)($link['id'] ?? ''), 'order_id' => $orderIds[0] ?? null];
+}
+
+/**
+ * Buy one offering: records the attempt first (one row per attempt), then
+ * creates the hosted checkout when Square is available. Without credentials
+ * the intent stays honestly recorded and the caller is told so.
+ *
+ * @return array{configured: bool, url: ?string, purchase_id: int}
+ */
+function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId) {
+    require_once __DIR__ . '/square_config.php';
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, $offeringId);
+    if ($forceNoSquare) {
+        return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId];
+    }
+    try {
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId);
+    } catch (Throwable $e) {
+        // The intent stays recorded; the caller shows the honest notice.
+        return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'error' => $e->getMessage()];
+    }
+    return ['configured' => true, 'url' => $checkout['url'], 'purchase_id' => $purchaseId];
+}
+
+/**
+ * Guarded state transitions. Each returns true only when it changed
+ * something, so webhook replays are naturally idempotent.
+ */
+function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePaymentId = null, $manualNote = '', $actorUserId = null) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return false;
+    }
+    $allowedFrom = [
+        'paid' => ['intent', 'pending', 'failed'],
+        'refunded' => ['paid'],
+        'canceled' => ['pending', 'intent', 'paid'],
+        'failed' => ['pending', 'intent'],
+    ];
+    $status = (string)$status;
+    if (!isset($allowedFrom[$status])) {
+        throw new InvalidArgumentException('Unknown purchase status');
+    }
+    $placeholders = implode(', ', array_fill(0, count($allowedFrom[$status]), '?'));
+    $sql = 'UPDATE sfb_offering_purchases
+            SET status = ?,
+                square_payment_id = COALESCE(?, square_payment_id),
+                manual_note = ' . ($manualNote !== '' && $manualNote !== null ? '?' : 'manual_note') . ',
+                actor_user_id = COALESCE(?, actor_user_id)' .
+            ($status === 'paid' ? ', paid_at = COALESCE(paid_at, NOW())' : '') . '
+            WHERE id = ? AND status IN (' . $placeholders . ')';
+    $values = [$status, $squarePaymentId];
+    if ($manualNote !== '' && $manualNote !== null) {
+        $values[] = $manualNote;
+    }
+    $actorId = (int)$actorUserId;
+    $values[] = $actorId > 0 ? $actorId : null;
+    $values[] = (int)$purchaseId;
+    foreach ($allowedFrom[$status] as $from) {
+        $values[] = $from;
+    }
+    $stmt = $db->prepare($sql);
+    $stmt->execute($values);
+    return $stmt->rowCount() > 0;
+}
+
+/** Paid, unexpired purchases for a customer: the entitlement set. */
+function bakery_sfb_customer_entitlements(PDO $db, $customerId) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT p.id AS purchase_id, p.offering_id, p.offering_title_snapshot, p.paid_at,
+                COALESCE(o.entitlement_days, 0) AS entitlement_days
+         FROM sfb_offering_purchases p
+         LEFT JOIN sfb_offerings o ON o.id = p.offering_id
+         WHERE p.customer_id = ? AND p.status = "paid"'
+    );
+    $stmt->execute([(int)$customerId]);
+    $out = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $days = (int)$row['entitlement_days'];
+        if ($days > 0) {
+            $expires = strtotime((string)$row['paid_at']) + $days * 86400;
+            if ($expires < time()) {
+                continue;
+            }
+        }
+        $out[] = $row;
+    }
+    return $out;
+}
+
+function bakery_sfb_customer_entitled_to(PDO $db, $customerId, $offeringId) {
+    foreach (bakery_sfb_customer_entitlements($db, $customerId) as $row) {
+        if ((string)$row['offering_id'] === (string)$offeringId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** A baker's own purchase history, newest first. */
+function bakery_sfb_customer_purchases(PDO $db, $customerId, $limit = 20) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status, checkout_url, created_at, paid_at
+         FROM sfb_offering_purchases WHERE customer_id = ?
+         ORDER BY id DESC LIMIT ' . max(1, (int)$limit)
+    );
+    $stmt->execute([(int)$customerId]);
+    return $stmt->fetchAll();
+}
+
+/** Recent attempts across all bakers for the staff ops card. */
+function bakery_sfb_recent_purchases(PDO $db, $limit = 15) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return [];
+    }
+    return $db->query(
+        'SELECT p.id, p.customer_id, c.name AS customer_name, p.offering_title_snapshot,
+                p.price_cents_snapshot, p.currency_snapshot, p.status, p.manual_note, p.created_at, p.paid_at
+         FROM sfb_offering_purchases p
+         LEFT JOIN customers c ON c.id = p.customer_id
+         ORDER BY p.id DESC LIMIT ' . max(1, (int)$limit)
+    )->fetchAll();
+}
+
+/**
+ * Education-side Square webhook truth. Handles payment.* and refund.* events;
+ * dedupes on event_id against the shared square_webhook_events ledger.
+ * Unknown or unmatched events are ignored — never guessed onto a purchase.
+ */
+function bakery_sfb_handle_education_webhook(PDO $db, array $payload): array {
+    if (!bakery_sfb_payments_ready($db)) {
+        return ['ok' => true, 'ignored' => true];
+    }
+    $eventId = (string)($payload['event_id'] ?? $payload['eventId'] ?? '');
+    $type = (string)($payload['type'] ?? '');
+    $object = $payload['data']['object'] ?? [];
+
+    if ($eventId !== '' && table_exists($db, 'square_webhook_events')) {
+        try {
+            $db->prepare('INSERT INTO square_webhook_events (event_id, event_type) VALUES (?, ?)')
+                ->execute([$eventId, $type]);
+        } catch (PDOException $e) {
+            return ['ok' => true, 'duplicate' => true, 'event_id' => $eventId];
+        }
+    }
+
+    $payment = null;
+    if (isset($object['payment']) && is_array($object['payment'])) {
+        $payment = $object['payment'];
+    } elseif (isset($object['id']) && (strpos($type, 'payment.') === 0)) {
+        $payment = $object;
+    }
+
+    // Refund events carry the refunded payment id on data.object.refund.payment_id.
+    if ($payment === null && isset($object['refund']['payment_id'])) {
+        $refundPaymentId = (string)$object['refund']['payment_id'];
+        $upd = $db->prepare(
+            'UPDATE sfb_offering_purchases SET status = "refunded"
+             WHERE square_payment_id = ? AND status IN ("paid")'
+        );
+        $upd->execute([$refundPaymentId]);
+        return ['ok' => true, 'refunded' => true, 'event_type' => $type];
+    }
+
+    if ($payment === null) {
+        return ['ok' => true, 'ignored' => true];
+    }
+
+    $paymentId = (string)($payment['id'] ?? '');
+    $orderIdRef = (string)($payment['order_id'] ?? ($payment['orderId'] ?? ''));
+    $paymentStatus = strtoupper((string)($payment['status'] ?? ''));
+
+    $find = $db->prepare(
+        'SELECT id, status FROM sfb_offering_purchases
+         WHERE (square_order_id IS NOT NULL AND square_order_id = ?)
+            OR (square_payment_id IS NOT NULL AND square_payment_id = ?)
+         ORDER BY id DESC LIMIT 1'
+    );
+    $find->execute([$orderIdRef, $paymentId]);
+    $purchase = $find->fetch();
+    if (!$purchase) {
+        return ['ok' => true, 'unmatched' => true, 'payment_id' => $paymentId];
+    }
+
+    $map = ['COMPLETED' => 'paid', 'FAILED' => 'failed', 'CANCELED' => 'canceled', 'VOIDED' => 'canceled'];
+    if (!isset($map[$paymentStatus])) {
+        return ['ok' => true, 'unmatched_status' => true, 'payment_status' => $paymentStatus];
+    }
+    $changed = bakery_sfb_set_purchase_status($db, (int)$purchase['id'], $map[$paymentStatus], $paymentId);
+    return ['ok' => true, 'changed' => $changed, 'purchase_id' => (int)$purchase['id'], 'status' => $map[$paymentStatus]];
 }
 
 /** Circles the product wants. Extra values appear only after the ENUM migration. */

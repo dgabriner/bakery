@@ -15,6 +15,18 @@ $recentBatches = array_slice($recentForReview, 0, 5);
 $starters = bakery_sfb_starters($db, $customerId);
 $formulaCount = count(bakery_sfb_formulas($db, $customerId));
 
+// First-run home base: show the welcome strip on the signup redirect or
+// whenever the baker has nothing started yet.
+$firstRun = ($_GET['welcome'] ?? '') === '1'
+    || (!$starters && $formulaCount === 0 && !$recentBatches);
+$firstRunActions = $firstRun ? bakery_sfb_first_run_actions($db, $customerId) : [];
+$firstRunLessonUrl = null;
+foreach ($firstRunActions as $action) {
+    if ($action['key'] === 'lesson' && !empty($action['lesson_id'])) {
+        $firstRunLessonUrl = 'sfb_lesson.php?lesson=' . (int)$action['lesson_id'];
+    }
+}
+
 $latestFeedings = [];
 foreach ($starters as $starter) {
     $feedings = bakery_sfb_starter_feedings($db, (int)$starter['id'], 1);
@@ -49,6 +61,38 @@ $portalCustomerName = $customer['name'];
 
   <main class="container sfb-app">
     <?php $sfbActiveTab = 'dashboard'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
+
+    <?php if ($firstRun): ?>
+      <section class="card" aria-labelledby="sfbFirstRun">
+        <div class="card-header"><h2 id="sfbFirstRun"><?php bakery_te('sfb.first_run_title'); ?></h2></div>
+        <div class="card-body">
+          <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.first_run_intro'); ?></p>
+          <ul class="line-list">
+            <?php foreach ($firstRunActions as $action): ?>
+              <li>
+                <span>
+                  <span class="badge <?php echo $action['done'] ? 'badge-ok' : 'badge-info'; ?>"><?php
+                    bakery_te($action['done'] ? 'sfb.builder_step_done' : 'sfb.builder_step_todo');
+                  ?></span>
+                  <?php bakery_te('sfb.first_run_' . $action['key']); ?>
+                </span>
+                <?php if (!$action['done']): ?>
+                  <?php if ($action['key'] === 'starter'): ?>
+                    <a class="btn-link" href="sfb_starters.php"><?php bakery_te('sfb.first_run_go'); ?></a>
+                  <?php elseif ($action['key'] === 'formula'): ?>
+                    <a class="btn-link" href="sfb_formulas.php"><?php bakery_te('sfb.first_run_go'); ?></a>
+                  <?php elseif ($action['key'] === 'lesson'): ?>
+                    <a class="btn-link" href="<?php echo htmlspecialchars($firstRunLessonUrl ?? BASE_URL . 'sfb_resources.php', ENT_QUOTES, 'UTF-8'); ?>"><?php
+                      echo htmlspecialchars($action['lesson_title'] !== '' ? $action['lesson_title'] : bakery_t('sfb.first_run_go'), ENT_QUOTES, 'UTF-8');
+                    ?></a>
+                  <?php endif; ?>
+                <?php endif; ?>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      </section>
+    <?php endif; ?>
 
     <section class="card hero-card sfb-hero">
       <div class="card-body">

@@ -18,6 +18,20 @@ if (!$batch) {
     exit;
 }
 
+$notice = '';
+$noticeKind = 'info';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remix_formula' && $customer) {
+    try {
+        bakery_require_csrf();
+        $remixFormulaId = bakery_sfb_remix_shared_formula($db, (int)$customer['id'], $batchId);
+        header('Location: sfb_formulas.php?formula=' . $remixFormulaId . '&saved=remixed');
+        exit;
+    } catch (Throwable $e) {
+        $notice = $e->getMessage();
+        $noticeKind = 'warn';
+    }
+}
+
 $formulaSnapshot = bakery_sfb_batch_formula_snapshot($db, $batchId);
 $formulaLines = $formulaSnapshot ? bakery_sfb_batch_formula_snapshot_lines($db, $batchId) : [];
 $formulaTarget = null;
@@ -29,6 +43,7 @@ $photos = bakery_sfb_batch_photos($db, $batchId);
 $turns = bakery_sfb_batch_turns($db, $batchId);
 $temps = bakery_sfb_batch_temps($db, $batchId);
 $phase = bakery_sfb_batch_phase($batch);
+$resolvedQna = bakery_sfb_batch_resolved_qna($db, $batchId);
 
 $temperatureValues = array_map(static function (array $temp): float { return (float)$temp['temp_f']; }, $temps);
 $linkedTopics = bakery_sfb_community_topics_for_batch($db, $batchId, 8);
@@ -57,6 +72,9 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
   <?php require __DIR__ . '/includes/portal_header.php'; ?>
 
   <main class="container sfb-app">
+    <?php if ($notice !== ''): ?>
+      <div class="notice notice--<?php echo $noticeKind === 'warn' ? 'warn' : 'info'; ?>"><?php echo htmlspecialchars($notice); ?></div>
+    <?php endif; ?>
     <?php if ($staffOnly): ?>
       <p class="sfb-back-link"><a href="sfb_admin_overview.php"><?php bakery_te('sfb.community_back_to_admin'); ?></a></p>
     <?php endif; ?>
@@ -120,6 +138,14 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
               </li>
             <?php endforeach; ?>
           </ul>
+          <?php if ($customer && !$isOwner && bakery_sfb_builder_ready($db)): ?>
+            <form method="post" style="margin-top:10px;">
+              <?php echo bakery_csrf_field(); ?>
+              <input type="hidden" name="action" value="remix_formula">
+              <button type="submit" class="btn btn-block"><?php bakery_te('sfb.remix_cta'); ?></button>
+            </form>
+            <p class="muted" style="margin:8px 0 0;"><?php bakery_te('sfb.remix_copy'); ?></p>
+          <?php endif; ?>
         </div>
       </section>
     <?php endif; ?>
@@ -173,6 +199,37 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
               </li>
             <?php endforeach; ?>
           </ol>
+        </div>
+      </section>
+    <?php endif; ?>
+
+    <?php if ($resolvedQna): ?>
+      <section class="card">
+        <div class="card-header"><h2><?php bakery_te('sfb.resolved_qna_title'); ?></h2></div>
+        <div class="card-body">
+          <div class="sfb-message-list">
+            <?php foreach ($resolvedQna as $qna): ?>
+              <article class="sfb-message sfb-message--<?php echo htmlspecialchars($qna['author_type'], ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="sfb-message__meta">
+                  <strong><?php echo htmlspecialchars($qna['author_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                  <span class="sfb-message__type is-resolved"><?php bakery_te('sfb.answered'); ?></span>
+                  <?php if (!empty($qna['phase'])): ?>
+                    <span class="badge badge-muted"><?php echo htmlspecialchars(bakery_sfb_phase_label($qna['phase']), ENT_QUOTES, 'UTF-8'); ?></span>
+                  <?php endif; ?>
+                </div>
+                <p class="sfb-message__body"><?php echo nl2br(htmlspecialchars($qna['body'], ENT_QUOTES, 'UTF-8')); ?></p>
+              </article>
+              <?php foreach ($qna['replies'] as $qnaReply): ?>
+                <article class="sfb-message sfb-message--reply sfb-message--<?php echo htmlspecialchars($qnaReply['author_type'], ENT_QUOTES, 'UTF-8'); ?>">
+                  <div class="sfb-message__meta">
+                    <strong><?php echo htmlspecialchars($qnaReply['author_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                    <span class="sfb-message__role"><?php echo $qnaReply['author_type'] === 'admin' ? bakery_t('sfb.from_sour_flour') : bakery_t('sfb.from_baker'); ?></span>
+                  </div>
+                  <p class="sfb-message__body"><?php echo nl2br(htmlspecialchars($qnaReply['body'], ENT_QUOTES, 'UTF-8')); ?></p>
+                </article>
+              <?php endforeach; ?>
+            <?php endforeach; ?>
+          </div>
         </div>
       </section>
     <?php endif; ?>

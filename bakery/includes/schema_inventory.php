@@ -214,6 +214,41 @@ function bakery_schema_inventory_for_live_publish(PDO $db, bool $forceRefresh = 
     return $inventory;
 }
 
+function bakery_schema_inventory_index_table(string $key): string
+{
+    $dot = strpos($key, '.');
+    return $dot === false ? $key : substr($key, 0, $dot);
+}
+
+/**
+ * Same unique/non-unique column list under different names is one index, not a gap.
+ */
+function bakery_schema_inventory_pair_equivalent_indexes(
+    array $stagingIndexes,
+    array $liveIndexes,
+    array $missingIndexes,
+    array $extraIndexes
+): array {
+    foreach ($missingIndexes as $missingIndex => $missingName) {
+        $missingDef = (string)($stagingIndexes[$missingName] ?? '');
+        $missingTable = bakery_schema_inventory_index_table((string)$missingName);
+        if ($missingDef === '') {
+            continue;
+        }
+        foreach ($extraIndexes as $extraIndex => $extraName) {
+            if (bakery_schema_inventory_index_table((string)$extraName) !== $missingTable) {
+                continue;
+            }
+            if ((string)($liveIndexes[$extraName] ?? '') !== $missingDef) {
+                continue;
+            }
+            unset($missingIndexes[$missingIndex], $extraIndexes[$extraIndex]);
+            break;
+        }
+    }
+    return [array_values($missingIndexes), array_values($extraIndexes)];
+}
+
 function bakery_schema_inventory_compare(array $staging, array $live): array
 {
     $staging = bakery_schema_inventory_strip_views($staging);
@@ -229,6 +264,12 @@ function bakery_schema_inventory_compare(array $staging, array $live): array
     $extraColumns = array_values(array_diff(array_keys($liveColumns), array_keys($stagingColumns)));
     $missingIndexes = array_values(array_diff(array_keys($stagingIndexes), array_keys($liveIndexes)));
     $extraIndexes = array_values(array_diff(array_keys($liveIndexes), array_keys($stagingIndexes)));
+    [$missingIndexes, $extraIndexes] = bakery_schema_inventory_pair_equivalent_indexes(
+        $stagingIndexes,
+        $liveIndexes,
+        $missingIndexes,
+        $extraIndexes
+    );
     $stagingOnlyMigrations = array_values(array_diff($stagingMigrations, $liveMigrations));
     $liveOnlyMigrations = array_values(array_diff($liveMigrations, $stagingMigrations));
 
@@ -246,11 +287,10 @@ function bakery_schema_inventory_compare(array $staging, array $live): array
 
     $liveDatabase = (string)($live['database'] ?? '');
     $unexpectedDatabase = $liveDatabase !== '' && $liveDatabase !== 'bakerysf';
-    $structureEqual = $missingColumns === [] && $extraColumns === [] && $missingIndexes === []
-        && $extraIndexes === [] && $mismatches === [];
 
-    // Structure wins. Migration ledger drift alone is not Stop when objects match.
-    if ($unexpectedDatabase || $extraColumns || $extraIndexes || $mismatches) {
+    // Live-only indexes (stricter uniqueness on production) are listed, not Stop.
+    // Extra columns or different types still block a database update.
+    if ($unexpectedDatabase || $extraColumns || $mismatches) {
         $state = 'discrepancy';
     } elseif ($missingColumns || $missingIndexes) {
         $state = 'live_behind';

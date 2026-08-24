@@ -544,6 +544,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'drivers_with_work' => bakery_dashboard_metric(null, 'unavailable'),
             'incomplete_loads' => bakery_dashboard_metric(null, 'unavailable'),
         ],
+        'focus_driver_id' => 0,
     ];
 
     try {
@@ -556,49 +557,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $sectionErrors['load'] = 'Driver pickup loads require finished-goods inventory tables.';
             }
         } else {
-            $reqStmt = $db->prepare("
-                SELECT doa.driver_id, COALESCE(SUM(doi.quantity), 0) AS required_units
-                FROM daily_order_assignments doa
-                JOIN daily_orders do ON do.id = doa.daily_order_id
-                JOIN daily_order_items doi ON doi.daily_order_id = do.id
-                WHERE doa.delivery_date = ?
-                  AND do.order_date = ?
-                  AND doa.delivery_status <> 'cancelled'
-                GROUP BY doa.driver_id
-            ");
-            $reqStmt->execute([$date, $date]);
-            $requiredByDriver = [];
-            foreach ($reqStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $requiredByDriver[(int)$row['driver_id']] = (int)$row['required_units'];
+            if (!function_exists('bakery_inventory_load_progress')) {
+                require_once __DIR__ . '/product_inventory.php';
             }
-
-            $loadedByDriver = [];
-            $driversWithLoadRow = [];
-            $loadStmt = $db->prepare("
-                SELECT dl.driver_id,
-                       COALESCE(SUM(li.loaded_quantity), 0) AS loaded_units,
-                       COUNT(DISTINCT dl.id) AS load_rows
-                FROM driver_loads dl
-                LEFT JOIN driver_load_items li ON li.driver_load_id = dl.id
-                WHERE dl.delivery_date = ?
-                GROUP BY dl.driver_id
-            ");
-            $loadStmt->execute([$date]);
-            foreach ($loadStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $driverId = (int)$row['driver_id'];
-                $loadedByDriver[$driverId] = (int)$row['loaded_units'];
-                $driversWithLoadRow[$driverId] = (int)$row['load_rows'] > 0;
-            }
-
-            $driversWithWork = count($requiredByDriver);
-            $incomplete = 0;
-            foreach ($requiredByDriver as $driverId => $required) {
-                $loaded = $loadedByDriver[$driverId] ?? 0;
-                $hasLoad = !empty($driversWithLoadRow[$driverId]);
-                if ($required > 0 && (!$hasLoad || $loaded < $required)) {
-                    $incomplete++;
-                }
-            }
+            $loadProgress = bakery_inventory_load_progress($db, $date);
+            $driversWithWork = (int)$loadProgress['drivers_with_work'];
+            $incompleteList = $loadProgress['incomplete'];
+            $incomplete = count($incompleteList);
+            $focusDriverId = $incomplete === 1 ? (int)$incompleteList[0]['driver_id'] : 0;
+            $load['focus_driver_id'] = $focusDriverId;
 
             $load['metrics']['drivers_with_work'] = bakery_dashboard_metric($driversWithWork, $driversWithWork > 0 ? 'ready' : 'empty');
             $load['metrics']['incomplete_loads'] = bakery_dashboard_metric($incomplete, 'ready');
@@ -610,17 +577,30 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $load['state'] = 'attention';
                 $load['summary'] = $incomplete . ' of ' . $driversWithWork . ' driver load'
                     . ($driversWithWork === 1 ? '' : 's') . ' incomplete';
+                $loadParams = ['attention' => 'incomplete'];
+                $focusName = '';
+                if ($focusDriverId > 0) {
+                    $loadParams['driver_id'] = $focusDriverId;
+                    $focusName = trim((string)($incompleteList[0]['name'] ?? ''));
+                }
+                $detail = $incomplete . ' driver'
+                    . ($incomplete === 1 ? '' : 's')
+                    . ' have assigned order units that are missing or under-loaded.';
+                if ($focusName !== '') {
+                    $detail = $focusName
+                        . ' has assigned order units with no matching pickup saved. '
+                        . 'Open Driver Pickup Loads for this operating date, set pickup quantities '
+                        . '(Fill to need is fine even when production is empty), and Save pickup.';
+                }
                 $exceptions[] = bakery_ops_exception([
                     'type' => 'load_incomplete',
                     'severity' => 'warning',
                     'category' => 'load',
                     'stage' => 'dispatch',
                     'title' => 'Incomplete driver pickup loads',
-                    'detail' => $incomplete . ' driver'
-                        . ($incomplete === 1 ? '' : 's')
-                        . ' have assigned order units that are missing or under-loaded.',
+                    'detail' => $detail,
                     'count' => $incomplete,
-                    'href' => bakery_ops_link_driver_load($date, ['attention' => 'incomplete']),
+                    'href' => bakery_ops_link_driver_load($date, $loadParams),
                     'action' => 'Open Driver Pickup Loads',
                 ]);
             } else {

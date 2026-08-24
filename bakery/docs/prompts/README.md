@@ -8,6 +8,15 @@ Canonical `--agent=` slugs: see `php scripts/agent_homebase.php brief --agent=ag
 php scripts/agent_homebase.php brief --agent=SLUG --json
 ```
 
+## Community Bread Education Center (owner-commissioned 2026-08-23)
+
+Four streams, one lane (`--agent=bread-education`). Build 23 → 24 → 25 → 26 in order; each is its own loop.
+
+- [23 — Bread Education Batch Builder](23-bread-education-batch-builder.md) (**shipped** 2026-08-23, session 89)
+- [24 — Learning Center](24-bread-education-learning-center.md) (**shipped** 2026-08-23, session 91)
+- [25 — Home Base Onboarding](25-home-base-onboarding.md) (**shipped** 2026-08-23, session 96)
+- [26 — Education Payments Connect](26-education-payments-connect.md) (**code shipped** 2026-08-23, session 97; staging verification awaits sandbox Square keys in gitignored env)
+
 ## Close the remaining day (ops)
 
 See [close-the-day-README.md](close-the-day-README.md).

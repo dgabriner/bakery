@@ -334,6 +334,59 @@ try {
     $assert(isset($langEnTexts['texts.delivery_no_callback_hint'], $langEsTexts['texts.delivery_no_callback_hint']), 'no-callback hint exists in both languages');
     $includesSrc = (string)file_get_contents(__DIR__ . '/../includes/text_comms.php');
     $assert(strpos($includesSrc, 'function bakery_text_status_rank') !== false, 'status vocabulary is ranked in one helper the callback trusts');
+    $assert(substr($includesSrc, 0, 3) !== "\xEF\xBB\xBF", 'text comms include carries no UTF-8 BOM that would leak into JSON responses');
+
+    // ---- Canonical CLI sender (bug 4689: no more temp-script bypass) ----------
+    $cliPath = __DIR__ . '/../scripts/text_send.php';
+    $cliSrc = (string)@file_get_contents($cliPath);
+    $assert($cliSrc !== '', 'canonical CLI sender script exists');
+    $assert(strpos($cliSrc, "PHP_SAPI !== 'cli'") !== false, 'CLI sender is command-line only');
+    $assert(strpos($cliSrc, 'bakery_text_send(') !== false, 'CLI sender writes through the one canonical send path');
+    $assert(strpos($cliSrc, "'--send'") !== false, 'CLI sender requires explicit --send before any real attempt');
+
+    $runCli = static function (array $args): array {
+        $appRoot = dirname(__DIR__);
+        $cmd = [PHP_BINARY, $appRoot . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'text_send.php'];
+        foreach ($args as $arg) {
+            $cmd[] = $arg;
+        }
+        $env = array_merge($_ENV, getenv() ?: [], [
+            'DB_NAME' => 'bakerysf_test',
+            'USE_PROD_DB' => 'false',
+            'BAKERY_TEXT_FORCE_RECORD_ONLY' => '1',
+        ]);
+        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $appRoot, $env);
+        if (!is_resource($proc)) {
+            return [-1, '', ''];
+        }
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+        return [$code, (string)$stdout, (string)$stderr];
+    };
+    $countRows = static function () use ($db): int {
+        $stmt = $db->query("SELECT COUNT(*) FROM text_messages WHERE body LIKE 'CLI smoke%'");
+        return (int)$stmt->fetchColumn();
+    };
+
+    $missingArgs = $runCli(['--body=CLI smoke missing to']);
+    $assert((int)$missingArgs[0] === 1 && strpos($missingArgs[2], '--to=') !== false, 'CLI sender refuses missing --to with usage help');
+
+    $beforeRows = $countRows();
+    $preview = $runCli(['--to=+14155550999', '--body=CLI smoke preview run']);
+    $assert((int)$preview[0] === 0 && strpos($preview[1], 'PREVIEW') !== false, 'preview exits clean and says nothing was sent');
+    $assert(strpos($preview[1], 'ledger row') === false || strpos($preview[1], 'no ledger row written') !== false, 'preview states the ledger stays untouched');
+    $assert($countRows() === $beforeRows, 'preview writes zero rows - a look is not an attempt');
+
+    $sentRun = $runCli(['--to=+14155550999', '--body=CLI smoke send one', '--send', '--json']);
+    $payload = json_decode(trim(preg_replace('/^[\x{FEFF}]+/u', '', $sentRun[1]) ?? ''), true);
+    $afterOne = $countRows();
+    $assert((int)$sentRun[0] === 0 && is_array($payload) && $payload['recorded_only'] === true && $payload['status'] === 'logged', 'forced record-only send answers honestly');
+    $assert($afterOne === $beforeRows + 1, 'one attempt leaves exactly one ledger row');
+    $lastRowStmt = $db->query("SELECT id FROM text_messages WHERE body LIKE 'CLI smoke%' ORDER BY id DESC LIMIT 1");
+    $cleanupMessageIds[] = (int)$lastRowStmt->fetchColumn();
 } finally {
     $GLOBALS['bakery_twilio_api_handler'] = null;
     $GLOBALS['bakery_text_force_record_only'] = null;
