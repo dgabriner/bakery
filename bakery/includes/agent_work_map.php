@@ -378,6 +378,7 @@ function bakery_agent_work_map(): array
                 'sfb_offerings.php',
                 'scripts/push_breadeducation_sftp.ps1',
                 'scripts/seed_education_demo.php',
+                'scripts/export_education_content.php',
                 'docs/prompts/23-bread-education-batch-builder.md',
                 'docs/prompts/24-bread-education-learning-center.md',
                 'docs/prompts/25-home-base-onboarding.md',
