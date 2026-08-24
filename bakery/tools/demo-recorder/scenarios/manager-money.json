@@ -1,0 +1,63 @@
+{
+  "id": "manager-money",
+  "title": {
+    "en": "Who owes what, this morning",
+    "es": "Quién debe qué, esta mañana"
+  },
+  "description": {
+    "en": "Balances and aging computed from delivery snapshots — Billing Center chips, no new ledger.",
+    "es": "Saldos y antigüedad calculados desde las fotos de entrega — filtros en el Centro de Facturación, sin libro nuevo."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1280, "height": 800 },
+  "captionPosition": "top",
+  "slowMo": 320,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2400,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{MANAGER_CODE}}",
+      "delay": 200,
+      "caption": {
+        "en": "Manager sign-in",
+        "es": "Entrada de gerente"
+      },
+      "narration": {
+        "en": "Manager sign-in.",
+        "es": "Entrada de gerente."
+      }
+    },
+    { "action": "waitForURL", "includes": "manager.php" },
+    { "action": "wait", "ms": 600 },
+    { "action": "goto", "path": "billing_center.php" },
+    {
+      "action": "waitForSelector",
+      "selector": ".ic-balance-strip",
+      "caption": {
+        "en": "Balances are computed, never invented",
+        "es": "Los saldos se calculan, nunca se inventan"
+      },
+      "narration": {
+        "en": "Every number here comes from confirmed delivery snapshots minus COD cash collected and Square-paid settlements. The OS owns the truth.",
+        "es": "Cada número viene de fotos de entrega confirmadas menos efectivo COD y pagos Square. El sistema es la verdad."
+      }
+    },
+    {
+      "action": "clickIf",
+      "selector": "a[href*='balances=outstanding']",
+      "caption": {
+        "en": "Outstanding: who actually owes today",
+        "es": "Pendientes: quién debe hoy de verdad"
+      },
+      "narration": {
+        "en": "One chip filters to customers with a real remainder. Thirty-plus-days flags the conversations worth having.",
+        "es": "Un filtro deja solo a clientes con saldo real. Más de treinta días marca las conversaciones que valen la pena."
+      }
+    },
+    { "action": "wait", "ms": 1000 }
+  ]
+}

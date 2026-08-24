@@ -11,7 +11,8 @@ Respects §8 principles and §9 exclusions. **Reconfirm with the owner before st
 
 ### Now (loop-closing, low risk, owner-aligned)
 
-**P1 · Broken-window batch** (named in §7.6)
+**P1 · Broken-window batch** — **SHIPPED 2026-08-23**: leads filter fixed; zones single-source
+via `includes/zones_catalog.php`; i18n parity complete. Kept for reference:
 - Fix the Leads filter bug; retire the dead `customer_upcoming.php` redirect target;
   finish i18n (~1,170/1,174 — find the last raw-key nav items and any unpaired en/es keys);
   collapse zone dual-source-of-truth (`map.php` hardcoded list → `zones` table, per §4.14).
@@ -19,7 +20,9 @@ Respects §8 principles and §9 exclusions. **Reconfirm with the owner before st
 - Surfaces: `leads.php`, `customer_upcoming_edit.php`, `map.php`, `zones.php`, `lang/en.php`, `lang/es.php`.
 - Suggested slug: `broken-windows`
 
-**P2 · Staff morning alert digest** (closes §6.6 "staff receive no proactive alerts")
+**P2 · Staff morning alert digest** — **SHIPPED 2026-08-23**: nav bell plus cron email
+`scripts/staff_alert_digest.php` (silent when clean; `--to=` override; see
+`docs/CRON_KIT.md` for install).
 - One daily staff digest (email, or `MAIL_DRIVER=log` record — reuse the pattern in
   `includes/customer_notifications.php`) listing: tomorrow unconfirmed demand, dates missing
   a production-plan commit, `production_plan_drift` events, failed stops awaiting recovery,
@@ -29,7 +32,9 @@ Respects §8 principles and §9 exclusions. **Reconfirm with the owner before st
 - Tests: `run_customer_notifications_tests.php`, `run_exception_desk_tests.php`.
 - Suggested slug: `staff-alert-digest`
 
-**P3 · Money visibility phase 1: balances + AR aging** (first "deferred bigger idea", loops 1–5 shipped)
+**P3 · Money visibility phase 1: balances + AR aging** — **SHIPPED 2026-08-23**
+(`includes/billing_aging.php`, Billing Center chips, Customer Hub chip). Remaining phase 2
+ideas below stay open.
 - Manager-facing, **computed read-first**: per-customer balance and aging buckets derived
   from confirmed delivery snapshots minus COD collected (Route Manager cash) minus Square
   payments (webhook/poll status). Surface as Billing Center filter chips + a Customer Hub

@@ -1,0 +1,73 @@
+{
+  "id": "baker-drift-diff",
+  "title": {
+    "en": "Baker sees plan changes",
+    "es": "El panadero ve los cambios del plan"
+  },
+  "description": {
+    "en": "Re-committed numbers show their before-and-after right on the bake sheet.",
+    "es": "Las cantidades recomprometidas muestran su antes y después en la hoja de horneo."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1024, "height": 768 },
+  "captionPosition": "top",
+  "slowMo": 340,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2400,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    {
+      "action": "waitForSelector",
+      "selector": "#code",
+      "caption": {
+        "en": "Bakers sign in with their own code",
+        "es": "Los panaderos entran con su propio código"
+      },
+      "narration": {
+        "en": "Bakers sign in with their own code.",
+        "es": "Los panaderos entran con su propio código."
+      }
+    },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{BAKER_CODE}}",
+      "delay": 200,
+      "caption": {
+        "en": "Straight to tomorrow's bake sheet",
+        "es": "Directo a la hoja de horneo de mañana"
+      },
+      "narration": {
+        "en": "Bakers land on Daily Production for tomorrow. Work first: what to make, how much, which dough.",
+        "es": "Caen en Producción Diaria de mañana. Primero el trabajo: qué hacer, cuánto, con qué masa."
+      }
+    },
+    { "action": "waitForURL", "includes": "production.php" },
+    { "action": "waitForSelector", "selector": ".bp-plan-note" },
+    {
+      "action": "wait",
+      "ms": 700,
+      "caption": {
+        "en": "Committed numbers, demand beside them, drift loud when real",
+        "es": "Cantidades comprometidas, demanda al lado, y el desfase bien fuerte cuando existe"
+      },
+      "narration": {
+        "en": "The sheet bakes the committed snapshot. If demand changed after commit, the amber note says so without rewriting numbers.",
+        "es": "La hoja hornea la foto comprometida. Si la demanda cambió después, la nota ámbar lo dice sin reescribir números."
+      }
+    },
+    {
+      "action": "clickIf",
+      "selector": "details.bp-commit-diff summary",
+      "caption": {
+        "en": "A re-commit shows exactly what moved",
+        "es": "Una recompromisión muestra exactamente qué cambió"
+      },
+      "narration": {
+        "en": "When the manager re-commits, bakers see before-and-after per product. No surprises at the bench.",
+        "es": "Cuando el gerente recompromete, el panadero ve el antes y el después por producto. Sin sorpresas en la mesa."
+      }
+    },
+    { "action": "wait", "ms": 900 }
+  ]
+}

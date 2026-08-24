@@ -1,0 +1,62 @@
+{
+  "id": "staff-bell",
+  "title": {
+    "en": "The alert bell finds you",
+    "es": "La campana de alertas te encuentra"
+  },
+  "description": {
+    "en": "Critical bakery facts reach managers on any staff page — no dashboard hunting.",
+    "es": "Los hechos críticos llegan al gerente en cualquier página — sin cazar tableros."
+  },
+  "prepare": "users",
+  "viewport": { "width": 1280, "height": 800 },
+  "captionPosition": "top",
+  "slowMo": 320,
+  "captionHoldMs": 1200,
+  "endHoldMs": 2400,
+  "steps": [
+    { "action": "goto", "path": "login.php" },
+    { "action": "waitForSelector", "selector": "#code" },
+    {
+      "action": "fill",
+      "selector": "#code",
+      "value": "{{ADMIN_CODE}}",
+      "delay": 200,
+      "caption": {
+        "en": "Sign in as staff",
+        "es": "Entra como personal"
+      },
+      "narration": {
+        "en": "Sign in as staff.",
+        "es": "Entra como personal."
+      }
+    },
+    { "action": "waitForURL", "includes": "index.php" },
+    {
+      "action": "waitForSelector",
+      "selector": ".js-staff-alerts",
+      "caption": {
+        "en": "The bell is already in the nav, on any page",
+        "es": "La campana ya está en el menú, en cualquier página"
+      },
+      "narration": {
+        "en": "No dashboard hunting. The bell rides the nav and shows a badge when something critical or urgent is true today or tomorrow.",
+        "es": "Sin cazar tableros. La campana viaja en el menú y muestra insignia cuando algo crítico o urgente es cierto hoy o mañana."
+      }
+    },
+    {
+      "action": "click",
+      "selector": ".js-staff-alerts",
+      "caption": {
+        "en": "Open it: live facts, loudest first",
+        "es": "Ábrela: hechos vivos, lo más fuerte primero"
+      },
+      "narration": {
+        "en": "Alerts are recomputed live. Completing exception work never hides a fact that is still true; a fact that stops being true stops pinging.",
+        "es": "Las alertas se recalculan vivas. Terminar el trabajo nunca esconde un hecho que sigue siendo cierto; el que deja de ser cierto deja de sonar."
+      }
+    },
+    { "action": "waitForSelector", "selector": "#staffAlertsPanel" },
+    { "action": "wait", "ms": 1000 }
+  ]
+}

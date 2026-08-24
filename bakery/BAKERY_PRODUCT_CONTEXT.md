@@ -40,9 +40,9 @@ individual stages do not fully close.* `includes/daily_run.php` implements an 8-
 gated checklist (Confirm Demand → Commit Production Plan → Produce → Pack →
 Assign/Load/Dispatch → Deliver & Reconcile → Invoice → Close the Day) whose closeout
 refuses to record while blockers exist. Dated demand now lazy-generates, route construction
-prepares demand first, and route closeout reconciles loads. Remaining loop-closes are
-mostly polish (staff alerts, overnight cron on DreamHost). The product work is
-closing those loops — not adding modules.
+prepares demand first, and route closeout reconciles loads. Staff alerts shipped (nav bell
++ cron digest); the overnight cron install itself remains an owner ops task
+(`docs/CRON_KIT.md`). The product work is closing remaining loops — not adding modules.
 
 ## 2. Primary user roles
 
@@ -248,7 +248,7 @@ Compact map — entry points only, not every file.
 | Portal | `customer_portal*.php`, `customer_login.php`, `qr_login.php`, `includes/customer_portal.php`, `includes/portal_*` | Customer self-service |
 | Admin | `users.php`, `login_history.php`, `historical_navigation.php`, `module_guide.php`, `agent_homebase.php` | Identity, audit, retained legacy menu, Agent Learning Studio / Homebase (admin coaching view; agents use `scripts/agent_homebase.php`) |
 | Insights | `customer_overview.php`, `customer_routes.php`, `product_distribution.php` (per-customer demand merge) | Read-only exploration |
-| Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; **no staff alerts exist** |
+| Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; staff side ships the alert bell + `scripts/staff_alert_digest.php` cron email (silent when clean) |
 | Texting Command Center | `text_comms.php`, `text_comms_api.php`, `includes/text_comms.php`, `includes/twilio_config.php`, `twilio_webhook.php`, schema 057 | One SMS ledger for outbound attempts (live, failed, or recorded-only without credentials), inbound replies linked to customers by phone tail, delivery health, and ops mix. Sending happens only on the Command Center page; the API is read-only. Status callbacks can advance but never regress a row; Twilio retries of recorded inbound messages answer success, not a second row. |
 | Timeline | `operational_timeline.php`, `includes/operational_timeline.php` | Audit/event feed per date/customer/order |
 
@@ -304,9 +304,12 @@ Compact map — entry points only, not every file.
    and a desktop workshop (`includes/exception_workshop.php`, ≥900px) for filter/group/bulk
    coordination — completing that work never hides a still-true operational fact. Destination
    pages honor `return=` plus the promised `review` / `attention` / `filter`, show situation
-   chips on the implicated rows, and failed delivery deep-links to Manager recovery (not
-   `driver_list.php`). Service issues remain a real customer-reported queue. Staff still
-   receive no proactive alerts.
+    chips on the implicated rows, and failed delivery deep-links to Manager recovery (not
+    `driver_list.php`). Service issues remain a real customer-reported queue. Staff alerts
+    shipped: the nav bell (`includes/staff_alerts.php` + `staff_alerts_api.php`) surfaces
+    live critical/warning facts plus owned assignments on every staff page, and
+    `scripts/staff_alert_digest.php` emails one silent-when-clean digest to
+    administrators/managers (DreamHost cron; see `docs/CRON_KIT.md`).
 
 ## 7. Current improvement priorities (working roadmap, not gospel)
 
@@ -333,21 +336,25 @@ a later item.
    requires closed routes.
 4. **Canonical invoicing** — shipped: bulk mark-invoiced, send/record of the portal
    per-delivery invoice from Billing Center, legacy generators quarantined. Non-COD Square
-   invoice send + webhook/poll status is in Billing Center. *Still deferred: AR aging,
-   weekly rollup invoices, full QuickBooks sync.*
+   invoice send + webhook/poll status is in Billing Center. *Money visibility phase 1
+   shipped 2026-08-23: computed per-customer balances + AR aging (`includes/billing_aging.php`,
+   snapshot totals − COD collected − Square-PAID settlements) as Billing Center balance chips
+   and a Customer Hub chip — read-only, no ledger; full AR/payments ledger, weekly rollup
+   invoices, and QuickBooks sync stay deferred.*
 5. **Customer hub + findability** — `customer_record.php` is the staff hub (nav item
-   "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
-   open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
-   links — do not rebuild standing/pricing/billing editors inside the hub.
+    "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
+    open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
+    links — do not rebuild standing/pricing/billing editors inside the hub.
 6. **High-value usability fixes** — bulk actions, inline order editing, broken-window batch
-    closed: leads pipeline filter fixed; dead `customer_upcoming.php` link repaired as a
-    quarantined redirect-only stub into the portal deliveries screens; i18n parity verified
-    with zero raw-key references.
+     closed: leads pipeline filter fixed; dead `customer_upcoming.php` link repaired as a
+     quarantined redirect-only stub into the portal deliveries screens; i18n parity verified
+     with zero raw-key references. Zones are single-source now: `includes/zones_catalog.php`
+     (table-first + legacy fallback) feeds map, driver trio, customers, schedule.
    Product Distribution demand is the per-customer merge (dated beats standing). Pack List now has shared check-offs, route/driver
-   grouping, and shortage display aligned with dashboard (on-hand + loaded).
+    grouping, and shortage display aligned with dashboard (on-hand + loaded).
 
-Deferred bigger ideas (only after loops close): money visibility (balances/credits/aging),
-production variance intelligence, offline-capable driver confirm.
+Deferred bigger ideas (only after loops close): production variance intelligence,
+offline-capable driver confirm.
 
 ## 8. Product principles for agents
 
