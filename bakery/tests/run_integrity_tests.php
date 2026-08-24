@@ -209,6 +209,139 @@ try {
     throw $e;
 }
 
+echo "\n=== Zones catalog single source of truth (invariant 4.14) ===\n";
+if (!function_exists('bakery_zones_catalog')) {
+    require_once $root . '/includes/zones_catalog.php';
+}
+assert_true(function_exists('bakery_zones_catalog'), 'bakery_zones_catalog helper loads function-safe');
+assert_true(function_exists('bakery_zones_catalog_ready'), 'bakery_zones_catalog_ready helper loads function-safe');
+assert_true(function_exists('bakery_zones_legacy_list'), 'bakery_zones_legacy_list helper loads function-safe');
+assert_true(function_exists('bakery_zones_legacy_rows'), 'bakery_zones_legacy_rows helper loads function-safe');
+assert_true(function_exists('bakery_zone_color'), 'bakery_zone_color helper loads function-safe');
+assert_true(function_exists('bakery_zone_display_cycle'), 'bakery_zone_display_cycle helper loads function-safe');
+assert_true(function_exists('bakery_zone_route_color'), 'bakery_zone_route_color helper loads function-safe');
+
+$zonePageContract = [
+    'driver.php' => ['bakery_zones_catalog(', 'bakery_zone_display_cycle(', 'bakery_zone_route_color('],
+    'driver_overview.php' => ['bakery_zones_catalog(', 'bakery_zone_display_cycle(', 'bakery_zone_route_color('],
+    'driver_list.php' => ['bakery_zones_catalog(', 'bakery_zone_display_cycle(', 'bakery_zone_route_color('],
+    'customers.php' => ['bakery_zones_catalog('],
+    'customer_schedule.php' => ['bakery_zones_catalog('],
+];
+foreach ($zonePageContract as $zonePage => $requiredCalls) {
+    $pageSource = @file_get_contents($root . '/' . $zonePage);
+    if (!assert_true(is_string($pageSource) && $pageSource !== '', "$zonePage readable for zone source contract")) {
+        continue;
+    }
+    assert_true(
+        strpos($pageSource, 'includes/zones_catalog.php') !== false,
+        "$zonePage requires includes/zones_catalog.php"
+    );
+    foreach ($requiredCalls as $requiredCall) {
+        assert_true(strpos($pageSource, $requiredCall) !== false, "$zonePage calls $requiredCall");
+    }
+    assert_true(
+        strpos($pageSource, "'#6610f2'") === false,
+        "$zonePage no longer declares a local 15-color zone palette"
+    );
+    assert_true(
+        strpos($pageSource, "'Ruta Sour Flour'") === false,
+        "$zonePage no longer declares a local hardcoded zone-name list"
+    );
+}
+$mapSource = @file_get_contents($root . '/map.php');
+if (assert_true(is_string($mapSource) && $mapSource !== '', 'map.php readable for zone source contract')) {
+    assert_true(
+        strpos($mapSource, 'SELECT name, color FROM zones ORDER BY name') !== false,
+        'map.php retains its guarded table-first zones query'
+    );
+}
+
+assert_eq(
+    ['Centro', 'Mission', 'Ruta Sour Flour', 'Daly City/San Mateo', 'North Bay', 'East Bay'],
+    bakery_zones_legacy_list(),
+    'legacy fallback equals the documented six zones in historical order'
+);
+assert_eq(
+    ['#007bff', '#dc3545', '#28a745', '#fd7e14', '#6f42c1', '#20c997'],
+    array_column(bakery_zones_legacy_rows(), 'color'),
+    'legacy fallback colors match the zones.php seed values'
+);
+
+$catalogTableNames = $db->query("SELECT TRIM(name) FROM zones ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+$catalogRows = bakery_zones_catalog($db);
+assert_true(count($catalogRows) > 0, 'zones catalog returns rows from the populated zones table');
+assert_eq(
+    array_map('strval', $catalogTableNames),
+    array_column($catalogRows, 'name'),
+    'catalog names and order match SELECT name FROM zones ORDER BY name'
+);
+$catalogShapeOk = true;
+foreach ($catalogRows as $catalogRow) {
+    if (!isset($catalogRow['name'], $catalogRow['color'])
+        || trim((string)$catalogRow['name']) === ''
+        || preg_match('/^#[0-9a-f]{6}$/', (string)$catalogRow['color']) !== 1) {
+        $catalogShapeOk = false;
+        break;
+    }
+}
+assert_true($catalogShapeOk, 'every catalog row carries a name plus validated hex color');
+assert_true(bakery_zones_catalog_ready($db), 'catalog ready flag true while zones table holds rows');
+
+$db->exec("CREATE TEMPORARY TABLE zones (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    color VARCHAR(7) DEFAULT '#007bff',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)");
+try {
+    $emptyTableCatalog = bakery_zones_catalog($db);
+    assert_eq(
+        bakery_zones_legacy_rows(),
+        $emptyTableCatalog,
+        'empty zones table falls back to the canonical legacy rows'
+    );
+    assert_true(!bakery_zones_catalog_ready($db), 'catalog ready flag false while zones table is empty');
+
+    assert_eq('#dc3545', bakery_zone_color($emptyTableCatalog, 'mission'), 'zone color lookup is case-insensitive');
+    assert_eq('#dc3545', bakery_zone_color($emptyTableCatalog, '  Mission  '), 'zone color lookup trims whitespace');
+    assert_eq('', bakery_zone_color($emptyTableCatalog, 'Atlantis'), 'unknown zone yields the empty default');
+    assert_eq('#123abc', bakery_zone_color($emptyTableCatalog, 'atlantis', '#123abc'), 'unknown zone honors caller-supplied default');
+
+    $stmt = $db->prepare("INSERT INTO zones (name, description, color) VALUES (?, ?, ?)");
+    $stmt->execute(['Harbor Fog', 'integrity temp fixture', '#FFAA01']);
+    $stmt->execute(['Atlantis', 'integrity temp fixture', '#GGHH']);
+
+    $fixtureCatalog = bakery_zones_catalog($db);
+    assert_eq(
+        ['Atlantis', 'Harbor Fog'],
+        array_column($fixtureCatalog, 'name'),
+        'non-empty zones table wins over legacy fallback, ordered by name'
+    );
+    assert_eq(
+        '#ffaa01',
+        bakery_zone_color($fixtureCatalog, 'harbor fog'),
+        'table colors normalize to lowercase #rrggbb'
+    );
+    assert_eq(
+        '#6c757d',
+        bakery_zone_color($fixtureCatalog, 'ATLANTIS'),
+        'invalid table colors degrade to the neutral presentation gray'
+    );
+
+    $zoneCycle = bakery_zone_display_cycle();
+    assert_eq('#007bff', bakery_zone_route_color([], 'Mission', $zoneCycle, 0), 'legacy-named zones keep encounter-order tints');
+    assert_eq('#28a745', bakery_zone_route_color([], 'East Bay', $zoneCycle, 1), 'second-seen legacy zone keeps its cycle tint');
+    assert_eq('#ffaa01', bakery_zone_route_color($fixtureCatalog, 'Harbor Fog', $zoneCycle, 0), 'post-migration zones light up with their table color');
+    assert_eq('#ffc107', bakery_zone_route_color([], 'No Zone', $zoneCycle, 6), 'untracked zones keep cycling as before');
+    assert_eq('#007bff', bakery_zone_route_color([], 'Overflow Zone', $zoneCycle, 15), 'tint cycle wraps around past its length');
+} finally {
+    $db->exec("DROP TEMPORARY TABLE IF EXISTS zones");
+}
+assert_true(bakery_zones_catalog_ready($db), 'real zones table visible again after temporary fixture dropped');
+
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
 echo "Failed: {$GLOBALS['TEST_FAIL']}\n";

@@ -2,6 +2,7 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/zones_catalog.php';
 
 // Add cache-busting headers to ensure fresh data
 header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -105,11 +106,8 @@ try {
     error_log("Driver Overview - Available dates with orders: " . implode(', ', $availableDates));
     
     // Get zone colors for consistent display
-    $zoneColors = [
-        '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1', 
-        '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
-        '#6610f2', '#fd7e14', '#e83e8c', '#6f42c1', '#20c997'
-    ];
+    $zoneColors = bakery_zone_display_cycle();
+    $zonesCatalog = bakery_zones_catalog($db);
     
     $drivers = [];
     foreach (bakery_get_drivers($db) as $driver) {
@@ -132,7 +130,7 @@ try {
         
         // Assign color to zone if not already assigned
         if (!isset($zoneColorMap[$zone])) {
-            $zoneColorMap[$zone] = $zoneColors[$zoneIndex % count($zoneColors)];
+            $zoneColorMap[$zone] = bakery_zone_route_color($zonesCatalog, $zone, $zoneColors, $zoneIndex);
             $zoneIndex++;
         }
         

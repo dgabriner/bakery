@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/zones_catalog.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/sf_baker.php';
 bakery_ensure_portal_schema($db);
@@ -172,24 +173,8 @@ if (isset($_GET['success'])) {
 }
 
 // Load zones from DB (fallback to legacy hardcoded list if empty)
-$zones = [];
-try {
-    if (table_exists($db, 'zones')) {
-        $zones = $db->query("SELECT name FROM zones ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
-    }
-} catch (Exception $e) {
-    error_log("Zones load error: " . $e->getMessage());
-}
-if (empty($zones)) {
-    $zones = [
-        'Centro',
-        'Mission',
-        'Ruta Sour Flour',
-        'Daly City/San Mateo',
-        'North Bay',
-        'East Bay'
-    ];
-}
+$zonesCatalog = bakery_zones_catalog($db);
+$zones = array_column($zonesCatalog, 'name');
 ?>
 
 <div class="container container--wide">

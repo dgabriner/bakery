@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/zones_catalog.php';
 require_once 'includes/google_maps_config.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/customer_account.php';
@@ -137,11 +138,8 @@ if ($driver && $selectedDriverId > 0 && function_exists('bakery_set_selected_dri
     bakery_set_selected_driver($selectedDriverId, $driver['name']);
 }
 
-$zoneColors = [
-    '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
-    '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
-    '#6610f2', '#fd7e14', '#e83e8c', '#6f42c1', '#20c997',
-];
+$zoneColors = bakery_zone_display_cycle();
+$zonesCatalog = bakery_zones_catalog($db);
 
 $zoneColorMap = [];
 $zoneIndex = 0;
@@ -479,7 +477,7 @@ if ($selectedDriverId > 0 && $driver) {
         foreach ($results as $row) {
             $zone = $row['zone'] ?: bakery_t('driver.no_zone');
             if (!isset($zoneColorMap[$zone])) {
-                $zoneColorMap[$zone] = $zoneColors[$zoneIndex % count($zoneColors)];
+                $zoneColorMap[$zone] = bakery_zone_route_color($zonesCatalog, $zone, $zoneColors, $zoneIndex);
                 $zoneIndex++;
             }
 

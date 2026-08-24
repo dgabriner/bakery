@@ -2,6 +2,7 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/zones_catalog.php';
 
 $page_title = bakery_t('page.customer_schedule');
 
@@ -113,36 +114,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // Define available zones
-$zones = [];
-try {
-    // Try to get zones from database first
-    $stmt = $db->query("SELECT name FROM zones ORDER BY name");
-    $zonesFromDB = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    
-    if (!empty($zonesFromDB)) {
-        $zones = $zonesFromDB;
-    } else {
-        // Fallback to hardcoded zones if database is empty
-        $zones = [
-            'Centro',
-            'Mission', 
-            'Ruta Sour Flour',
-            'Daly City/San Mateo',
-            'North Bay',
-            'East Bay'
-        ];
-    }
-} catch (Exception $e) {
-    // If zones table doesn't exist yet, use hardcoded zones
-    $zones = [
-        'Centro',
-        'Mission', 
-        'Ruta Sour Flour',
-        'Daly City/San Mateo',
-        'North Bay',
-        'East Bay'
-    ];
-}
+$zonesCatalog = bakery_zones_catalog($db);
+$zones = array_column($zonesCatalog, 'name');
 
 // Get available drivers with color assignments
 $drivers = [];
