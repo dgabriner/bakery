@@ -3,8 +3,10 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/pack_list.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/operational_exceptions.php';
+require_once 'includes/demand_review.php';
 
 $selectedDate = $_GET['date'] ?? $_POST['delivery_date'] ?? date('Y-m-d', strtotime('+1 day'));
 try {
@@ -81,6 +83,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                 'product_count' => count($quantities),
             ],
         ]);
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+}
+
+$canBackfillProduction = function_exists('bakery_user_has_role')
+    && bakery_user_has_role(['baker', 'manager', 'administrator']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array((string)($_POST['action'] ?? ''), ['backfill_production', 'backfill_day'], true)
+    && $canBackfillProduction
+) {
+    bakery_require_login();
+    bakery_require_csrf();
+    try {
+        if (!bakery_inventory_ready($db)) {
+            throw new RuntimeException('Finished-goods inventory is not installed. Run the database migrations first.');
+        }
+        $requiredByProduct = [];
+        foreach (bakery_operating_demand_lines($db, $selectedDate) as $row) {
+            $pid = (int)($row['product_id'] ?? 0);
+            $qty = (int)($row['quantity'] ?? 0);
+            if ($pid <= 0 || $qty <= 0) {
+                continue;
+            }
+            $requiredByProduct[$pid] = ($requiredByProduct[$pid] ?? 0) + $qty;
+        }
+        $availableByProduct = [];
+        $loadedByProduct = [];
+        $producedByProduct = [];
+        $invStmt = $db->prepare(
+            'SELECT product_id, available_quantity, produced_quantity, loaded_quantity
+             FROM product_inventory_days WHERE delivery_date = ?'
+        );
+        $invStmt->execute([$selectedDate]);
+        foreach ($invStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pid = (int)$row['product_id'];
+            $availableByProduct[$pid] = (int)$row['available_quantity'];
+            $producedByProduct[$pid] = (int)$row['produced_quantity'];
+            $loadedByProduct[$pid] = (int)($row['loaded_quantity'] ?? 0);
+        }
+        $targets = bakery_inventory_missing_production_targets(
+            $requiredByProduct,
+            $availableByProduct,
+            $loadedByProduct,
+            $producedByProduct
+        );
+        $postedAction = (string)$_POST['action'];
+        if ($postedAction === 'backfill_production') {
+            $productId = (int)($_POST['product_id'] ?? 0);
+            if ($productId <= 0 || !isset($targets[$productId])) {
+                $notice = bakery_t('pack_list.produced_none');
+            } else {
+                $targets = [$productId => (int)$targets[$productId]];
+            }
+        }
+        if ($notice === '' || $postedAction === 'backfill_day') {
+            $summary = bakery_inventory_backfill_day_production(
+                $db,
+                $selectedDate,
+                $targets,
+                'Load board retroactive production'
+            );
+            $notice = $summary['updated'] > 0
+                ? bakery_t('pack_list.produced_saved', [
+                    'count' => number_format((int)$summary['added_produced']),
+                    'products' => number_format((int)$summary['updated']),
+                ])
+                : bakery_t('pack_list.produced_none');
+        }
     } catch (Throwable $e) {
         $error = $e->getMessage();
     }
@@ -461,6 +533,41 @@ if ($inventoryReady) {
     $error = 'Finished-goods inventory is not installed. Run scripts/run_migrations.php first.';
 }
 
+$missingProductionTargets = [];
+if ($inventoryReady) {
+    $dayRequiredByProduct = [];
+    foreach ($driverSheets as $sheet) {
+        foreach ($sheet['products'] as $product) {
+            $pid = (int)$product['product_id'];
+            $need = (int)$product['required_quantity'];
+            if ($pid <= 0 || $need <= 0) {
+                continue;
+            }
+            $dayRequiredByProduct[$pid] = ($dayRequiredByProduct[$pid] ?? 0) + $need;
+        }
+    }
+    $availableByProduct = [];
+    $loadedByProduct = [];
+    $producedByProduct = [];
+    $invStmt = $db->prepare(
+        'SELECT product_id, available_quantity, produced_quantity, loaded_quantity
+         FROM product_inventory_days WHERE delivery_date = ?'
+    );
+    $invStmt->execute([$selectedDate]);
+    foreach ($invStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $pid = (int)$row['product_id'];
+        $availableByProduct[$pid] = (int)$row['available_quantity'];
+        $producedByProduct[$pid] = (int)$row['produced_quantity'];
+        $loadedByProduct[$pid] = (int)($row['loaded_quantity'] ?? 0);
+    }
+    $missingProductionTargets = bakery_inventory_missing_production_targets(
+        $dayRequiredByProduct,
+        $availableByProduct,
+        $loadedByProduct,
+        $producedByProduct
+    );
+}
+
 $pageExceptions = [];
 try {
     $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
@@ -557,8 +664,34 @@ try {
             <?php if ($daySummary['remaining_units'] > 0): ?>
                 <span class="load-pill remain"><?php echo (int)$daySummary['remaining_units']; ?> unit(s) remaining</span>
             <?php endif; ?>
+            <?php if ($missingProductionTargets !== []): ?>
+                <span class="load-pill blocked"><?php echo count($missingProductionTargets); ?> no bake recorded</span>
+            <?php endif; ?>
         </div>
     </div>
+    <?php if ($canBackfillProduction && $missingProductionTargets !== []): ?>
+        <div class="load-notice warn" role="status">
+            <p><?php echo htmlspecialchars(bakery_t('pack_list.no_production_body', [
+                'count' => number_format(count($missingProductionTargets)),
+            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php
+            echo bakery_pack_backfill_form_html(
+                'backfill_day',
+                $selectedDate,
+                'route',
+                bakery_t('pack_list.mark_day_produced'),
+                [
+                    'class' => 'load-backfill-form',
+                    'button_class' => 'btn btn-primary',
+                    'driver_id' => $focusDriverId,
+                    'confirm' => bakery_t('pack_list.mark_day_produced_confirm', [
+                        'count' => number_format(count($missingProductionTargets)),
+                    ]),
+                ]
+            );
+            ?>
+        </div>
+    <?php endif; ?>
     <p class="load-legend">
         <strong>How to load:</strong> For each product, set <strong>Pickup quantity</strong> to what the driver actually picked up.
         Use <strong>Fill to need</strong> to set the full order amount, or type any number to adjust.
@@ -709,10 +842,28 @@ try {
                                     <span class="load-qty-value"><?php echo number_format($product['produced_quantity']); ?></span>
                                 </div>
                             </div>
-                            <?php if ($product['not_in_production']): ?>
+                            <?php
+                            $lineMissing = (int)($missingProductionTargets[$pid] ?? 0);
+                            if ($product['not_in_production'] || $lineMissing > 0):
+                            ?>
                                 <p class="load-prod-warn" data-prod-warn>
-                                    No production recorded and no finished-goods stock for this day.
-                                    If the product was baked or pulled from elsewhere, enter the pickup quantity anyway.
+                                    <?php bakery_te('pack_list.not_produced_hint'); ?>
+                                    <?php if ($canBackfillProduction && $lineMissing > 0): ?>
+                                        <?php
+                                        echo bakery_pack_backfill_form_html(
+                                            'backfill_production',
+                                            $selectedDate,
+                                            'route',
+                                            bakery_t('pack_list.mark_produced_qty', ['count' => number_format($lineMissing)]),
+                                            [
+                                                'product_id' => $pid,
+                                                'form_id' => 'backfill-prod-' . $pid,
+                                                'button_only' => true,
+                                                'button_class' => 'btn btn-outline',
+                                            ]
+                                        );
+                                        ?>
+                                    <?php endif; ?>
                                 </p>
                             <?php else: ?>
                                 <p class="load-prod-warn is-hidden" data-prod-warn hidden></p>
@@ -823,6 +974,37 @@ try {
         </section>
     <?php endforeach; ?>
 
+    <?php if ($canBackfillProduction && $missingProductionTargets !== []):
+        $missingNames = [];
+        foreach ($driverSheets as $sheet) {
+            foreach ($sheet['products'] as $product) {
+                $pid = (int)$product['product_id'];
+                if (isset($missingProductionTargets[$pid]) && !isset($missingNames[$pid])) {
+                    $missingNames[$pid] = (string)$product['name'];
+                }
+            }
+        }
+        foreach ($missingProductionTargets as $pid => $qty):
+            echo bakery_pack_backfill_form_html(
+                'backfill_production',
+                $selectedDate,
+                'route',
+                bakery_t('pack_list.mark_produced_qty', ['count' => number_format((int)$qty)]),
+                [
+                    'product_id' => (int)$pid,
+                    'form_id' => 'backfill-prod-' . (int)$pid,
+                    'class' => 'load-backfill-form is-hidden',
+                    'button_class' => 'is-hidden',
+                    'driver_id' => $focusDriverId,
+                    'confirm' => bakery_t('pack_list.mark_produced_confirm', [
+                        'count' => number_format((int)$qty),
+                        'product' => $missingNames[$pid] ?? bakery_t('ui.product_num', ['id' => (int)$pid]),
+                    ]),
+                ]
+            );
+        endforeach;
+    endif; ?>
+
     <aside class="load-caveats">
         <h3>Loading tips</h3>
         <p>
@@ -892,6 +1074,9 @@ try {
 .load-shortage.is-hidden{display:none}
 .load-prod-warn{margin:8px 0 0;padding:8px 10px;border-radius:6px;background:var(--load-partial-bg);color:var(--load-warn);font-size:.9rem;font-weight:600}
 .load-prod-warn.is-hidden{display:none}
+.load-prod-warn .btn{margin-top:8px;display:inline-block}
+.load-backfill-form{display:inline-block;margin:8px 0 0}
+.load-backfill-form.is-hidden{display:none}
 .load-sheet-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 4px;padding:10px 12px;background:var(--load-bg);border:1px solid var(--load-line);border-radius:8px}
 .load-sheet-help{margin:0;color:var(--load-muted);font-size:.92rem}
 .load-bulk-actions{display:flex;gap:8px;flex-wrap:wrap}

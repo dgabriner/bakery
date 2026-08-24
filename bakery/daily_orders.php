@@ -90,6 +90,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 ]);
                 break;
 
+            case 'set_dated_quantity':
+                $customerId = (int)($_POST['customer_id'] ?? 0);
+                $date = (string)($_POST['date'] ?? '');
+                $productId = (int)($_POST['product_id'] ?? 0);
+                $quantity = (int)($_POST['quantity'] ?? 0);
+                $result = bakery_demand_set_dated_quantity($db, $customerId, $date, $productId, $quantity);
+                echo json_encode(['success' => true] + $result);
+                break;
+
+            case 'copy_prior_to_dated':
+                $customerId = (int)($_POST['customer_id'] ?? 0);
+                $date = (string)($_POST['date'] ?? '');
+                $result = bakery_demand_copy_prior_quantities_to_dated($db, $customerId, $date);
+                echo json_encode(['success' => true] + $result);
+                break;
+
+            case 'apply_standing_to_dated':
+                $customerId = (int)($_POST['customer_id'] ?? 0);
+                $date = (string)($_POST['date'] ?? '');
+                $result = bakery_demand_apply_standing_to_dated($db, $customerId, $date);
+                echo json_encode(['success' => true] + $result);
+                break;
+
             case 'update_quantity':
                 $itemId = (int)$_POST['item_id'];
                 $quantity = (int)$_POST['quantity'];
@@ -375,7 +398,19 @@ if (!in_array($reviewFilter, $allowedReviewFilters, true)) {
 }
 $customerSearch = trim((string)($_GET['customer'] ?? ''));
 $selectedProductId = isset($_GET['product_id']) ? (int)$_GET['product_id'] : 0;
-$viewMode = ($_GET['view'] ?? 'review') === 'edit' ? 'edit' : 'review';
+$viewMode = trim((string)($_GET['view'] ?? 'review'));
+if (!in_array($viewMode, ['review', 'edit', 'visit'], true)) {
+    $viewMode = 'review';
+}
+$defaultVisitFilter = $viewMode === 'visit' ? 'deviations' : 'all';
+$visitFilter = trim((string)($_GET['visit'] ?? $defaultVisitFilter));
+$allowedVisitFilters = [
+    'all', 'deviations', 'today_standing', 'yesterday_went', 'yesterday_delivered',
+    'consecutive', 'overdue', 'prior_missed', 'prior_only', 'extra_yesterday',
+];
+if (!in_array($visitFilter, $allowedVisitFilters, true)) {
+    $visitFilter = $defaultVisitFilter;
+}
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $pageReturnKey = $returnTarget['key'] ?? null;
 
@@ -419,6 +454,7 @@ function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver', $
 $page_title = bakery_t('page.daily_orders') . ' - ' . date('M j, Y', strtotime($selectedDate));
 
 // Get daily orders for selected date
+$visitCompare = null;
 try {
     $customerZoneJoin = bakery_customer_zone_join_sql();
     $orderSql = "
@@ -521,12 +557,22 @@ try {
     }
 
     $demandSummaryAll = bakery_demand_review_build($db, $selectedDate, [
-        'driver_id' => $selectedDriverId,
+        'driver_id' => $viewMode === 'visit' ? 0 : $selectedDriverId,
         'zone' => $selectedZone,
         'customer' => $customerSearch,
         'product_id' => $selectedProductId,
         'review' => 'all',
     ]);
+    $visitCompare = null;
+    if ($viewMode === 'visit') {
+        $visitCompare = bakery_demand_visit_compare_build($db, $selectedDate, [
+            'driver_id' => $selectedDriverId,
+            'zone' => $selectedZone,
+            'customer' => $customerSearch,
+            'product_id' => 0,
+            'visit' => $visitFilter,
+        ]);
+    }
     $demandReviewCustomers = array_values(array_filter(
         $demandSummaryAll['customers'],
         function ($c) use ($reviewFilter) {
@@ -557,6 +603,7 @@ try {
 $filterExtra = [
     'view' => $viewMode,
     'review' => $reviewFilter,
+    'visit' => $visitFilter,
 ];
 if ($pageReturnKey) {
     $filterExtra['return'] = $pageReturnKey;
@@ -608,12 +655,16 @@ $summary = $demandSummaryAll['summary'];
 
     <div class="source-legend">
         <div>
-            <strong>Standing forecast</strong>
-            <span>Recurring template for <?= htmlspecialchars($dayName) ?>s (not date-specific).</span>
+            <strong><?= htmlspecialchars(bakery_t('daily_orders.legend_standing')) ?></strong>
+            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_standing_help', ['day' => $dayName])) ?></span>
         </div>
         <div>
-            <strong>Dated daily order</strong>
-            <span>What this page edits — applies only to <?= htmlspecialchars(date('D, M j, Y', strtotime($selectedDate))) ?>.</span>
+            <strong><?= htmlspecialchars(bakery_t('daily_orders.legend_dated')) ?></strong>
+            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_dated_help', ['date' => date('D, M j, Y', strtotime($selectedDate))])) ?></span>
+        </div>
+        <div>
+            <strong><?= htmlspecialchars(bakery_t('daily_orders.legend_prior')) ?></strong>
+            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_prior_help', ['date' => date('D, M j', strtotime($selectedDate . ' -1 day'))])) ?></span>
         </div>
     </div>
     
@@ -622,9 +673,15 @@ $summary = $demandSummaryAll['summary'];
         <div class="date-info">
             <h2><?= date('l, F j, Y', strtotime($selectedDate)) ?></h2>
             <span class="order-count">
-                Standing expected: <?= (int)$summary['expected_customers'] ?> customers
-                · Dated orders: <?= (int)$summary['customers_with_daily'] ?>
-                · Exceptions: <?= (int)$summary['changed'] + (int)$summary['missing_daily'] + (int)$summary['one_off'] + (int)$summary['empty_daily'] ?>
+                <?php if ($viewMode === 'visit' && is_array($visitCompare)): ?>
+                    <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_standing_route')) ?>: <?= (int)$visitCompare['summary']['today_standing'] ?>
+                    · <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_prior_route')) ?>: <?= (int)$visitCompare['summary']['prior_assigned'] ?>
+                    · <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_look')) ?>: <?= (int)($visitCompare['summary']['look'] ?? 0) ?>
+                <?php else: ?>
+                    Standing expected: <?= (int)$summary['expected_customers'] ?> customers
+                    · Dated orders: <?= (int)$summary['customers_with_daily'] ?>
+                    · Exceptions: <?= (int)$summary['changed'] + (int)$summary['missing_daily'] + (int)$summary['one_off'] + (int)$summary['empty_daily'] ?>
+                <?php endif; ?>
             </span>
         </div>
         <div class="date-controls">
@@ -635,19 +692,27 @@ $summary = $demandSummaryAll['summary'];
     </div>
 
     <div class="view-toggle">
+        <a class="btn <?= $viewMode === 'visit' ? 'btn-primary' : 'btn-outline' ?>"
+           href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'visit', 'visit' => $viewMode === 'visit' ? $visitFilter : 'deviations']))) ?>">
+            <?= htmlspecialchars(bakery_t('daily_orders.view_visit')) ?>
+        </a>
         <a class="btn <?= $viewMode === 'review' ? 'btn-primary' : 'btn-outline' ?>"
            href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'review']))) ?>">
-            Demand Review
+            <?= htmlspecialchars(bakery_t('daily_orders.view_review')) ?>
         </a>
         <a class="btn <?= $viewMode === 'edit' ? 'btn-primary' : 'btn-outline' ?>"
            href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'edit']))) ?>">
-            Edit Dated Orders
+            <?= htmlspecialchars(bakery_t('daily_orders.view_edit')) ?>
         </a>
     </div>
     
     <form class="order-filters" method="get">
         <input type="hidden" name="date" value="<?= htmlspecialchars($selectedDate) ?>">
         <input type="hidden" name="view" value="<?= htmlspecialchars($viewMode) ?>">
+        <?php if ($viewMode !== 'visit'): ?>
+            <input type="hidden" name="visit" value="<?= htmlspecialchars($visitFilter) ?>">
+        <?php endif; ?>
+        <?php if ($viewMode !== 'visit'): ?>
         <fieldset class="filter-group group-by-options">
             <legend>Group dated orders by</legend>
             <label><input type="radio" name="group_by" value="driver" <?= $groupBy === 'driver' ? 'checked' : '' ?>> Driver route</label>
@@ -666,10 +731,29 @@ $summary = $demandSummaryAll['summary'];
                 <option value="all" <?= $reviewFilter === 'all' ? 'selected' : '' ?>>All customers</option>
             </select>
         </div>
+        <?php else: ?>
+            <input type="hidden" name="group_by" value="<?= htmlspecialchars($groupBy) ?>">
+            <input type="hidden" name="review" value="<?= htmlspecialchars($reviewFilter) ?>">
+        <?php endif; ?>
+        <?php if ($viewMode === 'visit'): ?>
+        <div class="filter-group">
+            <label for="visit"><?= htmlspecialchars(bakery_t('daily_orders.visit_focus')) ?></label>
+            <select id="visit" name="visit">
+                <option value="deviations" <?= $visitFilter === 'deviations' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_deviations')) ?></option>
+                <option value="today_standing" <?= $visitFilter === 'today_standing' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_today_standing')) ?></option>
+                <option value="yesterday_went" <?= $visitFilter === 'yesterday_went' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_yesterday_went')) ?></option>
+                <option value="consecutive" <?= $visitFilter === 'consecutive' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_consecutive')) ?></option>
+                <option value="extra_yesterday" <?= $visitFilter === 'extra_yesterday' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_prior_only')) ?></option>
+                <option value="overdue" <?= $visitFilter === 'overdue' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_overdue')) ?></option>
+                <option value="all" <?= $visitFilter === 'all' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('daily_orders.visit_all')) ?></option>
+            </select>
+        </div>
+        <?php endif; ?>
         <div class="filter-group">
             <label for="customer">Customer</label>
             <input type="search" id="customer" name="customer" value="<?= htmlspecialchars($customerSearch) ?>" placeholder="Search name">
         </div>
+        <?php if ($viewMode !== 'visit'): ?>
         <div class="filter-group">
             <label for="product_id">Product</label>
             <select id="product_id" name="product_id">
@@ -681,6 +765,7 @@ $summary = $demandSummaryAll['summary'];
                 <?php endforeach; ?>
             </select>
         </div>
+        <?php endif; ?>
         <div class="filter-group">
             <label for="driver_id">Driver route</label>
             <select id="driver_id" name="driver_id">
@@ -700,11 +785,210 @@ $summary = $demandSummaryAll['summary'];
             </select>
         </div>
         <button type="submit" class="btn btn-primary">Apply Filters</button>
-        <?php if ($selectedDriverId > 0 || $selectedZone !== '' || $customerSearch !== '' || $selectedProductId > 0 || $reviewFilter !== 'differences'): ?>
-            <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, 0, '', $groupBy, ['view' => $viewMode, 'review' => 'differences'])) ?>" class="btn btn-outline">Clear Filters</a>
+        <?php
+            $visitFiltersDirty = $viewMode === 'visit' && $visitFilter !== 'deviations';
+            $reviewFiltersDirty = $viewMode !== 'visit' && $reviewFilter !== 'differences';
+            $commonFiltersDirty = $selectedDriverId > 0 || $selectedZone !== '' || $customerSearch !== '' || ($viewMode !== 'visit' && $selectedProductId > 0);
+        ?>
+        <?php if ($visitFiltersDirty || $reviewFiltersDirty || $commonFiltersDirty): ?>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, 0, '', $groupBy, [
+                'view' => $viewMode,
+                'review' => 'differences',
+                'visit' => $viewMode === 'visit' ? 'deviations' : $visitFilter,
+            ])) ?>" class="btn btn-outline">Clear Filters</a>
         <?php endif; ?>
     </form>
 
+    <?php if ($viewMode === 'visit' && is_array($visitCompare)): ?>
+    <?php
+        $priorShort = date('D, M j', strtotime($visitCompare['prior_date']));
+        $visitSummary = $visitCompare['summary'];
+        $visitDrivers = $visitCompare['drivers'] ?? [];
+        $yesterdayCell = static function (array $vc): string {
+            $kind = $vc['prior']['visit_kind'] ?? 'none';
+            if ($kind === 'delivered') {
+                return bakery_t('daily_orders.visit_cell_delivered');
+            }
+            if ($kind === 'assigned') {
+                return bakery_t('daily_orders.visit_cell_on_route');
+            }
+            return '—';
+        };
+        $callClass = static function (string $call): string {
+            if (in_array($call, ['overdue', 'missed_yesterday'], true)) {
+                return 'missing_daily';
+            }
+            if (in_array($call, ['back_to_back', 'extra_yesterday', 'not_on_today_route'], true)) {
+                return 'changed';
+            }
+            if ($call === 'one_off_today') {
+                return 'one_off';
+            }
+            return 'matches';
+        };
+    ?>
+    <section class="demand-review visit-compare" id="visit-compare">
+        <div class="demand-review-header">
+            <h2><?= htmlspecialchars(bakery_t('daily_orders.visit_title')) ?></h2>
+            <p>
+                <?= htmlspecialchars(bakery_t('daily_orders.visit_lead', [
+                    'today' => date('l, M j', strtotime($selectedDate)),
+                    'prior' => date('l, M j', strtotime($visitCompare['prior_date'])),
+                ])) ?>
+            </p>
+        </div>
+
+        <div class="demand-summary-grid">
+            <div class="demand-stat">
+                <span class="demand-stat-label"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_standing_route')) ?></span>
+                <span class="demand-stat-value"><?= (int)$visitSummary['today_standing'] ?></span>
+                <span class="demand-stat-sub"><?= htmlspecialchars($dayName) ?></span>
+            </div>
+            <div class="demand-stat">
+                <span class="demand-stat-label"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_prior_route')) ?></span>
+                <span class="demand-stat-value"><?= (int)$visitSummary['prior_assigned'] ?></span>
+                <span class="demand-stat-sub"><?= htmlspecialchars($priorShort) ?></span>
+            </div>
+            <div class="demand-stat <?= (int)($visitSummary['look'] ?? 0) > 0 ? 'is-warn' : '' ?>">
+                <span class="demand-stat-label"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_look')) ?></span>
+                <span class="demand-stat-value"><?= (int)($visitSummary['look'] ?? 0) ?></span>
+                <span class="demand-stat-sub"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_look_sub')) ?></span>
+            </div>
+            <div class="demand-stat <?= (int)($visitSummary['back_to_back'] ?? 0) > 0 ? 'is-warn' : '' ?>">
+                <span class="demand-stat-label"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_consecutive')) ?></span>
+                <span class="demand-stat-value"><?= (int)($visitSummary['back_to_back'] ?? $visitSummary['consecutive']) ?></span>
+                <span class="demand-stat-sub"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_consecutive_sub')) ?></span>
+            </div>
+            <div class="demand-stat <?= (int)($visitSummary['extra_yesterday'] ?? 0) > 0 ? 'is-warn' : '' ?>">
+                <span class="demand-stat-label"><?= htmlspecialchars(bakery_t('daily_orders.visit_stat_extra')) ?></span>
+                <span class="demand-stat-value"><?= (int)($visitSummary['extra_yesterday'] ?? 0) ?></span>
+                <span class="demand-stat-sub"><?= htmlspecialchars($priorShort) ?></span>
+            </div>
+        </div>
+
+        <p class="visit-board-actions">
+            <a class="btn btn-primary" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('daily_orders.visit_open_today_route')) ?></a>
+            <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($visitCompare['prior_date']) ?>"><?= htmlspecialchars(bakery_t('daily_orders.visit_open_prior_route')) ?></a>
+            <a class="btn btn-outline" href="standing_routes.php"><?= htmlspecialchars(bakery_t('daily_orders.visit_open_standing_routes')) ?></a>
+        </p>
+
+        <?php if (empty($visitDrivers)): ?>
+            <div class="empty-state compact-empty">
+                <h3><?= htmlspecialchars(bakery_t('daily_orders.visit_empty')) ?></h3>
+                <p><?= htmlspecialchars(bakery_t('daily_orders.visit_empty_help')) ?></p>
+            </div>
+        <?php else: ?>
+            <?php foreach ($visitDrivers as $vg): ?>
+                <section class="visit-driver-board" id="visit-driver-<?= (int)$vg['driver_id'] ?>">
+                    <div class="visit-driver-head">
+                        <div>
+                            <h3><?= htmlspecialchars($vg['driver_name'] !== '' ? $vg['driver_name'] : bakery_t('daily_orders.visit_unassigned')) ?></h3>
+                            <p>
+                                <?= (int)$vg['standing_count'] ?> <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_standing_route')) ?>
+                                · <?= (int)$vg['prior_count'] ?> <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_prior_route')) ?>
+                                · <?= (int)$vg['look_count'] ?> <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_look')) ?>
+                            </p>
+                        </div>
+                        <?php if ((int)$vg['driver_id'] > 0): ?>
+                            <a class="btn btn-small btn-primary" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>&driver_id=<?= (int)$vg['driver_id'] ?>"><?= htmlspecialchars(bakery_t('daily_orders.visit_open_today_route')) ?></a>
+                        <?php endif; ?>
+                    </div>
+                    <div class="visit-route-scan">
+                        <div class="visit-route-col">
+                            <h4><?= htmlspecialchars(bakery_t('daily_orders.visit_standing_list', ['day' => $dayName])) ?> · <?= (int)$vg['standing_count'] ?></h4>
+                            <?php if (empty($vg['standing_names'])): ?>
+                                <p class="muted"><?= htmlspecialchars(bakery_t('daily_orders.visit_no_standing_stops')) ?></p>
+                            <?php else: ?>
+                                <p class="visit-stop-pills">
+                                    <?php foreach ($vg['standing_names'] as $pill): ?>
+                                        <span class="visit-pill"><?= htmlspecialchars($pill['customer_name']) ?></span>
+                                    <?php endforeach; ?>
+                                </p>
+                            <?php endif; ?>
+                        </div>
+                        <div class="visit-route-col">
+                            <h4><?= htmlspecialchars(bakery_t('daily_orders.visit_yesterday_list')) ?> · <?= (int)$vg['prior_count'] ?></h4>
+                            <?php if (empty($vg['prior_names'])): ?>
+                                <p class="muted"><?= htmlspecialchars(bakery_t('daily_orders.visit_no_yesterday_stops')) ?></p>
+                            <?php else: ?>
+                                <p class="visit-stop-pills">
+                                    <?php foreach ($vg['prior_names'] as $pill): ?>
+                                        <span class="visit-pill<?= !empty($pill['is_extra']) ? ' is-extra' : '' ?>"<?php if (!empty($pill['is_extra'])): ?> title="<?= htmlspecialchars(bakery_t('daily_orders.visit_pill_extra')) ?>"<?php endif; ?>>
+                                            <?= htmlspecialchars($pill['customer_name']) ?>
+                                            <?php if (!empty($pill['is_extra'])): ?>
+                                                <em><?= htmlspecialchars(bakery_t('daily_orders.visit_pill_extra')) ?></em>
+                                            <?php endif; ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </p>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php if (empty($vg['stops'])): ?>
+                        <p class="visit-no-look"><?= htmlspecialchars(bakery_t('daily_orders.visit_no_look')) ?></p>
+                    <?php else: ?>
+                    <table class="items-table compact-table visit-route-table">
+                        <thead>
+                            <tr>
+                                <th><?= htmlspecialchars(bakery_t('daily_orders.visit_col_stop')) ?></th>
+                                <th><?= htmlspecialchars(bakery_t('daily_orders.visit_col_standing_route', ['day' => $dayName])) ?></th>
+                                <th><?= htmlspecialchars(bakery_t('daily_orders.visit_col_prior', ['date' => $priorShort])) ?></th>
+                                <th><?= htmlspecialchars(bakery_t('daily_orders.visit_last_actual')) ?></th>
+                                <th><?= htmlspecialchars(bakery_t('daily_orders.visit_col_look')) ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($vg['stops'] as $vc): ?>
+                                <?php $call = (string)($vc['route_call'] ?? 'other'); ?>
+                                <tr class="<?= !empty($vc['flags']['is_deviation']) ? 'row-diff' : 'row-match' ?>">
+                                    <td>
+                                        <a href="customer_record.php?customer_id=<?= (int)$vc['customer_id'] ?>&date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars($vc['customer_name']) ?></a>
+                                        <?php if (!empty($vc['zone_label'])): ?>
+                                            <div class="muted"><?= htmlspecialchars($vc['zone_label']) ?></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if (!empty($vc['flags']['on_standing_today'])): ?>
+                                            <?= htmlspecialchars(bakery_t('daily_orders.visit_cell_yes')) ?>
+                                        <?php else: ?>
+                                            <span class="muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php $priorLabel = $yesterdayCell($vc); ?>
+                                        <?php if ($priorLabel === '—'): ?>
+                                            <span class="muted">—</span>
+                                        <?php else: ?>
+                                            <?= htmlspecialchars($priorLabel) ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if (!empty($vc['last_actual_label'])): ?>
+                                            <?= htmlspecialchars($vc['last_actual_label']) ?>
+                                        <?php else: ?>
+                                            <span class="muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="state-badge state-<?= htmlspecialchars($callClass($call)) ?>">
+                                            <?= htmlspecialchars(bakery_t('daily_orders.visit_call_' . $call)) ?>
+                                        </span>
+                                        <?php if (!empty($vc['flags']['today_missing_dated'])): ?>
+                                            <button type="button" class="btn btn-small btn-outline" onclick="applyStandingToDated(<?= (int)$vc['customer_id'] ?>, false)"><?= htmlspecialchars(bakery_t('daily_orders.visit_add_stop')) ?></button>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <?php endif; ?>
+                </section>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($viewMode !== 'visit'): ?>
     <!-- Demand Review -->
     <section class="demand-review" id="demand-review">
         <div class="demand-review-header">
@@ -944,6 +1228,7 @@ $summary = $demandSummaryAll['summary'];
             <?php endif; ?>
         </div>
     </section>
+    <?php endif; ?>
 
     <?php if ($viewMode === 'edit'): ?>
     <section class="dated-orders-section" id="dated-orders">
@@ -1166,9 +1451,13 @@ $summary = $demandSummaryAll['summary'];
         </div>
     <?php endif; ?>
     </section>
-    <?php else: ?>
+    <?php elseif ($viewMode === 'review'): ?>
         <div class="edit-view-nudge">
-            <p>Demand Review is focused on exceptions. Switch to <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'edit']))) ?>">Edit Dated Orders</a> to change quantities for this date.</p>
+            <p><?= htmlspecialchars(bakery_t('daily_orders.review_nudge_prefix')) ?>
+                <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'edit']))) ?>"><?= htmlspecialchars(bakery_t('daily_orders.view_edit')) ?></a>
+                <?= htmlspecialchars(bakery_t('daily_orders.review_nudge_or')) ?>
+                <a href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'visit']))) ?>"><?= htmlspecialchars(bakery_t('daily_orders.view_visit')) ?></a>.
+            </p>
         </div>
     <?php endif; ?>
 </div>
@@ -1542,6 +1831,153 @@ $summary = $demandSummaryAll['summary'];
     gap: 8px;
     margin: 0 0 18px;
     flex-wrap: wrap;
+}
+
+.visit-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 16px;
+    margin: 12px 0 14px;
+}
+.visit-meta dt {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+    margin: 0 0 4px;
+}
+.visit-meta dd {
+    margin: 0;
+    font-size: 13px;
+    color: #2c3e50;
+}
+.standing-week {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
+}
+.standing-day {
+    display: inline-block;
+    min-width: 2.1em;
+    text-align: center;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #eef1f4;
+    color: #8a96a3;
+}
+.standing-day.is-on {
+    background: #d4edda;
+    color: #155724;
+}
+.standing-day.is-today {
+    box-shadow: 0 0 0 2px #2c3e50;
+}
+.standing-day.is-prior.is-on {
+    background: #fff3cd;
+    color: #856404;
+}
+.qty-prior {
+    font-weight: 700;
+    color: #0c5460;
+}
+.visit-line-actions {
+    white-space: nowrap;
+}
+.visit-line-actions .btn {
+    margin: 0 4px 4px 0;
+}
+.visit-compare .date-scope-banner {
+    margin-bottom: 16px;
+}
+.visit-board-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 20px;
+}
+.visit-driver-board {
+    margin: 0 0 20px;
+    padding: 16px;
+    background: #fff;
+    border: 1px solid #e3e8ef;
+    border-radius: 10px;
+}
+.visit-driver-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.visit-driver-head h3 {
+    margin: 0 0 4px;
+}
+.visit-driver-head p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 13px;
+}
+.visit-route-scan {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.visit-route-col {
+    background: #fbfcfe;
+    border: 1px solid #eef2f6;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.visit-route-col h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #5a6a7a;
+    font-weight: 700;
+}
+.visit-stop-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+}
+.visit-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #eef2f6;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 13px;
+    color: #2c3e50;
+}
+.visit-pill em {
+    font-style: normal;
+    font-size: 11px;
+    color: #856404;
+}
+.visit-pill.is-extra {
+    background: #fff3cd;
+    border: 1px solid #f6c23e;
+}
+.visit-no-look {
+    margin: 0;
+    color: #215c36;
+    font-size: 14px;
+}
+.visit-route-table {
+    width: 100%;
+}
+@media (max-width: 800px) {
+    .visit-route-scan {
+        grid-template-columns: 1fr;
+    }
+    .visit-driver-head {
+        flex-direction: column;
+    }
 }
 
 .demand-review {
@@ -2150,6 +2586,76 @@ function updateQuantity(itemId, quantity, isAdvanced) {
             alert('Error: ' + data.error);
         }
     });
+}
+
+function setVisitDatedQty(customerId, productId, quantity, isAdvanced) {
+    if (!confirmAdvancedEdit(!!isAdvanced)) {
+        location.reload();
+        return;
+    }
+    const qty = quantity === '' || quantity === null ? 0 : parseInt(quantity, 10);
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=set_dated_quantity&customer_id=' + customerId
+            + '&date=' + encodeURIComponent(selectedOrderDate)
+            + '&product_id=' + productId
+            + '&quantity=' + (isNaN(qty) ? 0 : qty)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || <?= json_encode(bakery_t('daily_orders.visit_save_error')) ?>));
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
+}
+
+function copyPriorToDated(customerId, isAdvanced) {
+    if (!confirm(<?= json_encode(bakery_t('daily_orders.visit_copy_confirm')) ?>)) {
+        return;
+    }
+    if (!confirmAdvancedEdit(!!isAdvanced)) {
+        return;
+    }
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=copy_prior_to_dated&customer_id=' + customerId
+            + '&date=' + encodeURIComponent(selectedOrderDate)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || <?= json_encode(bakery_t('daily_orders.visit_copy_error')) ?>));
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
+}
+
+function applyStandingToDated(customerId, isAdvanced) {
+    if (!confirmAdvancedEdit(!!isAdvanced)) {
+        return;
+    }
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=apply_standing_to_dated&customer_id=' + customerId
+            + '&date=' + encodeURIComponent(selectedOrderDate)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || <?= json_encode(bakery_t('daily_orders.visit_standing_error')) ?>));
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
 }
 
 function updateStatus(orderId, status) {

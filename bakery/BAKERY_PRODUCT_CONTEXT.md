@@ -8,7 +8,8 @@ disagree, the code wins — fix the doc.
 **Stack reality:** flat PHP server-rendered pages (page scripts + `includes/`), vanilla
 JS/CSS, MariaDB. No framework. Deploy target DreamHost. Migrations in `database/schema/`
 (001–049; note some schema files are placeholders and the real columns are added by
-`scripts/run_migrations.php`). Tests are custom scripts under `tests/`.
+`scripts/run_migrations.php`; additive migrations continue through 068 under the same
+`NNN_slug.sql` convention). Tests are custom scripts under `tests/`.
 
 ---
 
@@ -251,6 +252,8 @@ Compact map — entry points only, not every file.
 | Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; staff side ships the alert bell + `scripts/staff_alert_digest.php` cron email (silent when clean) |
 | Texting Command Center | `text_comms.php`, `text_comms_api.php`, `includes/text_comms.php`, `includes/twilio_config.php`, `twilio_webhook.php`, schema 057 | One SMS ledger for outbound attempts (live, failed, or recorded-only without credentials), inbound replies linked to customers by phone tail, delivery health, and ops mix. Sending happens only on the Command Center page; the API is read-only. Status callbacks can advance but never regress a row; Twilio retries of recorded inbound messages answer success, not a second row. |
 | Timeline | `operational_timeline.php`, `includes/operational_timeline.php` | Audit/event feed per date/customer/order |
+| SF Baker / Bread Education (learner) | `sfb_join.php` (public door), `sfb_dashboard.php`, `sfb_resources.php`, `sfb_lesson.php`, `sfb_media.php`, `sfb_starters.php`, `sfb_formulas.php`, `sfb_batches.php`, `sfb_batch.php`, `sfb_community.php`, `sfb_community_topic.php`, `sfb_shared_batch.php`, `includes/sf_baker.php` | Learner home base on the portal identity: join/preview/sign-in door over phone-PIN signup + invites, courses/lessons/gated media/progress, batch-builder journal, community circles; every write goes through the `bakery_sfb_*` domain layer |
+| Bread Education (commerce / staff / static) | `sfb_offerings.php`, `square_webhook.php` (education routing), `sfb_admin_learn.php`, `breadeducation/` static zone pushed by `scripts/push_breadeducation_sftp.ps1` to `/breadeducation/` | Offerings bought via Square checkout or account credit; the signature-checked webhook is the only payment truth and unlocks entitlements; staff authoring of courses/lessons/invites; public curriculum pages deploy out-of-band from this app |
 
 ## 6. Known open loops
 

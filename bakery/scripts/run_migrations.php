@@ -1128,6 +1128,18 @@ try {
     // 051 is a Live catch-up of 037–047; Staging that already has those objects
     // only records the ledger id.
     require_once $root . '/includes/hosted_migration_runtime.php';
+    require_once $root . '/includes/schema_migration_numbers.php';
+    $duplicatePrefixes = bakery_schema_unexpected_duplicate_prefixes();
+    if ($duplicatePrefixes !== []) {
+        $parts = [];
+        foreach ($duplicatePrefixes as $prefix => $ids) {
+            $parts[] = $prefix . ' => ' . implode(', ', $ids);
+        }
+        throw new RuntimeException(
+            'New schema files reused a migration number. Use php scripts/next_schema_migration.php --name=slug. Collisions: '
+            . implode('; ', $parts)
+        );
+    }
     foreach (glob($newMigrationsDir . '/[0-9][0-9][0-9]_*.sql') ?: [] as $migrationPath) {
         $file = basename($migrationPath, '.sql');
         $number = (int)substr($file, 0, 3);

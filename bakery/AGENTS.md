@@ -18,7 +18,7 @@ Prefer canonical `--agent=` slugs from `canonical_slugs`. Use `mission_packet`. 
 
 Skills: `.cursor/skills/agent-homebase/SKILL.md`, `test-gate`, `close-a-loop`, `sfb-agent`.
 
-Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`.
+Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`. New schema files take the next unused `NNN` (`php scripts/next_schema_migration.php --name=slug`); do not reuse 062 or rename applied migrations.
 
 **Grok Bot / Cursor on the web:** give them [docs/GROK_AND_CLOUD_AGENT_DEPLOY.md](docs/GROK_AND_CLOUD_AGENT_DEPLOY.md). They move code with Git only — no SFTP credentials; Live stays Staging Manager `confirm`.
 

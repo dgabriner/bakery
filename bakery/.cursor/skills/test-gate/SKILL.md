@@ -16,6 +16,15 @@ There is no PHPUnit. Suites are `tests/run_*.php` on **`bakerysf_test` only**.
 2. Or `php scripts/agent_homebase.php tests-for --files="billing_center.php,lang/en.php" --json`.
 3. If you touched `lang/en.php` or `lang/es.php`, also run `php tests/run_i18n_tests.php`.
 
+## Minimum gate for any repo edit
+
+Any change that ships — including JS, CSS, and doc-sync commits — needs at
+least `php -l` on touched PHP plus the mapped suites for those paths. Touched
+`lang/*` or `includes/` always means `run_i18n_tests.php` and
+`run_integrity_tests.php`. "Ops only" (SMS sends, Live reads) is the sole
+exemption, and handoff field 6 must say why no suite ran. Never skip the gate
+because the edit is small; session 59 shipped filter behavior with zero suites.
+
 ```text
 php tests/run_invoice_send_tests.php
 php tests/run_agent_homebase_tests.php

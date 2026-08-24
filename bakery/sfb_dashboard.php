@@ -15,6 +15,14 @@ $recentBatches = array_slice($recentForReview, 0, 5);
 $starters = bakery_sfb_starters($db, $customerId);
 $formulaCount = count(bakery_sfb_formulas($db, $customerId));
 
+$completedCourses = [];
+foreach (bakery_sfb_courses($db) as $learnCourse) {
+    [$learnDone, $learnTotal] = bakery_sfb_course_progress($db, $customerId, (int)$learnCourse['id']);
+    if ($learnTotal > 0 && $learnDone === $learnTotal) {
+        $completedCourses[] = (string)$learnCourse['title'];
+    }
+}
+
 // First-run home base: show the welcome strip on the signup redirect or
 // whenever the baker has nothing started yet.
 $firstRun = ($_GET['welcome'] ?? '') === '1'
@@ -106,6 +114,19 @@ $portalCustomerName = $customer['name'];
             <span class="<?php echo $journey['total'] >= $milestone ? 'hit' : ''; ?>"><?php echo number_format($milestone); ?></span>
           <?php endforeach; ?>
         </div>
+        <?php if ($journey['total'] >= 1000): ?>
+          <?php
+          $celebratedMilestone = 100;
+          foreach ($milestones as $milestone) {
+              if ($journey['total'] >= $milestone) {
+                  $celebratedMilestone = $milestone;
+              }
+          }
+          ?>
+          <p style="margin:10px 0 0;">
+            <span class="badge badge-ok"><?php echo htmlspecialchars(bakery_t('sfb.milestone_reached', ['count' => number_format($celebratedMilestone)]), ENT_QUOTES, 'UTF-8'); ?></span>
+          </p>
+        <?php endif; ?>
         <p class="muted" style="margin-top:10px;">
           <?php if ($journey['reached']): ?>
             <?php bakery_te('sfb.journey_reached'); ?>
@@ -153,6 +174,7 @@ $portalCustomerName = $customer['name'];
       <a href="sfb_starters.php"><strong><?php echo count($starters); ?></strong><?php bakery_te('sfb.tab_starters'); ?></a>
       <a href="sfb_formulas.php"><strong><?php echo (int)$formulaCount; ?></strong><?php bakery_te('sfb.tab_formulas'); ?></a>
       <a href="sfb_batches.php"><strong><?php echo count($recentBatches); ?></strong><?php bakery_te('sfb.tab_batches'); ?></a>
+      <a href="sfb_offerings.php"><?php bakery_te('sfb.offerings_quick'); ?></a>
     </div>
 
     <?php if ($starters): ?>
@@ -175,6 +197,21 @@ $portalCustomerName = $customer['name'];
                   </small>
                 </span>
                 <a class="btn-link" href="sfb_starters.php?starter=<?php echo (int)$starter['id']; ?>"><?php bakery_te('sfb.feed_now'); ?></a>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      </section>
+    <?php endif; ?>
+
+    <?php if ($completedCourses): ?>
+      <section class="card" style="margin-bottom:14px;">
+        <div class="card-header"><h2><?php bakery_te('sfb.course_complete_title'); ?></h2></div>
+        <div class="card-body">
+          <ul class="line-list">
+            <?php foreach ($completedCourses as $completedCourseTitle): ?>
+              <li>
+                <a class="btn-link" href="sfb_resources.php"><?php echo htmlspecialchars($completedCourseTitle, ENT_QUOTES, 'UTF-8'); ?></a>
               </li>
             <?php endforeach; ?>
           </ul>

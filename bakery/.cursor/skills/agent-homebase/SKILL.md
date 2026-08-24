@@ -45,4 +45,22 @@ php scripts/agent_homebase.php tests-for --files="a.php,lang/en.php" --json
 php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=NAME --mission="..."
 php scripts/agent_homebase.php handoff --agent=NAME --summary="1. ... 8. ..." --files="path.php"
+php scripts/agent_homebase.php notes --kind=coach --json
 ```
+
+## Handoff formatting (the 1/8 trap)
+
+PowerShell and spawn wrappers flatten multiline `--summary` strings onto one
+line. The scorer accepts both shapes — each field on its own line, or all
+eight numbered inline after sentence boundaries (`...done. 2. Decided...`).
+Always read the returned `handoff_score`: if `complete` is `false`, open a
+follow-up session and re-handoff with corrected formatting. Never leave a
+1/8 ledger row behind.
+
+## Shared files need a courtesy check
+
+Before editing `lang/en.php`, `lang/es.php`, `includes/nav*.php`,
+`includes/navigation_catalog.php`, or `includes/agent_work_map.php`, run
+`sessions --json` and check for another open session whose mission overlaps.
+Keep lang edits additive (append keys; never reformat the file), and say so in
+handoff field 5 when you dodged a concurrent agent's line.

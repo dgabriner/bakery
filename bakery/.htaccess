@@ -30,3 +30,21 @@
         Header set Expires "0"
     </FilesMatch>
 </IfModule>
+
+# Staging must stay out of search indexes and AI crawl corpora.
+# On staging.sourflour.org only: serve the block-everything robots.txt and
+# send X-Robots-Tag noindex on every response. Live (bakery.sourflour.org)
+# never matches these host conditions and behaves exactly as before.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP_HOST} ^staging\.sourflour\.org$ [NC]
+    RewriteRule .* - [E=STAGING:1]
+    RewriteCond %{HTTP_HOST} ^staging\.sourflour\.org$ [NC]
+    RewriteRule ^staging-robots\.txt$ - [L]
+    RewriteCond %{HTTP_HOST} ^staging\.sourflour\.org$ [NC]
+    RewriteRule ^robots\.txt$ staging-robots.txt [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set X-Robots-Tag "noindex, nofollow" env=STAGING
+</IfModule>

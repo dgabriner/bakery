@@ -42,14 +42,17 @@ function deploy_surface_skip(string $message): void {
 }
 
 /* Mirror of Test-BakeryDeployWebRootFile: root *.php/.js/.css/.html/.htaccess
- * minus Get-BakeryDeployExcludeNamePatterns junk (via the mirrored PHP helper). */
+ * minus Get-BakeryDeployExcludeNamePatterns junk (via the mirrored PHP helper),
+ * plus the Get-BakeryDeployRootFiles whitelist entries that are not web-root
+ * sweepable by extension (staging-robots.txt serves as robots.txt on staging). */
 function deploy_surface_expected_root_files(string $root): array {
     $allowedExtensions = ['.php' => true, '.js' => true, '.css' => true, '.html' => true];
+    $whitelistExtras = ['staging-robots.txt' => true];
     $files = [];
     foreach (scandir($root) ?: [] as $name) {
         if ($name === '.' || $name === '..') continue;
         if (!is_file($root . DIRECTORY_SEPARATOR . $name)) continue;
-        if ($name !== '.htaccess' && !isset($allowedExtensions[strtolower((string)strrchr($name, '.'))])) continue;
+        if ($name !== '.htaccess' && !isset($allowedExtensions[strtolower((string)strrchr($name, '.'))]) && !isset($whitelistExtras[$name])) continue;
         if (bakery_staging_live_skip_name($name)) continue;
         $files[] = $name;
     }

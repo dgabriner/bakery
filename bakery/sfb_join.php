@@ -25,6 +25,11 @@ if (bakery_sfb_learning_ready($db)) {
     $courses = array_slice(bakery_sfb_courses($db), 0, 6);
 }
 
+$offeringsById = [];
+foreach (bakery_sfb_offerings($db) as $offeringRow) {
+    $offeringsById[(int)$offeringRow['id']] = $offeringRow;
+}
+
 $joinUrl = BASE_URL . 'customer_login.php?create=1';
 $signInUrl = BASE_URL . 'customer_login.php';
 if ($invite) {
@@ -64,6 +69,7 @@ $currentLocale = bakery_locale();
     .staff a { color: var(--terracotta); }
     .invite-chip { background: #f3ead9; border-radius: 999px; color: var(--ink); display: block; font-size: .88rem; margin: 0 auto 22px; max-width: 420px; padding: 9px 16px; text-align: center; }
     .muted { color: var(--muted); }
+    .chip { background: #f3ead9; border-radius: 999px; color: var(--muted); display: block; font-size: .72rem; letter-spacing: .02em; margin-top: 4px; max-width: fit-content; padding: 2px 9px; }
     small.mono { font-family: monospace; letter-spacing: .06em; }
   </style>
 </head>
@@ -88,13 +94,51 @@ $currentLocale = bakery_locale();
         <?php else: ?>
           <ul>
             <?php foreach ($courses as $course): ?>
+              <?php
+              $gatedOffering = !empty($course['required_offering_id']) ? ($offeringsById[(int)$course['required_offering_id']] ?? null) : null;
+              if ($gatedOffering) {
+                  $chipText = bakery_t('sfb.course_included_with', ['label' => (string)$gatedOffering['title']]);
+                  if ((int)($gatedOffering['price_cents'] ?? 0) > 0) {
+                      $chipText .= ' · $' . number_format(((int)$gatedOffering['price_cents']) / 100, 2);
+                  }
+              } else {
+                  $chipText = bakery_t('sfb.course_free_label');
+              }
+              ?>
               <li>
-                <span><?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?></span>
+                <span>
+                  <?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?>
+                  <span class="chip"><?php echo htmlspecialchars($chipText, ENT_QUOTES, 'UTF-8'); ?></span>
+                </span>
                 <span class="muted"><?php echo (int)$course['lesson_count']; ?> <?php bakery_te('sfb.lessons'); ?></span>
               </li>
             <?php endforeach; ?>
           </ul>
         <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <p class="eyebrow"><?php bakery_te('sfb.join_door_workshops'); ?></p>
+        <h2><?php bakery_te('sfb.join_workshops_title'); ?></h2>
+        <?php
+        $workshopTeaser = null;
+        $publicOfferings = bakery_sfb_payments_ready($db) ? array_slice(bakery_sfb_offerings($db), 0, 3) : [];
+        foreach ($publicOfferings as $po) {
+            if (($po['kind'] ?? '') === 'class') { $workshopTeaser = $po; break; }
+        }
+        ?>
+        <?php if ($workshopTeaser): ?>
+          <ul>
+            <li>
+              <span><?php echo htmlspecialchars($workshopTeaser['title'], ENT_QUOTES, 'UTF-8'); ?></span>
+              <span class="muted">$<?php echo number_format((float)$workshopTeaser['price_cents'] / 100, 2); ?></span>
+            </li>
+          </ul>
+        <?php endif; ?>
+        <p class="muted"><?php bakery_te('sfb.join_workshops_copy'); ?></p>
+        <a class="btn" href="<?php echo htmlspecialchars($joinUrl . '&next=' . rawurlencode('/sfb_offerings.php'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.join_cta_workshops'); ?></a>
       </div>
     </div>
 

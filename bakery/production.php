@@ -981,9 +981,12 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                 $panDulceBatch = $isBaker && $isPanDulceLine
                     ? bakery_production_pan_dulce_batch_hint($db, (int)$doughTypeId, $lineRemaining)
                     : null;
+                $batchKey = ((int)$doughTypeId > 0)
+                    ? ('batch-' . (int)$doughTypeId)
+                    : ('batch-' . preg_replace('/[^a-z0-9]+/i', '-', (string)$doughType));
             ?>
-                <section class="bp-line">
-                    <header class="bp-line__header">
+                <details class="bp-line" id="<?php echo htmlspecialchars($batchKey, ENT_QUOTES, 'UTF-8'); ?>" data-batch-key="<?php echo htmlspecialchars($batchKey, ENT_QUOTES, 'UTF-8'); ?>" open>
+                    <summary class="bp-line__header">
                         <div>
                             <h2 class="bp-line__title"><?php echo htmlspecialchars($doughType, ENT_QUOTES, 'UTF-8'); ?></h2>
                             <p class="bp-line__meta"><?php echo htmlspecialchars(bakery_t('production.line_meta', [
@@ -1002,41 +1005,15 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                                 </p>
                             <?php endif; ?>
                         </div>
-                    </header>
+                        <span class="bp-line__toggle" data-show="<?php echo htmlspecialchars(bakery_t('production.show_batch'), ENT_QUOTES, 'UTF-8'); ?>" data-hide="<?php echo htmlspecialchars(bakery_t('production.hide_batch'), ENT_QUOTES, 'UTF-8'); ?>"></span>
+                    </summary>
 
-                    <?php if (!empty($data['formula']) && (float)($data['formula']['total_percentage'] ?? 0) > 0 && !empty($doughTypeId)):
-                        $ingredientsStmt = $db->prepare("
-                            SELECT i.name, i.unit, fi.percentage
-                            FROM formula_ingredients fi
-                            JOIN ingredients i ON fi.ingredient_id = i.id
-                            WHERE fi.dough_type_id = ?
-                            ORDER BY fi.percentage DESC
-                        ");
-                        $ingredientsStmt->execute([$doughTypeId]);
-                        $ingredients = $ingredientsStmt->fetchAll(PDO::FETCH_ASSOC);
+                    <?php if (!empty($data['ingredients']) && (float)($data['formula']['total_percentage'] ?? 0) > 0 && !empty($doughTypeId)):
                         $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
-                        $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
                     ?>
                         <details class="bp-formula" open>
                             <summary><?php echo htmlspecialchars(bakery_t('production.dough_formula', ['grams' => number_format($data['total_weight_grams'], 0)]), ENT_QUOTES, 'UTF-8'); ?></summary>
-                            <ul class="bp-formula__list" data-formula-units data-unit-mode="<?php echo htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8'); ?>">
-                                <?php foreach ($ingredients as $ingredient):
-                                    $amount = $totalFlour * ($ingredient['percentage'] / 100);
-                                    $classification = bakery_formula_classify_ingredient($ingredient['name'], $ingredient['unit'] ?? '');
-                                ?>
-                                    <li class="<?php echo !empty($classification['liquid']) ? 'is-liquid' : ''; ?>"
-                                        data-grams="<?php echo htmlspecialchars((string) $amount, ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-liquid="<?php echo !empty($classification['liquid']) ? '1' : '0'; ?>"
-                                        <?php if (!empty($classification['density_lb_per_gal'])): ?>data-density="<?php echo htmlspecialchars((string) $classification['density_lb_per_gal'], ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
-                                        <span><?php echo htmlspecialchars($ingredient['name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                        <strong class="ingredient-amount"><?php echo bakery_formula_amount_markup($amount, $classification); ?></strong>
-                                    </li>
-                                <?php endforeach; ?>
-                                <li class="bp-formula-total" data-grams="<?php echo htmlspecialchars((string) $data['total_weight_grams'], ENT_QUOTES, 'UTF-8'); ?>" data-liquid="0">
-                                    <span><?php echo htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <strong class="ingredient-amount"><?php echo bakery_formula_amount_markup($data['total_weight_grams'], $doughClassification); ?></strong>
-                                </li>
-                            </ul>
+                            <?php bakery_production_echo_formula_items($data['ingredients'], (float)$totalFlour, (float)$data['total_weight_grams'], $isBaker); ?>
                         </details>
                     <?php endif; ?>
 
@@ -1127,7 +1104,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                             </article>
                         <?php endforeach; ?>
                     </div>
-                </section>
+                </details>
             <?php endforeach; ?>
 
             <footer class="bp-actions">
@@ -1197,6 +1174,25 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 .bp-form-intro { margin: 0 0 14px; color: #4b6351; line-height: 1.45; }
 .bp-form-error { background: #fdecec; border: 1px solid #e7a1a1; color: #7a1f1f; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
 .bp-line { background: #fff; border: 1px solid #dbe7df; border-radius: 14px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 2px 10px rgba(31,42,36,.06); }
+.bp-line > .bp-line__header { list-style: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px; background: linear-gradient(180deg, #f4faf6, #fff); border-bottom: 1px solid #e4eee8; cursor: pointer; }
+.bp-line > .bp-line__header::-webkit-details-marker { display: none; }
+.bp-line__toggle { flex: 0 0 auto; min-height: 44px; min-width: 64px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border-radius: 999px; background: #e7f3ec; color: #1f6637; font-size: .82rem; font-weight: 800; }
+.bp-line__toggle::after { content: attr(data-show); }
+.bp-line[open] > .bp-line__header .bp-line__toggle::after { content: attr(data-hide); }
+.bp-mix-overview { margin: 0 0 16px; border: 1px solid #cfe8db; border-radius: 14px; background: #f7fbf8; overflow: hidden; }
+.bp-mix-overview__summary { cursor: pointer; font-weight: 800; padding: 14px 16px; list-style: none; color: #173f3c; min-height: 48px; }
+.bp-mix-overview__summary::-webkit-details-marker { display: none; }
+.bp-mix-overview__lead { margin: 0; padding: 0 16px 12px; color: #4b6351; }
+.bp-mix-grid { display: grid; gap: 12px; padding: 0 12px 14px; }
+.bp-mix-card { background: #fff; border: 1px solid #d7e8de; border-radius: 12px; padding: 12px; }
+.bp-mix-card__title { margin: 0; font-size: 1.05rem; color: #173f3c; }
+.bp-mix-card__meta { margin: 4px 0 10px; color: #607068; font-size: .9rem; }
+.bp-mix-card__empty { margin: 0 0 10px; color: #607068; }
+.bp-mix-card__jump { display: inline-flex; min-height: 44px; align-items: center; font-weight: 800; color: #1f6637; text-decoration: none; }
+.bp-mix-card .bp-formula__list { padding: 0 0 10px; }
+@media (min-width: 720px) {
+    .bp-mix-grid { grid-template-columns: 1fr 1fr; }
+}
 .bp-line__header { padding: 14px 16px; background: linear-gradient(180deg, #f4faf6, #fff); border-bottom: 1px solid #e4eee8; }
 .bp-line__title { margin: 0; font-size: 1.15rem; color: #173f3c; }
 .bp-line__meta { margin: 6px 0 0; color: #607068; font-size: .92rem; }
@@ -1356,6 +1352,38 @@ var __PRODUCTION_I18N__ = <?php echo json_encode([
     'confirm_record_plural' => bakery_t('production.confirm_record_plural', ['units' => '__UNITS__', 'products' => '__PRODUCTS__']),
 ], JSON_UNESCAPED_UNICODE); ?>;
 document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        var overview = document.getElementById('bp-mix-overview');
+        document.querySelectorAll('a[href="#bp-mix-overview"]').forEach(function (link) {
+            link.addEventListener('click', function () {
+                if (overview) overview.open = true;
+            });
+        });
+        if (overview && window.location.hash === '#bp-mix-overview') {
+            overview.open = true;
+        }
+        document.querySelectorAll('a[href^="#batch-"]').forEach(function (link) {
+            link.addEventListener('click', function () {
+                var id = (link.getAttribute('href') || '').slice(1);
+                var batch = document.getElementById(id);
+                if (batch && batch.tagName === 'DETAILS') batch.open = true;
+            });
+        });
+        var dateInput = document.querySelector('input[name="production_date"]');
+        var storageKey = 'bakery.bakeBatchOpen.' + (dateInput ? dateInput.value : '');
+        var saved = {};
+        try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (err) { saved = {}; }
+        document.querySelectorAll('details.bp-line[data-batch-key]').forEach(function (el) {
+            var key = el.getAttribute('data-batch-key');
+            if (Object.prototype.hasOwnProperty.call(saved, key)) {
+                el.open = !!saved[key];
+            }
+            el.addEventListener('toggle', function () {
+                saved[key] = el.open;
+                try { localStorage.setItem(storageKey, JSON.stringify(saved)); } catch (e) {}
+            });
+        });
+    })();
     (function () {
         var storageKey = 'bakery.formulaUnitMode';
         var bakerView = !!document.querySelector('[data-baker-units]');

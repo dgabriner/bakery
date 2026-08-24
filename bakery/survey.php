@@ -22,7 +22,24 @@ bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
 $user = bakery_current_user();
 $isManager = bakery_user_has_role(['administrator', 'manager']);
 $token = trim((string)($_REQUEST['t'] ?? ''));
-$survey = $token !== '' ? bakery_survey_find_by_token($db, $token) : [];
+
+if (!bakery_surveys_ready($db)) {
+    bakery_survey_fail(
+        (string)bakery_t('survey.unavailable_title', [], 'Surveys not set up here'),
+        (string)bakery_t('survey.unavailable_body', [], 'This environment does not have the survey tables yet (migration 061). Ask the administrator to apply database/schema/061_surveys.sql.')
+    );
+}
+
+try {
+    $survey = $token !== '' ? bakery_survey_find_by_token($db, $token) : [];
+} catch (Throwable $e) {
+    error_log('survey.php lookup: ' . $e->getMessage());
+    $survey = [];
+    bakery_survey_fail(
+        (string)bakery_t('survey.unavailable_title', [], 'Surveys not set up here'),
+        (string)bakery_t('survey.unavailable_body', [], 'This environment does not have the survey tables yet (migration 061). Ask the administrator to apply database/schema/061_surveys.sql.')
+    );
+}
 
 function bakery_survey_fail(string $title, string $message): void
 {
@@ -75,9 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     bakery_require_csrf();
     $action = (string)($_POST['action'] ?? '');
     try {
-        if ($action === 'close' && $isManager) {
-            bakery_survey_close($db, (int)$survey['id']);
-            safe_redirect('text_comms.php?view=inbox&survey_closed=1');
+        if (($action === 'close' || $action === 'reopen') && $isManager) {
+            bakery_survey_set_status($db, (int)$survey['id'], $action === 'close' ? 'closed' : 'open');
+            safe_redirect('text_comms.php?view=surveys&survey=' . ($action === 'close' ? 'closed' : 'reopened'));
         }
         if ($action === 'skip') {
             $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
@@ -121,15 +138,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode($result['message']));
         }
         if ($action === 'answer') {
-            $answer = trim((string)($_POST['answer'] ?? ''));
-            if ($answer === '') {
+            $questions = bakery_survey_questions($survey);
+            $answered = 0;
+            foreach ($questions as $q) {
+                $raw = trim((string)($_POST['answer_' . $q['key']] ?? ''));
+                if ($raw === '') {
+                    continue;
+                }
+                $label = bakery_survey_answer_label($q, $raw);
+                bakery_survey_record_response($db, [
+                    'survey_id' => (int)$survey['id'],
+                    'action' => 'answer',
+                    'question_key' => $q['key'],
+                    'respondent' => (string)($user['display_name'] ?? ''),
+                    'response' => $label,
+                ]);
+                $answered++;
+            }
+            if ($answered === 0) {
                 safe_redirect('survey.php?t=' . rawurlencode($token) . '&err=' . rawurlencode((string)bakery_t('survey.err_empty_answer', [], 'Please write an answer first.')));
             }
-            bakery_survey_record_response($db, [
-                'survey_id' => (int)$survey['id'],
-                'action' => 'answer',
-                'response' => $answer,
-            ]);
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_answer', [], 'Answer recorded. Thank you!')));
         }
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&err=' . rawurlencode('unknown_action'));
@@ -141,12 +169,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $pageTitle = (string)bakery_t('survey.page_title', [], 'Survey');
 $data = [];
 $routeReview = false;
+$questions = bakery_survey_questions($survey);
 if ((string)$survey['kind'] === 'route_review') {
     $routeReview = true;
     $data = bakery_survey_route_review_data($db, $driverId, $deliveryDate);
 }
 $responses = [];
-$stmt = $db->prepare('SELECT action, response, created_at FROM survey_responses WHERE survey_id = ? ORDER BY id DESC LIMIT 30');
+$stmt = $db->prepare("SELECT action, question_key, respondent, response, created_at FROM survey_responses WHERE survey_id = ? AND action <> 'sent' ORDER BY id DESC LIMIT 40");
 $stmt->execute([(int)$survey['id']]);
 $responses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -186,7 +215,16 @@ $esc = static function ($v): string {
   <?php if ($routeReview): ?>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_review_sub', ['date' => $deliveryDate], 'Route review for :date')); ?></p>
   <?php else: ?>
-  <p class="sub"><?php echo $esc((string)($survey['question'] ?? '')); ?></p>
+  <p class="sub"><?php
+    $headline = trim((string)($survey['title'] ?? ''));
+    if ($headline === '' && count($questions) === 1) {
+        $headline = (string)$questions[0]['text'];
+    }
+    echo $esc($headline !== '' ? $headline : (string)bakery_survey_text('survey.page_title', [], 'Survey'));
+    if (count($questions) > 1) {
+        echo ' · ' . count($questions) . ' ' . bakery_survey_text('survey.questions_suffix', [], 'questions');
+    }
+  ?></p>
   <?php endif; ?>
   <?php if ($flash !== ''): ?><div class="flash"><?php echo $esc($flash); ?></div><?php endif; ?>
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
@@ -241,10 +279,28 @@ $esc = static function ($v): string {
     </div>
   <?php else: ?>
     <div class="card">
-      <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" style="display:grid;gap:10px">
+      <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" style="display:grid;gap:14px">
         <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
         <input type="hidden" name="action" value="answer">
-        <textarea name="answer" placeholder="<?php echo $esc(bakery_survey_text('survey.answer_placeholder', [], 'Type your answer…')); ?>"></textarea>
+        <?php foreach ($questions as $q): ?>
+        <div>
+          <div class="name" style="margin-bottom:6px"><?php echo $esc($q['text']); ?></div>
+          <?php if ($q['type'] === 'yes_no'): ?>
+          <div style="display:flex;gap:10px">
+            <label style="font-size:15px"><input type="radio" name="answer_<?php echo $esc($q['key']); ?>" value="yes" required> <?php echo $esc(bakery_survey_text('survey.answer_yes', [], 'Yes')); ?></label>
+            <label style="font-size:15px"><input type="radio" name="answer_<?php echo $esc($q['key']); ?>" value="no"> <?php echo $esc(bakery_survey_text('survey.answer_no', [], 'No')); ?></label>
+          </div>
+          <?php elseif ($q['type'] === 'choice'): ?>
+          <div style="display:grid;gap:6px">
+            <?php foreach ($q['options'] as $opt): ?>
+            <label style="font-size:15px"><input type="radio" name="answer_<?php echo $esc($q['key']); ?>" value="<?php echo $esc($opt); ?>" required> <?php echo $esc($opt); ?></label>
+            <?php endforeach; ?>
+          </div>
+          <?php else: ?>
+          <textarea name="answer_<?php echo $esc($q['key']); ?>" placeholder="<?php echo $esc(bakery_survey_text('survey.answer_placeholder', [], 'Type your answer…')); ?>"></textarea>
+          <?php endif; ?>
+        </div>
+        <?php endforeach; ?>
         <button type="submit" class="btn primary"><?php echo $esc(bakery_survey_text('survey.answer_send', [], 'Send answer')); ?></button>
       </form>
     </div>
@@ -254,7 +310,19 @@ $esc = static function ($v): string {
   <div class="card">
     <div class="meta"><?php echo $esc(bakery_survey_text('survey.responses_so_far', [], 'Answers so far')); ?></div>
     <?php foreach ($responses as $r): ?>
-      <div class="stop"><span class="meta"><?php echo $esc($r['action']); ?></span><span class="meta"><?php echo $esc(substr((string)$r['response'], 0, 120)); ?></span></div>
+      <div class="stop">
+        <span class="meta"><?php
+          $labelKey = $actionLabels[(string)$r['action']] ?? '';
+          echo $esc($labelKey !== '' ? bakery_survey_text($labelKey, [], (string)$r['action']) : (string)$r['action']);
+        ?></span>
+        <span class="meta"><?php
+          $txt = trim((string)$r['response']);
+          if (($r['respondent'] ?? '') !== '') {
+              $txt = $r['respondent'] . ($txt !== '' ? ': ' . $txt : '');
+          }
+          echo $esc(mb_substr($txt, 0, 140));
+        ?></span>
+      </div>
     <?php endforeach; ?>
   </div>
   <?php endif; ?>
@@ -262,8 +330,8 @@ $esc = static function ($v): string {
   <?php if ($isManager): ?>
   <form method="post" action="survey.php?t=<?php echo $esc($token); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
-    <input type="hidden" name="action" value="close">
-    <button type="submit" class="btn warn"><?php echo $esc(bakery_survey_text('survey.close', [], 'Close this survey')); ?></button>
+    <input type="hidden" name="action" value="<?php echo ((string)$survey['status'] === 'open') ? 'close' : 'reopen'; ?>">
+    <button type="submit" class="btn warn"><?php echo $esc(bakery_survey_text(((string)$survey['status'] === 'open') ? 'survey.close' : 'survey.reopen', [], ((string)$survey['status'] === 'open') ? 'Close this survey' : 'Reopen this survey')); ?></button>
   </form>
   <?php endif; ?>
 </main>

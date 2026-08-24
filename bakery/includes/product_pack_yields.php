@@ -841,7 +841,7 @@ function bakery_pack_count_breakdown(PDO $db, int $productId, int $pieces): arra
         'box_remainder' => $pieces,
         'label' => $pieces > 0 ? (number_format($pieces) . ' pcs') : '',
     ];
-    if ($pieces <= 0 || $productId <= 0) {
+    if ($productId <= 0) {
         return $out;
     }
 
@@ -879,6 +879,11 @@ function bakery_pack_count_breakdown(PDO $db, int $productId, int $pieces): arra
         $out['box_remainder'] = $pieces % $perBox;
     }
 
+    if ($pieces <= 0) {
+        $out['label'] = '';
+        return $out;
+    }
+
     $parts = [number_format($pieces) . ' pcs'];
     if ($out['pieces_per_tray'] && ($out['trays'] > 0 || $out['tray_remainder'] !== $pieces)) {
         $trayBit = $out['trays'] . ' tray' . ($out['trays'] === 1 ? '' : 's');
@@ -896,6 +901,89 @@ function bakery_pack_count_breakdown(PDO $db, int $productId, int $pieces): arra
     }
     $out['label'] = implode(' · ', $parts);
     return $out;
+}
+
+/**
+ * Persist pack-floor tray/box sizes on the product catalog (not a dated override).
+ *
+ * @return array{product_id:int,pieces_per_tray:?int,pieces_per_box:?int}
+ */
+function bakery_pack_save_count_units(PDO $db, int $productId, $piecesPerTray, $piecesPerBox): array
+{
+    if (!bakery_pack_yields_ready($db) || $productId <= 0) {
+        throw new InvalidArgumentException('Pack yields are not available.');
+    }
+    $exists = $db->prepare('SELECT 1 FROM products WHERE id = ? LIMIT 1');
+    $exists->execute([$productId]);
+    if (!$exists->fetchColumn()) {
+        throw new InvalidArgumentException('Unknown product.');
+    }
+
+    $tray = bakery_pack_normalize_count_unit($piecesPerTray);
+    $box = bakery_pack_normalize_count_unit($piecesPerBox);
+    $hasBox = function_exists('column_exists') && column_exists($db, 'product_pack_yields', 'pieces_per_box');
+    $current = bakery_pack_product_yield($db, $productId);
+
+    if ($current) {
+        if ($hasBox) {
+            $stmt = $db->prepare(
+                'UPDATE product_pack_yields
+                 SET pieces_per_tray = ?,
+                     pieces_per_box = ?,
+                     pieces_per_input = IF(input_unit = \'tray\' AND ? IS NOT NULL, ?, pieces_per_input)
+                 WHERE product_id = ?'
+            );
+            $stmt->execute([$tray, $box, $tray, $tray, $productId]);
+        } else {
+            $stmt = $db->prepare(
+                'UPDATE product_pack_yields
+                 SET pieces_per_tray = ?,
+                     pieces_per_input = IF(input_unit = \'tray\' AND ? IS NOT NULL, ?, pieces_per_input)
+                 WHERE product_id = ?'
+            );
+            $stmt->execute([$tray, $tray, $tray, $productId]);
+        }
+    } else {
+        if ($hasBox) {
+            $stmt = $db->prepare(
+                'INSERT INTO product_pack_yields (product_id, input_unit, pieces_per_tray, pieces_per_box)
+                 VALUES (?, \'piece\', ?, ?)'
+            );
+            $stmt->execute([$productId, $tray, $box]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO product_pack_yields (product_id, input_unit, pieces_per_tray)
+                 VALUES (?, \'piece\', ?)'
+            );
+            $stmt->execute([$productId, $tray]);
+        }
+    }
+
+    $fresh = bakery_pack_count_breakdown($db, $productId, 0);
+    return [
+        'product_id' => $productId,
+        'pieces_per_tray' => $fresh['pieces_per_tray'],
+        'pieces_per_box' => $hasBox ? $fresh['pieces_per_box'] : null,
+    ];
+}
+
+/** @param mixed $raw */
+function bakery_pack_normalize_count_unit($raw): ?int
+{
+    if ($raw === null || $raw === '') {
+        return null;
+    }
+    if (filter_var($raw, FILTER_VALIDATE_INT) === false) {
+        throw new InvalidArgumentException('Tray and box sizes must be whole numbers.');
+    }
+    $value = (int)$raw;
+    if ($value === 0) {
+        return null;
+    }
+    if ($value < 2 || $value > 500) {
+        throw new InvalidArgumentException('Use 2–500 pieces per tray or box, or leave blank.');
+    }
+    return $value;
 }
 
 /**

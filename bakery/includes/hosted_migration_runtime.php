@@ -418,6 +418,12 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         if (!$approval || ($approval['status'] ?? '') !== 'approved_for_live' || (int)($approval['format'] ?? 0) !== 1) return 0;
 
         $id = (string)($approval['migration_id'] ?? '');
+        $ids = function_exists('bakery_hosted_migration_ids_from_approval')
+            ? bakery_hosted_migration_ids_from_approval($approval)
+            : [];
+        if ($ids === []) {
+            $ids = $id !== '' ? [$id] : [];
+        }
         $release = (string)($approval['release_id'] ?? '');
         $hash = strtolower((string)($approval['sha256'] ?? ''));
         if (!preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)
@@ -427,9 +433,11 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         if (($prior['release_id'] ?? '') === $release && in_array(($prior['status'] ?? ''), ['succeeded', 'failed'], true)) return 0;
 
         $status = [
-            'format' => 2, 'worker_version' => 2, 'status' => 'preflighting', 'phase' => 'source',
-            'release_id' => $release, 'migration_id' => $id, 'started_at' => gmdate('c'),
-            'public_message' => 'Validating the approved additive migration.',
+            'format' => 2, 'worker_version' => 3, 'status' => 'preflighting', 'phase' => 'source',
+            'release_id' => $release, 'migration_id' => $id, 'migration_ids' => $ids, 'started_at' => gmdate('c'),
+            'public_message' => count($ids) > 1
+                ? 'Validating the approved remaining additive migrations.'
+                : 'Validating the approved additive migration.',
         ];
         bakery_hosted_migration_write_json($statusPath, $status);
         if (!is_dir($workRoot) && !mkdir($workRoot, 0700, true) && !is_dir($workRoot)) throw new RuntimeException('Cannot create migration work directory.');
@@ -451,9 +459,16 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         $ledgerExists = (bool)$pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema='bakerysf' AND table_name='schema_migrations' LIMIT 1")->fetchColumn();
         if ($ledgerExists) {
             $check = $pdo->prepare('SELECT 1 FROM schema_migrations WHERE id = ?');
-            $check->execute([$id]);
-            if ($check->fetchColumn()) {
+            $missing = [];
+            foreach ($ids as $checkId) {
+                $check->execute([$checkId]);
+                if (!$check->fetchColumn()) {
+                    $missing[] = $checkId;
+                }
+            }
+            if ($missing === []) {
                 $status['status'] = 'succeeded'; $status['phase'] = 'complete'; $status['completed_at'] = gmdate('c');
+                $status['migration_ids'] = $ids;
                 $status['public_message'] = 'Migration was already recorded; no schema change was made.';
                 bakery_hosted_migration_write_json($statusPath, $status);
                 if (function_exists('bakery_schema_inventory_cache_path')) {
@@ -473,7 +488,9 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         if ($backup['exit'] !== 0 || !bakery_hosted_migration_backup_succeeded($backup['stdout'])) throw new RuntimeException('Pre-migration production backup failed.');
 
         $status['database_backup'] = $backup['stdout']; $status['status'] = 'applying'; $status['phase'] = 'schema';
-        $status['public_message'] = 'Production backup verified; applying one additive migration.';
+        $status['public_message'] = count($ids) > 1
+            ? 'Production backup verified; applying remaining additive migrations.'
+            : 'Production backup verified; applying one additive migration.';
         bakery_hosted_migration_write_json($statusPath, $status);
         if (!$ledgerExists) {
             $pdo->exec('CREATE TABLE IF NOT EXISTS schema_migrations (id VARCHAR(64) NOT NULL PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
@@ -492,15 +509,25 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         }
         $mark = $pdo->prepare('INSERT INTO schema_migrations (id) VALUES (?)');
         $mark->execute([$id]);
+        $markIgnore = $pdo->prepare('INSERT IGNORE INTO schema_migrations (id) VALUES (?)');
+        foreach ($ids as $extraId) {
+            if ($extraId === $id) {
+                continue;
+            }
+            $markIgnore->execute([$extraId]);
+        }
         if (function_exists('bakery_schema_inventory_cache_path')) {
             @unlink(bakery_schema_inventory_cache_path());
         } else {
             @unlink($root . '/storage/deploy/HOSTED_SCHEMA_STATUS.json');
         }
         $status['status'] = 'succeeded'; $status['phase'] = 'complete'; $status['completed_at'] = gmdate('c');
-        $status['public_message'] = 'Additive migration ' . $id . ' applied and recorded on Live.';
+        $status['migration_ids'] = $ids;
+        $status['public_message'] = count($ids) > 1
+            ? 'Additive migrations ' . implode(', ', $ids) . ' applied and recorded on Live.'
+            : 'Additive migration ' . $id . ' applied and recorded on Live.';
         bakery_hosted_migration_write_json($statusPath, $status);
-        echo "MIGRATED {$id}\n";
+        echo 'MIGRATED ' . implode(',', $ids) . "\n";
         return 0;
     } catch (Throwable $error) {
         if (is_array($status)) {

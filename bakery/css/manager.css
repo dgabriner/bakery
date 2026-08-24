@@ -12,7 +12,10 @@
 .manager-live-card p,.manager-live-card small{color:var(--sf-text-secondary);font-size:.88rem;line-height:1.4;margin:0}
 .manager-live-card ul{margin:0;padding-left:1.15rem;max-height:14rem;overflow:auto}
 .manager-live-card__status{font-weight:650}
+.manager-live-card__more{margin-top:.1rem}
+.manager-live-card__more>summary{cursor:pointer;color:var(--sf-text-secondary);font-size:.82rem;font-weight:700}
 .manager-live-card__form{display:grid;gap:.55rem;margin-top:.25rem}
+.manager-live-card__form .sf-btn[disabled]{opacity:.65}
 .manager-live-card__form label{display:grid;gap:.3rem;font-size:.82rem;font-weight:700}
 .manager-live-card__form input,.manager-live-card__form select{min-height:38px;padding:.35rem .55rem}
 .manager-live-state{border-radius:var(--sf-radius-sm);display:grid;gap:.35rem;padding:.85rem .95rem}

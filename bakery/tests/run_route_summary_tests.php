@@ -192,6 +192,8 @@ $requiredKeys = [
     'route_manager.pickup_summary',
     'route_manager.no_pickup',
     'route_manager.edit_pickup_loads',
+    'route_manager.unit_trays',
+    'route_manager.col_per_box',
 ];
 foreach ($requiredKeys as $key) {
     route_summary_assert("en has {$key}", isset($english[$key]) && $english[$key] !== '');

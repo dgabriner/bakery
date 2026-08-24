@@ -47,6 +47,11 @@ cache_assert('portal styles cache-bust csrf.js', strpos($portal, "bakery_asset_h
 
 $js = file_get_contents($root . '/includes/client_refresh.js');
 cache_assert('refresh script watches visibility', strpos($js, 'visibilitychange') !== false);
+cache_assert('refresh script honors skip meta', strpos($js, 'app-skip-client-refresh') !== false);
+$refreshPhp = file_get_contents($root . '/includes/client_refresh.php');
+cache_assert('refresh include can skip the script', strpos($refreshPhp, 'BAKERY_SKIP_CLIENT_REFRESH') !== false);
+$managerSrc = file_get_contents($root . '/manager.php');
+cache_assert('Staging Live board skips client refresh', strpos($managerSrc, "define('BAKERY_SKIP_CLIENT_REFRESH', true)") !== false);
 cache_assert('refresh script does not clear localStorage', strpos($js, 'localStorage.clear') === false);
 cache_assert('refresh script does not clear cookies', strpos($js, 'document.cookie') === false);
 

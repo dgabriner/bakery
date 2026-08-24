@@ -3,6 +3,7 @@
 
 require_once __DIR__ . '/schema_inventory.php';
 require_once __DIR__ . '/hosted_migration_runtime.php';
+require_once __DIR__ . '/schema_migration_numbers.php';
 
 function bakery_hosted_migration_source_root(): string {
     return dirname(dirname(__DIR__)) . DIRECTORY_SEPARATOR . '.sourflour-migration-source';
@@ -164,14 +165,28 @@ function bakery_hosted_migration_succeeded(?array $status): bool {
         && (string)($status['migration_id'] ?? '') !== '';
 }
 
-function bakery_hosted_migration_status(): ?array {
+function bakery_hosted_migration_status(bool $ingestHistory = true, bool $bypassCache = false): ?array {
+    if (!$bypassCache && function_exists('bakery_staging_live_remote_status_cache_read')) {
+        $cached = bakery_staging_live_remote_status_cache_read('database', 20);
+        if (is_array($cached)) {
+            if ($ingestHistory && function_exists('bakery_staging_live_history_ingest_live')) {
+                bakery_staging_live_history_ingest_live($cached, 'database');
+            }
+            return $cached;
+        }
+    }
     $fetched = bakery_hosted_fetch_json('https://bakery.sourflour.org/bake/migration_status.php', 8);
     $data = is_string($fetched['raw']) ? json_decode($fetched['raw'], true) : null;
     $status = function_exists('bakery_staging_live_decorate_status')
         ? bakery_staging_live_decorate_status(is_array($data) ? $data : null)
         : (is_array($data) ? $data : null);
-    if (is_array($status) && function_exists('bakery_staging_live_history_ingest_live')) {
-        bakery_staging_live_history_ingest_live($status, 'database');
+    if (is_array($status)) {
+        if (function_exists('bakery_staging_live_remote_status_cache_write')) {
+            bakery_staging_live_remote_status_cache_write('database', $status);
+        }
+        if ($ingestHistory && function_exists('bakery_staging_live_history_ingest_live')) {
+            bakery_staging_live_history_ingest_live($status, 'database');
+        }
     }
     return $status;
 }
@@ -272,8 +287,8 @@ function bakery_staging_live_unknown_detail_key(string $reason, bool $migrationS
     return 'manager.live_db_unknown_detail';
 }
 
-function bakery_staging_live_board(?PDO $db, bool $refreshLiveSchema = false): array {
-    $migrationStatus = bakery_hosted_migration_status();
+function bakery_staging_live_board(?PDO $db, bool $refreshLiveSchema = false, bool $bypassStatusCache = false): array {
+    $migrationStatus = bakery_hosted_migration_status(true, $bypassStatusCache);
     $migrationSucceeded = bakery_hosted_migration_succeeded($migrationStatus);
     $compare = ($db instanceof PDO)
         ? bakery_hosted_schema_compare($db, $refreshLiveSchema)
@@ -295,44 +310,65 @@ function bakery_staging_live_board(?PDO $db, bool $refreshLiveSchema = false): a
             && isset($appliedIds[(string)($recommended['id'] ?? '')])
             && in_array((string)$recommended['id'], array_map('strval', $compare['staging_only_migrations'] ?? []), true);
     }
-    // Never ask the operator to guess among unrelated SQL files. The gate opens
-    // when inventory identifies the remaining safe forward migrations.
-    $canMigrate = ($compare['state'] ?? '') === 'live_behind' && is_array($recommended) && !$staleAfterApply;
-    $state = (string)($compare['state'] ?? 'unknown');
-    $reason = (string)($compare['reason'] ?? '');
-    return [
+    $board = [
         'compare' => $compare,
         'candidates' => $candidates,
         'recommended' => $recommended,
         'recommended_all' => $recommendedAll,
-        'next' => bakery_staging_live_next_step($state, $canMigrate, $migrationSucceeded, $reason, $staleAfterApply),
         'approval' => bakery_staging_live_approval_latest(),
         'migration_approval' => bakery_hosted_migration_latest(),
-        'files_status' => bakery_staging_live_status(),
+        'files_status' => bakery_staging_live_status(true, $bypassStatusCache),
         'migration_status' => $migrationStatus,
         'stale_after_apply' => $staleAfterApply,
     ];
+    return bakery_staging_live_relax_067_kind_stop($board);
 }
 
 /**
- * Concatenate remaining additive jobs into one SQL file the Live worker can apply.
- *
- * @param list<array{id?:string,sql?:string}> $loaded
+ * 067 widens sfb_offerings.kind by appending donation/credits. If Staging still
+ * has an older compare that treats that as Stop, reopen the database button.
  */
-function bakery_hosted_migration_catchup_sql(array $loaded): string {
-    $parts = [];
-    foreach ($loaded as $job) {
-        $id = trim((string)($job['id'] ?? ''));
-        $sql = trim((string)($job['sql'] ?? ''));
-        if ($id === '' || $sql === '') {
-            throw new RuntimeException('Each queued Live update must include an id and SQL.');
+function bakery_staging_live_relax_067_kind_stop(array $board): array
+{
+    $compare = is_array($board['compare'] ?? null) ? $board['compare'] : [];
+    if ((string)($compare['state'] ?? '') !== 'discrepancy' || !empty($compare['unexpected_database'])) {
+        return bakery_staging_live_board_with_next($board);
+    }
+    $mismatches = array_values(array_map('strval', (array)($compare['mismatches'] ?? [])));
+    if ($mismatches !== ['sfb_offerings.kind']) {
+        return bakery_staging_live_board_with_next($board);
+    }
+    foreach ((array)($compare['extra_on_live'] ?? []) as $name) {
+        if (strpos((string)$name, 'index:') !== 0) {
+            return bakery_staging_live_board_with_next($board);
         }
-        $parts[] = '-- sourflour-job: ' . $id . "\n" . $sql;
     }
-    if ($parts === []) {
-        throw new RuntimeException('No remaining additive Live updates are published.');
+    if (!in_array('067_bread_education_offerings_v2', array_map('strval', (array)($compare['staging_only_migrations'] ?? [])), true)) {
+        return bakery_staging_live_board_with_next($board);
     }
-    return implode("\n\n", $parts) . "\n";
+    $compare['mismatches'] = [];
+    $compare['state'] = 'live_behind';
+    $board['compare'] = $compare;
+    $candidates = is_array($board['candidates'] ?? null) ? $board['candidates'] : [];
+    $recommendedAll = bakery_staging_live_recommended_migrations($compare, $candidates);
+    $board['recommended_all'] = $recommendedAll;
+    $board['recommended'] = $recommendedAll[0] ?? null;
+    return bakery_staging_live_board_with_next($board);
+}
+
+function bakery_staging_live_board_with_next(array $board): array
+{
+    $compare = is_array($board['compare'] ?? null) ? $board['compare'] : [];
+    $state = (string)($compare['state'] ?? 'unknown');
+    $canMigrate = $state === 'live_behind' && is_array($board['recommended'] ?? null) && empty($board['stale_after_apply']);
+    $board['next'] = bakery_staging_live_next_step(
+        $state,
+        $canMigrate,
+        bakery_hosted_migration_succeeded($board['migration_status'] ?? null),
+        (string)($compare['reason'] ?? ''),
+        !empty($board['stale_after_apply'])
+    );
+    return $board;
 }
 
 function bakery_hosted_migration_applied_ids(?array $status): array {
@@ -353,15 +389,56 @@ function bakery_hosted_migration_applied_ids(?array $status): array {
     return $ids;
 }
 
-function bakery_hosted_migration_approve_recommended(PDO $db, string $file): array {
-    $compare = bakery_hosted_schema_compare($db, true);
-    $queue = bakery_staging_live_recommended_migrations($compare, bakery_hosted_migration_candidates());
-    $first = $queue[0] ?? null;
-    if (($compare['state'] ?? '') !== 'live_behind' || !is_array($first)
-        || !hash_equals((string)$first['file'], basename(trim($file)))) {
-        throw new RuntimeException('The selected migration is not the first remaining update recommended by the current Staging-to-Live schema comparison.');
+/**
+ * Queue what the Manager board already decided. Do not re-fetch Live schema
+ * here — a second compare (or a refresh timeout) was rejecting the same click.
+ */
+function bakery_hosted_migration_queue_from_board(array $board, string $file = ''): array
+{
+    $file = basename(trim($file));
+    $compare = is_array($board['compare'] ?? null) ? $board['compare'] : [];
+    $state = (string)($compare['state'] ?? '');
+    $candidates = is_array($board['candidates'] ?? null) && $board['candidates'] !== []
+        ? $board['candidates']
+        : bakery_hosted_migration_candidates();
+    $queue = [];
+    foreach ((array)($board['recommended_all'] ?? []) as $job) {
+        if (is_array($job) && !empty($job['safe']) && (string)($job['file'] ?? '') !== '') {
+            $queue[] = $job;
+        }
     }
-    return bakery_hosted_migration_approve_jobs($queue);
+    if ($queue === []) {
+        $queue = bakery_staging_live_recommended_migrations($compare, $candidates);
+    }
+    if ($state === 'live_behind' && $queue !== []) {
+        return $queue;
+    }
+    $pending = array_fill_keys(array_map('strval', $compare['staging_only_migrations'] ?? []), true);
+    foreach ($candidates as $candidate) {
+        if (empty($candidate['safe']) || $file === '') {
+            continue;
+        }
+        if (!isset($pending[(string)($candidate['id'] ?? '')])) {
+            continue;
+        }
+        if (hash_equals((string)$candidate['file'], $file)) {
+            return [$candidate];
+        }
+    }
+    if ($state === 'discrepancy') {
+        throw new RuntimeException('Live still has a real type clash. Refresh the schema comparison before updating the database.');
+    }
+    if ($state === 'unknown') {
+        throw new RuntimeException('Could not read the Live schema report. Refresh the comparison, then click Update Live database again.');
+    }
+    throw new RuntimeException('That update is not in the remaining Staging-to-Live database queue.');
+}
+
+function bakery_hosted_migration_approve_recommended(PDO $db, string $file = ''): array {
+    $board = bakery_staging_live_board($db, false, true);
+    return bakery_hosted_migration_approve_jobs(
+        bakery_hosted_migration_queue_from_board($board, $file)
+    );
 }
 
 function bakery_hosted_migration_approve_jobs(array $jobs): array {
@@ -443,6 +520,9 @@ function bakery_hosted_migration_approve_jobs(array $jobs): array {
         @unlink($tmp);
         throw new RuntimeException('Could not queue the migration.');
     }
+    if (function_exists('bakery_staging_live_remote_status_cache_clear')) {
+        bakery_staging_live_remote_status_cache_clear('database');
+    }
     if (function_exists('bakery_staging_live_history_append')) {
         bakery_staging_live_history_append(bakery_staging_live_history_from_approval($record, 'database'));
     }
@@ -478,6 +558,9 @@ function bakery_hosted_migration_approve(string $file): array {
     $ready = bakery_hosted_migration_approval_path(); $tmp = $ready . '.tmp.' . bin2hex(random_bytes(3));
     if (@file_put_contents($tmp, json_encode($record, JSON_PRETTY_PRINT) . PHP_EOL, LOCK_EX) === false || !@rename($tmp, $ready)) {
         @unlink($tmp); throw new RuntimeException('Could not queue the migration.');
+    }
+    if (function_exists('bakery_staging_live_remote_status_cache_clear')) {
+        bakery_staging_live_remote_status_cache_clear('database');
     }
     if (function_exists('bakery_staging_live_history_append')) {
         bakery_staging_live_history_append(bakery_staging_live_history_from_approval($record, 'database'));

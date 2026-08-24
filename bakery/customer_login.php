@@ -58,7 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             $error = (string)($result['error'] ?? 'That 4-digit code does not match an account.');
-            bakery_login_audit_record_failure($db, 'customer', 'Customer portal login', (string)$code);
+            // Failed signups must stay auditable and distinguishable from
+            // sign-in attempts in the login ledger (same convention as staff).
+            $failurePrincipal = $mode === 'create' ? 'Customer portal signup' : 'Customer portal login';
+            bakery_login_audit_record_failure($db, 'customer', $failurePrincipal, (string)$code);
             usleep(300000);
         } catch (Exception $e) {
             $error = bakery_t('portal.error_unavailable');

@@ -9,4 +9,6 @@ Before coding in `bakery/`, run `php scripts/agent_homebase.php brief --agent=<m
 
 During work, pin decisions (`--column=decided` for lasting ones) and log durable bugs. Do not leave those only in chat.
 
-End every session with a numbered §10 handoff. Completing exception *work* never hides a still-true operational fact. Craft ledger is `bakerysf_stage_local`. Tests wipe `bakerysf_test`. Staging auto-push must never target `bakery.sourflour.org/bake`.
+Before touching shared files (`lang/en.php`, `lang/es.php`, `includes/nav*.php`, `includes/navigation_catalog.php`, `includes/agent_work_map.php`), check `php scripts/agent_homebase.php sessions --json` for an open session with an overlapping mission; keep edits additive and note the dodge in the handoff. Review `notes --kind=coach --json` when starting craft work.
+
+End every session with a numbered §10 handoff — one field per line, or all eight numbered inline (shells flatten newlines). Verify the returned `handoff_score.complete` is true; if it is false, re-handoff in a follow-up session. Completing exception *work* never hides a still-true operational fact. Craft ledger is `bakerysf_stage_local`. Tests wipe `bakerysf_test`. Staging auto-push must never target `bakery.sourflour.org/bake`.

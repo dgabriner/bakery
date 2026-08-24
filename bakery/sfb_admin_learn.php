@@ -43,7 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     (string)($_POST['status'] ?? ''),
                     null,
                     $markNote !== '' ? $markNote : 'recorded by ' . (string)($admin['display_name'] ?? 'staff'),
-                    (int)($admin['id'] ?? 0)
+                    (int)($admin['id'] ?? 0),
+                    'manual'
                 );
                 header('Location: sfb_admin_learn.php?saved=purchase_marked#purchases');
                 exit;
@@ -55,7 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     (float)($_POST['price'] ?? 0),
                     $_POST['kind'] ?? 'class',
                     $_POST['description'] ?? '',
-                    ($_POST['entitlement_days'] ?? '') !== '' ? (int)$_POST['entitlement_days'] : null
+                    ($_POST['entitlement_days'] ?? '') !== '' ? (int)$_POST['entitlement_days'] : null,
+                    ($_POST['units'] ?? '') !== '' ? (int)$_POST['units'] : null
                 );
                 header('Location: sfb_admin_learn.php?saved=offering_created');
                 exit;
@@ -118,6 +120,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 bakery_sfb_delete_lesson_step($db, (int)($_POST['step_id'] ?? 0));
                 header('Location: sfb_admin_learn.php?lesson=' . (int)($_POST['lesson_id'] ?? 0) . '&saved=step_deleted');
                 exit;
+
+            case 'set_course_offering':
+                bakery_sfb_set_course_offering(
+                    $db,
+                    (int)($_POST['course_id'] ?? 0),
+                    (int)($_POST['gate_offering'] ?? 0)
+                );
+                header('Location: sfb_admin_learn.php?saved=gate_saved');
+                exit;
+
+            case 'set_course_template_formula':
+                bakery_sfb_set_course_template_formula(
+                    $db,
+                    (int)($_POST['course_id'] ?? 0),
+                    (int)($_POST['template_formula'] ?? 0)
+                );
+                header('Location: sfb_admin_learn.php?saved=gate_saved');
+                exit;
         }
     } catch (Throwable $e) {
         $notice = $e->getMessage();
@@ -151,11 +171,18 @@ $savedMessages = [
     'invite_created' => bakery_t('sfb.invite_created_saved'),
     'offering_created' => bakery_t('sfb.offering_saved'),
     'purchase_marked' => bakery_t('sfb.purchase_marked_saved'),
+    'gate_saved' => bakery_t('sfb.admin_gate_saved'),
 ];
 
 $recentInvites = bakery_sfb_recent_invites($db);
 $recentPurchases = bakery_sfb_recent_purchases($db);
+$inviteFunnel = bakery_sfb_invite_funnel($db);
+$offeringRevenue = bakery_sfb_offering_revenue($db);
 $adminOfferings = bakery_sfb_offerings($db, true);
+$gateOfferings = array_values(array_filter($adminOfferings, static function (array $o): bool {
+    return (int)$o['is_active'] === 1;
+}));
+$templateFormulas = bakery_sfb_templates($db);
 $joinBase = BASE_URL . 'sfb_join.php';
 
 $page_title = bakery_t('sfb.admin_learn_title');
@@ -211,6 +238,47 @@ $currentLocale = bakery_locale();
                   </form>
                   <a class="btn-link" href="sfb_admin_learn.php?course=<?php echo (int)$course['id']; ?>#new-lesson"><?php bakery_te('sfb.admin_add_lesson'); ?></a>
                 </span>
+                <?php if (bakery_sfb_gating_ready($db)): ?>
+                <form method="post" style="margin:6px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <?php echo bakery_csrf_field(); ?>
+                  <input type="hidden" name="action" value="set_course_offering">
+                  <input type="hidden" name="course_id" value="<?php echo (int)$course['id']; ?>">
+                  <label style="display:flex;gap:6px;align-items:center;">
+                    <span class="muted"><?php bakery_te('sfb.admin_offering_gate_label'); ?></span>
+                    <select name="gate_offering">
+                      <option value="0"<?php echo empty($course['required_offering_id']) ? ' selected' : ''; ?>><?php bakery_te('sfb.admin_offering_none_option'); ?></option>
+                      <?php foreach ($gateOfferings as $gateOption): ?>
+                        <option value="<?php echo (int)$gateOption['id']; ?>"<?php echo (int)($course['required_offering_id'] ?? 0) === (int)$gateOption['id'] ? ' selected' : ''; ?>><?php
+                          echo htmlspecialchars($gateOption['title'], ENT_QUOTES, 'UTF-8');
+                          if ((int)$gateOption['price_cents'] > 0) {
+                              echo ' · $' . number_format((float)$gateOption['price_cents'] / 100, 2);
+                          }
+                        ?></option>
+                      <?php endforeach; ?>
+                    </select>
+                  </label>
+                  <button class="btn-link" type="submit"><?php bakery_te('sfb.admin_gate_save'); ?></button>
+                </form>
+                <?php endif; ?>
+                <?php if (bakery_sfb_handoff_ready($db)): ?>
+                <form method="post" style="margin:6px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <?php echo bakery_csrf_field(); ?>
+                  <input type="hidden" name="action" value="set_course_template_formula">
+                  <input type="hidden" name="course_id" value="<?php echo (int)$course['id']; ?>">
+                  <label style="display:flex;gap:6px;align-items:center;">
+                    <span class="muted"><?php bakery_te('sfb.admin_template_formula_label'); ?></span>
+                    <select name="template_formula">
+                      <option value="0"<?php echo empty($course['template_formula_id']) ? ' selected' : ''; ?>><?php bakery_te('common.none'); ?></option>
+                      <?php foreach ($templateFormulas as $templateOption): ?>
+                        <option value="<?php echo (int)$templateOption['id']; ?>"<?php echo (int)($course['template_formula_id'] ?? 0) === (int)$templateOption['id'] ? ' selected' : ''; ?>><?php
+                          echo htmlspecialchars($templateOption['name'], ENT_QUOTES, 'UTF-8');
+                        ?></option>
+                      <?php endforeach; ?>
+                    </select>
+                  </label>
+                  <button class="btn-link" type="submit"><?php bakery_te('sfb.admin_gate_save'); ?></button>
+                </form>
+                <?php endif; ?>
               </li>
             <?php endforeach; ?>
           </ul>
@@ -297,11 +365,24 @@ $currentLocale = bakery_locale();
     </section>
     <?php endif; endif; ?>
 
-    <?php if ($selectedLesson): ?>
     <section class="card" id="purchases">
       <div class="card-header"><h2><?php bakery_te('sfb.purchase_ops_title'); ?></h2></div>
       <div class="card-body">
         <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.purchase_ops_intro'); ?></p>
+        <?php if ($offeringRevenue): ?>
+          <p style="margin:0;"><strong><?php bakery_te('sfb.offering_revenue_title'); ?></strong></p>
+          <ul class="line-list">
+            <?php foreach ($offeringRevenue as $revenueRow): ?>
+              <li>
+                <span>
+                  <?php echo htmlspecialchars((string)$revenueRow['title'], ENT_QUOTES, 'UTF-8'); ?>
+                  · <?php echo (int)$revenueRow['paid_count']; ?> <?php bakery_te('sfb.purchase_status_paid'); ?>
+                  · $<?php echo number_format((float)$revenueRow['cents'] / 100, 2); ?>
+                </span>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
         <?php if (!$recentPurchases): ?>
           <p class="muted"><?php bakery_te('sfb.purchase_none'); ?></p>
         <?php else: ?>
@@ -362,7 +443,14 @@ $currentLocale = bakery_locale();
                     <option value="class"><?php bakery_te('sfb.offering_kind_class'); ?></option>
                     <option value="membership"><?php bakery_te('sfb.offering_kind_membership'); ?></option>
                     <option value="kit"><?php bakery_te('sfb.offering_kind_kit'); ?></option>
+                    <option value="donation"><?php bakery_te('sfb.offering_kind_donation'); ?></option>
+                    <option value="credits"><?php bakery_te('sfb.offering_kind_credits'); ?></option>
                   </select>
+                </label>
+              </div>
+              <div class="sfb-field">
+                <label><span><?php bakery_te('sfb.offering_units_label'); ?></span>
+                  <input type="number" name="units" min="1" max="100" placeholder="<?php bakery_te('sfb.offering_units_hint'); ?>">
                 </label>
               </div>
               <div class="sfb-field">
@@ -405,6 +493,35 @@ $currentLocale = bakery_locale();
       <div class="card-header"><h2><?php bakery_te('sfb.invite_title'); ?></h2></div>
       <div class="card-body">
         <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.invite_intro'); ?></p>
+        <p style="margin:0 0 10px;">
+          <strong><?php bakery_te('sfb.invite_funnel_title'); ?>:</strong>
+          <?php bakery_te('sfb.invite_funnel_summary', [
+              'minted' => (int)$inviteFunnel['minted'],
+              'claimed' => (int)$inviteFunnel['used'],
+              'open' => (int)$inviteFunnel['unused'],
+          ]); ?>
+        </p>
+        <?php if ($inviteFunnel['recent_used']): ?>
+          <p class="muted" style="margin:0;"><strong><?php bakery_te('sfb.invite_recent_activations'); ?></strong></p>
+          <ul class="line-list">
+            <?php foreach ($inviteFunnel['recent_used'] as $activated): ?>
+              <li>
+                <span>
+                  <?php if (!empty($activated['label'])): ?>
+                    <?php echo htmlspecialchars((string)$activated['label'], ENT_QUOTES, 'UTF-8'); ?> ·
+                  <?php endif; ?>
+                  <?php bakery_te(($activated['intent'] ?? '') === 'share' ? 'sfb.invite_intent_share' : 'sfb.invite_intent_learn'); ?>
+                  · <?php echo htmlspecialchars((string)($activated['activated_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                  <br><small class="muted"><?php
+                    echo !empty($activated['used_at'])
+                        ? htmlspecialchars(date('M j, g:ia', strtotime((string)$activated['used_at'])), ENT_QUOTES, 'UTF-8')
+                        : '';
+                  ?></small>
+                </span>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
         <?php if ($recentInvites): ?>
           <ul class="line-list">
             <?php foreach ($recentInvites as $inviteRow): ?>
@@ -453,6 +570,7 @@ $currentLocale = bakery_locale();
       </div>
     </section>
 
+    <?php if ($selectedLesson): ?>
     <section class="card">
         <div class="card-header"><h2><?php echo htmlspecialchars($selectedLesson['title'], ENT_QUOTES, 'UTF-8'); ?></h2></div>
         <div class="card-body">

@@ -78,6 +78,12 @@ Canonical slugs come from the brief. Aliases resolve; lesson progress is stored 
 
 A sophisticated change is a small one that closes a bakery-day loop and leaves a map, a test, and a handoff. A large change that adds a home page is a failure of taste. Sour Flour OS is the pattern: flat PHP, one day, one ledger — reusable because it is specific.
 
+## Schema file numbers
+
+`schema_migrations` is keyed by the **full id** (`062_surveys_custom`), not the digits. Two agents can both ship `062_*.sql` and both apply. That already happened (010, 021, 025, 062; Live also recorded leftover `061_bread_education` and `065_bread_education_payments`). Do not rename those files.
+
+Before adding SQL: `php scripts/next_schema_migration.php --name=your_slug`. Today that is `068_…`. A third file that reuses a prefix fails the schema compare suite and `run_migrations.php`.
+
 ## For the next agent
 
 If the packet is silent on your files, you are in a hole. Fill the map, run the new suite, then do the product work. Do not invent a second studio.

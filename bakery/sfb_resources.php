@@ -54,6 +54,20 @@ function bakery_sfb_resources_render_card(array $piece): void {
   <main class="container sfb-app">
     <?php $sfbActiveTab = 'resources'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
 
+    <?php if (bakery_sfb_payments_ready($db)): ?>
+      <section class="card sfb-resource-hero">
+        <div class="card-body">
+          <p class="hero-label"><?php bakery_te('sfb.offerings_eyebrow'); ?></p>
+          <h2><?php bakery_te('sfb.offerings_hero_title'); ?></h2>
+          <p><?php bakery_te('sfb.offerings_hero_copy'); ?></p>
+          <div class="btn-row" style="margin-top:14px;">
+            <a class="btn btn-block" href="sfb_offerings.php"><?php bakery_te('sfb.offerings_link'); ?></a>
+            <a class="btn btn-secondary btn-block" href="sfb_offerings.php#donate"><?php bakery_te('sfb.donate_link'); ?></a>
+          </div>
+        </div>
+      </section>
+    <?php endif; ?>
+
     <?php
     $learnCourses = bakery_sfb_courses($db);
     if ($learnCourses):
@@ -63,6 +77,7 @@ function bakery_sfb_resources_render_card(array $piece): void {
         <?php foreach ($learnCourses as $course): ?>
           <?php
           [$courseDoneSteps, $courseTotalSteps] = bakery_sfb_course_progress($db, (int)$customer['id'], (int)$course['id']);
+          $lock = bakery_sfb_course_lock($db, (int)$customer['id'], $course);
           ?>
           <article class="card sfb-resource-card">
             <div class="card-body">
@@ -71,7 +86,17 @@ function bakery_sfb_resources_render_card(array $piece): void {
               <?php if (!empty($course['description'])): ?>
                 <p class="sfb-resource-card__lead"><?php echo htmlspecialchars($course['description'], ENT_QUOTES, 'UTF-8'); ?></p>
               <?php endif; ?>
-              <?php if ($courseTotalSteps > 0): ?>
+              <?php if ($lock['offering']): ?>
+                <span class="badge badge-info"><?php
+                  echo htmlspecialchars(bakery_t('sfb.course_included_with', ['label' => (string)$lock['offering']['title']]), ENT_QUOTES, 'UTF-8');
+                  if ((int)($lock['offering']['price_cents'] ?? 0) > 0) {
+                      echo ' · $' . number_format((float)$lock['offering']['price_cents'] / 100, 2);
+                  }
+                ?></span>
+              <?php else: ?>
+                <span class="badge badge-ok"><?php bakery_te('sfb.course_free_label'); ?></span>
+              <?php endif; ?>
+              <?php if ($courseTotalSteps > 0 && !$lock['locked']): ?>
                 <p class="muted"><?php
                   echo bakery_t('sfb.learn_course_progress', ['done' => (string)$courseDoneSteps, 'total' => (string)$courseTotalSteps]);
                 ?></p>
@@ -85,8 +110,16 @@ function bakery_sfb_resources_render_card(array $piece): void {
             }
             ?>
             <div class="btn-row" style="padding:0 16px 16px;">
-              <?php if ($firstLesson): ?>
-                <a class="btn btn-block" href="sfb_lesson.php?lesson=<?php echo (int)$firstLesson['id']; ?>"><?php bakery_te('sfb.learn_open_course'); ?></a>
+              <?php if ($lock['locked']): ?>
+                <a class="btn btn-block" href="sfb_offerings.php#offering-<?php echo (int)$lock['offering']['id']; ?>"><?php bakery_te('sfb.lesson_locked_cta'); ?></a>
+              <?php elseif ($firstLesson): ?>
+                <a class="btn btn-block<?php echo ($courseTotalSteps > 0 && $courseDoneSteps === $courseTotalSteps) ? ' btn-secondary' : ''; ?>" href="sfb_lesson.php?lesson=<?php echo (int)$firstLesson['id']; ?>"><?php
+                  if ($courseTotalSteps > 0 && $courseDoneSteps === $courseTotalSteps) {
+                    echo '✓ ' . htmlspecialchars(bakery_t('sfb.course_complete_title'), ENT_QUOTES, 'UTF-8');
+                  } else {
+                    bakery_te('sfb.learn_open_course');
+                  }
+                ?></a>
               <?php else: ?>
                 <span class="muted btn btn-block btn-secondary disabled" role="presentation"><?php bakery_te('sfb.admin_no_lessons'); ?></span>
               <?php endif; ?>
@@ -97,7 +130,6 @@ function bakery_sfb_resources_render_card(array $piece): void {
       <?php if (function_exists('bakery_current_user') && bakery_current_user() !== null): ?>
         <p class="muted" style="margin-top:-6px;"><a class="btn-link" href="sfb_admin_learn.php"><?php bakery_te('sfb.admin_learn_link'); ?></a></p>
       <?php endif; ?>
-      <p style="margin:10px 0 0;"><a class="btn btn-secondary btn-block" href="sfb_offerings.php"><?php bakery_te('sfb.offerings_link'); ?></a></p>
     <?php endif; ?>
 
     <section class="card sfb-resource-hero">

@@ -87,7 +87,18 @@ $squareRuntime = (string)file_get_contents($root . '/includes/square_invoices.ph
 $assert(strpos($squareRuntime, 'KEY idx_square_webhook_invoice (square_invoice_id)') !== false,
     'runtime-created webhook tables include the canonical invoice index');
 $assert(strpos($runtime, 'Migration stopped while applying schema') !== false, 'partial DDL failure is reported honestly');
-$assert(strpos($manager, 'bakery_hosted_migration_approve_recommended') !== false, 'Manager can approve only the exact recommended migration');
+$assert(strpos($manager, 'bakery_hosted_migration_approve_recommended') !== false, 'Manager can approve only the remaining recommended migrations');
+$assert(strpos($manager, 'manager.live_send_db_all') !== false, 'Manager offers a full remaining Live database update');
+$catchupSql = bakery_hosted_migration_catchup_sql([
+    ['id' => '056_square', 'sql' => 'CREATE TABLE IF NOT EXISTS square_invoices (id INT NOT NULL PRIMARY KEY);'],
+    ['id' => '057_text', 'sql' => 'ALTER TABLE customers ADD COLUMN notes VARCHAR(255) NULL;'],
+]);
+[$catchupSafe] = bakery_hosted_migration_sql_safe($catchupSql);
+$assert($catchupSafe && strpos($catchupSql, "INSERT IGNORE INTO schema_migrations (id) VALUES ('057_text')") !== false, 'catch-up SQL records remaining ids after the first applied file');
+$assert(bakery_hosted_migration_ids_from_approval([
+    'migration_id' => '056_square',
+    'migration_ids' => ['056_square', '057_text'],
+]) === ['056_square', '057_text'], 'approval lists every remaining Live migration id');
 $assert(strpos($manager, '<select name="migration_file"') === false, 'Manager no longer asks the operator to guess among migrations');
 $assert(strpos($manager, '[data-live-promotion-status], [data-live-migration-status]') !== false, 'Manager polls both file and database workers');
 $assert(strpos($manager, 'manager-live-history') !== false, 'Manager history is collapsed under the live board');
@@ -96,11 +107,24 @@ $assert(strpos($status, "'history'") !== false, 'public migration status include
 $assert(strpos($runtime, 'bakery_hosted_status_history_append') !== false, 'migration worker appends terminal outcomes to history');
 [$safe061] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/061_surveys.sql'));
 $assert($safe061, '061 surveys CREATE TABLE is hosted-safe');
+[$safe067] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/067_bread_education_offerings_v2.sql'));
+$assert($safe067, '067 offerings v2 enum widen and credit ledger is hosted-safe');
 $assert(strpos($runtime, 'bakery_schema_inventory_cache_path') !== false, 'worker busts the Live schema report cache after apply');
 $assert(strpos($runtime, 'contained no executable statements') !== false, 'worker refuses to record an empty SQL file');
 $assert(strpos($manager, 'schema_compare=1') !== false && strpos($manager, 'stale_after_apply') !== false, 'Manager refreshes Live schema after a succeeded update');
+$assert(strpos($manager, "if (\$schemaState === 'unknown'):") === false, 'Refresh and compare again stays visible on Stop');
+$assert(strpos($manager, 'confirm_phrase') === false, 'Manager no longer asks for a typed confirm phrase');
+$assert(strpos($manager, "separator + 'schema_compare=1'") === false, 'Manager does not auto-navigate after worker success');
+$assert(strpos($manager, 'data-poll-workers') !== false && strpos($manager, 'IN_FLIGHT') !== false, 'Manager polls Live workers only while a job is running');
+$assert(strpos($manager, 'live_queued') !== false, 'successful Live actions mark the board to follow that job');
 $approvalSource = (string)file_get_contents($root . '/includes/hosted_migration_approval.php');
 $assert(strpos($approvalSource, '?refresh=1') !== false, 'Staging asks Live to rebuild the schema report after an update');
+$assert(strpos($approvalSource, 'bakery_staging_live_relax_067_kind_stop') !== false, 'board relaxes 067 kind-only Stop');
+$assert(strpos($approvalSource, 'bakery_hosted_migration_queue_from_board') !== false, 'approve uses the board queue helper');
+$assert(strpos($approvalSource, 'bakery_staging_live_board($db, false, true)') !== false, 'approve does not re-fetch Live schema');
+$assert(strpos($approvalSource, 'The selected migration is not the first remaining update') === false, 'approve no longer rejects a drifted first-file name');
+$assert(strpos($manager, 'bakery_staging_live_relax_067_kind_stop') !== false, 'Manager reopens 067 when kind is the only type clash');
+$assert(strpos($manager, 'bakery_hosted_migration_approve($fallbackFile)') !== false, 'Manager can queue the shown safe file if older approve still throws');
 
 echo "{$failed} failed" . PHP_EOL;
 exit($failed === 0 ? 0 : 1);

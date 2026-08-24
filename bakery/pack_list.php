@@ -480,6 +480,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pack_
     }
 }
 
+$canBackfillProduction = $inventoryReady
+    && function_exists('bakery_user_has_role')
+    && bakery_user_has_role(['baker', 'manager', 'administrator']);
+$missingProductionTargets = [];
+if ($inventoryReady && !empty($productTotals)) {
+    $missingProductionTargets = bakery_inventory_missing_production_targets(
+        $productTotals,
+        $availableByProduct,
+        $loadedByProduct,
+        $producedByProduct
+    );
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array((string)($_POST['action'] ?? ''), ['backfill_production', 'backfill_day'], true)
+) {
+    bakery_require_login();
+    bakery_require_csrf();
+    bakery_require_role(['baker', 'manager', 'administrator']);
+    $packDate = $selectedDate;
+    $postedAction = (string)$_POST['action'];
+    try {
+        if (!$inventoryReady) {
+            throw new RuntimeException(bakery_t('production.error_inventory_ops'));
+        }
+        $targets = $missingProductionTargets;
+        if ($postedAction === 'backfill_production') {
+            $productId = (int)($_POST['product_id'] ?? 0);
+            if ($productId <= 0 || !isset($targets[$productId])) {
+                $qs = bakery_ops_workflow_query([
+                    'date' => $packDate,
+                    'view' => $viewMode,
+                    'produced' => 'none',
+                ]);
+                header('Location: pack_list.php?' . http_build_query($qs));
+                exit;
+            }
+            $targets = [$productId => (int)$targets[$productId]];
+        }
+        $summary = bakery_inventory_backfill_day_production(
+            $db,
+            $packDate,
+            $targets,
+            'Pack List retroactive production'
+        );
+        $qs = bakery_ops_workflow_query([
+            'date' => $packDate,
+            'view' => $viewMode,
+            'produced' => $summary['updated'] > 0 ? '1' : 'none',
+            'units' => (string)$summary['added_produced'],
+            'products' => (string)$summary['updated'],
+        ]);
+        header('Location: pack_list.php?' . http_build_query($qs));
+        exit;
+    } catch (Throwable $e) {
+        $packDeskError = $e->getMessage();
+    }
+}
+
 // Persisted check-offs for this date (survive refresh and are shared by all staff).
 $checkedMap = [];
 $packProgressReady = bakery_pack_progress_ready($db);
@@ -505,6 +564,14 @@ foreach (array_keys($allLineKeys) as $packKey) {
 $packComplete = $packProgressReady && $totalPackLines > 0 && $packedLineCount >= $totalPackLines;
 if ((string)($_GET['packed'] ?? '') === '1') {
     $packDeskNotice = bakery_t('pack_list.packed_notice');
+}
+if ((string)($_GET['produced'] ?? '') === '1') {
+    $packDeskNotice = bakery_t('pack_list.produced_saved', [
+        'count' => number_format((int)($_GET['units'] ?? 0)),
+        'products' => number_format((int)($_GET['products'] ?? 0)),
+    ]);
+} elseif ((string)($_GET['produced'] ?? '') === 'none') {
+    $packDeskNotice = bakery_t('pack_list.produced_none');
 }
 
 $totalCustomers = count($byCustomer);
@@ -1085,6 +1152,28 @@ require_once 'includes/nav.php';
 
 .pack-complete-banner p { margin: 0 0 8px; color: #1d6534; font-weight: 700; }
 
+.pack-produced-banner {
+    background: #fff6e5;
+    border: 1px solid #efd7a8;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+}
+.pack-produced-banner p { margin: 0 0 10px; color: #8a5a12; font-weight: 700; }
+.pack-produced-banner__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pack-prod-warn {
+    background: #fff6e5;
+    border: 1px solid #efd7a8;
+    border-radius: 8px;
+    color: #8a5a12;
+    font-size: .86rem;
+    font-weight: 650;
+    margin: 0 12px 12px;
+    padding: 8px 10px;
+}
+.pack-prod-warn--inline { margin: 8px 0 0; }
+.pack-section__header .pack-all-form { margin: 0; }
+
 .pack-driver-product {
     border-bottom: 1px solid #edf2f0;
 }
@@ -1161,7 +1250,7 @@ require_once 'includes/nav.php';
 @media print {
     .bakery-nav, .pack-toolbar__actions, .pack-view-toggle, .pack-check,
     .pack-session-note, .pack-date-form, .pack-day-shortcuts, .auth-bar,
-    footer, .pack-btn, .pack-all-form { display: none !important; }
+    footer, .pack-btn, .pack-all-form, .pack-produced-banner { display: none !important; }
     .pack-page { max-width: none; padding: 0; }
     .pack-toolbar { background: none; border: 0; padding: 0 0 8px; }
     .pack-section, .pack-inventory-bar, .pack-totals { break-inside: avoid; }
@@ -1277,6 +1366,32 @@ require_once 'includes/nav.php';
                 </div>
             <?php endif; ?>
         </div>
+        <?php if ($canBackfillProduction && $missingProductionTargets !== []): ?>
+            <div class="pack-produced-banner" role="status">
+                <p><?php echo htmlspecialchars(bakery_t('pack_list.no_production_body', [
+                    'count' => number_format(count($missingProductionTargets)),
+                ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                <div class="pack-produced-banner__actions">
+                    <?php
+                    echo bakery_pack_backfill_form_html(
+                        'backfill_day',
+                        $selectedDate,
+                        $viewMode,
+                        bakery_t('pack_list.mark_day_produced'),
+                        [
+                            'button_class' => 'pack-btn pack-btn--primary',
+                            'confirm' => bakery_t('pack_list.mark_day_produced_confirm', [
+                                'count' => number_format(count($missingProductionTargets)),
+                            ]),
+                        ]
+                    );
+                    ?>
+                    <?php if ($isBaker || !$isDriver): ?>
+                        <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
         <?php if ($packComplete): ?>
             <div class="pack-complete-banner" role="status">
                 <p><?php bakery_te('pack_list.ready_to_load'); ?></p>
@@ -1339,6 +1454,7 @@ require_once 'includes/nav.php';
                             $covered = $onHand + $loaded;
                             $produced = $producedByProduct[$pid] ?? 0;
                             $short = max(0, $required - $covered);
+                            $missingQty = (int)($missingProductionTargets[$pid] ?? 0);
                         ?>
                             <tr class="<?php echo $short > 0 ? 'shortage' : ''; ?>">
                                 <td><strong><?php echo htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?></strong></td>
@@ -1352,6 +1468,24 @@ require_once 'includes/nav.php';
                                         <span class="short-badge"><?php echo htmlspecialchars(bakery_t('pack_list.short', ['count' => number_format($short)]), ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php else: ?>
                                         <?php bakery_te('pack_list.covered'); ?>
+                                    <?php endif; ?>
+                                    <?php if ($canBackfillProduction && $missingQty > 0): ?>
+                                        <?php
+                                        echo bakery_pack_backfill_form_html(
+                                            'backfill_production',
+                                            $selectedDate,
+                                            $viewMode,
+                                            bakery_t('pack_list.mark_produced_qty', ['count' => number_format($missingQty)]),
+                                            [
+                                                'product_id' => $pid,
+                                                'button_class' => 'pack-btn',
+                                                'confirm' => bakery_t('pack_list.mark_produced_confirm', [
+                                                    'count' => number_format($missingQty),
+                                                    'product' => (string)$product['product_name'],
+                                                ]),
+                                            ]
+                                        );
+                                        ?>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -1387,6 +1521,7 @@ require_once 'includes/nav.php';
                 $required = (int)$product['total'];
                 $available = $inventoryReady ? (($availableByProduct[$pid] ?? 0) + ($loadedByProduct[$pid] ?? 0)) : null;
                 $short = ($available !== null && $available < $required) ? ($required - $available) : 0;
+                $missingQty = (int)($missingProductionTargets[$pid] ?? 0);
             ?>
                 <section class="pack-section<?php echo !$isBaker && $short > 0 ? ' ops-attention-row' : ''; ?>" id="pack-product-<?php echo $pid; ?>">
                     <header class="pack-section__header">
@@ -1416,8 +1551,31 @@ require_once 'includes/nav.php';
                                     <span class="pack-qty-pill pack-qty-pill--short"><?php echo htmlspecialchars(bakery_t('pack_list.short', ['count' => number_format($short)]), ENT_QUOTES, 'UTF-8'); ?></span>
                                 <?php endif; ?>
                             <?php endif; ?>
+                            <?php if ($inventoryReady): ?>
+                                <span class="pack-qty-pill"><?php echo htmlspecialchars(bakery_t('pack_list.produced') . ': ' . number_format((int)($producedByProduct[$pid] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></span>
+                            <?php endif; ?>
+                            <?php if ($canBackfillProduction && $missingQty > 0): ?>
+                                <?php
+                                echo bakery_pack_backfill_form_html(
+                                    'backfill_production',
+                                    $selectedDate,
+                                    $viewMode,
+                                    bakery_t('pack_list.mark_produced_qty', ['count' => number_format($missingQty)]),
+                                    [
+                                        'product_id' => $pid,
+                                        'confirm' => bakery_t('pack_list.mark_produced_confirm', [
+                                            'count' => number_format($missingQty),
+                                            'product' => (string)$product['product_name'],
+                                        ]),
+                                    ]
+                                );
+                                ?>
+                            <?php endif; ?>
                         </div>
                     </header>
+                    <?php if ($canBackfillProduction && $missingQty > 0): ?>
+                        <p class="pack-prod-warn pack-prod-warn--inline"><?php bakery_te('pack_list.not_produced_hint'); ?></p>
+                    <?php endif; ?>
                     <div class="pack-section__body">
                         <?php foreach ($product['customers'] as $line): ?>
                             <?php $lineChecked = isset($checkedMap[$line['line_key']]); ?>
@@ -1511,7 +1669,9 @@ require_once 'includes/nav.php';
                     </header>
                     <div class="pack-section__body">
                         <?php foreach (($route['product_totals'] ?? []) as $roll):
-                            $rollBreak = bakery_pack_count_breakdown($db, (int)$roll['product_id'], (int)$roll['quantity']);
+                            $rollPid = (int)$roll['product_id'];
+                            $rollBreak = bakery_pack_count_breakdown($db, $rollPid, (int)$roll['quantity']);
+                            $rollMissing = (int)($missingProductionTargets[$rollPid] ?? 0);
                         ?>
                             <details class="pack-driver-product">
                                 <summary>
@@ -1540,9 +1700,29 @@ require_once 'includes/nav.php';
                                                 <?php endif; ?>
                                             </span>
                                         </div>
-                                        <?php echo bakery_pack_qty_html($db, (int)$roll['product_id'], (int)$line['quantity']); ?>
+                                        <?php echo bakery_pack_qty_html($db, $rollPid, (int)$line['quantity']); ?>
                                     </div>
                                 <?php endforeach; ?>
+                                <?php if ($canBackfillProduction && $rollMissing > 0): ?>
+                                    <div class="pack-prod-warn pack-prod-warn--inline">
+                                        <?php bakery_te('pack_list.not_produced_hint'); ?>
+                                        <?php
+                                        echo bakery_pack_backfill_form_html(
+                                            'backfill_production',
+                                            $selectedDate,
+                                            $viewMode,
+                                            bakery_t('pack_list.mark_produced_qty', ['count' => number_format($rollMissing)]),
+                                            [
+                                                'product_id' => $rollPid,
+                                                'confirm' => bakery_t('pack_list.mark_produced_confirm', [
+                                                    'count' => number_format($rollMissing),
+                                                    'product' => (string)$roll['product_name'],
+                                                ]),
+                                            ]
+                                        );
+                                        ?>
+                                    </div>
+                                <?php endif; ?>
                             </details>
                         <?php endforeach; ?>
                     </div>

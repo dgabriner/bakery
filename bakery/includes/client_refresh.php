@@ -5,6 +5,10 @@ if (!defined('ACCESS_ALLOWED')) {
 if (!function_exists('bakery_client_build_id') || !function_exists('bakery_asset_href')) {
     return;
 }
+if (defined('BAKERY_SKIP_CLIENT_REFRESH') && BAKERY_SKIP_CLIENT_REFRESH) {
+    echo '<meta name="app-skip-client-refresh" content="1">' . "\n";
+    return;
+}
 ?>
 <meta name="app-build" content="<?php echo htmlspecialchars(bakery_client_build_id(), ENT_QUOTES, 'UTF-8'); ?>">
 <meta name="app-base-url" content="<?php echo htmlspecialchars(defined('BASE_URL') ? BASE_URL : '/', ENT_QUOTES, 'UTF-8'); ?>">

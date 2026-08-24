@@ -12,6 +12,11 @@ php scripts/agent_homebase.php brief --agent=SLUG --json
 
 Four streams, one lane (`--agent=bread-education`). Build 23 → 24 → 25 → 26 in order; each is its own loop.
 
+All four shipped at checkpoint commit `7575d19`; sister artifacts: migrations `062_bread_education`
+through `068_bread_education_gating` (bread education owns 062–064 and 066–068; 065 is the parallel
+pack-boxes lane), suites `tests/run_bread_education_tests.php`, `tests/run_bread_education_gating_tests.php`,
+`tests/run_education_copy_parity_tests.php`.
+
 - [23 — Bread Education Batch Builder](23-bread-education-batch-builder.md) (**shipped** 2026-08-23, session 89)
 - [24 — Learning Center](24-bread-education-learning-center.md) (**shipped** 2026-08-23, session 91)
 - [25 — Home Base Onboarding](25-home-base-onboarding.md) (**shipped** 2026-08-23, session 96)

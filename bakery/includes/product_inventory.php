@@ -200,6 +200,170 @@ function bakery_inventory_credit_return_note(int $dailyOrderId): string {
     return 'Order #' . $dailyOrderId . ' credit taken back';
 }
 
+/**
+ * Products whose produced_quantity is still below today's bake target.
+ * Target is max(required, on-hand + loaded) so a load override is not under-recorded.
+ *
+ * @param array<int|string, int> $requiredByProduct
+ * @param array<int|string, int> $availableByProduct
+ * @param array<int|string, int> $loadedByProduct
+ * @param array<int|string, int> $producedByProduct
+ * @return array<int, int> product_id => target produced quantity
+ */
+function bakery_inventory_missing_production_targets(
+    array $requiredByProduct,
+    array $availableByProduct,
+    array $loadedByProduct,
+    array $producedByProduct
+): array {
+    $targets = [];
+    foreach ($requiredByProduct as $productId => $required) {
+        $productId = (int)$productId;
+        $required = (int)$required;
+        if ($productId <= 0 || $required <= 0) {
+            continue;
+        }
+        $onBooks = (int)($availableByProduct[$productId] ?? 0) + (int)($loadedByProduct[$productId] ?? 0);
+        $produced = (int)($producedByProduct[$productId] ?? 0);
+        $target = max($required, $onBooks);
+        if ($produced < $target) {
+            $targets[$productId] = $target;
+        }
+    }
+    return $targets;
+}
+
+/**
+ * Raise produced_quantity to a known bake total without double-counting units
+ * already in available + loaded (typical after a pickup-load override).
+ *
+ * @return array{product_id:int,target:int,produced_was:int,produced_now:int,added_produced:int,added_available:int,changed:bool}
+ */
+function bakery_inventory_backfill_production(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $targetQuantity,
+    ?string $notes = null
+): array {
+    if ($productId <= 0 || $targetQuantity <= 0) {
+        throw new InvalidArgumentException('Production quantity must be at least one unit.');
+    }
+    $date = bakery_inventory_validate_date($date);
+    $notes = ($notes !== null && trim($notes) !== '') ? trim($notes) : 'Retroactive production';
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        bakery_inventory_ensure_day($db, $date, $productId);
+        $current = $db->prepare(
+            'SELECT available_quantity, produced_quantity, loaded_quantity
+             FROM product_inventory_days
+             WHERE delivery_date = ? AND product_id = ?
+             FOR UPDATE'
+        );
+        $current->execute([$date, $productId]);
+        $row = $current->fetch(PDO::FETCH_ASSOC) ?: [];
+        $available = (int)($row['available_quantity'] ?? 0);
+        $produced = (int)($row['produced_quantity'] ?? 0);
+        $loaded = (int)($row['loaded_quantity'] ?? 0);
+        $onBooks = $available + $loaded;
+
+        $result = [
+            'product_id' => $productId,
+            'target' => $targetQuantity,
+            'produced_was' => $produced,
+            'produced_now' => $produced,
+            'added_produced' => 0,
+            'added_available' => 0,
+            'changed' => false,
+        ];
+        if ($produced >= $targetQuantity) {
+            if ($ownTransaction) {
+                $db->commit();
+            }
+            return $result;
+        }
+
+        $addedProduced = $targetQuantity - $produced;
+        $addedAvailable = max(0, $targetQuantity - $onBooks);
+        $stmt = $db->prepare(
+            'UPDATE product_inventory_days
+             SET available_quantity = available_quantity + ?,
+                 produced_quantity = produced_quantity + ?
+             WHERE delivery_date = ? AND product_id = ?'
+        );
+        $stmt->execute([$addedAvailable, $addedProduced, $date, $productId]);
+        bakery_inventory_movement($db, $date, $productId, 'production', $addedProduced, null, $notes);
+
+        $result['produced_now'] = $produced + $addedProduced;
+        $result['added_produced'] = $addedProduced;
+        $result['added_available'] = $addedAvailable;
+        $result['changed'] = true;
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $result;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Backfill every product in $targets. Safe to call again; already-covered SKUs are skipped.
+ *
+ * @param array<int|string, int> $targets product_id => target produced quantity
+ * @return array{updated:int,added_produced:int,added_available:int,products:list<array<string,mixed>>}
+ */
+function bakery_inventory_backfill_day_production(
+    PDO $db,
+    string $date,
+    array $targets,
+    ?string $notes = null
+): array {
+    $date = bakery_inventory_validate_date($date);
+    $summary = [
+        'updated' => 0,
+        'added_produced' => 0,
+        'added_available' => 0,
+        'products' => [],
+    ];
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        foreach ($targets as $productId => $target) {
+            $productId = (int)$productId;
+            $target = (int)$target;
+            if ($productId <= 0 || $target <= 0) {
+                continue;
+            }
+            $row = bakery_inventory_backfill_production($db, $date, $productId, $target, $notes);
+            $summary['products'][] = $row;
+            if (!empty($row['changed'])) {
+                $summary['updated']++;
+                $summary['added_produced'] += (int)$row['added_produced'];
+                $summary['added_available'] += (int)$row['added_available'];
+            }
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $summary;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
 function bakery_inventory_record_production(PDO $db, string $date, int $productId, int $quantity, ?string $notes = null, ?int $expectedProduced = null, int $wasteQuantity = 0): void {
     if ($productId <= 0 || $quantity < 0 || $wasteQuantity < 0 || ($quantity + $wasteQuantity) <= 0) {
         throw new InvalidArgumentException('Production or waste quantity must be at least one unit.');

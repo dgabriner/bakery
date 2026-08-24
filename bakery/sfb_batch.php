@@ -200,6 +200,12 @@ $temps = bakery_sfb_batch_temps($db, (int)$batch['id']);
 $photos = bakery_sfb_batch_photos($db, (int)$batch['id']);
 $discussionMessages = bakery_sfb_batch_messages($db, (int)$batch['id']);
 $discussionThreads = bakery_sfb_message_threads($discussionMessages);
+$answeredCount = 0;
+foreach ($discussionThreads['roots'] as $rootMessage) {
+    if (($rootMessage['message_type'] ?? '') === 'question' && (int)($rootMessage['is_resolved'] ?? 0) === 1) {
+        $answeredCount++;
+    }
+}
 $batchShare = bakery_sfb_batch_share($db, (int)$batch['id']);
 $photosByPhase = [];
 foreach ($photos as $photo) {
@@ -806,6 +812,9 @@ $portalCustomerName = $customer['name'];
           <h2 id="sfbDiscussionHeading"><?php bakery_te('sfb.discussion'); ?></h2>
           <p class="muted sfb-discussion__intro"><?php bakery_te('sfb.discussion_hint'); ?></p>
         </div>
+        <?php if ($answeredCount > 0): ?>
+          <span class="badge badge-ok">✓ <?php echo htmlspecialchars(bakery_t('sfb.discussion_answered_chip', ['count' => $answeredCount]), ENT_QUOTES, 'UTF-8'); ?></span>
+        <?php endif; ?>
       </div>
       <div class="card-body">
         <?php if (!$discussionThreads['roots']): ?>

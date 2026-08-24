@@ -22,4 +22,7 @@ backup, Git, sync, deploy, environment, hook, or DreamHost behavior.
   checkout-overwrite, or broad staging.
 - No database dumps, credentials, uploads, logs, or production PII enter Git.
 - Stop at the owner gates listed in the plan. Record every phase in Homebase.
+- New `database/schema/NNN_*.sql` files take the next unused number
+  (`php scripts/next_schema_migration.php --name=slug`). Do not reuse 010,
+  021, 025, 061, 062, or 065. Do not rename applied migration files.
 

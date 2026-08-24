@@ -198,6 +198,8 @@ if ($colHasBox) {
     $db->prepare('UPDATE product_pack_yields SET pieces_per_box = 40 WHERE product_id = ?')->execute([$conchas]);
     $boxBreak = bakery_pack_count_breakdown($db, $conchas, 440);
     $assert($boxBreak['boxes'] === 11 && $boxBreak['box_remainder'] === 0, '440 conchas → 11 boxes of 40');
+    $savedBox = bakery_pack_save_count_units($db, $conchas, 20, 40);
+    $assert((int)$savedBox['pieces_per_box'] === 40, 'pack unit save writes pieces_per_box');
     $db->prepare('UPDATE product_pack_yields SET pieces_per_box = NULL WHERE product_id = ?')->execute([$conchas]);
 }
 

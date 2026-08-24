@@ -64,6 +64,56 @@ function bakery_pack_mark_keys(PDO $db, string $date, array $lineKeys, ?int $use
     return (int)$count->fetchColumn();
 }
 
+/**
+ * Compact POST form to mark one SKU or the whole day's missing bake as produced.
+ *
+ * @param array{product_id?:int,confirm?:string,class?:string,button_class?:string,driver_id?:int} $opts
+ */
+function bakery_pack_backfill_form_html(string $action, string $date, string $view, string $label, array $opts = []): string
+{
+    $productId = (int)($opts['product_id'] ?? 0);
+    $confirm = (string)($opts['confirm'] ?? '');
+    $class = (string)($opts['class'] ?? 'pack-all-form');
+    $btnClass = (string)($opts['button_class'] ?? 'pack-btn');
+    $formId = (string)($opts['form_id'] ?? '');
+    $buttonOnly = !empty($opts['button_only']);
+    $html = '';
+    if (!$buttonOnly) {
+        $html .= '<form method="post"';
+        if ($formId !== '') {
+            $html .= ' id="' . htmlspecialchars($formId, ENT_QUOTES, 'UTF-8') . '"';
+        }
+        $html .= ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"';
+        if ($confirm !== '') {
+            $encoded = json_encode(
+                $confirm,
+                JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+            );
+            $html .= ' onsubmit="return confirm(' . htmlspecialchars((string)$encoded, ENT_QUOTES, 'UTF-8') . ')"';
+        }
+        $html .= '>';
+        $html .= function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
+        $html .= '<input type="hidden" name="action" value="' . htmlspecialchars($action, ENT_QUOTES, 'UTF-8') . '">';
+        $html .= '<input type="hidden" name="view" value="' . htmlspecialchars($view, ENT_QUOTES, 'UTF-8') . '">';
+        $html .= '<input type="hidden" name="delivery_date" value="' . htmlspecialchars($date, ENT_QUOTES, 'UTF-8') . '">';
+        if ($productId > 0) {
+            $html .= '<input type="hidden" name="product_id" value="' . $productId . '">';
+        }
+        if (isset($opts['driver_id'])) {
+            $html .= '<input type="hidden" name="board_driver_id" value="' . (int)$opts['driver_id'] . '">';
+        }
+    }
+    $html .= '<button type="submit" class="' . htmlspecialchars($btnClass, ENT_QUOTES, 'UTF-8') . '"';
+    if ($buttonOnly && $formId !== '') {
+        $html .= ' form="' . htmlspecialchars($formId, ENT_QUOTES, 'UTF-8') . '"';
+    }
+    $html .= '>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</button>';
+    if (!$buttonOnly) {
+        $html .= '</form>';
+    }
+    return $html;
+}
+
 function bakery_pack_qty_html(PDO $db, int $productId, int $qty): string
 {
     $qty = max(0, $qty);

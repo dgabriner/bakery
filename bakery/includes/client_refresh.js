@@ -3,6 +3,9 @@
  * Does not clear cookies or localStorage.
  */
 (function () {
+  if (document.querySelector('meta[name="app-skip-client-refresh"]')) {
+    return;
+  }
   var BUILD_KEY = 'bakery-client-build';
   var RELOAD_KEY = 'bakery-client-build-reloaded';
   var meta = document.querySelector('meta[name="app-build"]');

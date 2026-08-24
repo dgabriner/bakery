@@ -27,6 +27,45 @@ function bakery_schema_inventory_normalize_column_definition(string $definition)
     return implode('|', $parts);
 }
 
+/** @return list<string>|null */
+function bakery_schema_inventory_enum_values(string $type): ?array
+{
+    $type = strtolower(trim($type));
+    if (!preg_match('/^enum\((.*)\)$/s', $type, $matched)) {
+        return null;
+    }
+    if (!preg_match_all("/'((?:\\\\'|[^'])*)'/", $matched[1], $inner)) {
+        return [];
+    }
+    $values = [];
+    foreach ($inner[1] as $value) {
+        $values[] = stripcslashes((string)$value);
+    }
+    return $values;
+}
+
+/**
+ * Hosted Live migrations may widen an ENUM by appending values. That is
+ * Live-behind, not a type clash, as long as Live's values stay the prefix.
+ */
+function bakery_schema_inventory_is_additive_enum_widen(string $stagingDefinition, string $liveDefinition): bool
+{
+    $stagingParts = explode('|', bakery_schema_inventory_normalize_column_definition($stagingDefinition), 3);
+    $liveParts = explode('|', bakery_schema_inventory_normalize_column_definition($liveDefinition), 3);
+    if (($stagingParts[1] ?? '') !== ($liveParts[1] ?? '') || ($stagingParts[2] ?? '') !== ($liveParts[2] ?? '')) {
+        return false;
+    }
+    $stagingEnum = bakery_schema_inventory_enum_values((string)($stagingParts[0] ?? ''));
+    $liveEnum = bakery_schema_inventory_enum_values((string)($liveParts[0] ?? ''));
+    if ($stagingEnum === null || $liveEnum === null || $liveEnum === [] || $stagingEnum === $liveEnum) {
+        return false;
+    }
+    if (count($liveEnum) >= count($stagingEnum)) {
+        return false;
+    }
+    return array_slice($stagingEnum, 0, count($liveEnum)) === $liveEnum;
+}
+
 function bakery_schema_inventory_from_pdo(PDO $db): array
 {
     $database = (string)$db->query('SELECT DATABASE()')->fetchColumn();
@@ -275,9 +314,13 @@ function bakery_schema_inventory_compare(array $staging, array $live): array
 
     $mismatches = [];
     foreach ($stagingColumns as $key => $definition) {
-        if (isset($liveColumns[$key]) && (string)$liveColumns[$key] !== (string)$definition) {
-            $mismatches[] = $key;
+        if (!isset($liveColumns[$key]) || (string)$liveColumns[$key] === (string)$definition) {
+            continue;
         }
+        if (bakery_schema_inventory_is_additive_enum_widen((string)$definition, (string)$liveColumns[$key])) {
+            continue;
+        }
+        $mismatches[] = $key;
     }
     foreach ($stagingIndexes as $key => $definition) {
         if (isset($liveIndexes[$key]) && (string)$liveIndexes[$key] !== (string)$definition) {

@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/portal_command_center.php';
 
 $customer = bakery_portal_require_customer($db);
+bakery_portal_handle_sfb_bridge_post($db);
 $customerId = (int)$customer['id'];
 
 $nextDelivery = null;
@@ -185,6 +186,8 @@ $portalCustomerName = $customer['name'];
         </div>
       </section>
     <?php endif; ?>
+
+    <?php bakery_portal_sfb_bridge_card($db, $customer); ?>
 
     <section class="card" style="text-align:center;padding:20px 16px">
       <p style="font-size:1.1rem;font-weight:600;margin:0 0 4px"><?php bakery_te('portal.tip_heading'); ?></p>

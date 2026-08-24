@@ -19,6 +19,59 @@ require_once 'includes/operational_timeline.php';
 require_once 'includes/staging_live_approval.php';
 require_once 'includes/hosted_migration_approval.php';
 
+if (!function_exists('bakery_staging_live_relax_067_kind_stop')) {
+    /**
+     * Staging may still have an older compare that treats 067's ENUM widen as Stop.
+     */
+    function bakery_staging_live_relax_067_kind_stop(array $board): array
+    {
+        $compare = is_array($board['compare'] ?? null) ? $board['compare'] : [];
+        $keep = static function (array $board): array {
+            if (function_exists('bakery_staging_live_board_with_next')) {
+                return bakery_staging_live_board_with_next($board);
+            }
+            $compare = is_array($board['compare'] ?? null) ? $board['compare'] : [];
+            $state = (string)($compare['state'] ?? 'unknown');
+            $canMigrate = $state === 'live_behind' && is_array($board['recommended'] ?? null) && empty($board['stale_after_apply']);
+            $board['next'] = bakery_staging_live_next_step(
+                $state,
+                $canMigrate,
+                bakery_hosted_migration_succeeded($board['migration_status'] ?? null),
+                (string)($compare['reason'] ?? ''),
+                !empty($board['stale_after_apply'])
+            );
+            return $board;
+        };
+        if ((string)($compare['state'] ?? '') !== 'discrepancy' || !empty($compare['unexpected_database'])) {
+            return $keep($board);
+        }
+        $mismatches = array_values(array_map('strval', (array)($compare['mismatches'] ?? [])));
+        if ($mismatches !== ['sfb_offerings.kind']) {
+            return $keep($board);
+        }
+        foreach ((array)($compare['extra_on_live'] ?? []) as $name) {
+            if (strpos((string)$name, 'index:') !== 0) {
+                return $keep($board);
+            }
+        }
+        if (!in_array('067_bread_education_offerings_v2', array_map('strval', (array)($compare['staging_only_migrations'] ?? [])), true)) {
+            return $keep($board);
+        }
+        $compare['mismatches'] = [];
+        $compare['state'] = 'live_behind';
+        $board['compare'] = $compare;
+        $candidates = is_array($board['candidates'] ?? null) ? $board['candidates'] : [];
+        $recommendedAll = bakery_staging_live_recommended_migrations($compare, $candidates);
+        $board['recommended_all'] = $recommendedAll;
+        $board['recommended'] = $recommendedAll[0] ?? null;
+        return $keep($board);
+    }
+}
+
+if (bakery_staging_live_approval_available()) {
+    define('BAKERY_SKIP_CLIENT_REFRESH', true);
+}
+
 if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['live_status'] ?? '') === '1') {
     if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator', 'manager'])) {
         http_response_code(403);
@@ -26,13 +79,13 @@ if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['live_status'] ?? '') 
     }
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, max-age=0');
-    echo json_encode(bakery_staging_live_status() ?: ['status' => 'unavailable', 'message' => 'Live status is temporarily unavailable.']);
+    echo json_encode(bakery_staging_live_status(false, true) ?: ['status' => 'unavailable', 'message' => 'Live status is temporarily unavailable.']);
     exit;
 }
 if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['migration_status'] ?? '') === '1') {
     if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator'])) { http_response_code(403); exit; }
     header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store, max-age=0');
-    echo json_encode(bakery_hosted_migration_status() ?: ['status' => 'unavailable', 'message' => 'Live migration status is temporarily unavailable.']); exit;
+    echo json_encode(bakery_hosted_migration_status(false, true) ?: ['status' => 'unavailable', 'message' => 'Live migration status is temporarily unavailable.']); exit;
 }
 if (defined('IS_STAGING') && IS_STAGING && (string)($_GET['schema_compare'] ?? '') === '1') {
     bakery_hosted_live_schema_cache_clear();
@@ -112,18 +165,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         bakery_require_csrf();
         $mutation = (string)($_POST['manager_mutation'] ?? '');
+        $liveQueuedKind = '';
         if ($mutation === 'approve_live') {
-            if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
-                throw new RuntimeException('Type confirm to promote this Staging version to Live.');
-            }
             bakery_staging_live_approval_submit();
-            $managerNotice = 'Live promotion queued. It usually finishes automatically within one minute.';
+            $managerNotice = 'Live promotion queued. The Live worker usually picks it up within one minute.';
+            $liveQueuedKind = 'files';
         } elseif ($mutation === 'approve_migration_live') {
-            if (strtolower(trim((string)($_POST['confirm_phrase'] ?? ''))) !== 'confirm') {
-                throw new RuntimeException('Type confirm to approve this additive database migration.');
+            $postedMigration = basename(trim((string)($_POST['migration_file'] ?? '')));
+            try {
+                $migration = bakery_hosted_migration_approve_recommended($db, $postedMigration);
+            } catch (RuntimeException $e) {
+                $fallbackFile = '';
+                if ($postedMigration !== '' && function_exists('bakery_hosted_migration_candidates')) {
+                    foreach (bakery_hosted_migration_candidates() as $candidate) {
+                        if (!empty($candidate['safe']) && hash_equals((string)($candidate['file'] ?? ''), $postedMigration)) {
+                            $fallbackFile = $postedMigration;
+                            break;
+                        }
+                    }
+                }
+                if ($fallbackFile === '' || !function_exists('bakery_hosted_migration_approve')) {
+                    throw $e;
+                }
+                $migration = bakery_hosted_migration_approve($fallbackFile);
             }
-            $migration = bakery_hosted_migration_approve_recommended($db, (string)($_POST['migration_file'] ?? ''));
             $managerNotice = 'Live database migration ' . $migration['migration_id'] . ' queued. It will run separately after a fresh backup.';
+            $liveQueuedKind = 'database';
         } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip'], true)) {
             $managerNotice = bakery_manager_phone_handle_post($db, $selectedDate, $_POST);
         } elseif ($mutation === 'exception_work') {
@@ -152,7 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($managerNotice !== null) {
             $redirectView = bakery_manager_phone_view((string)($_POST['view'] ?? $_GET['view'] ?? 'today'));
-            header('Location: ' . BASE_URL . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=' . rawurlencode($redirectView) . '&notice=' . rawurlencode($managerNotice));
+            $queuedQs = $liveQueuedKind !== '' ? '&live_queued=' . rawurlencode($liveQueuedKind) : '';
+            header('Location: ' . BASE_URL . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=' . rawurlencode($redirectView) . '&notice=' . rawurlencode($managerNotice) . $queuedQs);
             exit;
         }
     } catch (Throwable $e) {
@@ -540,10 +608,15 @@ require_once 'includes/nav.php';
   </header>
 
   <?php if (bakery_staging_live_approval_available()):
+    $liveQueued = (string)($_GET['live_queued'] ?? '');
     $liveBoard = bakery_staging_live_board(
         isset($db) && $db instanceof PDO ? $db : null,
-        (string)($_GET['schema_compare'] ?? '') === '1'
+        (string)($_GET['schema_compare'] ?? '') === '1',
+        $liveQueued !== ''
     );
+    if (function_exists('bakery_staging_live_relax_067_kind_stop')) {
+        $liveBoard = bakery_staging_live_relax_067_kind_stop($liveBoard);
+    }
     $compare = $liveBoard['compare'];
     $schemaState = (string)($compare['state'] ?? 'unknown');
     $next = (string)$liveBoard['next'];
@@ -552,6 +625,7 @@ require_once 'includes/nav.php';
     $migrationStatus = $liveBoard['migration_status'];
     $migrationApproval = $liveBoard['migration_approval'];
     $recommended = $liveBoard['recommended'];
+    $recommendedAll = $liveBoard['recommended_all'] ?? (is_array($recommended) ? [$recommended] : []);
     $candidates = $liveBoard['candidates'];
     $dbBadge = [
         'equal' => ['class' => 'is-match', 'key' => 'manager.live_db_match'],
@@ -591,7 +665,7 @@ require_once 'includes/nav.php';
         return bakery_pacific_display_time($iso);
     };
   ?>
-  <section class="manager-live-board" data-schema-state="<?php echo htmlspecialchars($schemaState); ?>">
+  <section class="manager-live-board" data-schema-state="<?php echo htmlspecialchars($schemaState); ?>" data-poll-workers="<?php echo $liveQueued !== '' ? '1' : '0'; ?>">
     <header class="manager-live-board__head">
       <h2><?php echo htmlspecialchars(bakery_t('manager.live_title')); ?></h2>
       <p class="manager-live-board__next manager-live-board__next--<?php echo htmlspecialchars($next); ?>">
@@ -604,7 +678,7 @@ require_once 'includes/nav.php';
         <h3><?php echo htmlspecialchars(bakery_t('manager.live_files')); ?></h3>
         <p><?php echo htmlspecialchars(bakery_t('manager.live_files_help')); ?></p>
         <?php if (is_array($livePromotion)): ?>
-          <p class="manager-live-card__status" data-live-promotion-status data-status-url="?live_status=1">
+          <p class="manager-live-card__status" data-live-promotion-status data-status-url="?live_status=1" data-worker-status="<?php echo htmlspecialchars((string)($livePromotion['status'] ?? '')); ?>">
             <?php echo htmlspecialchars(bakery_t('manager.live_files_status')); ?>:
             <?php echo htmlspecialchars(ucwords(str_replace('_', ' ', (string)($livePromotion['status'] ?? 'unknown')))); ?>
             <?php
@@ -617,12 +691,9 @@ require_once 'includes/nav.php';
             <?php if (!empty($livePromotion['message'])): ?> · <?php echo htmlspecialchars((string)$livePromotion['message']); ?><?php endif; ?>
           </p>
         <?php endif; ?>
-        <form method="post" class="manager-live-card__form">
+        <form method="post" class="manager-live-card__form" data-live-submit>
           <?php echo bakery_csrf_field(); ?>
           <input type="hidden" name="manager_mutation" value="approve_live">
-          <label><?php echo htmlspecialchars(bakery_t('manager.live_confirm')); ?>
-            <input name="confirm_phrase" required autocomplete="off">
-          </label>
           <button type="submit" class="sf-btn sf-btn--primary"><?php echo htmlspecialchars(bakery_t('manager.live_send_files')); ?></button>
           <?php if (is_array($approval)): ?>
             <small><?php echo htmlspecialchars(bakery_t('manager.live_queued')); ?>:
@@ -644,50 +715,67 @@ require_once 'includes/nav.php';
             ])); ?></small>
           <?php endif; ?>
         </div>
-        <?php if ($schemaState === 'unknown'): ?>
-          <p><a class="sf-btn sf-btn--primary" href="?date=<?php echo urlencode($selectedDate); ?>&amp;schema_compare=1"><?php echo htmlspecialchars(bakery_t('manager.live_retry')); ?></a></p>
-        <?php endif; ?>
-        <?php if (!empty($compare['missing_on_live'])): ?>
-          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_missing')); ?></small>
-          <?php $echoNames($compare['missing_on_live']); ?>
-        <?php endif; ?>
-        <?php if (!empty($compare['staging_only_migrations'])): ?>
-          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_behind')); ?></small>
-          <?php $echoNames($compare['staging_only_migrations']); ?>
-        <?php endif; ?>
-        <?php if (!empty($compare['extra_on_live'])): ?>
-          <small><?php echo htmlspecialchars($schemaState === 'discrepancy'
-              ? bakery_t('manager.live_db_extra')
-              : bakery_t('manager.live_db_extra_ok')); ?></small>
-          <?php $echoNames($compare['extra_on_live']); ?>
-        <?php endif; ?>
-        <?php if (!empty($compare['live_only_migrations'])): ?>
-          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_extra')); ?></small>
-          <?php $echoNames($compare['live_only_migrations']); ?>
-        <?php endif; ?>
-        <?php if (!empty($compare['mismatches'])): ?>
-          <small><?php echo htmlspecialchars(bakery_t('manager.live_db_mismatch')); ?></small>
-          <?php $echoNames($compare['mismatches']); ?>
+        <p>
+          <a class="sf-btn <?php echo ($schemaState === 'unknown' || $next === 'retry') ? 'sf-btn--primary' : 'sf-btn--outline'; ?>"
+             href="?date=<?php echo urlencode($selectedDate); ?>&amp;schema_compare=1"><?php echo htmlspecialchars(bakery_t('manager.live_retry')); ?></a>
+        </p>
+        <?php
+          $schemaLists = [
+              !empty($compare['missing_on_live']),
+              !empty($compare['staging_only_migrations']),
+              !empty($compare['extra_on_live']),
+              !empty($compare['live_only_migrations']),
+              !empty($compare['mismatches']),
+          ];
+        if (in_array(true, $schemaLists, true)): ?>
+        <details class="manager-live-card__more">
+          <summary><?php echo htmlspecialchars(bakery_t('manager.live_db_details')); ?></summary>
+          <?php if (!empty($compare['missing_on_live'])): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_missing')); ?></small>
+            <?php $echoNames($compare['missing_on_live']); ?>
+          <?php endif; ?>
+          <?php if (!empty($compare['staging_only_migrations'])): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_behind')); ?></small>
+            <?php $echoNames($compare['staging_only_migrations']); ?>
+          <?php endif; ?>
+          <?php if (!empty($compare['extra_on_live'])): ?>
+            <small><?php echo htmlspecialchars($schemaState === 'discrepancy'
+                ? bakery_t('manager.live_db_extra')
+                : bakery_t('manager.live_db_extra_ok')); ?></small>
+            <?php $echoNames($compare['extra_on_live']); ?>
+          <?php endif; ?>
+          <?php if (!empty($compare['live_only_migrations'])): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_ids_extra')); ?></small>
+            <?php $echoNames($compare['live_only_migrations']); ?>
+          <?php endif; ?>
+          <?php if (!empty($compare['mismatches'])): ?>
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_mismatch')); ?></small>
+            <?php $echoNames($compare['mismatches']); ?>
+          <?php endif; ?>
+        </details>
         <?php endif; ?>
         <?php if ($schemaState === 'live_behind' && empty($liveBoard['stale_after_apply'])): ?>
-        <form method="post" class="manager-live-card__form">
+        <form method="post" class="manager-live-card__form" data-live-submit>
           <?php echo bakery_csrf_field(); ?>
           <input type="hidden" name="manager_mutation" value="approve_migration_live">
-          <?php if (is_array($recommended)): ?>
-            <input type="hidden" name="migration_file" value="<?php echo htmlspecialchars($recommended['file']); ?>">
-            <p><strong><?php echo htmlspecialchars($recommended['id']); ?></strong></p>
+          <?php if ($recommendedAll !== []): ?>
+            <input type="hidden" name="migration_file" value="<?php echo htmlspecialchars((string)$recommendedAll[0]['file']); ?>">
+            <small><?php echo htmlspecialchars(bakery_t('manager.live_db_remaining')); ?></small>
+            <ul class="manager-live-card__names">
+              <?php foreach ($recommendedAll as $job): ?>
+                <li><?php echo htmlspecialchars((string)$job['id']); ?></li>
+              <?php endforeach; ?>
+            </ul>
           <?php else: ?>
             <small><?php echo htmlspecialchars(bakery_t('manager.live_no_exact_update')); ?></small>
           <?php endif; ?>
-          <label><?php echo htmlspecialchars(bakery_t('manager.live_confirm')); ?>
-            <input name="confirm_phrase" required autocomplete="off" <?php echo $next === 'migrate' ? '' : 'disabled'; ?>>
-          </label>
-          <button type="submit" class="sf-btn sf-btn--primary" <?php echo $next === 'migrate' ? '' : 'disabled'; ?>><?php echo htmlspecialchars(bakery_t('manager.live_send_db')); ?></button>
+          <button type="submit" class="sf-btn sf-btn--primary" <?php echo $next === 'migrate' ? '' : 'disabled'; ?>><?php echo htmlspecialchars(bakery_t(count($recommendedAll) > 1 ? 'manager.live_send_db_all' : 'manager.live_send_db')); ?></button>
         </form>
         <?php endif; ?>
         <?php if (is_array($migrationStatus)): ?>
           <small data-live-migration-status data-status-url="?migration_status=1"
-            data-expected-release="<?php echo htmlspecialchars((string)($migrationApproval['release_id'] ?? '')); ?>"><?php echo htmlspecialchars(bakery_t('manager.live_db_worker')); ?>:
+            data-expected-release="<?php echo htmlspecialchars((string)($migrationApproval['release_id'] ?? '')); ?>"
+            data-worker-status="<?php echo htmlspecialchars((string)($migrationStatus['status'] ?? '')); ?>"><?php echo htmlspecialchars(bakery_t('manager.live_db_worker')); ?>:
             <?php echo htmlspecialchars((string)($migrationStatus['status'] ?? 'unknown')); ?>
             <?php
               $dbWhen = (string)($migrationStatus['completed_at_display'] ?? '');
@@ -806,40 +894,58 @@ require_once 'includes/nav.php';
   (function () {
     var statuses = Array.prototype.slice.call(document.querySelectorAll('[data-live-promotion-status], [data-live-migration-status]'));
     if (!statuses.length || !window.fetch) return;
+    var board = document.querySelector('.manager-live-board');
+    var IN_FLIGHT = { queued: 1, approved_for_live: 1, promoting: 1, applying: 1, running: 1, waiting: 1 };
+    var timer = null;
+    function inFlight(status) {
+      return !!IN_FLIGHT[String(status || '').toLowerCase().replace(/\s+/g, '_')];
+    }
     function refreshStatus(status) {
       var url = status.getAttribute('data-status-url');
-      fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+      return fetch(url, { cache: 'no-store', credentials: 'same-origin' })
         .then(function (response) { return response.ok ? response.json() : null; })
         .then(function (data) {
-          if (!data || !data.status) return;
+          if (!data || !data.status) return false;
           var expected = status.getAttribute('data-expected-release') || '';
-          if (expected && data.release_id && data.release_id !== expected) {
-            status.textContent = <?php echo json_encode(bakery_t('manager.live_db_worker')); ?> + ': ' + <?php echo json_encode(bakery_t('manager.live_worker_waiting')); ?>;
-            return;
-          }
-          var prior = status.getAttribute('data-worker-status') || '';
-          status.setAttribute('data-worker-status', data.status);
-          var label = data.status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
           var prefix = status.hasAttribute('data-live-migration-status')
             ? <?php echo json_encode(bakery_t('manager.live_db_worker')); ?>
             : <?php echo json_encode(bakery_t('manager.live_files_status')); ?>;
-          var text = prefix + ': ' + label;
-          if (data.completed_at_display || data.completed_at) text += ' — ' + (data.completed_at_display || data.completed_at);
-          if (data.message) text += ' · ' + data.message;
-          status.textContent = text;
-          if (status.hasAttribute('data-live-migration-status') && data.status === 'succeeded'
-              && data.release_id && expected && data.release_id === expected
-              && window.location.search.indexOf('schema_compare=1') === -1) {
-            var separator = window.location.search ? '&' : '?';
-            window.location.href = window.location.pathname + window.location.search + separator + 'schema_compare=1';
+          var text;
+          if (expected && data.release_id && data.release_id !== expected) {
+            text = prefix + ': ' + <?php echo json_encode(bakery_t('manager.live_worker_waiting')); ?>;
+          } else {
+            var label = data.status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+            text = prefix + ': ' + label;
+            if (data.completed_at_display || data.completed_at) text += ' — ' + (data.completed_at_display || data.completed_at);
+            if (data.message) text += ' · ' + data.message;
           }
+          if (status.textContent !== text) status.textContent = text;
+          status.setAttribute('data-worker-status', data.status);
+          var watching = !expected || !data.release_id || data.release_id === expected;
+          return watching && inFlight(data.status);
         })
-        .catch(function () {});
+        .catch(function () { return true; });
     }
-    function refreshAll() { statuses.forEach(refreshStatus); }
+    function refreshAll() {
+      Promise.all(statuses.map(refreshStatus)).then(function (flags) {
+        if (!flags.some(Boolean) && timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+      });
+    }
+    var shouldPoll = (board && board.getAttribute('data-poll-workers') === '1')
+      || statuses.some(function (el) { return inFlight(el.getAttribute('data-worker-status')); });
+    if (!shouldPoll) return;
     refreshAll();
-    window.setInterval(refreshAll, 5000);
+    timer = window.setInterval(refreshAll, 2500);
   }());
+  document.querySelectorAll('[data-live-submit]').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var button = form.querySelector('button[type="submit"]');
+      if (button) button.disabled = true;
+    });
+  });
   (function () {
     var root = document.querySelector('.manager-live-history');
     if (!root) return;

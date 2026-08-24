@@ -19,7 +19,7 @@ The app has too many screens. After the user's action, something must carry the 
 5. CSRF on POSTs. `bakery_require_role` on the server. Menu hiding is not security.
 6. Add keys to `lang/en.php` **and** `lang/es.php`.
 7. Run the packet's `tests/run_*.php` (see the `test-gate` skill). Isolated `bakerysf_test` only.
-8. Handoff with the eight §10 fields. Pin lasting choices `--column=decided`.
+8. Handoff with the eight §10 fields (one per line, or numbered inline — shells flatten newlines). Check the returned `handoff_score.complete`; if false, re-handoff in a follow-up session. Pin lasting choices `--column=decided`.
 
 ## Do not
 

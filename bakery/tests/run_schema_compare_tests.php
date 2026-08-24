@@ -10,6 +10,7 @@ require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/schema_inventory.php';
+require_once $root . '/includes/schema_migration_numbers.php';
 
 $db = check_mysql_connection();
 bakery_assert_local_test_target($db);
@@ -107,6 +108,32 @@ $discrepancyType = bakery_schema_inventory_compare(
 $assert(($discrepancyType['state'] ?? '') === 'discrepancy', 'type mismatch is a discrepancy');
 $assert(in_array('customers.name', $discrepancyType['mismatches'], true), 'type mismatch names the column');
 
+$liveKind = $baseColumns + ['sfb_offerings.kind' => "enum('class','membership','kit')|NO|"];
+$stagingKind = $baseColumns + ['sfb_offerings.kind' => "enum('class','membership','kit','donation','credits')|NO|"];
+$enumWiden = bakery_schema_inventory_compare(
+    schema_compare_fixture($stagingKind, $baseIndexes, ['066_payments', '067_bread_education_offerings_v2']),
+    schema_compare_fixture($liveKind, $baseIndexes, ['066_payments'])
+);
+$assert(($enumWiden['state'] ?? '') === 'equal', 'appending ENUM values is not a type clash');
+$assert(!in_array('sfb_offerings.kind', $enumWiden['mismatches'] ?? [], true), 'widened kind is not listed as a mismatch');
+
+$enumWidenBehind = bakery_schema_inventory_compare(
+    schema_compare_fixture(
+        $stagingKind + ['sfb_offerings.units' => 'int|YES|'],
+        $baseIndexes,
+        ['066_payments', '067_bread_education_offerings_v2']
+    ),
+    schema_compare_fixture($liveKind, $baseIndexes, ['066_payments'])
+);
+$assert(($enumWidenBehind['state'] ?? '') === 'live_behind', '067-style enum widen plus new column is Live-behind');
+$assert(in_array('067_bread_education_offerings_v2', $enumWidenBehind['staging_only_migrations'] ?? [], true), '067 remains the pending Live update');
+
+$enumReorder = bakery_schema_inventory_compare(
+    schema_compare_fixture($baseColumns + ['sfb_offerings.kind' => "enum('credits','class')|NO|"], $baseIndexes, ['049_done']),
+    schema_compare_fixture($baseColumns + ['sfb_offerings.kind' => "enum('class','credits')|NO|"], $baseIndexes, ['049_done'])
+);
+$assert(($enumReorder['state'] ?? '') === 'discrepancy', 'reordered ENUM values stay a mismatch');
+
 $discrepancyLedger = bakery_schema_inventory_compare(
     $staging,
     schema_compare_fixture($baseColumns, $baseIndexes, ['049_done', '050_hot_fix'])
@@ -202,12 +229,93 @@ $pickedFirstSafe = bakery_staging_live_recommended_migration(
     ]
 );
 $assert(is_array($pickedFirstSafe) && $pickedFirstSafe['file'] === '056_square.sql', 'several safe pending migrations recommend the earliest file, not a greyed-out guess');
+$remainingSafe = bakery_staging_live_recommended_migrations(
+    ['state' => 'live_behind', 'staging_only_migrations' => ['056_square', '057_text', '059_bolillo']],
+    [
+        ['id' => '056_square', 'file' => '056_square.sql', 'safe' => true],
+        ['id' => '057_text', 'file' => '057_text.sql', 'safe' => true],
+        ['id' => '059_bolillo', 'file' => '059_bolillo.sql', 'safe' => true],
+    ]
+);
+$assert(array_column($remainingSafe, 'file') === ['056_square.sql', '057_text.sql', '059_bolillo.sql'], 'catch-up queues every remaining safe migration in file order');
 $notPicked = bakery_staging_live_recommended_migration(
     ['state' => 'live_behind', 'staging_only_migrations' => []],
     [['id' => '050_nickname', 'file' => '050_nickname.sql', 'safe' => true]]
 );
 $assert($notPicked === null, 'recommendation is never guessed from the only available file');
 
+$kindStopBoard = bakery_staging_live_relax_067_kind_stop([
+    'compare' => [
+        'state' => 'discrepancy',
+        'mismatches' => ['sfb_offerings.kind'],
+        'extra_on_live' => ['index:sfb_credit_entries.PRIMARY'],
+        'staging_only_migrations' => ['067_bread_education_offerings_v2'],
+        'unexpected_database' => false,
+    ],
+    'candidates' => [[
+        'id' => '067_bread_education_offerings_v2',
+        'file' => '067_bread_education_offerings_v2.sql',
+        'safe' => true,
+    ]],
+    'recommended' => null,
+    'stale_after_apply' => false,
+    'migration_status' => null,
+]);
+$assert(($kindStopBoard['compare']['state'] ?? '') === 'live_behind', '067 kind-only Stop becomes Live-behind');
+$assert(($kindStopBoard['recommended']['file'] ?? '') === '067_bread_education_offerings_v2.sql', '067 is recommended after kind relax');
+$assert(($kindStopBoard['next'] ?? '') === 'migrate', 'kind relax opens the database button');
+
+$realKindClash = bakery_staging_live_relax_067_kind_stop([
+    'compare' => [
+        'state' => 'discrepancy',
+        'mismatches' => ['sfb_offerings.kind', 'customers.name'],
+        'staging_only_migrations' => ['067_bread_education_offerings_v2'],
+    ],
+    'candidates' => [[
+        'id' => '067_bread_education_offerings_v2',
+        'file' => '067_bread_education_offerings_v2.sql',
+        'safe' => true,
+    ]],
+    'recommended' => null,
+    'stale_after_apply' => false,
+    'migration_status' => null,
+]);
+$assert(($realKindClash['compare']['state'] ?? '') === 'discrepancy', 'other type clashes stay Stop');
+
+$job067 = [
+    'id' => '067_bread_education_offerings_v2',
+    'file' => '067_bread_education_offerings_v2.sql',
+    'safe' => true,
+];
+$queueFromBoard = bakery_hosted_migration_queue_from_board([
+    'compare' => [
+        'state' => 'live_behind',
+        'staging_only_migrations' => ['067_bread_education_offerings_v2'],
+    ],
+    'candidates' => [$job067],
+    'recommended_all' => [$job067],
+], '062_surveys_custom.sql');
+$assert(($queueFromBoard[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'approve queues the board remainder, not a second first-file guess');
+
+$postedOnly = bakery_hosted_migration_queue_from_board([
+    'compare' => [
+        'state' => 'discrepancy',
+        'mismatches' => ['sfb_offerings.kind'],
+        'staging_only_migrations' => ['067_bread_education_offerings_v2'],
+    ],
+    'candidates' => [$job067],
+    'recommended_all' => [],
+], '067_bread_education_offerings_v2.sql');
+$assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
+
+$assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062 prefix pairs exist');
+$assert(bakery_schema_next_migration_number() === 68, 'next unused schema number is 068');
+$assert(bakery_schema_next_migration_id('demo_feature') === '068_demo_feature', 'next id is 068_ plus slug');
+$third062 = bakery_schema_migration_ids_from_dir();
+$third062[] = '062_another_collision';
+$assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');
+
+$assert(strpos($managerSource, "if (\$schemaState === 'unknown'):") === false, 'refresh compare is not hidden on Match or Stop');
 $assert(strpos($managerSource, 'manager-live-board') !== false, 'Manager shows the Staging to Live board');
 $assert(strpos($managerSource, 'bakery_staging_live_board') !== false, 'Manager uses the live board helper');
 $assert(strpos($managerSource, 'manager-live-history') !== false, 'Manager keeps Staging to Live history collapsed');
@@ -260,6 +368,7 @@ foreach ([
     'manager.live_no_exact_update', 'manager.live_worker_waiting', 'manager.live_db_extra_ok',
     'manager.live_next_stale', 'manager.live_db_stale_after_apply', 'manager.live_db_report_at',
     'manager.live_history', 'manager.live_history_summary', 'manager.live_history_filter_failed',
+    'manager.live_send_db_all', 'manager.live_db_remaining', 'manager.live_db_details',
 ] as $key) {
     $assert(isset($en[$key], $es[$key]) && $en[$key] !== '' && $es[$key] !== '', 'i18n key ' . $key);
 }

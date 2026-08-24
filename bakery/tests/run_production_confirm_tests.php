@@ -74,6 +74,9 @@ try {
     $page = file_get_contents($root . DIRECTORY_SEPARATOR . 'production.php');
     $assert(is_string($page) && strpos($page, 'produced_was[') !== false, 'bake sheet posts expected produced');
     $assert(is_string($page) && strpos($page, 'value="<?php echo (int)$product[\'remaining_quantity\']; ?>"') === false, 'Record-now no longer prefills remaining');
+    $assert(strpos($page, 'id="bp-mix-overview"') !== false, 'bake sheet includes the all-mixes overview');
+    $assert(strpos($page, 'details class="bp-line"') !== false, 'each mix can collapse on the bake sheet');
+    $assert(strpos($page, 'bakery_production_echo_formula_items') !== false, 'mix overview reuses the scaled ingredient list');
 
     bakery_inventory_record_production($db, $date, $productId, 4, 'confirm test first', 0);
     $assert($producedOf() === 4, 'first batch of 4 is recorded');

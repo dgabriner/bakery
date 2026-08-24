@@ -98,6 +98,14 @@ $toUpload = @(
         Sort-Object -Unique
 )
 
+# Markdown stays internal (README, DEBRIEF research notes, content roadmaps).
+$excludedMarkdown = @($toUpload | Where-Object { $_ -match '\.md$' })
+$toUpload = @($toUpload | Where-Object { $_ -notmatch '\.md$' })
+if ($excludedMarkdown.Count -gt 0) {
+    Write-Host "Excluding $($excludedMarkdown.Count) markdown file(s):"
+    foreach ($relExcluded in $excludedMarkdown) { Write-Host "  - $relExcluded" }
+}
+
 if ($toUpload.Count -eq 0) {
     Write-Host "No files found in breadeducation/."
     exit 1

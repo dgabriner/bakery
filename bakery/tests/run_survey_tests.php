@@ -20,19 +20,28 @@ require_once __DIR__ . '/../includes/test_target_guard.php';
 $db = check_mysql_connection();
 bakery_assert_local_test_target($db);
 
-// The snapshot source may predate migration 061 — apply the same DDL in place.
-$ddl = (string)file_get_contents(dirname(__DIR__) . '/database/schema/061_surveys.sql');
-$ddlNoComments = implode("\n", array_filter(
-    explode("\n", $ddl),
-    static function (string $line): bool {
-        return strpos(ltrim($line), '--') !== 0;
+// The snapshot source may predate migrations 061/062 — apply the same DDL in place.
+foreach (['061_surveys.sql', '062_surveys_custom.sql'] as $ddlFile) {
+    $ddl = (string)file_get_contents(dirname(__DIR__) . '/database/schema/' . $ddlFile);
+    $ddlNoComments = implode("\n", array_filter(
+        explode("\n", $ddl),
+        static function (string $line): bool {
+            return strpos(ltrim($line), '--') !== 0;
+        }
+    ));
+    foreach (array_filter(array_map('trim', explode(';', $ddlNoComments))) as $statement) {
+        if ($statement === '') {
+            continue;
+        }
+        try {
+            $db->exec($statement);
+        } catch (PDOException $e) {
+            // Column/table already present (idempotent re-run): safe to ignore.
+            if (strpos($e->getMessage(), '1060') === false && strpos($e->getMessage(), '1050') === false) {
+                throw $e;
+            }
+        }
     }
-));
-foreach (array_filter(array_map('trim', explode(';', $ddlNoComments))) as $statement) {
-    if ($statement === '') {
-        continue;
-    }
-    $db->exec($statement);
 }
 
 require_once __DIR__ . '/../includes/twilio_config.php';
@@ -100,6 +109,11 @@ try {
     $assert(strpos($body, '2026-08-25') !== false && strpos($body, 'survey.php?t=') !== false, 'link message carries date and token URL');
     $url = bakery_survey_link_url((string)$survey['token']);
     $assert(strpos($url, 'survey.php?t=' . $survey['token']) !== false, 'link URL embeds raw token');
+    $_SERVER['HTTP_HOST'] = 'staging.sourflour.org';
+    $_SERVER['HTTPS'] = 'on';
+    $absoluteUrl = bakery_survey_link_url((string)$survey['token']);
+    unset($_SERVER['HTTP_HOST'], $_SERVER['HTTPS']);
+    $assert(preg_match('#^https://staging\.sourflour\.org/[a-z0-9_./-]*survey\.php\?t=' . $survey['token'] . '$#', $absoluteUrl) === 1, 'under a request context the link is fully absolute and https');
 
     $send = bakery_survey_send($db, $survey, 1);
     $messageIds[] = (int)$send['send']['id'];
@@ -142,6 +156,70 @@ try {
     ];
     $data = bakery_survey_route_review_data($db, $driverId, '2026-08-25');
     $assert(isset($data['stops'], $data['unassigned']) && is_array($data['stops']), 'route review payload renders empty route safely');
+
+    // ---- Phase 2: multi-question custom surveys -------------------------------
+    try {
+        bakery_survey_create($db, [
+            'mode' => 'link',
+            'kind' => 'question',
+            'audience' => 'staff',
+            'target_phone' => '+14155550444',
+            'questions' => [
+                ['text' => 'Choice with no options', 'type' => 'choice'],
+            ],
+        ]);
+        $assert(false, 'choice question without options rejected');
+    } catch (RuntimeException $e) {
+        $assert(true, 'choice question without options rejected');
+    }
+
+    $multi = bakery_survey_create($db, [
+        'mode' => 'link',
+        'kind' => 'question',
+        'audience' => 'driver',
+        'driver_id' => $driverId,
+        'target_phone' => '+14155550111',
+        'title' => 'Sunday plan',
+        'questions' => [
+            ['text' => 'Can you drive next Sunday?', 'type' => 'yes_no'],
+            ['text' => 'Which van works best?', 'type' => 'choice', 'options' => ["Van 1", "Van 2"]],
+            ['text' => 'Anything else?', 'type' => 'text'],
+        ],
+        'created_by' => 1,
+    ]);
+    $surveyIds[] = (int)$multi['id'];
+    $multiQs = bakery_survey_questions($multi);
+    $assert(count($multiQs) === 3 && $multiQs[0]['key'] === 'q1', 'multi-question survey stores three keyed questions');
+    $assert($multiQs[1]['options'] === ['Van 1', 'Van 2'], 'choice options round-trip in order');
+    $msg = bakery_survey_build_message($multi);
+    $assert(strpos($msg, 'Sunday plan') !== false || strpos($msg, 'Can you drive') !== false, 'multi-question message includes headline or questions');
+
+    foreach ($multiQs as $q) {
+        $answer = $q['type'] === 'yes_no' ? 'yes' : ($q['type'] === 'choice' ? 'Van 2' : 'All good from my side');
+        bakery_survey_record_response($db, [
+            'survey_id' => (int)$multi['id'],
+            'action' => 'answer',
+            'question_key' => $q['key'],
+            'respondent' => 'Probe Driver',
+            'response' => $answer,
+        ]);
+    }
+    $results = bakery_survey_results($db, (int)$multi['id']);
+    $assert(count($results['questions']) === 3, 'results return all three questions');
+    $yn = $results['questions'][0];
+    $assert(($yn['tally']['Yes'] ?? 0) === 1, 'yes/no tally normalizes to Yes label');
+    $ch = $results['questions'][1];
+    $assert(($ch['tally']['Van 2'] ?? 0) === 1, 'choice tally counts the picked option');
+    $tx = $results['questions'][2];
+    $assert(count($tx['free']) === 1 && $tx['free'][0]['respondent'] === 'Probe Driver', 'free-text answers keep respondent attribution');
+    $assert($results['respondents'] >= 1, 'distinct respondent count computed');
+
+    // Legacy single-question rows still parse.
+    $legacy = bakery_survey_questions([
+        'questions_json' => null,
+        'question' => 'Do you have truck keys?',
+    ]);
+    $assert(count($legacy) === 1 && $legacy[0]['type'] === 'text' && $legacy[0]['key'] === 'q1', 'legacy single question parses as one text question');
     } catch (Throwable $e) {
     echo 'FAIL  unexpected exception: ' . $e->getMessage() . "\n";
     $fail++;

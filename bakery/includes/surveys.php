@@ -36,6 +36,71 @@ function bakery_survey_kinds(): array
     return ['route_review', 'question'];
 }
 
+function bakery_survey_question_types(): array
+{
+    return ['text', 'yes_no', 'choice'];
+}
+
+/**
+ * Normalized question list for a survey. Legacy single-question rows become
+ * one text question keyed q1.
+ */
+function bakery_survey_questions(array $survey): array
+{
+    $out = [];
+    $json = trim((string)($survey['questions_json'] ?? ''));
+    if ($json !== '') {
+        $decoded = json_decode($json, true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $i => $q) {
+                $type = strtolower(trim((string)($q['type'] ?? 'text')));
+                if (!in_array($type, bakery_survey_question_types(), true)) {
+                    $type = 'text';
+                }
+                $options = [];
+                if ($type === 'choice' && isset($q['options']) && is_array($q['options'])) {
+                    foreach ($q['options'] as $opt) {
+                        $opt = trim((string)$opt);
+                        if ($opt !== '') {
+                            $options[] = mb_substr($opt, 0, 80);
+                        }
+                    }
+                }
+                $out[] = [
+                    'key' => substr(preg_replace('/[^a-z0-9_]/', '', strtolower((string)($q['key'] ?? ''))) ?: ('q' . ($i + 1)), 0, 24) ?: ('q' . ($i + 1)),
+                    'text' => trim((string)($q['text'] ?? '')),
+                    'type' => $type,
+                    'options' => $options,
+                ];
+            }
+        }
+    }
+    if ($out === [] && trim((string)($survey['question'] ?? '')) !== '') {
+        $out[] = [
+            'key' => 'q1',
+            'text' => trim((string)$survey['question']),
+            'type' => 'text',
+            'options' => [],
+        ];
+    }
+    return $out;
+}
+
+/** Human label for a chosen option / free answer on one question. */
+function bakery_survey_answer_label(array $question, string $raw): string
+{
+    if ($question['type'] === 'yes_no') {
+        $normalized = strtolower(trim($raw));
+        if (in_array($normalized, ['yes', 'y', 'si', 'sí', '1'], true)) {
+            return (string)bakery_survey_text('survey.answer_yes', [], 'Yes');
+        }
+        if (in_array($normalized, ['no', 'n', '0'], true)) {
+            return (string)bakery_survey_text('survey.answer_no', [], 'No');
+        }
+    }
+    return $raw;
+}
+
 function bakery_survey_audiences(): array
 {
     return ['driver', 'staff'];
@@ -99,17 +164,71 @@ function bakery_survey_create(PDO $db, array $fields): array
     }
 
     $question = trim((string)($fields['question'] ?? ''));
-    if ($kind === 'question' && $question === '') {
-        throw new RuntimeException('Question surveys need question text');
-    }
     if (mb_strlen($question) > 500) {
         $question = mb_substr($question, 0, 500);
     }
 
+    // Optional multi-question payload (custom surveys). Each entry needs text;
+    // choice questions need at least two non-empty options.
+    $questionsJson = null;
+    $normalizedQuestions = [];
+    $title = trim((string)($fields['title'] ?? ''));
+    if (mb_strlen($title) > 120) {
+        $title = mb_substr($title, 0, 120);
+    }
+    if ($kind === 'question' && isset($fields['questions']) && is_array($fields['questions'])) {
+        $normalizedQuestions = [];
+        foreach (array_values($fields['questions']) as $i => $q) {
+            $text = trim((string)($q['text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            $type = strtolower(trim((string)($q['type'] ?? 'text')));
+            if (!in_array($type, bakery_survey_question_types(), true)) {
+                $type = 'text';
+            }
+            $options = [];
+            if ($type === 'choice') {
+                if (isset($q['options']) && is_array($q['options'])) {
+                    foreach ($q['options'] as $opt) {
+                        $opt = trim((string)$opt);
+                        if ($opt !== '') {
+                            $options[] = mb_substr($opt, 0, 80);
+                        }
+                    }
+                }
+                if (count($options) < 2) {
+                    throw new RuntimeException('Choice questions need at least two options');
+                }
+            }
+            $normalizedQuestions[] = [
+                'key' => 'q' . (count($normalizedQuestions) + 1),
+                'text' => mb_substr($text, 0, 300),
+                'type' => $type,
+                'options' => $options,
+            ];
+        }
+        if ($normalizedQuestions !== []) {
+            if (count($normalizedQuestions) > 12) {
+                $normalizedQuestions = array_slice($normalizedQuestions, 0, 12);
+            }
+            $questionsJson = json_encode(
+                $normalizedQuestions,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+            if ($title === '') {
+                $title = mb_substr(trim((string)$normalizedQuestions[0]['text']), 0, 120);
+            }
+        }
+    }
+    if ($kind === 'question' && $question === '' && $normalizedQuestions === []) {
+        throw new RuntimeException('Question surveys need question text');
+    }
+
     $token = bin2hex(random_bytes(16));
     $stmt = $db->prepare(
-        'INSERT INTO surveys (token, mode, kind, audience, driver_id, staff_user_id, target_phone, question, delivery_date, status, created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+        'INSERT INTO surveys (token, mode, kind, audience, driver_id, staff_user_id, target_phone, question, delivery_date, status, created_by, title, questions_json)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
     $stmt->execute([
         $token,
@@ -123,6 +242,8 @@ function bakery_survey_create(PDO $db, array $fields): array
         $deliveryDate !== '' ? $deliveryDate : null,
         'open',
         (int)($fields['created_by'] ?? 0) ?: null,
+        $title !== '' ? $title : null,
+        $questionsJson,
     ]);
 
     return bakery_survey_find_by_token($db, $token);
@@ -185,8 +306,8 @@ function bakery_survey_record_inbound_reply(PDO $db, string $fromPhone, int $mes
 function bakery_survey_record_response(PDO $db, array $fields): int
 {
     $stmt = $db->prepare(
-        'INSERT INTO survey_responses (survey_id, text_message_id, action, daily_order_id, customer_id, response)
-         VALUES (?,?,?,?,?,?)'
+        'INSERT INTO survey_responses (survey_id, text_message_id, action, daily_order_id, customer_id, response, question_key, respondent)
+         VALUES (?,?,?,?,?,?,?,?)'
     );
     $stmt->execute([
         (int)$fields['survey_id'],
@@ -195,19 +316,149 @@ function bakery_survey_record_response(PDO $db, array $fields): int
         isset($fields['daily_order_id']) && (int)$fields['daily_order_id'] > 0 ? (int)$fields['daily_order_id'] : null,
         isset($fields['customer_id']) && (int)$fields['customer_id'] > 0 ? (int)$fields['customer_id'] : null,
         isset($fields['response']) ? substr(trim((string)$fields['response']), 0, 2000) : null,
+        isset($fields['question_key']) ? substr(trim((string)$fields['question_key']), 0, 24) : null,
+        isset($fields['respondent']) ? substr(trim((string)$fields['respondent']), 0, 80) : null,
     ]);
     return (int)$db->lastInsertId();
 }
 
-function bakery_survey_close(PDO $db, int $surveyId): void
+function bakery_survey_set_status(PDO $db, int $surveyId, string $status): void
 {
-    $stmt = $db->prepare("UPDATE surveys SET status = 'closed', closed_at = NOW() WHERE id = ?");
+    if (!in_array($status, ['open', 'closed'], true)) {
+        throw new RuntimeException('Unknown survey status');
+    }
+    $stmt = $db->prepare(
+        $status === 'closed'
+            ? "UPDATE surveys SET status = 'closed', closed_at = NOW() WHERE id = ?"
+            : "UPDATE surveys SET status = 'open', closed_at = NULL WHERE id = ?"
+    );
     $stmt->execute([$surveyId]);
 }
 
+/**
+ * Aggregated results for the Command Center detail view.
+ *
+ * @return array{
+ *   questions: list<array{key:string,text:string,type:string,options:array,total:int,
+ *                          tally:array<string,int>,free:list<array{respondent:string,text:string,at:string}>}>,
+ *   actions: list<array<string,mixed>>,
+ *   action_counts: array<string,int>,
+ *   respondents: int
+ * }
+ */
+function bakery_survey_results(PDO $db, int $surveyId): array
+{
+    $survey = bakery_survey_find_by_id($db, $surveyId);
+    $questions = bakery_survey_questions($survey);
+
+    $stmt = $db->prepare(
+        'SELECT action, question_key, respondent, response, daily_order_id, customer_id, created_at
+         FROM survey_responses
+         WHERE survey_id = ? AND action <> \'sent\'
+         ORDER BY id ASC'
+    );
+    $stmt->execute([$surveyId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Resolve names once for route-review actions.
+    $customerNames = [];
+    $customerIds = [];
+    foreach ($rows as $r) {
+        if (!empty($r['customer_id'])) {
+            $customerIds[(int)$r['customer_id']] = true;
+        }
+    }
+    if ($customerIds !== [] && function_exists('table_exists') && table_exists($db, 'customers')) {
+        $ids = implode(',', array_map('intval', array_keys($customerIds)));
+        foreach ($db->query("SELECT id, name FROM customers WHERE id IN ($ids)") as $row) {
+            $customerNames[(int)$row['id']] = (string)$row['name'];
+        }
+    }
+
+    foreach ($questions as &$q) {
+        $q['total'] = 0;
+        $q['tally'] = [];
+        $q['free'] = [];
+        unset($q);
+    }
+    unset($q);
+    $byKey = [];
+    foreach ($questions as $i => $q) {
+        $byKey[$q['key']] = $i;
+    }
+
+    $actions = [];
+    $actionCounts = [];
+    $respondents = [];
+
+    foreach ($rows as $r) {
+        $action = (string)$r['action'];
+        $actionCounts[$action] = ($actionCounts[$action] ?? 0) + 1;
+
+        if ($action === 'answer' || $action === 'reply') {
+            $key = (string)($r['question_key'] ?? '');
+            if ($key === '' && count($questions) === 1) {
+                $key = $questions[0]['key'];
+            }
+            if ($key !== '' && isset($byKey[$key])) {
+                $qi = $byKey[$key];
+                $label = bakery_survey_answer_label($questions[$qi], (string)$r['response']);
+                $questions[$qi]['total']++;
+                if ($questions[$qi]['type'] === 'text') {
+                    $questions[$qi]['free'][] = [
+                        'respondent' => (string)($r['respondent'] ?? ''),
+                        'text' => (string)$r['response'],
+                        'at' => (string)$r['created_at'],
+                    ];
+                } elseif ($questions[$qi]['type'] === 'choice') {
+                    $questions[$qi]['tally'][$label] = ($questions[$qi]['tally'][$label] ?? 0) + 1;
+                    $respondents[(string)($r['respondent'] ?? '?')] = true;
+                } else {
+                    $questions[$qi]['tally'][$label] = ($questions[$qi]['tally'][$label] ?? 0) + 1;
+                    $respondents[(string)($r['respondent'] ?? '?')] = true;
+                }
+                continue;
+            }
+        }
+
+        $actions[] = [
+            'action' => $action,
+            'respondent' => (string)($r['respondent'] ?? ''),
+            'response' => (string)($r['response'] ?? ''),
+            'customer' => !empty($r['customer_id']) ? (string)($customerNames[(int)$r['customer_id']] ?? ('#' . $r['customer_id'])) : '',
+            'daily_order_id' => (int)($r['daily_order_id'] ?? 0),
+            'created_at' => (string)$r['created_at'],
+        ];
+
+        if (($r['respondent'] ?? '') !== '') {
+            $respondents[(string)$r['respondent']] = true;
+        }
+    }
+
+    return [
+        'questions' => $questions,
+        'actions' => $actions,
+        'action_counts' => $actionCounts,
+        'respondents' => count($respondents),
+    ];
+}
+
+/**
+ * Full clickable URL for the survey link page — SMS links must be absolute.
+ * Falls back to a relative path only when there is no request context (CLI).
+ */
 function bakery_survey_link_url(string $token): string
 {
-    return (defined('BASE_URL') ? BASE_URL : '/') . 'survey.php?t=' . rawurlencode($token);
+    $path = 'survey.php?t=' . rawurlencode($token);
+    $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
+    if ($host === '') {
+        return (defined('BASE_URL') ? BASE_URL : '/') . $path;
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+        || $host === 'staging.sourflour.org'
+        || $host === 'bakery.sourflour.org';
+    return ($https ? 'https://' : 'http://') . $host . (defined('BASE_URL') ? BASE_URL : '/') . $path;
 }
 
 /** i18n with plain fallback so CLI tests and the webhook can use this file. */
@@ -228,6 +479,18 @@ function bakery_survey_build_message(array $survey): string
 {
     $mode = (string)$survey['mode'];
     $kind = (string)$survey['kind'];
+
+    $headline = trim((string)($survey['title'] ?? ''));
+    $questions = bakery_survey_questions($survey);
+    if ($headline === '' && count($questions) > 1) {
+        $headline = (string)bakery_survey_text('survey.msg_multi_head', ['count' => count($questions)], 'Quick survey — :count questions:');
+        $numbered = '';
+        foreach ($questions as $i => $q) {
+            $numbered .= "\n" . ($i + 1) . '. ' . $q['text'];
+        }
+        $headline = str_replace(':count', (string)count($questions), $headline) . $numbered;
+    }
+
     if ($kind === 'route_review') {
         $dateLabel = (string)$survey['delivery_date'];
         if ($mode === 'link') {
@@ -246,12 +509,18 @@ function bakery_survey_build_message(array $survey): string
         }
         return $body;
     }
-    $question = trim((string)($survey['question'] ?? ''));
+
+    if ($headline !== '') {
+        $body = $headline;
+    } else {
+        $body = trim((string)($survey['question'] ?? ''));
+    }
+
     if ($mode === 'link') {
-        $body = $question . "\n" . bakery_survey_text('survey.msg_question_link_tail', [], 'Tap to answer:');
+        $body .= "\n" . bakery_survey_text('survey.msg_question_link_tail', [], 'Tap to answer:');
         $body .= "\n" . bakery_survey_link_url((string)$survey['token']);
     } else {
-        $body = $question . "\n" . bakery_survey_text('survey.msg_question_reply_tail', [], 'Reply to this text to answer.');
+        $body .= "\n" . bakery_survey_text('survey.msg_question_reply_tail', [], 'Reply to this text to answer.');
     }
     return $body;
 }
@@ -322,4 +591,36 @@ function bakery_survey_route_review_data(PDO $db, int $driverId, string $deliver
 function bakery_survey_driver_choices(PDO $db): array
 {
     return $db->query('SELECT id, name FROM drivers WHERE archived = 0 ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Turn the Command Center composer's parallel arrays
+ * (q_text[], q_type[], q_options[] newline-separated) into create() input.
+ */
+function bakery_survey_collect_questions_from_post(array $post): array
+{
+    $out = [];
+    $texts = isset($post['q_text']) && is_array($post['q_text']) ? $post['q_text'] : [];
+    $types = isset($post['q_type']) && is_array($post['q_type']) ? $post['q_type'] : [];
+    $optionLines = isset($post['q_options']) && is_array($post['q_options']) ? $post['q_options'] : [];
+    foreach (array_keys($texts) as $i) {
+        if (!is_scalar($texts[$i])) {
+            continue;
+        }
+        $options = [];
+        if (isset($optionLines[$i]) && is_string($optionLines[$i])) {
+            foreach (explode("\n", $optionLines[$i]) as $opt) {
+                $opt = trim($opt);
+                if ($opt !== '') {
+                    $options[] = $opt;
+                }
+            }
+        }
+        $out[] = [
+            'text' => (string)$texts[$i],
+            'type' => is_string($types[$i] ?? null) ? $types[$i] : 'text',
+            'options' => $options,
+        ];
+    }
+    return $out;
 }

@@ -51,6 +51,11 @@ function bakery_agent_craft_stanza(): string
 /**
  * Score a §10 handoff. Warns; does not block.
  *
+ * Fields count when their number starts a line (the ideal shape) or follows a
+ * sentence boundary inline — Windows shells flatten multiline --summary args,
+ * and a complete handoff must not score 1/8 because of spawn quoting. Fields
+ * are matched in order so stray "2." fragments cannot fake later fields.
+ *
  * @return array{score:int,max:int,missing:list<int>,present:list<int>,complete:bool}
  */
 function bakery_agent_homebase_score_handoff(string $md): array
@@ -58,10 +63,19 @@ function bakery_agent_homebase_score_handoff(string $md): array
     $md = str_replace("\r\n", "\n", $md);
     $present = [];
     $missing = [];
+    $cursor = 0;
     for ($n = 1; $n <= 8; $n++) {
-        $ok = (bool)preg_match('/(?:^|\n)\s*' . $n . '\s*[\.\:\)]\s+\S/u', $md);
-        if ($ok) {
+        $lineStart = '/(?:^|\n)\s*' . $n . '\s*[.:)]\s+\S/u';
+        $inline = '/[.!?)]:?\s+' . $n . '\s*[.:)]\s+\S/u';
+        $matched = null;
+        if (preg_match($lineStart, $md, $m, PREG_OFFSET_CAPTURE, $cursor)) {
+            $matched = $m[0];
+        } elseif (preg_match($inline, $md, $m, PREG_OFFSET_CAPTURE, $cursor)) {
+            $matched = $m[0];
+        }
+        if ($matched !== null) {
             $present[] = $n;
+            $cursor = $matched[1] + strlen($matched[0]);
         } else {
             $missing[] = $n;
         }

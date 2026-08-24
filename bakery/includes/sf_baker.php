@@ -226,6 +226,47 @@ function bakery_sfb_enabled(PDO $db) {
 }
 
 /**
+ * Opt one existing portal customer into the SF Baker journal (portal bridge).
+ *
+ * Requires an existing, active, portal_enabled customer row and refuses
+ * synthetic bakers when origin is readable (Prompt 25: synthetics never pass
+ * this door). Sets only sf_baker_enabled; sfb_origin stays exactly as stored
+ * (the column default labels humans). Education access is not an order:
+ * no orders, zones, routes, or invoices are created here.
+ *
+ * @return ?array Updated customer state (id, name, sf_baker_enabled), or null when refused.
+ */
+function bakery_sfb_enable_for_customer(PDO $db, $customerId) {
+    $customerId = (int)$customerId;
+    if ($customerId <= 0 || !column_exists($db, 'customers', 'sf_baker_enabled')) {
+        return null;
+    }
+    if (bakery_sfb_origin_column_ready($db)) {
+        $originStmt = $db->prepare('SELECT sfb_origin FROM customers WHERE id = ? LIMIT 1');
+        $originStmt->execute([$customerId]);
+        $origin = $originStmt->fetchColumn();
+        if ($origin !== false && bakery_sfb_is_synthetic($origin)) {
+            return null;
+        }
+    }
+    $stmt = $db->prepare(
+        'SELECT id, name, sf_baker_enabled
+         FROM customers WHERE id = ? AND portal_enabled = 1 AND is_active = 1 LIMIT 1'
+    );
+    $stmt->execute([$customerId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+    if ((int)$row['sf_baker_enabled'] !== 1) {
+        $upd = $db->prepare('UPDATE customers SET sf_baker_enabled = 1 WHERE id = ?');
+        $upd->execute([$customerId]);
+        $row['sf_baker_enabled'] = 1;
+    }
+    return $row;
+}
+
+/**
  * Gate for every SF Baker page: portal login + sf_baker flag + schema ready.
  *
  * @return array Customer row (id, name, sf_baker_enabled)
@@ -833,7 +874,10 @@ function bakery_sfb_copy_template(PDO $db, $customerId, $templateId) {
         throw new InvalidArgumentException('Standard formula not found');
     }
 
-    $db->beginTransaction();
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
+    }
     try {
         $ins = $db->prepare(
             'INSERT INTO sfb_formulas (customer_id, name, description, target_dough_g, is_template)
@@ -848,10 +892,12 @@ function bakery_sfb_copy_template(PDO $db, $customerId, $templateId) {
              FROM sfb_formula_ingredients WHERE formula_id = ?'
         );
         $copy->execute([$newId, (int)$template['id']]);
-        $db->commit();
+        if ($ownsTransaction) {
+            $db->commit();
+        }
         return $newId;
     } catch (Throwable $e) {
-        if ($db->inTransaction()) {
+        if ($ownsTransaction && $db->inTransaction()) {
             $db->rollBack();
         }
         throw $e;
@@ -1607,7 +1653,9 @@ function bakery_sfb_courses(PDO $db, $includeInactive = false) {
     if (!bakery_sfb_learning_ready($db)) {
         return [];
     }
-    $sql = 'SELECT c.id, c.title, c.description, c.sort_order, c.is_active,
+    $gateColumn = bakery_sfb_gating_ready($db) ? ', c.required_offering_id' : '';
+    $handoffColumn = bakery_sfb_handoff_ready($db) ? ', c.template_formula_id' : '';
+    $sql = 'SELECT c.id, c.title, c.description, c.sort_order, c.is_active' . $gateColumn . $handoffColumn . ',
                    (SELECT COUNT(*) FROM sfb_course_lessons l WHERE l.course_id = c.id AND l.is_active = 1) AS lesson_count
             FROM sfb_courses c';
     if (!$includeInactive) {
@@ -1621,7 +1669,9 @@ function bakery_sfb_course(PDO $db, $courseId) {
     if (!bakery_sfb_learning_ready($db)) {
         return null;
     }
-    $stmt = $db->prepare('SELECT id, title, description, sort_order, is_active FROM sfb_courses WHERE id = ? LIMIT 1');
+    $gateColumn = bakery_sfb_gating_ready($db) ? ', required_offering_id' : '';
+    $handoffColumn = bakery_sfb_handoff_ready($db) ? ', template_formula_id' : '';
+    $stmt = $db->prepare('SELECT id, title, description, sort_order, is_active' . $gateColumn . $handoffColumn . ' FROM sfb_courses WHERE id = ? LIMIT 1');
     $stmt->execute([(int)$courseId]);
     $row = $stmt->fetch();
     return $row ?: null;
@@ -1913,6 +1963,7 @@ function bakery_sfb_toggle_lesson_progress(PDO $db, $customerId, $lessonId, $ste
     if (!bakery_sfb_learning_ready($db)) {
         throw new RuntimeException('The learning center needs a database update (migration 063)');
     }
+    bakery_sfb_assert_human_customer($db, $customerId, 'track lesson progress');
     $stepOk = $db->prepare('SELECT 1 FROM sfb_lesson_steps WHERE id = ? AND lesson_id = ? LIMIT 1');
     $stepOk->execute([(int)$stepId, (int)$lessonId]);
     if (!$stepOk->fetchColumn()) {
@@ -1942,6 +1993,188 @@ function bakery_sfb_course_progress(PDO $db, $customerId, $courseId) {
         $done += count(bakery_sfb_lesson_progress($db, $customerId, (int)$lesson['id']));
     }
     return [$done, $total];
+}
+
+/* ── Course gating (Prompt 26 follow-through) ─────────────────────────── */
+
+/** Whether the gating column from migration 068 exists. */
+function bakery_sfb_gating_ready(PDO $db) {
+    return bakery_sfb_learning_ready($db)
+        && column_exists($db, 'sfb_courses', 'required_offering_id');
+}
+
+/**
+ * Lock state for one course for one viewer.
+ * Free courses (NULL offering) are always open. A locked course opens only
+ * with a paid, unexpired entitlement for its required offering. A retired
+ * (inactive) offering frees the course rather than stranding students.
+ *
+ * @return array{locked: bool, offering: ?array}
+ */
+function bakery_sfb_course_lock(PDO $db, $customerId, array $course) {
+    $requiredId = isset($course['required_offering_id']) ? (int)$course['required_offering_id'] : 0;
+    if ($requiredId <= 0 || !bakery_sfb_payments_ready($db)) {
+        return ['locked' => false, 'offering' => null];
+    }
+    $offering = bakery_sfb_offering($db, $requiredId);
+    if (!$offering || (int)$offering['is_active'] !== 1) {
+        return ['locked' => false, 'offering' => null];
+    }
+    $locked = !bakery_sfb_customer_entitled_to($db, (int)$customerId, $requiredId);
+    return ['locked' => $locked, 'offering' => $offering];
+}
+
+/**
+ * Assign (or clear, offeringId 0) the paid class a course belongs to.
+ * The single write path for course gating; staff screens call only this.
+ */
+function bakery_sfb_set_course_offering(PDO $db, $courseId, $offeringId) {
+    if (!bakery_sfb_gating_ready($db)) {
+        throw new RuntimeException('Course gating needs a database update (migration 068)');
+    }
+    $stmt = $db->prepare('SELECT id FROM sfb_courses WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$courseId]);
+    if (!$stmt->fetchColumn()) {
+        throw new InvalidArgumentException('Course not found');
+    }
+    $offeringId = (int)$offeringId;
+    if ($offeringId > 0) {
+        $offering = bakery_sfb_offering($db, $offeringId);
+        if (!$offering || (int)$offering['is_active'] !== 1) {
+            throw new InvalidArgumentException('Pick an active class to require');
+        }
+        $upd = $db->prepare('UPDATE sfb_courses SET required_offering_id = ? WHERE id = ?');
+        $upd->execute([$offeringId, (int)$courseId]);
+        return true;
+    }
+    $upd = $db->prepare('UPDATE sfb_courses SET required_offering_id = NULL WHERE id = ?');
+    $upd->execute([(int)$courseId]);
+    return true;
+}
+
+/** Active courses that belong to one offering (the "what it unlocks" list). */
+function bakery_sfb_courses_requiring(PDO $db, $offeringId) {
+    if (!bakery_sfb_gating_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT id, title FROM sfb_courses
+         WHERE required_offering_id = ? AND is_active = 1
+         ORDER BY sort_order, id'
+    );
+    $stmt->execute([(int)$offeringId]);
+    return $stmt->fetchAll();
+}
+
+/* ── Course → formula handoff (migration 069) ─────────────────────────── */
+
+/** Whether the handoff column from migration 069 exists. */
+function bakery_sfb_handoff_ready(PDO $db) {
+    return bakery_sfb_learning_ready($db)
+        && column_exists($db, 'sfb_courses', 'template_formula_id');
+}
+
+/**
+ * Map (or clear, formulaId 0) the standard formula a finished course hands
+ * to students as a one-click bake. Only shared templates qualify.
+ * The single write path for course template formulas; staff screens call only this.
+ */
+function bakery_sfb_set_course_template_formula(PDO $db, $courseId, $formulaId) {
+    if (!bakery_sfb_handoff_ready($db)) {
+        throw new RuntimeException('The course formula handoff needs a database update (migration 069)');
+    }
+    $stmt = $db->prepare('SELECT id FROM sfb_courses WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$courseId]);
+    if (!$stmt->fetchColumn()) {
+        throw new InvalidArgumentException('Course not found');
+    }
+    $formulaId = (int)$formulaId;
+    if ($formulaId > 0) {
+        $f = $db->prepare(
+            'SELECT id FROM sfb_formulas
+             WHERE id = ? AND is_template = 1 AND customer_id IS NULL LIMIT 1'
+        );
+        $f->execute([$formulaId]);
+        if (!$f->fetchColumn()) {
+            throw new InvalidArgumentException('Pick a standard formula template');
+        }
+        $upd = $db->prepare('UPDATE sfb_courses SET template_formula_id = ? WHERE id = ?');
+        $upd->execute([$formulaId, (int)$courseId]);
+        return true;
+    }
+    $upd = $db->prepare('UPDATE sfb_courses SET template_formula_id = NULL WHERE id = ?');
+    $upd->execute([(int)$courseId]);
+    return true;
+}
+
+/**
+ * Finish a course with flour on your hands: copy the course's standard
+ * formula into this baker's formulas and start their first batch from it,
+ * atomically. Honest errors when migration 069 is missing or the course
+ * has no formula mapped.
+ *
+ * @return int The new batch id.
+ */
+function bakery_sfb_start_batch_from_course(PDO $db, $customerId, $courseId) {
+    if (!bakery_sfb_handoff_ready($db)) {
+        throw new RuntimeException('The course formula handoff needs a database update (migration 069)');
+    }
+    $stmt = $db->prepare('SELECT id, template_formula_id FROM sfb_courses WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$courseId]);
+    $course = $stmt->fetch();
+    if (!$course) {
+        throw new InvalidArgumentException('Course not found');
+    }
+    $templateFormulaId = (int)($course['template_formula_id'] ?? 0);
+    if ($templateFormulaId <= 0) {
+        throw new RuntimeException('This course has no bake-along formula yet');
+    }
+
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $formulaId = bakery_sfb_copy_template($db, $customerId, $templateFormulaId);
+        $batchId = bakery_sfb_start_batch($db, $customerId, $formulaId, '', '');
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+        return $batchId;
+    } catch (Throwable $e) {
+        if ($ownsTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Whether lesson media belongs to a course this viewer has not paid for.
+ * Reverse-lookup step -> lesson -> course; free content and unknown paths
+ * are never locked. Staff callers skip this check entirely.
+ */
+function bakery_sfb_media_path_locked(PDO $db, $relativePath, $customerId) {
+    if (!bakery_sfb_gating_ready($db)) {
+        return false;
+    }
+    $stmt = $db->prepare(
+        'SELECT l.course_id
+         FROM sfb_lesson_steps s
+         JOIN sfb_course_lessons l ON l.id = s.lesson_id
+         WHERE s.media_path = ?
+         LIMIT 1'
+    );
+    $stmt->execute([(string)$relativePath]);
+    $courseId = (int)$stmt->fetchColumn();
+    if ($courseId <= 0) {
+        return false;
+    }
+    $course = bakery_sfb_course($db, $courseId);
+    if (!$course) {
+        return false;
+    }
+    return bakery_sfb_course_lock($db, $customerId, $course)['locked'];
 }
 
 /* ── Home Base Onboarding (Prompt 25) ─────────────────────────────────── */
@@ -2034,6 +2267,33 @@ function bakery_sfb_recent_invites(PDO $db, $limit = 12) {
     )->fetchAll();
 }
 
+/** Read-only invite funnel totals plus the most recent activations, for staff visibility. */
+function bakery_sfb_invite_funnel(PDO $db): array {
+    if (!bakery_sfb_invites_ready($db)) {
+        return ['minted' => 0, 'used' => 0, 'unused' => 0, 'recent_used' => []];
+    }
+    $totals = $db->query(
+        'SELECT COUNT(*) AS minted,
+                COALESCE(SUM(used_by_customer_id IS NOT NULL), 0) AS used_count
+         FROM sfb_invites'
+    )->fetch();
+    $minted = (int)($totals['minted'] ?? 0);
+    $usedCount = (int)($totals['used_count'] ?? 0);
+    $recentUsed = $db->query(
+        'SELECT i.id, i.code, i.intent, i.label, i.used_at, c.name AS activated_name
+         FROM sfb_invites i
+         LEFT JOIN customers c ON c.id = i.used_by_customer_id
+         WHERE i.used_by_customer_id IS NOT NULL
+         ORDER BY i.used_at DESC, i.id DESC LIMIT 10'
+    )->fetchAll();
+    return [
+        'minted' => $minted,
+        'used' => $usedCount,
+        'unused' => max(0, $minted - $usedCount),
+        'recent_used' => $recentUsed,
+    ];
+}
+
 /**
  * First-run next actions for a brand-new baker's home base.
  * Each action carries a done flag so the welcome strip can retire steps
@@ -2050,10 +2310,16 @@ function bakery_sfb_first_run_actions(PDO $db, $customerId) {
             break 2;
         }
     }
+    $lessonDone = false;
+    if ($firstLesson !== null) {
+        // The welcome strip retires the lesson step once progress exists,
+        // matching how starter/formula steps retire (Prompt 25).
+        $lessonDone = count(bakery_sfb_lesson_progress($db, $customerId, (int)$firstLesson['id'])) > 0;
+    }
     $actions = [
         ['key' => 'starter', 'done' => $hasStarter],
         ['key' => 'formula', 'done' => $hasFormula],
-        ['key' => 'lesson', 'done' => false, 'lesson_id' => $firstLesson !== null ? (int)$firstLesson['id'] : null,
+        ['key' => 'lesson', 'done' => $lessonDone, 'lesson_id' => $firstLesson !== null ? (int)$firstLesson['id'] : null,
          'lesson_title' => $firstLesson !== null ? (string)$firstLesson['title'] : ''],
     ];
     return $actions;
@@ -2071,7 +2337,7 @@ function bakery_sfb_offerings(PDO $db, $includeInactive = false) {
     if (!bakery_sfb_payments_ready($db)) {
         return [];
     }
-    $sql = 'SELECT id, title, description, price_cents, currency, kind, entitlement_days, sort_order, is_active
+    $sql = 'SELECT id, title, description, price_cents, currency, kind, entitlement_days, units, sort_order, is_active
             FROM sfb_offerings';
     if (!$includeInactive) {
         $sql .= ' WHERE is_active = 1';
@@ -2084,18 +2350,18 @@ function bakery_sfb_offering(PDO $db, $offeringId) {
     if (!bakery_sfb_payments_ready($db)) {
         return null;
     }
-    $stmt = $db->prepare('SELECT id, title, description, price_cents, currency, kind, entitlement_days, is_active FROM sfb_offerings WHERE id = ? LIMIT 1');
+    $stmt = $db->prepare('SELECT id, title, description, price_cents, currency, kind, entitlement_days, units, is_active FROM sfb_offerings WHERE id = ? LIMIT 1');
     $stmt->execute([(int)$offeringId]);
     $row = $stmt->fetch();
     return $row ?: null;
 }
 
-function bakery_sfb_create_offering(PDO $db, $title, $priceDollars, $kind = 'class', $description = '', $entitlementDays = null) {
+function bakery_sfb_create_offering(PDO $db, $title, $priceDollars, $kind = 'class', $description = '', $entitlementDays = null, $units = null) {
     if (!bakery_sfb_payments_ready($db)) {
         throw new RuntimeException('Education payments need a database update (migration 066)');
     }
-    if (!in_array((string)$kind, ['class', 'membership', 'kit'], true)) {
-        throw new InvalidArgumentException('Choose class, membership, or kit');
+    if (!in_array((string)$kind, ['class', 'membership', 'kit', 'donation', 'credits'], true)) {
+        throw new InvalidArgumentException('Choose class, membership, kit, donation, or credits');
     }
     $title = trim((string)$title);
     if ($title === '' || mb_strlen($title) > 150) {
@@ -2105,14 +2371,23 @@ function bakery_sfb_create_offering(PDO $db, $title, $priceDollars, $kind = 'cla
     if ($priceCents < 0 || $priceCents > 100000000) {
         throw new InvalidArgumentException('Price must be between 0 and 1,000,000 dollars');
     }
+    $dupe = $db->prepare('SELECT 1 FROM sfb_offerings WHERE title = ? LIMIT 1');
+    $dupe->execute([$title]);
+    if ($dupe->fetchColumn()) {
+        throw new InvalidArgumentException('An offering with that title already exists');
+    }
     $days = $entitlementDays === null ? null : max(0, (int)$entitlementDays);
+    $unitCount = $units === null ? null : max(1, (int)$units);
+    if ($kind === 'credits' && ($unitCount === null || $unitCount < 1)) {
+        throw new InvalidArgumentException('Credit packs need a units value of 1 or more');
+    }
     $description = trim((string)$description);
     $next = (int)$db->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sfb_offerings')->fetchColumn();
     $ins = $db->prepare(
-        'INSERT INTO sfb_offerings (title, description, price_cents, currency, kind, entitlement_days, sort_order)
-         VALUES (?, ?, ?, "USD", ?, ?, ?)'
+        'INSERT INTO sfb_offerings (title, description, price_cents, currency, kind, entitlement_days, units, sort_order)
+         VALUES (?, ?, ?, "USD", ?, ?, ?, ?)'
     );
-    $ins->execute([$title, $description !== '' ? $description : null, $priceCents, $kind, $days, $next]);
+    $ins->execute([$title, $description !== '' ? $description : null, $priceCents, $kind, $days, $unitCount, $next]);
     return (int)$db->lastInsertId();
 }
 
@@ -2120,6 +2395,23 @@ function bakery_sfb_toggle_offering(PDO $db, $offeringId) {
     $stmt = $db->prepare('UPDATE sfb_offerings SET is_active = 1 - is_active WHERE id = ?');
     $stmt->execute([(int)$offeringId]);
     return $stmt->rowCount() > 0;
+}
+
+/**
+ * Humans only in education commerce and progress (work-map invariant).
+ * Origin is a stored fact on customers.sfb_origin; when the column is
+ * readable, synthetic bakers are refused. Other gates still apply when
+ * the column itself is missing.
+ */
+function bakery_sfb_assert_human_customer(PDO $db, $customerId, string $action) {
+    if (!column_exists($db, 'customers', 'sfb_origin')) {
+        return;
+    }
+    $stmt = $db->prepare('SELECT sfb_origin FROM customers WHERE id = ? LIMIT 1');
+    $stmt->execute([(int)$customerId]);
+    if (strtolower(trim((string)$stmt->fetchColumn())) === 'synthetic') {
+        throw new InvalidArgumentException("Synthetic bakers cannot {$action}");
+    }
 }
 
 /** One purchase attempt with the offering's title and price frozen in. */
@@ -2131,6 +2423,7 @@ function bakery_sfb_record_purchase_intent(PDO $db, $customerId, $offeringId) {
     if (!$offering || (int)$offering['is_active'] !== 1) {
         throw new InvalidArgumentException('That offering is not available');
     }
+    bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
     $ins = $db->prepare(
         'INSERT INTO sfb_offering_purchases
             (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
@@ -2199,7 +2492,13 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
     ]);
     $link = $resp['payment_link'] ?? [];
     $url = (string)($link['url'] ?? '');
-    $orderIds = array_map('strval', (array)($link['order_ids'] ?? []));
+    // Square returns a singular payment_link.order_id; accept the older
+    // order_ids-array shape too rather than storing no order reference.
+    $orderId = (string)($link['order_id'] ?? '');
+    if ($orderId === '') {
+        $orderIds = array_map('strval', (array)($link['order_ids'] ?? []));
+        $orderId = $orderIds[0] ?? '';
+    }
     if ($url === '') {
         throw new RuntimeException('Square did not return a checkout link.');
     }
@@ -2211,11 +2510,11 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
     );
     $upd->execute([
         (string)($link['id'] ?? ''),
-        $orderIds[0] ?? null,
+        $orderId !== '' ? $orderId : null,
         $url,
         (int)$purchase['id'],
     ]);
-    return ['url' => $url, 'payment_link_id' => (string)($link['id'] ?? ''), 'order_id' => $orderIds[0] ?? null];
+    return ['url' => $url, 'payment_link_id' => (string)($link['id'] ?? ''), 'order_id' => $orderId !== '' ? $orderId : null];
 }
 
 /**
@@ -2245,7 +2544,7 @@ function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId) {
  * Guarded state transitions. Each returns true only when it changed
  * something, so webhook replays are naturally idempotent.
  */
-function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePaymentId = null, $manualNote = '', $actorUserId = null) {
+function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePaymentId = null, $manualNote = '', $actorUserId = null, $paidWith = null) {
     if (!bakery_sfb_payments_ready($db)) {
         return false;
     }
@@ -2259,15 +2558,19 @@ function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePa
     if (!isset($allowedFrom[$status])) {
         throw new InvalidArgumentException('Unknown purchase status');
     }
+    if ($paidWith !== null && !in_array($paidWith, ['square', 'credit', 'manual'], true)) {
+        throw new InvalidArgumentException('Unknown payment channel');
+    }
     $placeholders = implode(', ', array_fill(0, count($allowedFrom[$status]), '?'));
     $sql = 'UPDATE sfb_offering_purchases
             SET status = ?,
                 square_payment_id = COALESCE(?, square_payment_id),
+                paid_with = COALESCE(?, paid_with),
                 manual_note = ' . ($manualNote !== '' && $manualNote !== null ? '?' : 'manual_note') . ',
                 actor_user_id = COALESCE(?, actor_user_id)' .
             ($status === 'paid' ? ', paid_at = COALESCE(paid_at, NOW())' : '') . '
             WHERE id = ? AND status IN (' . $placeholders . ')';
-    $values = [$status, $squarePaymentId];
+    $values = [$status, $squarePaymentId, $paidWith];
     if ($manualNote !== '' && $manualNote !== null) {
         $values[] = $manualNote;
     }
@@ -2279,7 +2582,95 @@ function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePa
     }
     $stmt = $db->prepare($sql);
     $stmt->execute($values);
-    return $stmt->rowCount() > 0;
+    $changed = $stmt->rowCount() > 0;
+    if ($changed && $status === 'paid') {
+        bakery_sfb_maybe_grant_credits($db, (int)$purchaseId);
+    }
+    return $changed;
+}
+
+/** When a credit-pack purchase becomes paid, grant its units exactly once. */
+function bakery_sfb_maybe_grant_credits(PDO $db, $purchaseId) {
+    $purchase = bakery_sfb_purchase($db, $purchaseId);
+    if (!$purchase || $purchase['offering_id'] === null || (string)$purchase['paid_with'] === 'credit') {
+        return;
+    }
+    $offering = bakery_sfb_offering($db, (int)$purchase['offering_id']);
+    if (!$offering || (string)$offering['kind'] !== 'credits' || (int)$offering['units'] < 1) {
+        return;
+    }
+    $dupes = $db->prepare('SELECT COUNT(*) FROM sfb_credit_entries WHERE purchase_id = ? AND delta > 0');
+    $dupes->execute([(int)$purchase['id']]);
+    if ((int)$dupes->fetchColumn() > 0) {
+        return;
+    }
+    $ins = $db->prepare(
+        'INSERT INTO sfb_credit_entries (customer_id, delta, reason, purchase_id)
+         VALUES (?, ?, "purchase", ?)'
+    );
+    $ins->execute([(int)$purchase['customer_id'], (int)$offering['units'], (int)$purchase['id']]);
+}
+
+/** Spend one Bread Education Credit on a class/workshop/kit offering. */
+function bakery_sfb_pay_with_credit(PDO $db, $customerId, $offeringId) {
+    require_once __DIR__ . '/square_config.php';
+    if (!bakery_sfb_payments_ready($db)) {
+        throw new RuntimeException('Education payments need a database update (migration 066)');
+    }
+    $offering = bakery_sfb_offering($db, $offeringId);
+    if (!$offering || (int)$offering['is_active'] !== 1) {
+        throw new InvalidArgumentException('That offering is not available');
+    }
+    if (in_array((string)$offering['kind'], ['credits', 'donation'], true)) {
+        throw new InvalidArgumentException('Credits and donations are paid with money, not credits');
+    }
+    $balance = bakery_sfb_credit_balance($db, $customerId);
+    if ($balance < 1) {
+        throw new InvalidArgumentException('No Bread Education Credits available');
+    }
+    $customerId = (int)$customerId;
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, $offeringId);
+        $spend = $db->prepare(
+            'INSERT INTO sfb_credit_entries (customer_id, delta, reason, purchase_id)
+             VALUES (?, -1, "spent", ?)'
+        );
+        $spend->execute([$customerId, $purchaseId]);
+        // Direct paid transition with the credit channel; grant is skipped
+        // because paid_with=credit.
+        $upd = $db->prepare(
+            'UPDATE sfb_offering_purchases
+             SET status = "paid", paid_with = "credit", paid_at = COALESCE(paid_at, NOW())
+             WHERE id = ? AND status IN ("intent")'
+        );
+        $upd->execute([(int)$purchaseId]);
+        if ($upd->rowCount() === 0) {
+            throw new RuntimeException('Could not apply the credit to this attempt');
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $purchaseId;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/** Current Bread Education Credit balance for a baker. */
+function bakery_sfb_credit_balance(PDO $db, $customerId) {
+    if (!bakery_sfb_payments_ready($db) || !table_exists($db, 'sfb_credit_entries')) {
+        return 0;
+    }
+    $stmt = $db->prepare('SELECT COALESCE(SUM(delta), 0) FROM sfb_credit_entries WHERE customer_id = ?');
+    $stmt->execute([(int)$customerId]);
+    return (int)$stmt->fetchColumn();
 }
 
 /** Paid, unexpired purchases for a customer: the entitlement set. */
@@ -2347,6 +2738,27 @@ function bakery_sfb_recent_purchases(PDO $db, $limit = 15) {
 }
 
 /**
+ * Read-only paid revenue per offering for staff visibility. Purchase price
+ * snapshots are the truth — live catalog prices never touch these sums.
+ */
+function bakery_sfb_offering_revenue(PDO $db): array {
+    if (!bakery_sfb_payments_ready($db)) {
+        return [];
+    }
+    return $db->query(
+        'SELECT p.offering_id,
+                COALESCE(NULLIF(p.offering_title_snapshot, ""), o.title) AS title,
+                COUNT(*) AS paid_count,
+                SUM(p.price_cents_snapshot) AS cents
+         FROM sfb_offering_purchases p
+         LEFT JOIN sfb_offerings o ON o.id = p.offering_id
+         WHERE p.status = "paid"
+         GROUP BY p.offering_id, COALESCE(NULLIF(p.offering_title_snapshot, ""), o.title)
+         ORDER BY cents DESC'
+    )->fetchAll();
+}
+
+/**
  * Education-side Square webhook truth. Handles payment.* and refund.* events;
  * dedupes on event_id against the shared square_webhook_events ledger.
  * Unknown or unmatched events are ignored — never guessed onto a purchase.
@@ -2410,7 +2822,7 @@ function bakery_sfb_handle_education_webhook(PDO $db, array $payload): array {
     if (!isset($map[$paymentStatus])) {
         return ['ok' => true, 'unmatched_status' => true, 'payment_status' => $paymentStatus];
     }
-    $changed = bakery_sfb_set_purchase_status($db, (int)$purchase['id'], $map[$paymentStatus], $paymentId);
+    $changed = bakery_sfb_set_purchase_status($db, (int)$purchase['id'], $map[$paymentStatus], $paymentId, '', null, 'square');
     return ['ok' => true, 'changed' => $changed, 'purchase_id' => (int)$purchase['id'], 'status' => $map[$paymentStatus]];
 }
 
@@ -3279,6 +3691,8 @@ function bakery_sfb_phase_label($phase) {
         'development' => 'sfb.phase_development',
         'shape' => 'sfb.phase_shape',
         'bake' => 'sfb.phase_bake',
+        'starter' => 'sfb.phase_starter',
+        'final' => 'sfb.phase_final',
         'done' => 'sfb.phase_done',
         'abandoned' => 'sfb.phase_abandoned',
     ];
@@ -3290,6 +3704,8 @@ function bakery_sfb_phase_label($phase) {
         'development' => 'Bulk fermentation',
         'shape' => 'Shape',
         'bake' => 'Bake',
+        'starter' => 'Starter',
+        'final' => 'Final',
         'done' => 'Complete',
         'abandoned' => 'Set aside',
     ];

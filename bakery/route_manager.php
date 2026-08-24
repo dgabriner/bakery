@@ -121,8 +121,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             'date' => $date,
             'total_deliveries' => $totalDeliveries,
             'data' => $driversData,
+            'pickup_grid' => route_manager_pickup_grid($db, $date, $driversData),
         ]);
     } catch (Exception $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_pack_units') {
+    header('Content-Type: application/json');
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator', 'manager'])) {
+        echo json_encode(['success' => false, 'error' => 'Managers can save tray and box sizes.']);
+        exit;
+    }
+    $productId = (int)($_POST['product_id'] ?? 0);
+    try {
+        $saved = bakery_pack_save_count_units(
+            $db,
+            $productId,
+            $_POST['pieces_per_tray'] ?? '',
+            $_POST['pieces_per_box'] ?? ''
+        );
+        echo json_encode(['success' => true, 'product' => $saved]);
+    } catch (Throwable $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'pickup_rebalance') {
+    header('Content-Type: application/json');
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    if (function_exists('bakery_user_has_role') && !bakery_user_has_role(['administrator', 'manager'])) {
+        echo json_encode(['success' => false, 'error' => 'Managers can reassign pickup quantities.']);
+        exit;
+    }
+    try {
+        $result = route_manager_pickup_rebalance($db, $_POST);
+        echo json_encode(['success' => true] + $result);
+    } catch (Throwable $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
     exit;
@@ -254,6 +297,86 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
                 <span class="checkbox-label">Show GPS trail on map</span>
             </label>
         </div>
+    </div>
+
+    <section id="pickup-manifest-board" class="pickup-board" hidden
+             data-unit="pieces"
+             data-label-pieces="<?php echo htmlspecialchars(bakery_t('route_manager.unit_pieces'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-label-trays="<?php echo htmlspecialchars(bakery_t('route_manager.unit_trays'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-label-boxes="<?php echo htmlspecialchars(bakery_t('route_manager.unit_boxes'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-col-product="<?php echo htmlspecialchars(bakery_t('route_manager.col_product'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-col-tray="<?php echo htmlspecialchars(bakery_t('route_manager.col_per_tray'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-col-box="<?php echo htmlspecialchars(bakery_t('route_manager.col_per_box'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-col-total="<?php echo htmlspecialchars(bakery_t('route_manager.col_total'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-saved="<?php echo htmlspecialchars(bakery_t('route_manager.pack_units_saved'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-rebalanced="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_rebalanced'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-empty="<?php echo htmlspecialchars(bakery_t('route_manager.no_pickup'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-stores="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_stores'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-locked="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_locked'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-driver-total="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_driver_total'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-spread-existing="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_spread_existing'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-spread-all="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_spread_all'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-save-total="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_save_total'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-move-to="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_move_to'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-move-qty="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_move_qty'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-move="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_move'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-move-all="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_move_all'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-sheet-close="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_sheet_close'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-sheet-title="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_sheet_title'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-hand="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_hand'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-hand-ready="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_hand_ready'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-take="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_take'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-place="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_place'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-take-all="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_take_all'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-place-all="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_place_all'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-fixed="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_fixed'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-save-plan="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_save_plan'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-reset="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_reset'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-no-stops="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_no_stops'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-need-place="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_need_place'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-chunk="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_chunk'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-chunk-one="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_chunk_one'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-chunk-five="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_chunk_five'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-chunk-tray="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_chunk_tray'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-chunk-box="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_chunk_box'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-supposed="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_supposed'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-standing="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_standing'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-daily="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_daily'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-fill-need="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_fill_need'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-take-extra="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_take_extra'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-snap-need="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_snap_need'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-balance="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_balance'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-by-van="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_by_van'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-little="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_little_shop'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-trays="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_pack_trays'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-standing-aim="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_aim_standing'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-view-product="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_view_product'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-view-store="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_view_store'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-family-all="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_family_all'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-col-store="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_col_store'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-scope-help="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_scope_help'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-store-sheet="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_store_sheet'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-all-stops="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_all_stops'), ENT_QUOTES, 'UTF-8'); ?>"
+             data-store-edit="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_store_edit'), ENT_QUOTES, 'UTF-8'); ?>">
+        <div class="pickup-board-header">
+            <div>
+                <p class="pickup-board-kicker"><?php echo htmlspecialchars(bakery_t('route_manager.pickup_board_kicker')); ?></p>
+                <h2><?php echo htmlspecialchars(bakery_t('route_manager.pickup_manifest')); ?></h2>
+                <p class="pickup-board-help"><?php echo htmlspecialchars(bakery_t('route_manager.pickup_board_help')); ?></p>
+            </div>
+            <div class="pickup-unit-toggle" role="group" aria-label="<?php echo htmlspecialchars(bakery_t('route_manager.unit_group')); ?>">
+                <button type="button" class="pickup-unit-btn is-active" data-unit="pieces"><?php echo htmlspecialchars(bakery_t('route_manager.unit_pieces')); ?></button>
+                <button type="button" class="pickup-unit-btn" data-unit="trays"><?php echo htmlspecialchars(bakery_t('route_manager.unit_trays')); ?></button>
+                <button type="button" class="pickup-unit-btn" data-unit="boxes"><?php echo htmlspecialchars(bakery_t('route_manager.unit_boxes')); ?></button>
+            </div>
+        </div>
+        <p id="pickup-board-status" class="pickup-board-status" aria-live="polite"></p>
+        <div id="pickup-board-tools" class="pickup-board-tools"></div>
+        <div id="pickup-board-table" class="pickup-board-table-wrap"></div>
+    </section>
+    <div id="pickup-sheet-root" class="pickup-sheet-root" hidden>
+        <button type="button" class="pickup-sheet-backdrop" tabindex="-1" aria-label="<?php echo htmlspecialchars(bakery_t('route_manager.pickup_sheet_close'), ENT_QUOTES, 'UTF-8'); ?>"></button>
+        <div id="pickup-sheet" class="pickup-sheet" role="dialog" aria-modal="true" aria-labelledby="pickup-sheet-heading"></div>
     </div>
 
     <!-- Status Panel -->
@@ -454,6 +577,9 @@ function stopPaymentAmount(delivery) {
 let map;
 let geocoder;
 let driversData = {};
+let pickupGrid = { drivers: [], rows: [], families: [], store_view: [] };
+let pickupView = 'product';
+let pickupFamily = 'all';
 let deliveryMarkers = [];
 let markersByOrderId = {};
 let driverPaths = {};
@@ -517,6 +643,7 @@ function formatTime(value) {
 
 function loadDeliveries(options) {
     const background = options && options.background === true;
+    const skipMap = options && options.skipMap === true;
     const selectedDate = document.getElementById('tracking-date').value;
     const selectedDrivers = getSelectedDrivers();
     const selectedDriversKey = selectedDrivers.slice().sort((a, b) => a - b).join(',');
@@ -527,11 +654,13 @@ function loadDeliveries(options) {
 
     if (selectedDrivers.length === 0) {
         driversData = {};
+        pickupGrid = { drivers: [], rows: [], families: [], store_view: [] };
         clearMapElements();
         renderGpsActivity({});
         updateStatistics();
         updateLegend();
         updateDeliveryList();
+        renderPickupBoard();
         updateLastRefreshTime();
         return;
     }
@@ -566,13 +695,27 @@ function loadDeliveries(options) {
         }
         if (data.success) {
             driversData = data.data || {};
-            updateMap();
+            pickupGrid = data.pickup_grid || { drivers: [], rows: [], families: [], store_view: [] };
+            if (!skipMap) {
+                updateMap();
+            }
             updateStatistics();
             updateLegend();
             updateDeliveryList();
+            if (pickupSheetState && pickupSheetState.kind === 'store') {
+                const storeId = pickupSheetState.store && pickupSheetState.store.customer_id;
+                const driverId = pickupSheetState.driverId;
+                renderPickupBoard();
+                if (storeId) {
+                    openPickupStoreSheet(null, storeId, driverId);
+                }
+            } else if (!pickupSheetState) {
+                renderPickupBoard();
+            }
             updateLastRefreshTime();
-            // GPS history is always useful context; map trails remain an opt-in overlay.
-            loadTrackingOverlay({ background: background });
+            if (!skipMap) {
+                loadTrackingOverlay({ background: background });
+            }
         } else {
             console.error('Failed to load deliveries:', data.error);
             if (!background) showError('Failed to load deliveries: ' + (data.error || 'Unknown error'));
@@ -897,6 +1040,849 @@ function updateLegend() {
             </div>
         `;
     }).join('');
+}
+
+function pickupCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+
+function pickupSplit(pieces, per) {
+    const qty = Number(pieces) || 0;
+    const size = Number(per) || 0;
+    if (size < 2) return { whole: 0, remainder: qty };
+    return { whole: Math.floor(qty / size), remainder: qty % size };
+}
+
+function pickupWorkingPieces(cell) {
+    const required = Number(cell && cell.required) || 0;
+    if (required > 0) return required;
+    return Number(cell && cell.pieces) || 0;
+}
+
+function pickupCellLabel(cell, unit, perTray, perBox) {
+    const pieces = pickupWorkingPieces(cell);
+    if (pieces <= 0) return '—';
+    if (unit === 'trays') {
+        if (!(Number(perTray) > 1)) return String(pieces);
+        const split = pickupSplit(pieces, perTray);
+        return split.remainder > 0 ? (split.whole + '+' + split.remainder) : String(split.whole);
+    }
+    if (unit === 'boxes') {
+        if (!(Number(perBox) > 1)) return String(pieces);
+        const split = pickupSplit(pieces, perBox);
+        return split.remainder > 0 ? (split.whole + '+' + split.remainder) : String(split.whole);
+    }
+    return String(pieces);
+}
+
+function pickupVisibleRows() {
+    const rows = (pickupGrid && pickupGrid.rows) || [];
+    if (pickupFamily === 'all') return rows;
+    return rows.filter(row => (row.product_line_name || 'Other') === pickupFamily);
+}
+
+function pickupVisibleProductIds() {
+    return pickupVisibleRows().map(row => Number(row.product_id)).filter(id => id > 0);
+}
+
+function pickupVisibleStoreRows() {
+    const stores = (pickupGrid && pickupGrid.store_view) || [];
+    if (pickupFamily === 'all') return stores;
+    return stores.map(store => {
+        const cells = (store.cells || []).map(cell => {
+            const products = (cell.products || []).filter(item => (item.product_line_name || 'Other') === pickupFamily);
+            const required = products.reduce((n, item) => n + (Number(item.quantity) || 0), 0);
+            const expected = products.reduce((n, item) => n + (Number(item.expected_qty) || 0), 0);
+            return Object.assign({}, cell, { products: products, required: required, expected: expected });
+        });
+        const totalRequired = cells.reduce((n, cell) => n + (Number(cell.required) || 0), 0);
+        const totalExpected = cells.reduce((n, cell) => n + (Number(cell.expected) || 0), 0);
+        return Object.assign({}, store, { cells: cells, total_required: totalRequired, total_expected: totalExpected });
+    }).filter(store => store.cells.some(cell => (cell.products || []).length));
+}
+
+function pickupMethodButtons(board, extraClass) {
+    const items = [
+        { method: 'supposed', label: board.dataset.balance || 'Balance to supposed', cls: 'btn btn-primary' },
+        { method: 'by_van', label: board.dataset.byVan || 'Balance by van', cls: 'btn' },
+        { method: 'little_shop', label: board.dataset.little || 'Extra loaves to little shops', cls: 'btn pickup-surprise' },
+        { method: 'trays', label: board.dataset.trays || 'Pack into trays', cls: 'btn' },
+        { method: 'standing', label: board.dataset.standingAim || 'Aim at standing', cls: 'btn' }
+    ];
+    return items.map(item =>
+        '<button type="button" class="' + item.cls + (extraClass ? ' ' + extraClass : '') +
+        '" data-act="allocate-scope" data-method="' + item.method + '">' + escapeHtml(item.label) + '</button>'
+    ).join('');
+}
+
+function renderPickupTools() {
+    const board = document.getElementById('pickup-manifest-board');
+    const tools = document.getElementById('pickup-board-tools');
+    if (!board || !tools) return;
+    const families = (pickupGrid && pickupGrid.families) || [];
+    const familyBtns = ['<button type="button" class="pickup-family' + (pickupFamily === 'all' ? ' is-active' : '') +
+        '" data-act="family" data-family="all">' + escapeHtml(board.dataset.familyAll || 'All products') + '</button>']
+        .concat(families.map(family =>
+            '<button type="button" class="pickup-family' + (pickupFamily === family.name ? ' is-active' : '') +
+            '" data-act="family" data-family="' + escapeHtml(family.name) + '">' +
+            escapeHtml(family.name) + '</button>'
+        ));
+    tools.innerHTML =
+        '<div class="pickup-view-toggle" role="group">' +
+        '<button type="button" class="pickup-view-btn' + (pickupView === 'product' ? ' is-active' : '') +
+        '" data-act="view" data-view="product">' + escapeHtml(board.dataset.viewProduct || 'By product') + '</button>' +
+        '<button type="button" class="pickup-view-btn' + (pickupView === 'store' ? ' is-active' : '') +
+        '" data-act="view" data-view="store">' + escapeHtml(board.dataset.viewStore || 'By store') + '</button>' +
+        '</div>' +
+        '<div class="pickup-family-row">' + familyBtns.join('') + '</div>' +
+        '<p class="pickup-scope-help">' + escapeHtml(board.dataset.scopeHelp || '') + '</p>' +
+        '<div class="pickup-sheet-methods pickup-board-methods">' + pickupMethodButtons(board) + '</div>';
+}
+
+function renderPickupBoard() {
+    const board = document.getElementById('pickup-manifest-board');
+    const tableWrap = document.getElementById('pickup-board-table');
+    if (!board || !tableWrap) return;
+    const unit = board.dataset.unit || 'pieces';
+    const drivers = (pickupGrid && pickupGrid.drivers) || [];
+    const rows = pickupVisibleRows();
+    board.hidden = false;
+    renderPickupTools();
+    if (!rows.length) {
+        tableWrap.innerHTML = '<p class="text-muted">' + escapeHtml(board.dataset.empty || 'No pickup load saved yet.') + '</p>';
+        return;
+    }
+    const headDrivers = drivers.map(driver =>
+        '<th scope="col">' + escapeHtml(driver.name || '') + '</th>'
+    ).join('');
+    if (pickupView === 'store') {
+        const stores = pickupVisibleStoreRows();
+        const body = stores.map(store => {
+            const cells = (store.cells || []).map(cell => {
+                const qty = Number(cell.required) || 0;
+                const expected = Number(cell.expected) || 0;
+                const extra = expected > 0 && expected !== qty
+                    ? '<span class="pickup-required">' + escapeHtml(String(expected)) + '</span>'
+                    : '';
+                const skuCount = (cell.products || []).length;
+                return '<td class="pickup-qty"><button type="button" class="pickup-cell-btn" data-store-id="' +
+                    escapeHtml(String(store.customer_id)) + '" data-driver-id="' + escapeHtml(String(cell.driver_id)) + '">' +
+                    escapeHtml(qty ? String(qty) : '—') + extra +
+                    (skuCount ? '<small>' + skuCount + '</small>' : '') +
+                    '</button></td>';
+            }).join('');
+            return '<tr data-store-id="' + escapeHtml(String(store.customer_id)) + '">' +
+                '<th scope="row"><button type="button" class="pickup-store-btn" data-store-id="' +
+                escapeHtml(String(store.customer_id)) + '">' + escapeHtml(store.name || '') + '</button></th>' +
+                cells +
+                '<td class="pickup-qty pickup-qty--total">' + escapeHtml(String(store.total_required || 0)) + '</td>' +
+                '</tr>';
+        }).join('');
+        tableWrap.innerHTML = '<div class="pickup-table-scroll"><table class="pickup-table">' +
+            '<thead><tr>' +
+            '<th scope="col">' + escapeHtml(board.dataset.colStore || 'Store') + '</th>' +
+            headDrivers +
+            '<th scope="col">' + escapeHtml(board.dataset.colTotal || 'Total') + '</th>' +
+            '</tr></thead><tbody>' + body + '</tbody></table></div>';
+        tableWrap.querySelectorAll('.pickup-cell-btn').forEach(btn => {
+            btn.addEventListener('click', () => openPickupStoreSheet(btn, Number(btn.dataset.storeId), Number(btn.dataset.driverId)));
+        });
+        tableWrap.querySelectorAll('.pickup-store-btn').forEach(btn => {
+            btn.addEventListener('click', () => openPickupStoreSheet(btn, Number(btn.dataset.storeId), 0));
+        });
+        return;
+    }
+    const body = rows.map(row => {
+        const perTray = row.pieces_per_tray;
+        const perBox = row.pieces_per_box;
+        const cells = (row.cells || []).map(cell => {
+            const label = pickupCellLabel(cell, unit, perTray, perBox);
+            return '<td class="pickup-qty"><button type="button" class="pickup-cell-btn" data-driver-id="' +
+                escapeHtml(String(cell.driver_id)) + '">' + escapeHtml(label) + '</button></td>';
+        }).join('');
+        const totalPieces = Number(row.total_required) > 0 ? row.total_required : row.total_pieces;
+        const totalCell = pickupCellLabel({ pieces: totalPieces, required: totalPieces }, unit, perTray, perBox);
+        return '<tr data-product-id="' + escapeHtml(String(row.product_id)) + '">' +
+            '<th scope="row"><button type="button" class="pickup-product-btn">' + escapeHtml(row.name || '') + '</button></th>' +
+            '<td class="pickup-units"><input type="number" min="0" max="500" step="1" inputmode="numeric" class="pickup-per-input" data-field="tray" aria-label="' +
+            escapeHtml(board.dataset.colTray || 'Pcs / tray') + '" value="' +
+            (perTray ? escapeHtml(String(perTray)) : '') + '"></td>' +
+            '<td class="pickup-units"><input type="number" min="0" max="500" step="1" inputmode="numeric" class="pickup-per-input" data-field="box" aria-label="' +
+            escapeHtml(board.dataset.colBox || 'Pcs / box') + '" value="' +
+            (perBox ? escapeHtml(String(perBox)) : '') + '"></td>' +
+            cells +
+            '<td class="pickup-qty pickup-qty--total">' + escapeHtml(totalCell) + '</td>' +
+            '</tr>';
+    }).join('');
+    tableWrap.innerHTML = '<div class="pickup-table-scroll"><table class="pickup-table">' +
+        '<thead><tr>' +
+        '<th scope="col">' + escapeHtml(board.dataset.colProduct || 'Product') + '</th>' +
+        '<th scope="col">' + escapeHtml(board.dataset.colTray || '') + '</th>' +
+        '<th scope="col">' + escapeHtml(board.dataset.colBox || '') + '</th>' +
+        headDrivers +
+        '<th scope="col">' + escapeHtml(board.dataset.colTotal || 'Total') + '</th>' +
+        '</tr></thead><tbody>' + body + '</tbody></table></div>';
+
+    tableWrap.querySelectorAll('.pickup-per-input').forEach(input => {
+        input.addEventListener('change', () => savePickupPackUnits(input));
+    });
+    tableWrap.querySelectorAll('.pickup-cell-btn').forEach(btn => {
+        btn.addEventListener('click', () => openPickupSheet(btn, Number(btn.dataset.driverId)));
+    });
+    tableWrap.querySelectorAll('.pickup-product-btn').forEach(btn => {
+        btn.addEventListener('click', () => openPickupSheet(btn, 0));
+    });
+}
+
+let pickupSheetState = null;
+
+function pickupSheetClone(gridRow, drivers, focusDriverId, focusCustomerId) {
+    return {
+        productId: Number(gridRow.product_id),
+        productName: gridRow.name || '',
+        focusDriverId: Number(focusDriverId) || 0,
+        focusCustomerId: Number(focusCustomerId) || 0,
+        showAllStops: false,
+        hand: 0,
+        source: null,
+        dest: null,
+        chunk: '1',
+        tray: Number(gridRow.pieces_per_tray) || 0,
+        box: Number(gridRow.pieces_per_box) || 0,
+        drivers: drivers.map(driver => {
+            const cell = (gridRow.cells || []).find(item => Number(item.driver_id) === Number(driver.id)) || {};
+            const stores = (cell.stores || []).map(store => ({
+                customer_id: Number(store.customer_id),
+                name: store.name || '',
+                origin: Number(store.quantity) || 0,
+                draft: Number(store.quantity) || 0,
+                locked: !!store.locked,
+                standing: Number(store.standing_qty) || 0,
+                expected: Number(store.expected_qty) || 0,
+                source: store.source || 'none'
+            }));
+            return { id: Number(driver.id), name: driver.name || '', stores: stores };
+        })
+    };
+}
+
+function pickupSheetChunkSize() {
+    const state = pickupSheetState;
+    if (!state) return 1;
+    if (state.chunk === 'five') return 5;
+    if (state.chunk === 'tray') return Math.max(2, Number(state.tray) || 0) || 1;
+    if (state.chunk === 'box') return Math.max(2, Number(state.box) || 0) || 1;
+    return 1;
+}
+
+function pickupSheetApplyDraft(store, next) {
+    if (!store || store.locked) return 0;
+    next = Math.max(0, Math.min(Math.floor(Number(next) || 0), store.draft + pickupSheetState.hand));
+    const delta = next - store.draft;
+    store.draft = next;
+    pickupSheetState.hand -= delta;
+    if (delta > 0) pickupSheetState.dest = store.name;
+    if (delta < 0) pickupSheetState.source = store.name;
+    return delta;
+}
+
+function pickupSheetDriverTotal(driver) {
+    return (driver.stores || []).reduce((n, store) => n + (Number(store.draft) || 0), 0);
+}
+
+function pickupSheetUnlocked(driver) {
+    return (driver.stores || []).filter(store => !store.locked);
+}
+
+function pickupSheetTakeFromStores(stores, count) {
+    let left = count;
+    const ordered = stores.slice().sort((a, b) => b.draft - a.draft);
+    ordered.forEach(store => {
+        if (left <= 0 || store.locked) return;
+        const take = Math.min(left, store.draft);
+        store.draft -= take;
+        left -= take;
+    });
+    return count - left;
+}
+
+function pickupSheetPlaceOnStores(stores, count) {
+    let left = count;
+    const unlocked = stores.filter(store => !store.locked);
+    while (left > 0 && unlocked.length) {
+        const preferred = unlocked.filter(store => store.origin > 0 || store.draft > 0);
+        const pool = preferred.length ? preferred : unlocked;
+        pool.sort((a, b) => a.draft - b.draft);
+        pool[0].draft += 1;
+        left -= 1;
+    }
+    return count - left;
+}
+
+function pickupSheetLabel(board) {
+    const state = pickupSheetState;
+    if (!state) return '';
+    if (state.hand > 0 && state.source) {
+        return (board.dataset.hand || ':n in hand — tap where they go').replace(':n', String(state.hand))
+            + (state.source ? ' · −' + escapeHtml(state.source) : '');
+    }
+    if (state.source && state.dest) {
+        return '−' + state.source + ' → +' + state.dest;
+    }
+    return board.dataset.handReady || 'Take pieces, then place them. The day total stays fixed.';
+}
+
+function pickupSheetVisibleStores(driver) {
+    const stores = driver.stores || [];
+    if (!pickupSheetState || pickupSheetState.showAllStops) return stores;
+    const focus = Number(pickupSheetState.focusCustomerId) || 0;
+    const useful = stores.filter(store =>
+        store.draft > 0 || store.origin > 0 || store.expected > 0 || store.standing > 0 || store.customer_id === focus
+    );
+    return useful.length ? useful : stores;
+}
+
+function renderPickupSheet() {
+    const board = document.getElementById('pickup-manifest-board');
+    const sheet = document.getElementById('pickup-sheet');
+    const state = pickupSheetState;
+    if (!board || !sheet || !state || state.kind === 'store') return;
+    const pool = state.drivers.reduce((n, driver) => n + pickupSheetDriverTotal(driver), 0) + state.hand;
+    const trail = pickupSheetLabel(board);
+    const columns = state.drivers.map(driver => {
+        const delta = pickupSheetDriverTotal(driver) - driver.stores.reduce((n, store) => n + store.origin, 0);
+        const deltaHtml = delta > 0
+            ? '<span class="pickup-delta pickup-delta--up">+' + delta + '</span>'
+            : (delta < 0 ? '<span class="pickup-delta pickup-delta--down">' + delta + '</span>' : '');
+        const visibleStores = pickupSheetVisibleStores(driver);
+        const storesHtml = visibleStores.length
+            ? visibleStores.map(store => {
+                const storeDelta = store.draft - store.origin;
+                const canTake = !store.locked && store.draft > 0;
+                const canPlace = !store.locked && state.hand > 0;
+                const expected = Number(store.expected) || 0;
+                const standing = Number(store.standing) || 0;
+                const vsNeed = expected > 0 ? store.draft - expected : 0;
+                const hintBits = [];
+                if (expected > 0) hintBits.push((board.dataset.supposed || 'supposed :n').replace(':n', String(expected)));
+                if (standing > 0 && standing !== expected) hintBits.push((board.dataset.standing || 'standing :n').replace(':n', String(standing)));
+                if ((store.source || '') === 'daily' || (store.source || '') === 'dated') hintBits.push(board.dataset.daily || 'today’s order');
+                const sliderMax = store.locked ? store.draft : store.draft + state.hand;
+                return '<div class="pickup-sheet-store' +
+                    (store.customer_id === state.focusCustomerId ? ' is-focus-store' : '') +
+                    (storeDelta > 0 ? ' is-up' : '') +
+                    (storeDelta < 0 ? ' is-down' : '') +
+                    (vsNeed > 0 ? ' is-over' : '') +
+                    (expected > 0 && vsNeed < 0 ? ' is-short' : '') +
+                    (store.locked ? ' is-locked' : '') +
+                    (canPlace ? ' is-target' : '') + '" data-customer="' + store.customer_id + '">' +
+                    '<div class="pickup-sheet-store-copy">' +
+                    '<div class="pickup-sheet-store-name">' + escapeHtml(store.name) +
+                    (store.locked ? ' <em>' + escapeHtml(board.dataset.locked || '') + '</em>' : '') +
+                    (storeDelta ? ' <span class="pickup-delta ' + (storeDelta > 0 ? 'pickup-delta--up' : 'pickup-delta--down') + '">' +
+                        (storeDelta > 0 ? '+' : '') + storeDelta + '</span>' : '') +
+                    '</div>' +
+                    (hintBits.length ? '<p class="pickup-sheet-hint">' + escapeHtml(hintBits.join(' · ')) + '</p>' : '') +
+                    '</div>' +
+                    '<div class="pickup-sheet-store-controls">' +
+                    '<div class="pickup-stepper">' +
+                    '<button type="button" class="pickup-step" data-act="store-take" data-driver="' + driver.id +
+                    '" data-customer="' + store.customer_id + '" ' + (canTake ? '' : 'disabled') + '>−</button>' +
+                    '<strong>' + store.draft + '</strong>' +
+                    '<button type="button" class="pickup-step" data-act="store-place" data-driver="' + driver.id +
+                    '" data-customer="' + store.customer_id + '" ' + (canPlace ? '' : 'disabled') + '>+</button>' +
+                    '</div>' +
+                    (store.locked ? '' :
+                    '<input type="range" min="0" max="' + sliderMax + '" step="1" value="' + store.draft +
+                    '" class="pickup-slider" data-act="store-slide" data-driver="' + driver.id +
+                    '" data-customer="' + store.customer_id + '" aria-label="' + escapeHtml(store.name) + '">') +
+                    (!store.locked && expected > 0 && store.draft !== expected ?
+                    '<button type="button" class="btn pickup-mini" data-act="store-need" data-driver="' + driver.id +
+                    '" data-customer="' + store.customer_id + '">' + escapeHtml(board.dataset.fillNeed || 'Fill supposed') + '</button>' : '') +
+                    '</div></div>';
+            }).join('')
+            : '<p class="pickup-sheet-empty">' + escapeHtml(board.dataset.noStops || '') + '</p>';
+        const canTakeDriver = pickupSheetUnlocked(driver).some(store => store.draft > 0);
+        const canPlaceDriver = state.hand > 0 && pickupSheetUnlocked(driver).length > 0;
+        const hasExtra = pickupSheetUnlocked(driver).some(store => store.expected > 0 && store.draft > store.expected);
+        const hasShort = pickupSheetUnlocked(driver).some(store => store.expected > 0 && store.draft < store.expected);
+        return '<section class="pickup-sheet-driver' + (driver.id === state.focusDriverId ? ' is-focus' : '') +
+            (delta > 0 ? ' is-up' : '') + (delta < 0 ? ' is-down' : '') + '">' +
+            '<header><strong>' + escapeHtml(driver.name) + '</strong> <span>' + pickupSheetDriverTotal(driver) + '</span> ' +
+            deltaHtml + '</header>' +
+            storesHtml +
+            '<div class="pickup-sheet-driver-actions">' +
+            '<button type="button" class="btn pickup-mini" data-act="driver-take" data-driver="' + driver.id + '" ' +
+            (canTakeDriver ? '' : 'disabled') + '>' + escapeHtml(board.dataset.take || 'Take') + ' ' + pickupSheetChunkSize() + '</button>' +
+            '<button type="button" class="btn pickup-mini" data-act="driver-take-all" data-driver="' + driver.id + '" ' +
+            (canTakeDriver ? '' : 'disabled') + '>' + escapeHtml(board.dataset.takeAll || 'Take all') + '</button>' +
+            '<button type="button" class="btn pickup-mini pickup-mini--place" data-act="driver-place" data-driver="' + driver.id + '" ' +
+            (canPlaceDriver ? '' : 'disabled') + '>' + escapeHtml(board.dataset.place || 'Place') + ' ' + pickupSheetChunkSize() + '</button>' +
+            '<button type="button" class="btn pickup-mini pickup-mini--place" data-act="driver-place-all" data-driver="' + driver.id + '" ' +
+            (canPlaceDriver ? '' : 'disabled') + '>' + escapeHtml(board.dataset.placeAll || 'Place all') + '</button>' +
+            '<button type="button" class="btn pickup-mini" data-act="driver-surplus" data-driver="' + driver.id + '" ' +
+            (hasExtra ? '' : 'disabled') + '>' + escapeHtml(board.dataset.takeExtra || 'Take extras') + '</button>' +
+            '<button type="button" class="btn pickup-mini pickup-mini--place" data-act="driver-fill" data-driver="' + driver.id + '" ' +
+            (hasShort && state.hand > 0 ? '' : 'disabled') + '>' + escapeHtml(board.dataset.fillNeed || 'Fill supposed') + '</button>' +
+            '</div></section>';
+    }).join('');
+    const canSave = state.hand === 0 && state.drivers.some(driver =>
+        driver.stores.some(store => store.draft !== store.origin)
+    );
+    const chunk = state.chunk || '1';
+    const chunkBtns = [
+        { id: '1', label: board.dataset.chunkOne || '1', show: true },
+        { id: 'five', label: board.dataset.chunkFive || '5', show: true },
+        { id: 'tray', label: board.dataset.chunkTray || 'Tray', show: Number(state.tray) > 1 },
+        { id: 'box', label: board.dataset.chunkBox || 'Box', show: Number(state.box) > 1 }
+    ].filter(item => item.show).map(item =>
+        '<button type="button" class="pickup-chunk' + (chunk === item.id ? ' is-active' : '') +
+        '" data-act="chunk" data-chunk="' + item.id + '">' + escapeHtml(item.label) + '</button>'
+    ).join('');
+    sheet.innerHTML =
+        '<div class="pickup-sheet-head">' +
+        '<p class="pickup-sheet-kicker">' + escapeHtml((board.dataset.sheetTitle || 'Move :product').replace(':product', '')) + '</p>' +
+        '<h3 id="pickup-sheet-heading">' + escapeHtml(state.productName) + '</h3>' +
+        '<p class="pickup-sheet-fixed">' + escapeHtml((board.dataset.fixed || ':n pieces today').replace(':n', String(pool))) + '</p>' +
+        '<button type="button" class="pickup-sheet-x" data-act="close" aria-label="' +
+        escapeHtml(board.dataset.sheetClose || 'Close') + '">×</button>' +
+        '</div>' +
+        '<p class="pickup-sheet-trail' + (state.hand > 0 ? ' is-holding' : '') + '">' + trail + '</p>' +
+        '<div class="pickup-chunk-row" role="group" aria-label="' + escapeHtml(board.dataset.chunk || 'Move by') + '">' +
+        chunkBtns +
+        '<button type="button" class="pickup-chunk' + (state.showAllStops ? ' is-active' : '') +
+        '" data-act="all-stops">' + escapeHtml(board.dataset.allStops || 'All stops') + '</button>' +
+        '</div>' +
+        '<div class="pickup-sheet-grid">' + columns + '</div>' +
+        '<div class="pickup-sheet-methods">' +
+        '<button type="button" class="btn btn-primary" data-act="allocate" data-method="supposed">' +
+        escapeHtml(board.dataset.balance || 'Balance to supposed') + '</button>' +
+        '<button type="button" class="btn" data-act="allocate" data-method="by_van">' +
+        escapeHtml(board.dataset.byVan || 'Balance by van') + '</button>' +
+        '<button type="button" class="btn pickup-surprise" data-act="allocate" data-method="little_shop">' +
+        escapeHtml(board.dataset.little || 'Extra loaves to little shops') + '</button>' +
+        (Number(state.tray) > 1
+            ? '<button type="button" class="btn" data-act="allocate" data-method="trays">' +
+              escapeHtml(board.dataset.trays || 'Pack into trays') + '</button>'
+            : '') +
+        '<button type="button" class="btn" data-act="allocate" data-method="standing">' +
+        escapeHtml(board.dataset.standingAim || 'Aim at standing') + '</button>' +
+        '</div>' +
+        '<div class="pickup-sheet-foot">' +
+        '<button type="button" class="btn" data-act="snap-need">' + escapeHtml(board.dataset.snapNeed || 'Cover supposed') + '</button>' +
+        '<button type="button" class="btn" data-act="reset">' + escapeHtml(board.dataset.reset || 'Reset') + '</button>' +
+        '<button type="button" class="btn btn-primary" data-act="save" ' + (canSave ? '' : 'disabled') + '>' +
+        escapeHtml(board.dataset.savePlan || 'Save moves') + '</button>' +
+        '</div>';
+    if (state.focusCustomerId) {
+        const focused = sheet.querySelector('[data-customer="' + state.focusCustomerId + '"]');
+        if (focused && focused.scrollIntoView) {
+            focused.scrollIntoView({ block: 'nearest' });
+        }
+    }
+}
+
+function pickupSheetFindStore(driverId, customerId) {
+    const driver = pickupSheetState && pickupSheetState.drivers.find(item => item.id === Number(driverId));
+    if (!driver) return null;
+    return driver.stores.find(store => store.customer_id === Number(customerId)) || null;
+}
+
+function pickupSheetAllocate(method) {
+    if (!pickupSheetState) return;
+    pickupRebalance({
+        op: 'allocate',
+        product_id: pickupSheetState.productId,
+        product_ids: JSON.stringify([pickupSheetState.productId]),
+        method: method,
+        tray_size: Number(pickupSheetState.tray) || 0
+    });
+}
+
+function pickupScopeAllocate(method) {
+    const ids = pickupVisibleProductIds();
+    if (!ids.length) return;
+    pickupRebalance({
+        op: 'allocate',
+        product_ids: JSON.stringify(ids),
+        method: method
+    });
+}
+
+function openPickupStoreSheet(anchor, storeId, driverId) {
+    const board = document.getElementById('pickup-manifest-board');
+    const store = pickupVisibleStoreRows().find(item => Number(item.customer_id) === Number(storeId));
+    if (!board || !store) return;
+    let cell = (store.cells || []).find(item => Number(item.driver_id) === Number(driverId));
+    if (!cell || !(cell.products || []).length) {
+        cell = (store.cells || []).find(item => (item.products || []).length) || { products: [], driver_id: driverId };
+        driverId = Number(cell.driver_id) || Number(driverId) || 0;
+    }
+    pickupSheetState = { kind: 'store', productId: 0, hand: 0, store: store, driverId: Number(driverId), products: cell.products || [] };
+    const root = document.getElementById('pickup-sheet-root');
+    const sheet = document.getElementById('pickup-sheet');
+    if (!root || !sheet) return;
+    const alreadyOpen = !root.hidden;
+    const driverName = ((pickupGrid && pickupGrid.drivers) || []).find(d => Number(d.id) === Number(driverId));
+    const rows = (cell.products || []).map(item => {
+        const locked = !!item.locked;
+        return '<div class="pickup-store-sku-row">' +
+            '<button type="button" class="pickup-store-sku" data-act="open-sku" data-product="' +
+            escapeHtml(String(item.product_id)) + '" data-driver="' + escapeHtml(String(driverId)) +
+            '" data-customer="' + escapeHtml(String(store.customer_id)) + '">' +
+            '<span>' + escapeHtml(item.name || '') + '</span>' +
+            (item.expected_qty ? '<small>' + escapeHtml(String(item.expected_qty)) + '</small>' : '') +
+            '</button>' +
+            '<div class="pickup-stepper">' +
+            '<button type="button" class="pickup-step" data-act="sku-bump" data-delta="-1" data-product="' +
+            escapeHtml(String(item.product_id)) + '" data-customer="' + escapeHtml(String(store.customer_id)) + '" ' +
+            (locked || !(item.quantity > 0) ? 'disabled' : '') + '>−</button>' +
+            '<strong>' + escapeHtml(String(item.quantity || 0)) + '</strong>' +
+            '<button type="button" class="pickup-step" data-act="sku-bump" data-delta="1" data-product="' +
+            escapeHtml(String(item.product_id)) + '" data-customer="' + escapeHtml(String(store.customer_id)) + '" ' +
+            (locked ? 'disabled' : '') + '>+</button>' +
+            '</div></div>';
+    }).join('');
+    sheet.innerHTML =
+        '<header class="pickup-sheet-head"><div><p class="pickup-sheet-kicker">' +
+        escapeHtml(board.dataset.storeSheet || 'Store × driver') + '</p><h3>' +
+        escapeHtml(store.name || '') + (driverName ? ' · ' + escapeHtml(driverName.name) : '') +
+        '</h3></div><button type="button" class="pickup-sheet-x" data-act="close">' +
+        escapeHtml(board.dataset.sheetClose || 'Close') + '</button></header>' +
+        '<p class="pickup-sheet-trail">' + escapeHtml(board.dataset.storeEdit || 'Tap − / + to move pieces for this shop. Tap the name for the full product.') + '</p>' +
+        '<div class="pickup-sheet-body pickup-store-sku-list">' +
+        (rows || '<p class="pickup-sheet-empty">' + escapeHtml(board.dataset.noStops || '') + '</p>') +
+        '</div>';
+    if (alreadyOpen) {
+        root.hidden = false;
+        document.body.classList.add('pickup-sheet-open');
+        return;
+    }
+    placePickupSheet(anchor);
+}
+
+function pickupAdjustStoreProduct(productId, customerId, delta) {
+    const gridRow = ((pickupGrid && pickupGrid.rows) || []).find(item => Number(item.product_id) === Number(productId));
+    const board = document.getElementById('pickup-manifest-board');
+    const status = document.getElementById('pickup-board-status');
+    if (!gridRow || !delta) return;
+    const clone = pickupSheetClone(gridRow, (pickupGrid && pickupGrid.drivers) || [], 0, customerId);
+    const all = [];
+    clone.drivers.forEach(driver => driver.stores.forEach(store => all.push(store)));
+    const target = all.find(store => store.customer_id === Number(customerId) && !store.locked);
+    if (!target) {
+        if (status) status.textContent = (board && board.dataset.locked) || 'Locked';
+        return;
+    }
+    const others = all.filter(store => store !== target && !store.locked);
+    if (delta > 0) {
+        let need = delta;
+        others.slice().sort((a, b) => {
+            const ae = a.expected ? a.draft - a.expected : a.draft;
+            const be = b.expected ? b.draft - b.expected : b.draft;
+            return be - ae;
+        }).forEach(store => {
+            if (need <= 0 || store.draft <= 0) return;
+            const take = Math.min(need, store.draft);
+            store.draft -= take;
+            target.draft += take;
+            need -= take;
+        });
+        if (need > 0) {
+            if (status) status.textContent = (board && board.dataset.needPlace) || 'No unlocked pieces left to move here.';
+            return;
+        }
+    } else {
+        const give = Math.min(-delta, target.draft);
+        if (give <= 0) return;
+        const receiver = others.slice().sort((a, b) => {
+            const ae = a.expected ? a.draft - a.expected : 0;
+            const be = b.expected ? b.draft - b.expected : 0;
+            return ae - be;
+        })[0];
+        if (!receiver) {
+            if (status) status.textContent = (board && board.dataset.needPlace) || 'Nowhere else to place these pieces.';
+            return;
+        }
+        target.draft -= give;
+        receiver.draft += give;
+    }
+    const lines = [];
+    clone.drivers.forEach(driver => {
+        driver.stores.forEach(store => {
+            lines.push({ customer_id: store.customer_id, quantity: store.draft });
+        });
+    });
+    pickupRebalance({
+        op: 'apply_plan',
+        product_id: productId,
+        lines: JSON.stringify(lines)
+    }, { keepSheet: true });
+}
+
+function pickupSheetActStore(act, dataset) {
+    if (act === 'close') return closePickupSheet();
+    if (act === 'sku-bump') {
+        pickupAdjustStoreProduct(Number(dataset.product), Number(dataset.customer), Number(dataset.delta) || 0);
+        return;
+    }
+    if (act === 'open-sku') {
+        const productId = Number(dataset.product);
+        const driverId = Number(dataset.driver);
+        const customerId = Number(dataset.customer) || (pickupSheetState.store && pickupSheetState.store.customer_id) || 0;
+        const gridRow = ((pickupGrid && pickupGrid.rows) || []).find(item => Number(item.product_id) === productId);
+        if (!gridRow) return;
+        pickupSheetState = pickupSheetClone(gridRow, (pickupGrid && pickupGrid.drivers) || [], driverId, customerId);
+        renderPickupSheet();
+        const sheet = document.getElementById('pickup-sheet');
+        if (sheet) {
+            sheet.style.maxHeight = (window.innerHeight - 24) + 'px';
+        }
+    }
+}
+
+function pickupSheetTake(driver, count, label) {
+    const taken = pickupSheetTakeFromStores(pickupSheetUnlocked(driver), count);
+    if (taken <= 0) return;
+    pickupSheetState.hand += taken;
+    pickupSheetState.source = (label || driver.name) + ' ' + taken;
+    pickupSheetState.dest = null;
+    pickupSheetState.focusDriverId = driver.id;
+}
+
+function pickupSheetPlace(driver, count, label) {
+    const placed = pickupSheetPlaceOnStores(pickupSheetUnlocked(driver), Math.min(count, pickupSheetState.hand));
+    if (placed <= 0) return;
+    pickupSheetState.hand -= placed;
+    pickupSheetState.dest = (label || driver.name) + ' ' + placed;
+    pickupSheetState.focusDriverId = driver.id;
+}
+
+function pickupSheetAct(act, dataset) {
+    if (!pickupSheetState) return;
+    if (pickupSheetState.kind === 'store') {
+        pickupSheetActStore(act, dataset);
+        return;
+    }
+    const driver = pickupSheetState.drivers.find(item => item.id === Number(dataset.driver));
+    if (act === 'close') return closePickupSheet();
+    if (act === 'reset') {
+        pickupSheetState.hand = 0;
+        pickupSheetState.source = null;
+        pickupSheetState.dest = null;
+        pickupSheetState.drivers.forEach(item => item.stores.forEach(store => { store.draft = store.origin; }));
+        renderPickupSheet();
+        return;
+    }
+    if (act === 'save') return savePickupSheet();
+    if (act === 'allocate') return pickupSheetAllocate(dataset.method || 'supposed');
+    if (act === 'chunk') {
+        pickupSheetState.chunk = dataset.chunk || '1';
+        renderPickupSheet();
+        return;
+    }
+    if (act === 'all-stops') {
+        pickupSheetState.showAllStops = !pickupSheetState.showAllStops;
+        renderPickupSheet();
+        return;
+    }
+    if (act === 'snap-need') {
+        pickupSheetState.drivers.forEach(item => {
+            pickupSheetUnlocked(item).forEach(store => {
+                if (store.expected > 0 && store.draft > store.expected) {
+                    pickupSheetApplyDraft(store, store.expected);
+                }
+            });
+        });
+        pickupSheetState.drivers.forEach(item => {
+            pickupSheetUnlocked(item).forEach(store => {
+                if (store.expected > 0 && store.draft < store.expected && pickupSheetState.hand > 0) {
+                    pickupSheetApplyDraft(store, Math.min(store.expected, store.draft + pickupSheetState.hand));
+                }
+            });
+        });
+        renderPickupSheet();
+        return;
+    }
+    if (!driver) return;
+    if (act === 'store-take') {
+        const store = pickupSheetFindStore(driver.id, dataset.customer);
+        if (!store) return;
+        pickupSheetApplyDraft(store, store.draft - pickupSheetChunkSize());
+    } else if (act === 'store-place') {
+        const store = pickupSheetFindStore(driver.id, dataset.customer);
+        if (!store) return;
+        pickupSheetApplyDraft(store, store.draft + pickupSheetChunkSize());
+    } else if (act === 'store-need') {
+        const store = pickupSheetFindStore(driver.id, dataset.customer);
+        if (!store || store.expected <= 0) return;
+        pickupSheetApplyDraft(store, store.expected);
+    } else if (act === 'driver-take') {
+        pickupSheetTake(driver, pickupSheetChunkSize(), driver.name);
+    } else if (act === 'driver-take-all') {
+        const all = pickupSheetUnlocked(driver).reduce((n, store) => n + store.draft, 0);
+        pickupSheetTake(driver, all, driver.name);
+    } else if (act === 'driver-place') {
+        pickupSheetPlace(driver, pickupSheetChunkSize(), driver.name);
+    } else if (act === 'driver-place-all') {
+        pickupSheetPlace(driver, pickupSheetState.hand, driver.name);
+    } else if (act === 'driver-surplus') {
+        pickupSheetUnlocked(driver).forEach(store => {
+            if (store.expected > 0 && store.draft > store.expected) {
+                pickupSheetApplyDraft(store, store.expected);
+            }
+        });
+        pickupSheetState.focusDriverId = driver.id;
+    } else if (act === 'driver-fill') {
+        pickupSheetUnlocked(driver).forEach(store => {
+            if (store.expected > 0 && store.draft < store.expected && pickupSheetState.hand > 0) {
+                pickupSheetApplyDraft(store, Math.min(store.expected, store.draft + pickupSheetState.hand));
+            }
+        });
+        pickupSheetState.focusDriverId = driver.id;
+    }
+    renderPickupSheet();
+}
+
+function placePickupSheet(anchor) {
+    const root = document.getElementById('pickup-sheet-root');
+    const sheet = document.getElementById('pickup-sheet');
+    if (!root || !sheet) return;
+    root.hidden = false;
+    document.body.classList.add('pickup-sheet-open');
+    if (!pickupSheetState || pickupSheetState.kind !== 'store') {
+        renderPickupSheet();
+    }
+    const width = Math.min(720, window.innerWidth - 24);
+    sheet.style.width = width + 'px';
+    const rect = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { top: 80, bottom: 80, left: 24, right: 24 };
+    const height = Math.min(sheet.offsetHeight || 480, window.innerHeight - 24);
+    let top = rect.bottom + 10;
+    if (top + height > window.innerHeight - 12) {
+        top = Math.max(12, rect.top - height - 10);
+    }
+    if (top + height > window.innerHeight - 12) {
+        top = Math.max(12, (window.innerHeight - height) / 2);
+    }
+    let left = rect.left;
+    if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+    if (left < 12) left = 12;
+    sheet.style.top = Math.round(top) + 'px';
+    sheet.style.left = Math.round(left) + 'px';
+    sheet.style.maxHeight = (window.innerHeight - 24) + 'px';
+}
+
+function openPickupSheet(anchor, focusDriverId) {
+    const board = document.getElementById('pickup-manifest-board');
+    const row = anchor && anchor.closest ? anchor.closest('tr') : null;
+    if (!board || !row) return;
+    const productId = Number(row.dataset.productId);
+    const gridRow = ((pickupGrid && pickupGrid.rows) || []).find(item => Number(item.product_id) === productId);
+    if (!gridRow) return;
+    pickupSheetState = pickupSheetClone(gridRow, (pickupGrid && pickupGrid.drivers) || [], focusDriverId);
+    placePickupSheet(anchor);
+}
+
+function closePickupSheet() {
+    pickupSheetState = null;
+    const root = document.getElementById('pickup-sheet-root');
+    if (root) root.hidden = true;
+    document.body.classList.remove('pickup-sheet-open');
+    renderPickupBoard();
+}
+
+function savePickupSheet() {
+    const board = document.getElementById('pickup-manifest-board');
+    const status = document.getElementById('pickup-board-status');
+    if (!pickupSheetState || pickupSheetState.kind === 'store') return;
+    if (pickupSheetState.hand > 0) {
+        if (status) status.textContent = (board && board.dataset.needPlace) || 'Place the pieces you picked up before saving.';
+        return;
+    }
+    const lines = [];
+    pickupSheetState.drivers.forEach(driver => {
+        driver.stores.forEach(store => {
+            lines.push({ customer_id: store.customer_id, quantity: store.draft });
+        });
+    });
+    pickupRebalance({
+        op: 'apply_plan',
+        product_id: pickupSheetState.productId,
+        lines: JSON.stringify(lines)
+    });
+}
+
+function pickupRebalance(fields, options) {
+    const board = document.getElementById('pickup-manifest-board');
+    const status = document.getElementById('pickup-board-status');
+    const dateEl = document.getElementById('tracking-date');
+    const keepSheet = options && options.keepSheet === true;
+    if (board && board.dataset.pickupBusy === '1') return;
+    if (board) board.dataset.pickupBusy = '1';
+    board && board.querySelectorAll('[data-act="allocate-scope"]').forEach(btn => { btn.disabled = true; });
+    const formData = new FormData();
+    formData.append('action', 'pickup_rebalance');
+    formData.append('date', dateEl ? dateEl.value : '');
+    formData.append('csrf_token', pickupCsrfToken());
+    Object.keys(fields).forEach(key => formData.append(key, String(fields[key])));
+    fetch(window.location.pathname + window.location.search, { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': pickupCsrfToken() } })
+        .then(async response => {
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data || !data.success) {
+                throw new Error((data && data.error) || 'Could not update pickup');
+            }
+            return data;
+        })
+        .then(() => {
+            if (!keepSheet) closePickupSheet();
+            if (status) status.textContent = (board && board.dataset.rebalanced) || 'Updated.';
+            if (typeof loadDeliveries === 'function') loadDeliveries({ background: true, skipMap: true });
+        })
+        .catch(error => {
+            if (status) status.textContent = error.message || 'Could not update pickup';
+        })
+        .finally(() => {
+            if (board) board.dataset.pickupBusy = '0';
+            board && board.querySelectorAll('[data-act="allocate-scope"]').forEach(btn => { btn.disabled = false; });
+        });
+}
+
+function savePickupPackUnits(input) {
+    const row = input.closest('tr');
+    const board = document.getElementById('pickup-manifest-board');
+    const status = document.getElementById('pickup-board-status');
+    if (!row || !board) return;
+    const productId = Number(row.dataset.productId);
+    const trayInput = row.querySelector('input[data-field="tray"]');
+    const boxInput = row.querySelector('input[data-field="box"]');
+    const formData = new FormData();
+    formData.append('action', 'save_pack_units');
+    formData.append('product_id', String(productId));
+    formData.append('pieces_per_tray', trayInput ? trayInput.value : '');
+    formData.append('pieces_per_box', boxInput ? boxInput.value : '');
+    formData.append('csrf_token', pickupCsrfToken());
+    fetch(window.location.pathname + window.location.search, { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': pickupCsrfToken() } })
+        .then(async response => {
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data || !data.success) {
+                throw new Error((data && data.error) || 'Could not save pack sizes');
+            }
+            return data;
+        })
+        .then(data => {
+            const saved = data.product || {};
+            (pickupGrid.rows || []).forEach(gridRow => {
+                if (Number(gridRow.product_id) !== productId) return;
+                gridRow.pieces_per_tray = saved.pieces_per_tray;
+                gridRow.pieces_per_box = saved.pieces_per_box;
+            });
+            if (status) status.textContent = board.dataset.saved || 'Saved.';
+            renderPickupBoard();
+        })
+        .catch(error => {
+            if (status) status.textContent = error.message || 'Could not save pack sizes';
+        });
 }
 
 function pickupManifestHtml(listEl, driverData) {
@@ -1626,6 +2612,78 @@ function escapeHtml(value) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.pickup-unit-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const board = document.getElementById('pickup-manifest-board');
+            if (!board) return;
+            board.dataset.unit = btn.dataset.unit || 'pieces';
+            document.querySelectorAll('.pickup-unit-btn').forEach(other => {
+                other.classList.toggle('is-active', other === btn);
+            });
+            renderPickupBoard();
+        });
+    });
+
+    const pickupTools = document.getElementById('pickup-board-tools');
+    if (pickupTools) {
+        pickupTools.addEventListener('click', function(event) {
+            const btn = event.target.closest('[data-act]');
+            if (!btn || !pickupTools.contains(btn)) return;
+            const act = btn.dataset.act;
+            if (act === 'view') {
+                pickupView = btn.dataset.view === 'store' ? 'store' : 'product';
+                renderPickupBoard();
+                return;
+            }
+            if (act === 'family') {
+                pickupFamily = btn.dataset.family || 'all';
+                renderPickupBoard();
+                return;
+            }
+            if (act === 'allocate-scope') {
+                pickupScopeAllocate(btn.dataset.method || 'supposed');
+            }
+        });
+    }
+
+    const pickupRoot = document.getElementById('pickup-sheet-root');
+    if (pickupRoot) {
+        pickupRoot.addEventListener('click', function(event) {
+            if (event.target.closest('.pickup-sheet-backdrop')) {
+                closePickupSheet();
+                return;
+            }
+            const actionBtn = event.target.closest('[data-act]');
+            if (!actionBtn || !pickupRoot.contains(actionBtn)) return;
+            if (actionBtn.matches('input')) return;
+            pickupSheetAct(actionBtn.dataset.act, actionBtn.dataset);
+        });
+        pickupRoot.addEventListener('input', function(event) {
+            const slider = event.target.closest('.pickup-slider');
+            if (!slider || !pickupSheetState) return;
+            const store = pickupSheetFindStore(slider.dataset.driver, slider.dataset.customer);
+            if (!store) return;
+            pickupSheetApplyDraft(store, Number(slider.value) || 0);
+            const strong = slider.closest('.pickup-sheet-store-controls') && slider.closest('.pickup-sheet-store-controls').querySelector('strong');
+            if (strong) strong.textContent = String(store.draft);
+            const trail = document.querySelector('.pickup-sheet-trail');
+            const board = document.getElementById('pickup-manifest-board');
+            if (trail && board) {
+                trail.classList.toggle('is-holding', pickupSheetState.hand > 0);
+                trail.innerHTML = pickupSheetLabel(board);
+            }
+        });
+        pickupRoot.addEventListener('change', function(event) {
+            if (!event.target.closest('.pickup-slider')) return;
+            renderPickupSheet();
+        });
+    }
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && pickupSheetState) {
+            closePickupSheet();
+        }
+    });
+
     document.getElementById('tracking-date').addEventListener('change', loadDeliveries);
 
     document.getElementById('select-all-drivers').addEventListener('change', function() {
@@ -2167,6 +3225,549 @@ document.addEventListener('DOMContentLoaded', function() {
     font-size: 12px;
     font-weight: 600;
     color: #1f6f4a;
+}
+
+.pickup-board {
+    margin: 0 0 16px;
+    padding: 14px 16px 16px;
+    border: 1px solid #b8d8c2;
+    border-radius: 12px;
+    background: #f2fbf4;
+}
+
+.pickup-board-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.pickup-board-kicker {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #1f6637;
+}
+
+.pickup-board h2 {
+    margin: 2px 0 4px;
+    font-size: 1.15rem;
+}
+
+.pickup-board-help {
+    margin: 0;
+    max-width: 52rem;
+    color: #536258;
+    font-size: 13px;
+}
+
+.pickup-board-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 10px 0 12px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #f2fbf4;
+    padding: 4px 0 10px;
+}
+
+.pickup-view-toggle,
+.pickup-family-row,
+.pickup-board-methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pickup-view-btn,
+.pickup-family {
+    border: 1px solid #b8d8c2;
+    background: #fff;
+    border-radius: 999px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 36px;
+}
+
+.pickup-view-btn.is-active,
+.pickup-family.is-active {
+    background: #1f6f4a;
+    color: #fff;
+    border-color: #1f6f4a;
+}
+
+.pickup-scope-help {
+    margin: 0;
+    color: #536258;
+    font-size: 12px;
+}
+
+.pickup-store-sku-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px 16px;
+}
+
+.pickup-store-sku-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pickup-store-sku {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex: 1;
+    text-align: left;
+    border: 1px solid #d5e6db;
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    min-height: 44px;
+}
+
+.pickup-store-sku small {
+    color: #6a7c70;
+}
+
+.pickup-store-btn {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 650;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    padding: 4px 0;
+}
+
+.pickup-store-btn:hover,
+.pickup-store-btn:focus {
+    color: #1f6637;
+    text-decoration: underline;
+}
+
+.pickup-unit-toggle {
+    display: flex;
+    gap: 6px;
+}
+
+.pickup-unit-btn {
+    border: 1px solid #1f6f4a;
+    background: #fff;
+    color: #1f6f4a;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.pickup-unit-btn.is-active {
+    background: #1f6f4a;
+    color: #fff;
+}
+
+.pickup-board-status {
+    min-height: 1.2em;
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #1f6f4a;
+}
+
+.pickup-table-scroll {
+    overflow-x: auto;
+}
+
+.pickup-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    min-width: 640px;
+}
+
+.pickup-table th,
+.pickup-table td {
+    border: 1px solid #d7e6db;
+    padding: 6px 8px;
+    text-align: right;
+    font-size: 13px;
+}
+
+.pickup-table th[scope="col"]:first-child,
+.pickup-table th[scope="row"] {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: #fff;
+    z-index: 1;
+}
+
+.pickup-table thead th {
+    background: #e8f6ed;
+    color: #1f6637;
+}
+
+.pickup-qty {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.pickup-qty--total {
+    background: #f7fbf8;
+}
+
+.pickup-per-input {
+    width: 4.5rem;
+    padding: 4px 6px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+}
+
+.pickup-cell-btn {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.pickup-cell-btn:hover,
+.pickup-cell-btn:focus {
+    border-color: #1f6637;
+    background: #f2fbf4;
+}
+
+.pickup-product-btn {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 650;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+}
+
+.pickup-product-btn:hover,
+.pickup-product-btn:focus {
+    color: #1f6637;
+    text-decoration: underline;
+}
+
+body.pickup-sheet-open {
+    overflow: hidden;
+}
+
+.pickup-sheet-root[hidden] {
+    display: none !important;
+}
+
+.pickup-sheet-root {
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+}
+
+.pickup-sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    background: rgba(18, 42, 28, 0.38);
+    cursor: pointer;
+}
+
+.pickup-sheet {
+    position: fixed;
+    z-index: 12001;
+    display: flex;
+    flex-direction: column;
+    max-width: calc(100vw - 24px);
+    overflow: hidden;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(18, 42, 28, 0.28);
+    color: #24352b;
+}
+
+.pickup-sheet-head {
+    position: relative;
+    padding: 16px 44px 8px 18px;
+    border-bottom: 1px solid #e3efe7;
+    background: linear-gradient(180deg, #f3fbf6, #fff);
+}
+
+.pickup-sheet-kicker {
+    margin: 0;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #5d7a68;
+}
+
+.pickup-sheet-head h3 {
+    margin: 2px 0 4px;
+    font-size: 1.2rem;
+}
+
+.pickup-sheet-fixed {
+    margin: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #1f6637;
+}
+
+.pickup-sheet-x {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 999px;
+    background: #eef6f1;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #355544;
+}
+
+.pickup-sheet-trail {
+    margin: 0;
+    padding: 10px 18px;
+    font-size: 0.95rem;
+    background: #f7fbf8;
+    border-bottom: 1px solid #e3efe7;
+}
+
+.pickup-sheet-trail.is-holding {
+    background: #fff6e8;
+    color: #7a4b00;
+    font-weight: 650;
+}
+
+.pickup-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 14px 16px;
+    overflow: auto;
+    max-height: min(58vh, 520px);
+}
+
+.pickup-sheet-driver {
+    border: 1px solid #d7e8dd;
+    border-radius: 14px;
+    padding: 10px;
+    background: #fbfefc;
+}
+
+.pickup-sheet-driver.is-focus {
+    border-color: #1f6637;
+    box-shadow: 0 0 0 2px rgba(31, 102, 55, 0.12);
+}
+
+.pickup-sheet-driver.is-down {
+    background: #fff8f4;
+    border-color: #e8c4b0;
+}
+
+.pickup-sheet-driver.is-up {
+    background: #f1faf4;
+    border-color: #9fd0b0;
+}
+
+.pickup-sheet-driver header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pickup-sheet-driver header span {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.pickup-sheet-store {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 8px;
+    border-radius: 10px;
+}
+
+.pickup-sheet-store.is-focus-store {
+    outline: 2px solid #1f6637;
+    background: #eef8f1;
+}
+
+.pickup-sheet-store.is-down {
+    background: #fdece4;
+}
+
+.pickup-sheet-store.is-up {
+    background: #dff6e8;
+}
+
+.pickup-sheet-store.is-target {
+    outline: 2px dashed #1f6637;
+}
+
+.pickup-sheet-store.is-locked {
+    opacity: 0.6;
+}
+
+.pickup-sheet-store.is-short {
+    box-shadow: inset 3px 0 0 #c47a12;
+}
+
+.pickup-sheet-store.is-over {
+    box-shadow: inset 3px 0 0 #2a8f4c;
+}
+
+.pickup-sheet-store {
+    flex-wrap: wrap;
+}
+
+.pickup-sheet-store-copy {
+    flex: 1 1 8rem;
+    min-width: 0;
+}
+
+.pickup-sheet-hint {
+    margin: 2px 0 0;
+    font-size: 0.75rem;
+    color: #5d7a68;
+}
+
+.pickup-sheet-store-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.pickup-slider {
+    width: 8.5rem;
+    accent-color: #1f6637;
+}
+
+.pickup-chunk-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 16px 0;
+}
+
+.pickup-chunk {
+    border: 1px solid #c3d9cb;
+    background: #fff;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.pickup-chunk.is-active {
+    background: #1f6637;
+    border-color: #1f6637;
+    color: #fff;
+}
+
+.pickup-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pickup-stepper strong {
+    min-width: 1.6rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.pickup-step {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #c3d9cb;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.pickup-step:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.pickup-delta--up { color: #157a3a; }
+.pickup-delta--down { color: #b5471b; }
+
+.pickup-sheet-driver-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pickup-mini {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+}
+
+.pickup-mini--place {
+    background: #e8f6ed;
+    border-color: #9fd0b0;
+}
+
+.pickup-sheet-methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px 0;
+}
+
+.pickup-surprise {
+    background: #fff6e8;
+    border-color: #e0b56a;
+    color: #6a4300;
+}
+
+.pickup-sheet-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px 16px;
+    border-top: 1px solid #e3efe7;
+}
+
+.pickup-sheet-empty {
+    margin: 0;
+    color: #6a7c70;
+    font-size: 0.9rem;
 }
 
 .status-item--cash .status-value {

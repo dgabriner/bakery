@@ -501,6 +501,87 @@ function bakery_portal_require_customer(PDO $db) {
 }
 
 /**
+ * Portal-home SF Baker bridge POST handler (PRG).
+ *
+ * The quiet bridge card posts action=enable_sfb_baker back to
+ * customer_portal.php; call this before any output on that page. CSRF is
+ * required; a refusal redirects home with nothing changed.
+ */
+function bakery_portal_handle_sfb_bridge_post(PDO $db) {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST'
+        || ($_POST['action'] ?? '') !== 'enable_sfb_baker') {
+        return;
+    }
+    bakery_require_csrf();
+    $customer = bakery_portal_require_customer($db);
+    require_once __DIR__ . '/sf_baker.php';
+    $enabled = bakery_sfb_enable_for_customer($db, (int)$customer['id']);
+    header('Location: ' . BASE_URL . 'customer_portal.php'
+        . ($enabled ? '?sfb_bridge=done' : ''));
+    exit;
+}
+
+/**
+ * Whether the quiet SF Baker bridge card may show for this portal customer:
+ * schema ready, flag still off, and not a synthetic baker. Degrades to
+ * hidden when the columns are missing rather than erroring.
+ */
+function bakery_portal_sfb_bridge_eligible(PDO $db, array $customer) {
+    require_once __DIR__ . '/sf_baker.php';
+    try {
+        if (!column_exists($db, 'customers', 'sf_baker_enabled')) {
+            return false;
+        }
+        $select = 'SELECT sf_baker_enabled';
+        if (bakery_sfb_origin_column_ready($db)) {
+            $select .= ', sfb_origin';
+        }
+        $stmt = $db->prepare(
+            $select . '
+             FROM customers WHERE id = ? AND portal_enabled = 1 AND is_active = 1 LIMIT 1'
+        );
+        $stmt->execute([(int)$customer['id']]);
+        $row = $stmt->fetch();
+        if (!$row || (int)$row['sf_baker_enabled'] === 1) {
+            return false;
+        }
+        return !bakery_sfb_is_synthetic($row);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Render the quiet SF Baker bridge card (or its done flash) on the wholesale
+ * portal home. Echoes nothing when the customer is not eligible.
+ */
+function bakery_portal_sfb_bridge_card(PDO $db, array $customer) {
+    require_once __DIR__ . '/sf_baker.php';
+    if (($_GET['sfb_bridge'] ?? '') === 'done') {
+        echo '<section class="card" style="background:var(--ok-bg,#f0fdf4);border-left:4px solid var(--ok,#16a34a)">'
+            . '<div class="card-body" style="padding:14px 16px">'
+            . '<strong>' . htmlspecialchars(bakery_t('sfb.bridge_done'), ENT_QUOTES, 'UTF-8') . '</strong>'
+            . '</div></section>';
+        return;
+    }
+    if (!bakery_portal_sfb_bridge_eligible($db, $customer)) {
+        return;
+    }
+    echo '<section class="card" style="border-left:4px solid var(--accent,#b45309)">'
+        . '<div class="card-body" style="padding:14px 16px">'
+        . '<h2 style="margin:0 0 4px;font-size:1.02rem;font-weight:600">'
+        . htmlspecialchars(bakery_t('sfb.bridge_title'), ENT_QUOTES, 'UTF-8') . '</h2>'
+        . '<p style="margin:0 0 12px;color:var(--muted);font-size:.88rem">'
+        . htmlspecialchars(bakery_t('sfb.bridge_copy'), ENT_QUOTES, 'UTF-8') . '</p>'
+        . '<form method="post" action="' . htmlspecialchars(BASE_URL . 'customer_portal.php', ENT_QUOTES, 'UTF-8') . '">'
+        . bakery_csrf_field()
+        . '<input type="hidden" name="action" value="enable_sfb_baker">'
+        . '<button type="submit" class="btn btn-secondary" style="min-width:120px">'
+        . htmlspecialchars(bakery_t('sfb.first_run_go'), ENT_QUOTES, 'UTF-8')
+        . '</button></form></div></section>';
+}
+
+/**
  * Resolve unit price for a customer/product pair.
  *
  * @param array $customer Row with id, pricing_tier, default_pan_dulce_price

@@ -56,6 +56,23 @@ assert_eq('question', $note['kind'], 'question note stored');
 $handoff = bakery_agent_homebase_handoff($db, $agent, "1. Investigated homebase\n8. Next: keep using brief", 'tests/run_agent_homebase_tests.php');
 assert_eq('handed_off', $handoff['status'], 'handoff closes the session');
 
+$flattened = "1. Investigated X. 2. Decided Y. 3. Files: a.php. 4. Visible: none."
+    . " 5. Rules kept. 6. Tests: suite 5/5. 7. Questions: none. 8. Next: continue.";
+$flatScore = bakery_agent_homebase_score_handoff($flattened);
+assert_eq(8, $flatScore['score'], 'shell-flattened one-line §10 handoff scores 8/8');
+$linedScore = bakery_agent_homebase_score_handoff("1. A\n2. B\n3. C\n4. D\n5. E\n6. F\n7. G\n8. H");
+assert_eq(8, $linedScore['score'], 'one-field-per-line still scores 8/8');
+$partial = bakery_agent_homebase_score_handoff('1. Read Live rows. 2. No writes. 3. No files.');
+assert_true(!$partial['complete'] && $partial['score'] === 3, 'partial handoff stays incomplete');
+$versionTrap = bakery_agent_homebase_score_handoff('1. Used PHP 5.6 features and route v2. shipped.');
+assert_true(!in_array(5, $versionTrap['present'], true), 'version numbers do not fake field 5');
+
+bakery_agent_homebase_add_note($db, 'coach', 'Coach note body for listing test', 'Coach', $agent);
+$noteList = bakery_agent_homebase_notes($db, 10);
+assert_true(count($noteList) >= 2, 'notes listing returns stored notes');
+$kinds = array_column($noteList, 'kind');
+assert_true(in_array('coach', $kinds, true) && in_array('question', $kinds, true), 'notes listing keeps kinds');
+
 $brief = bakery_agent_homebase_brief($db, $agent);
 assert_true(isset($brief['product'], $brief['unread_required_lessons'], $brief['open_bugs']), 'brief has core keys');
 assert_true(isset($brief['mission_packet'], $brief['doc_trust'], $brief['agent_family']), 'brief is a packed packet');
@@ -99,6 +116,7 @@ assert_true($cli !== false && strpos($cli, 'case \'brief\':') !== false, 'CLI ex
 assert_true(strpos($cli, 'bakery_homebase_durable_connection') !== false, 'CLI hops onto durable staging');
 assert_true(strpos($cli, "case 'tests-for':") !== false || strpos($cli, "'tests-for'") !== false, 'CLI exposes tests-for');
 assert_true(strpos($cli, "'craft'") !== false, 'CLI exposes craft');
+assert_true(strpos($cli, "case 'notes':") !== false, 'CLI exposes notes listing');
 assert_true(is_readable(dirname(__DIR__) . '/docs/AGENT_DEVELOPMENT_MANUAL.md'), 'development manual exists');
 assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/test-gate/SKILL.md'), 'test-gate skill exists');
 assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/sfb-agent/SKILL.md'), 'sfb-agent skill exists');

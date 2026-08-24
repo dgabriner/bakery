@@ -51,9 +51,16 @@ $db->prepare('DELETE FROM customers WHERE name IN (?, ?)')
     ->execute(['SFB Edu Customer A', 'SFB Edu Customer B']);
 // Courses are global content rows; clean our named fixtures too.
 $db->prepare('DELETE FROM sfb_courses WHERE title = ?')->execute(['First Loaf Course']);
+// Demo seed rows (scripts/seed_education_demo.php) would break the exact
+// course-count assertions below; sweep them like our own named fixtures.
+$db->exec("DELETE FROM sfb_lesson_steps WHERE lesson_id IN (SELECT id FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title LIKE 'Demo:%'))");
+$db->exec("DELETE FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title LIKE 'Demo:%')");
+$db->exec("DELETE FROM sfb_courses WHERE title LIKE 'Demo:%'");
 $db->exec('DELETE FROM sfb_invites WHERE label = "Saturday class"');
 // Webhook ledger is global too; drop this suite's deterministic event ids.
 $db->prepare('DELETE FROM square_webhook_events WHERE event_id LIKE ?')->execute(['edu-test-event-%']);
+// Offerings are global as well; drop this suite's named fixtures.
+$db->exec("DELETE FROM sfb_offerings WHERE title IN ('Edu Starter Workshop','Edu Credit Pack','Edu Donation')");
 
 try {
     // ---- Fixture bakers --------------------------------------------------------
@@ -216,6 +223,11 @@ try {
     $assert(bakery_sfb_media_content_type('thing.bin') === 'application/octet-stream', 'unknown extension falls back');
     $assert(strpos(bakery_sfb_media_url('2026/08/a b.png'), 'sfb_media.php?f=') !== false, 'media URL always goes through the gate');
 
+    // Phase labels resolve through i18n keys for every composer phase.
+    $assert(bakery_sfb_phase_label('starter') === 'Starter', 'starter phase resolves via key');
+    $assert(bakery_sfb_phase_label('final') === 'Final', 'final phase resolves via key');
+    $assert(bakery_sfb_phase_label('mix') === 'Mix', 'existing phase keys still resolve');
+
     try {
         bakery_sfb_save_education_media(['error' => UPLOAD_ERR_NO_FILE]);
         $assert(false, 'missing upload rejected');
@@ -314,6 +326,31 @@ try {
         }
     }
 
+    // The lesson step retires once any progress exists on it (Prompt 25 truth).
+    bakery_sfb_toggle_course($db, $courseId); // bring the fixture course back
+    $lessonActionBefore = null;
+    foreach (bakery_sfb_first_run_actions($db, $customerC) as $action) {
+        if ($action['key'] === 'lesson') {
+            $lessonActionBefore = $action;
+        }
+    }
+    $assert($lessonActionBefore !== null && $lessonActionBefore['done'] === false
+        && (int)$lessonActionBefore['lesson_id'] > 0, 'lesson step pending while untouched');
+    $stripLessonSteps = bakery_sfb_lesson_steps($db, (int)$lessonActionBefore['lesson_id']);
+    bakery_sfb_toggle_lesson_progress(
+        $db,
+        $customerC,
+        (int)$lessonActionBefore['lesson_id'],
+        (int)$stripLessonSteps[0]['id']
+    );
+    $lessonActionAfter = null;
+    foreach (bakery_sfb_first_run_actions($db, $customerC) as $action) {
+        if ($action['key'] === 'lesson') {
+            $lessonActionAfter = $action;
+        }
+    }
+    $assert($lessonActionAfter !== null && $lessonActionAfter['done'] === true, 'lesson step retires once progress exists');
+
     // Invites: mint, normalize on lookup, claim exactly once.
     $invite = bakery_sfb_create_invite($db, 'share', 'Saturday class');
     $assert($invite !== null && strpos((string)$invite['code'], 'SFB-') === 0, 'invite minted with SFB- prefix');
@@ -376,11 +413,13 @@ try {
     $assert((int)$attemptOne['price_cents_snapshot'] === 4500 && (string)$attemptOne['offering_title_snapshot'] === 'Sourdough Start Class', 'intent freezes title and price');
 
     // Mocked checkout: intent -> pending with a hosted link.
+    // Square's real create/retrieve response carries payment_link.order_id
+    // (singular) — proven against the sandbox API on staging 2026-08-24.
     $GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null): array {
         return ['payment_link' => [
             'id' => 'PL-TEST-1',
             'url' => 'https://sandbox.square.link/u/test-checkout',
-            'order_ids' => ['ORDER-TEST-1'],
+            'order_id' => 'ORDER-TEST-1',
         ]];
     };
     $checkout = bakery_sfb_create_purchase_checkout($db, $buyOne['purchase_id']);
@@ -437,8 +476,89 @@ try {
     ]);
     $assert(($ignored['unmatched'] ?? false) === true, 'unmatched payment ignored');
 
+    // ---- Offerings v2: donations, credits, Starter Workshop (067) -------------------
+    try {
+        bakery_sfb_create_offering($db, 'Sourdough Start Class', 10);
+        $assert(false, 'duplicate offering title rejected');
+    } catch (InvalidArgumentException $e) {
+        $assert(true, 'duplicate offering title rejected');
+    }
+
+    $workshopId = bakery_sfb_create_offering($db, 'Edu Starter Workshop', 80.00, 'class', 'Hands-on starter class.');
+    $packId = bakery_sfb_create_offering($db, 'Edu Credit Pack', 60.00, 'credits', 'Four credits.', null, 4);
+    $donateId = bakery_sfb_create_offering($db, 'Edu Donation', 25.00, 'donation', 'Keep classes free.');
+    $assert($workshopId > 0 && $packId > 0 && $donateId > 0, 'class, credits, and donation kinds accepted');
+    $packRow = bakery_sfb_offering($db, $packId);
+    $assert((int)$packRow['units'] === 4, 'credit pack stores its units');
+    try {
+        bakery_sfb_create_offering($db, 'Broken Pack', 10.00, 'credits', '', null, null);
+        $assert(false, 'credit pack without units rejected');
+    } catch (InvalidArgumentException $e) {
+        $assert(true, 'credit pack without units rejected');
+    }
+
+    // Buy a credit pack with mocked Square; webhook truth grants units once.
+    $GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null): array {
+        return ['payment_link' => ['id' => 'PL-PACK-1', 'url' => 'https://sandbox.square.link/u/pack', 'order_ids' => ['ORDER-PACK-1']]];
+    };
+    $packBuy = bakery_sfb_buy_offering($db, $customerB, $packId);
+    unset($GLOBALS['bakery_square_api_handler']);
+    $assert(($packBuy['configured'] ?? false) === true, 'credit pack checkout created');
+    $packPurchase = bakery_sfb_purchase($db, $packBuy['purchase_id']);
+    $assert((string)$packPurchase['status'] === 'pending', 'credit pack attempt pending after checkout');
+    bakery_sfb_handle_education_webhook($db, [
+        'event_id' => 'edu-test-event-pack',
+        'type' => 'payment.updated',
+        'data' => ['object' => ['payment' => ['id' => 'PAY-PACK-1', 'order_id' => 'ORDER-PACK-1', 'status' => 'COMPLETED']]],
+    ]);
+    $paidPack = bakery_sfb_purchase($db, $packBuy['purchase_id']);
+    $assert((string)$paidPack['paid_with'] === 'square', 'square channel stamped on pack purchase');
+    $assert(bakery_sfb_credit_balance($db, $customerB) === 4, 'webhook grant gives four credits');
+
+    // Replay must not double-grant.
+    bakery_sfb_handle_education_webhook($db, ['event_id' => 'edu-test-event-pack-2', 'type' => 'payment.updated',
+        'data' => ['object' => ['payment' => ['id' => 'PAY-PACK-1', 'order_id' => 'ORDER-PACK-1', 'status' => 'COMPLETED']]]]);
+    // (different event id so dedupe passes; grant dedupe must hold)
+    $assert(bakery_sfb_credit_balance($db, $customerB) === 4, 'grant replay does not double-issue credits');
+
+    // Spend one credit on the workshop.
+    $spendId = bakery_sfb_pay_with_credit($db, $customerB, $workshopId);
+    $spentPurchase = bakery_sfb_purchase($db, $spendId);
+    $assert((string)$spentPurchase['status'] === 'paid' && (string)$spentPurchase['paid_with'] === 'credit', 'credit spend marks purchase paid with credit channel');
+    $assert(bakery_sfb_credit_balance($db, $customerB) === 3, 'credit balance drops by one');
+    $assert(bakery_sfb_customer_entitled_to($db, $customerB, $workshopId), 'credit-paid purchase grants entitlement');
+
+    // Credits never buy credits or donations.
+    try {
+        bakery_sfb_pay_with_credit($db, $customerB, $donateId);
+        $assert(false, 'credit spend on donation rejected');
+    } catch (InvalidArgumentException $e) {
+        $assert(true, 'credit spend on donation rejected');
+    }
+    try {
+        bakery_sfb_pay_with_credit($db, $customerA, $workshopId);
+        $assert(false, 'credit spend without balance rejected');
+    } catch (InvalidArgumentException $e) {
+        $assert(true, 'credit spend without balance rejected');
+    }
+
+    // Manual staff recording stamps its own channel.
+    $manualBuy = bakery_sfb_buy_offering($db, $customerB, $donateId);
+    $GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null): array {
+        return ['payment_link' => ['id' => 'PL-DON-1', 'url' => 'https://sandbox.square.link/u/don', 'order_ids' => ['ORDER-DON-1']]];
+    };
+    unset($GLOBALS['bakery_square_api_handler']);
+    bakery_sfb_set_purchase_status($db, $manualBuy['purchase_id'], 'canceled');
+    $rebuy = bakery_sfb_buy_offering($db, $customerB, $donateId);
+    bakery_sfb_set_purchase_status($db, $rebuy['purchase_id'], 'paid', null, 'cash at class', 0, 'manual');
+    $manualRow = bakery_sfb_purchase($db, $rebuy['purchase_id']);
+    $assert((string)$manualRow['paid_with'] === 'manual', 'manual recording stamps manual channel');
+    $assert((string)$manualRow['status'] === 'paid', 'manual mark reaches paid');
+
     // ---- Cleanup ----------------------------------------------------------------
     $db->prepare('DELETE FROM customers WHERE id IN (?, ?, ?)')->execute([$customerA, $customerB, $customerC]);
+    $db->prepare('DELETE FROM sfb_offerings WHERE title IN (?, ?, ?)')
+        ->execute(['Edu Starter Workshop', 'Edu Credit Pack', 'Edu Donation']);
     $db->prepare('DELETE FROM sfb_offerings WHERE title = ?')->execute(['Sourdough Start Class']);
 } catch (Throwable $e) {
     echo 'FAIL  unexpected: ' . $e->getMessage() . "\n";

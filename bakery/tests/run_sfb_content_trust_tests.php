@@ -305,4 +305,43 @@ assert_true(strpos(file_get_contents(dirname(__DIR__) . '/sfb_batch.php'), 'sfb_
 assert_true(strpos(file_get_contents(dirname(__DIR__) . '/sfb_dashboard.php'), 'sfb.library_review_open') !== false, 'dashboard offers a last-bake review');
 assert_true(is_file(dirname(__DIR__) . '/docs/sfb_synthetic_eval.md'), 'synthetic eval document exists');
 
+// Synthetics never enroll, hold progress, or pay (bread-education invariant).
+$db->prepare('DELETE FROM customers WHERE name = ?')->execute(['SFB Trust Synthetic']);
+$insTrustSyn = $db->prepare(
+    'INSERT INTO customers (name, phone, address, portal_enabled, sf_baker_enabled, is_active, sfb_origin)
+     VALUES (?, ?, ?, 1, 1, 1, "synthetic")'
+);
+$insTrustSyn->execute(['SFB Trust Synthetic', '555-0199', '9 Trust Way']);
+$syntheticId = (int)$db->lastInsertId();
+
+if (bakery_sfb_learning_ready($db)) {
+    try {
+        bakery_sfb_toggle_lesson_progress($db, $syntheticId, 1, 1);
+        assert_true(false, 'synthetic progress toggle refused');
+    } catch (InvalidArgumentException $e) {
+        assert_true(strpos($e->getMessage(), 'Synthetic') !== false, 'synthetic progress toggle refused');
+    }
+} else {
+    assert_true(true, 'synthetic progress toggle skipped (learning tables absent)');
+}
+
+$trustOfferingId = bakery_sfb_payments_ready($db)
+    ? (int)$db->query('SELECT id FROM sfb_offerings WHERE is_active = 1 ORDER BY id LIMIT 1')->fetchColumn()
+    : 0;
+if ($trustOfferingId > 0) {
+    $GLOBALS['bakery_sfb_payments_disabled'] = true;
+    try {
+        bakery_sfb_buy_offering($db, $syntheticId, $trustOfferingId);
+        assert_true(false, 'synthetic purchase refused');
+    } catch (InvalidArgumentException $e) {
+        assert_true(strpos($e->getMessage(), 'Synthetic') !== false, 'synthetic purchase refused');
+    }
+    unset($GLOBALS['bakery_sfb_payments_disabled']);
+    assert_true(count(bakery_sfb_customer_entitlements($db, $syntheticId)) === 0, 'refused synthetic holds no entitlements');
+} else {
+    assert_true(true, 'synthetic purchase check skipped (no offerings seeded)');
+}
+
+$db->prepare('DELETE FROM customers WHERE name = ?')->execute(['SFB Trust Synthetic']);
+
 $finish();

@@ -34,4 +34,9 @@ foreach (['deploy_status.php', 'migration_status.php', 'schema_status.php'] as $
         exit(1);
     }
 }
+$again = bakery_staging_live_snapshot_files();
+if (array_column($files, 'sha256') !== array_column($again, 'sha256')) {
+    fwrite(STDERR, "FAIL\n - hash cache changed snapshot hashes\n");
+    exit(1);
+}
 echo 'PASS hosted promotion manifest: ' . count($files) . " safe files\n";

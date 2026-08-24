@@ -16,11 +16,13 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/sf_baker.php';
 
 $isStaff = bakery_user_has_role(['administrator', 'manager']);
+$mediaCustomerId = 0;
 if (!$isStaff) {
     // Portal customers with SF Baker access may watch; everyone else bounces.
     require_once __DIR__ . '/includes/customer_portal.php';
     try {
-        bakery_sfb_require_access($db);
+        $mediaCustomer = bakery_sfb_require_access($db);
+        $mediaCustomerId = (int)$mediaCustomer['id'];
     } catch (Throwable $e) {
         header('Location: ' . BASE_URL . 'customer_login.php');
         exit;
@@ -39,6 +41,12 @@ $absolute = $mediaBase . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARA
 $realBase = realpath($mediaBase);
 $realFile = realpath($absolute);
 if ($realBase === false || $realFile === false || strpos($realFile, $realBase) !== 0 || !is_file($realFile)) {
+    http_response_code(404);
+    exit('Not found');
+}
+
+// Paid-class media answers 404 to non-entitled bakers (migration 068).
+if ($mediaCustomerId > 0 && bakery_sfb_media_path_locked($db, $relative, $mediaCustomerId)) {
     http_response_code(404);
     exit('Not found');
 }

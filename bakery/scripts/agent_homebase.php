@@ -45,8 +45,9 @@ Commands:
   bug         Log a durable bug (--title --detail [--severity=watch|critical|broken-window])
   bug-status  Update a bug (--id --status=open|watching|fixed|wont-fix)
   bugs        List bugs
-  note        Insight, question, or coach note (--kind --body [--title])
-  handoff     Close the open session with §10 markdown (--summary or --body, --files)
+   note        Insight, question, or coach note (--kind --body [--title])
+   notes       List insight/question/coach notes (--kind=... [--limit=40])
+   handoff     Close the open session with §10 markdown (--summary or --body, --files)
   sessions    Recent sessions
 
 Options:
@@ -227,6 +228,14 @@ try {
                 $agent
             );
             bakery_agent_cli_emit($note, $json);
+            break;
+        case 'notes':
+            $notes = bakery_agent_homebase_notes($db, isset($args['limit']) ? (int)$args['limit'] : 40);
+            if (isset($args['kind'])) {
+                $kind = (string)$args['kind'];
+                $notes = array_values(array_filter($notes, static fn(array $n): bool => ($n['kind'] ?? '') === $kind));
+            }
+            bakery_agent_cli_emit($notes, $json);
             break;
         case 'handoff':
             $md = trim((string)($args['summary'] ?? $args['body'] ?? ''));

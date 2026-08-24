@@ -110,6 +110,8 @@ def main() -> int:
     parser.add_argument("--to-name", help="Remote filename under SFTP_REMOTE_ROOT (with --from-file)")
     parser.add_argument("--migration-file", help="Upload one approved schema SQL file to Staging's private migration vault")
     parser.add_argument("--run-hosted-stage-migrations", action="store_true", help="Checkpoint and migrate bakerysoftware through the Staging SSH account")
+    parser.add_argument("--stage-tool", action="append", default=[], metavar="LOCAL_PHP",
+                        help="Additional PHP script to upload into stage-tools and run between checkpoint and migrations")
     parser.add_argument("--bootstrap-live-migration-worker", action="store_true", help="Atomically install the owner-approved Live migration wrapper and runtime")
     args = parser.parse_args()
 
@@ -187,10 +189,22 @@ def main() -> int:
             local_root / "scripts" / "run_migrations.php",
             local_root / "scripts" / "prod_db_cli.php",
         ]
+        stage_tools_extra = []
+        for raw in args.stage_tool:
+            path = Path(raw)
+            if not path.is_absolute():
+                path = local_root / path
+            if path.suffix.lower() != ".php" or not path.is_file():
+                raise SystemExit(f"--stage-tool must be an existing .php file: {raw}")
+            if any(tool.samefile(path) for tool in tools):
+                raise SystemExit("--stage-tool cannot replace a built-in hosted tool")
+            stage_tools_extra.append(path)
         if any(not tool.is_file() for tool in tools):
             raise SystemExit("Hosted Staging migration tools are incomplete")
         if args.dry_run:
             print("DRY-RUN  upload private Staging snapshot and migration tools")
+            for extra in stage_tools_extra:
+                print(f"DRY-RUN  stage-tool {extra.name}")
             print("DRY-RUN  checkpoint bakerysoftware, then run --mode=hosted-stage")
             return 0
         client = paramiko.SSHClient()
@@ -211,12 +225,20 @@ def main() -> int:
                 remote_tool = f"{private_dir}/{tool.name}"
                 sftp.put(str(tool), remote_tool)
                 sftp.chmod(remote_tool, 0o600)
-            command = (
-                "umask 077 && "
-                "export BAKERY_HOSTED_STAGE_ROOT=/home/bakeryOS/staging.sourflour.org && "
-                "php /home/bakeryOS/.sourflour-stage-tools/snapshot_dreamhost_staging.php --confirm-snapshot-staging && "
-                "php /home/bakeryOS/.sourflour-stage-tools/run_migrations.php --mode=hosted-stage"
-            )
+            for extra in stage_tools_extra:
+                remote_extra = f"{private_dir}/{extra.name}"
+                sftp.put(str(extra), remote_extra)
+                sftp.chmod(remote_extra, 0o600)
+                print(f"  stage-tool OK  {extra.name}  ({extra.stat().st_size} bytes)")
+            chain = [
+                "umask 077",
+                "export BAKERY_HOSTED_STAGE_ROOT=/home/bakeryOS/staging.sourflour.org",
+                "php /home/bakeryOS/.sourflour-stage-tools/snapshot_dreamhost_staging.php --confirm-snapshot-staging",
+            ]
+            for extra in stage_tools_extra:
+                chain.append(f"php /home/bakeryOS/.sourflour-stage-tools/{extra.name}")
+            chain.append("php /home/bakeryOS/.sourflour-stage-tools/run_migrations.php --mode=hosted-stage")
+            command = " && ".join(chain)
             _stdin, stdout, stderr = client.exec_command(command, timeout=600)
             stdout_text = stdout.read().decode("utf-8", errors="replace").strip()
             stderr_text = stderr.read().decode("utf-8", errors="replace").strip()

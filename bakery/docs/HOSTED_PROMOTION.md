@@ -5,8 +5,8 @@ The normal release workflow is:
 1. Develop locally. Changes may sync to Staging.
 2. Test at `https://staging.sourflour.org/`, including on the phone.
 3. Open **Staging → Manager**. The **Staging → Live** board is at the top.
-4. Do the single **Next** step it names. If Live is behind, apply the exact database migration first. Otherwise send the tested files. Type `confirm` once per queued operation.
-5. Leave the board open. It follows both workers and refreshes the schema comparison after a database update succeeds.
+4. Do the single **Next** step it names. If Live is behind, click the database button. Otherwise click **Send files to Live**. One click queues the job; there is no typed confirm.
+5. After you click, the board follows that worker until it finishes. Refresh the schema comparison yourself if the database card still looks behind after a succeeded update.
 6. Finish only when the database shows **Match** and the file worker shows **Succeeded**.
 7. Open **History** under the two cards only when you need the trail: each send is a collapsed row with time, success or failure, who queued it, and the exact file list or migration id. Filters keep failures easy to find without filling the board.
 
@@ -26,7 +26,7 @@ Production `.env`, databases, `storage/`, uploads, scripts, tests, and documenta
 
 ## Hosted additive database migration
 
-For a new migration, the Staging sync publishes the SQL file to a private Staging vault. Through the existing `bakeryOS` SSH account it takes a verified `bakerysoftware` checkpoint on DreamHost, then applies those same private bytes beside the database. The workstation no longer needs remote MySQL authorization. Migrations `055` and later must pass the shared hosted portability policy before Staging accepts them. After phone acceptance, the Manager board offers a database action only when the schema inventory names one exact, safe migration ID. There is no migration picker and no operator guesswork.
+For a new migration, the Staging sync publishes the SQL file to a private Staging vault. Through the existing `bakeryOS` SSH account it takes a verified `bakerysoftware` checkpoint on DreamHost, then applies those same private bytes beside the database. The workstation no longer needs remote MySQL authorization. Migrations `055` and later must pass the shared hosted portability policy before Staging accepts them. After phone acceptance, the Manager board offers a database action when Live is additively behind. The click queues the remaining safe updates the board already listed. It does not re-fetch Live schema or demand that the posted filename still match a second comparison. There is no migration picker.
 
 Additive migrations are resumable when runtime schema safeguards created an
 object before its ledger row. Each column is a separate statement; duplicate
@@ -42,11 +42,13 @@ Schema compare uses base tables only (not views). View columns such as `v_daily_
 Staging Manager shows a **Staging → Live** board with one Next step. Database states are:
 
 - **Match** — same tables, columns, and indexes.
-- **Live needs an update** — Staging is a strict additive superset.
-- **Stop — mismatch** — Live has extra columns or different types. Extra indexes on Live are shown, but they do not block an additive update.
+- **Live needs an update** — Staging is a strict additive superset. Appending ENUM values (for example `sfb_offerings.kind` gaining `donation` and `credits`) counts as behind, not Stop.
+- **Stop — mismatch** — Live has extra columns or different types. Extra indexes on Live are shown, but they do not block an additive update. Reordered or removed ENUM values still Stop.
 - **Can't compare yet** — Staging could not read Live’s report (missing file, timeout, or refused). Refresh. Waiting does not create the report. A succeeded Live migration is not a schema compare. After a succeeded update, Staging must fetch a fresh Live report (`schema_status.php?refresh=1`); an old cached report will still look behind.
 
 Live caches the schema report for a few minutes so Staging is not blocked on a full `INFORMATION_SCHEMA` scan every click. Staging also keeps a short cache after a successful read.
+
+New `database/schema/NNN_*.sql` files take the next unused number (`php scripts/next_schema_migration.php --name=slug`). Do not reuse 010, 021, 025, 061, 062, or 065 — competing agents already collided there. Do not rename applied files; Live already recorded those ids. Historical pairs stay; 068+ must be unique.
 
 MariaDB DDL is not generally reversible as a transaction. If a migration fails partway through, the worker stops and reports it; it never “fixes” the situation by restoring or importing an entire production database. The recovery path is a reviewed forward migration, using the verified backup only if a separately authorized disaster restore is genuinely needed.
 

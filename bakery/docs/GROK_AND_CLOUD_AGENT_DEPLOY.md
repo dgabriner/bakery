@@ -20,7 +20,7 @@
 | **Local laptop** (`bakerysf_stage_local`) | Danny’s everyday DB + optional SFTP auto-push | You usually do **not** control this |
 | **GitHub** (`dgabriner/bakery`) | Source of truth for application files | Commit and push additive branches |
 | **Hosted Staging** `https://staging.sourflour.org/` | Phone / acceptance site; DB `bakerysoftware` | Get files here via the Git → Staging path (below) |
-| **Live** `https://bakery.sourflour.org/bake/` | Real bakery ops; DB `bakerysf` | **Never** deploy here. Owner uses Staging Manager → **confirm** |
+| **Live** `https://bakery.sourflour.org/bake/` | Real bakery ops; DB `bakerysf` | **Never** deploy here. Owner uses Staging Manager → click the Next button |
 
 Databases, dumps, `.env`, uploads, and SFTP secrets are **not** in Git and must never be committed.
 
@@ -46,20 +46,20 @@ Secrets stay where they already belong: Danny’s machine (desktop auto-push) or
 Edit → test if you can → commit → push branch to GitHub
         → Staging updates from the agreed branch (server-side)
         → humans test Staging (phone)
-        → owner types confirm on Staging Manager → Live
+        → owner clicks the Staging Manager Next button → Live
 ```
 
 ### Why this is safe
 
 1. **Git does not deploy Live.** Pushing cannot change `bakery.sourflour.org/bake` by itself.
-2. **Staging → Live** is a separate hosted board ([HOSTED_PROMOTION.md](HOSTED_PROMOTION.md)): type `confirm`, send files or the named DB migration. No laptop required.
+2. **Staging → Live** is a separate hosted board ([HOSTED_PROMOTION.md](HOSTED_PROMOTION.md)): click the Next button to send files or the named DB migration. No laptop required.
 3. **Whole staging DB copies never overwrite Live.** “Database update” means an approved additive migration, not importing Staging data over production.
 
 ### What “using Git properly” means for you
 
 - Prefer **additive** branches (`codex/…`, `cursor/…`, `grok/…`). Do not rewrite history.
 - **Never** force-push to shared branches. **Never** update Live by pushing `main` or any default branch.
-- Commit **application source only** (PHP, CSS, JS, schema SQL under `database/schema/`, docs as needed).
+- Commit **application source only** (PHP, CSS, JS, schema SQL under `database/schema/`, docs as needed). New schema files must use the next unused `NNN` from `php scripts/next_schema_migration.php --name=slug`. Do not reuse 062 or any other taken prefix.
 - If you add a **new root-level** `.php` page (next to `login.php`), also add its filename to `Get-BakeryDeployRootFiles` in `scripts/deploy_manifest.ps1`. Staging Sync uses that whitelist; a missing name produces a Staging 404 while other files still “sync fine.”
 - New pages often need **new includes** under `includes/`. A Staging **500** with a page that works locally usually means the page uploaded but a `require_once` target did not. Confirm dependencies are on Staging, not only the root PHP file.
 - Secret-scan before commit: no `.env`, dumps, `storage/dumps/`, deploy state, credentials.
@@ -110,7 +110,7 @@ Normal path after Staging looks good:
 
 1. Open **Staging → Manager**.
 2. Follow the **Staging → Live** board **Next** step.
-3. Type `confirm` once for that step (files **or** the named DB update).
+3. Click the button for that step (files **or** the named DB update).
 4. Wait ~1 minute; refresh; board shows Match / needs update / Stop.
 
 Details: [HOSTED_PROMOTION.md](HOSTED_PROMOTION.md), [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md).
@@ -160,7 +160,7 @@ Data/Git plan: [DATA_ENVIRONMENT_STABILIZATION_PLAN.md](DATA_ENVIRONMENT_STABILI
 ## Quick refusal phrases (copy these)
 
 - “I don’t use SFTP. I push Git; Staging pulls or the desktop syncs.”
-- “Git push does not update Live. Live is Staging Manager → confirm only.”
+- “Git push does not update Live. Live is Staging Manager → click the Next button only.”
 - “I won’t take staging or production database passwords.”
 - “I won’t force-push or rewrite shared history.”
 

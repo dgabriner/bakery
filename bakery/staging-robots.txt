@@ -1,0 +1,4 @@
+# Staging is an acceptance environment, not a public site.
+# Served as robots.txt only on staging.sourflour.org (see root .htaccess rewrite).
+User-agent: *
+Disallow: /
