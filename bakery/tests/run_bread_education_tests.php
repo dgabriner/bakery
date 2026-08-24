@@ -555,6 +555,71 @@ try {
     $assert((string)$manualRow['paid_with'] === 'manual', 'manual recording stamps manual channel');
     $assert((string)$manualRow['status'] === 'paid', 'manual mark reaches paid');
 
+    // ---- Course gating lifecycle (migration 068 / bug 6835) ------------------------
+    // Deterministic pre-clean of our global gate fixtures.
+    $db->prepare('DELETE FROM customers WHERE name = ?')->execute(['SFB Edu Gate Stranger']);
+    $db->prepare('DELETE FROM sfb_offerings WHERE title = ?')->execute(['Edu Gate Class']);
+    $db->exec("DELETE FROM sfb_lesson_steps WHERE lesson_id IN (SELECT id FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title = 'Edu Gate Course'))");
+    $db->exec("DELETE FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title = 'Edu Gate Course')");
+    $db->prepare('DELETE FROM sfb_courses WHERE title = ?')->execute(['Edu Gate Course']);
+
+    if (bakery_sfb_gating_ready($db)) {
+        try {
+            $insGate = $db->prepare(
+                'INSERT INTO customers (name, phone, address, portal_enabled, sf_baker_enabled, is_active)
+                 VALUES (?, ?, ?, 1, 1, 1)'
+            );
+            $insGate->execute(['SFB Edu Gate Stranger', '555-0184', '4 Edu Way']);
+            $gateStranger = (int)$db->lastInsertId();
+
+            // Legacy shape: a course with no required offering stays free.
+            $gateCourseId = bakery_sfb_create_course($db, 'Edu Gate Course', 'Gating lifecycle fixture.');
+            $legacyLock = bakery_sfb_course_lock($db, $gateStranger, bakery_sfb_course($db, $gateCourseId));
+            $assert($legacyLock['locked'] === false && $legacyLock['offering'] === null, 'no-offering legacy course stays free');
+
+            $gateLessonId = bakery_sfb_create_lesson($db, $gateCourseId, 'Gate Lesson One', '', '');
+            bakery_sfb_add_lesson_step($db, $gateLessonId, 'Watch the shaping:', 'edu-gate/2026/shaping.mp4', 'video');
+            $gateOfferingId = bakery_sfb_create_offering($db, 'Edu Gate Class', 45.00, 'class', 'Gating lifecycle class.', null);
+
+            // Assigning the gate locks non-entitled bakers and their media.
+            bakery_sfb_set_course_offering($db, $gateCourseId, $gateOfferingId);
+            $gatedCourseRow = bakery_sfb_course($db, $gateCourseId);
+            $strangerLock = bakery_sfb_course_lock($db, $gateStranger, $gatedCourseRow);
+            $assert($strangerLock['locked'] === true && (int)$strangerLock['offering']['id'] === $gateOfferingId,
+                'unentitled baker sees the paywall lock with the offering attached');
+            $assert(bakery_sfb_media_path_locked($db, 'edu-gate/2026/shaping.mp4', $gateStranger) === true,
+                'unentitled baker has lesson media reverse-locked (no content leak)');
+            $assert(count(bakery_sfb_courses_requiring($db, $gateOfferingId)) === 1,
+                'unlock list shows exactly the gated course');
+
+            // Paying unlocks: intent -> paid flips entitlement and opens everything.
+            $gatePurchaseId = bakery_sfb_record_purchase_intent($db, $customerC, $gateOfferingId);
+            $prePaidLock = bakery_sfb_course_lock($db, $customerC, $gatedCourseRow);
+            $assert($prePaidLock['locked'] === true, 'intent-only attempt stays locked');
+            bakery_sfb_set_purchase_status($db, $gatePurchaseId, 'paid', null, 'gating fixture', null);
+            $paidLock = bakery_sfb_course_lock($db, $customerC, $gatedCourseRow);
+            $assert($paidLock['locked'] === false && $paidLock['offering'] !== null, 'entitled customer passes the lock');
+            $assert(bakery_sfb_media_path_locked($db, 'edu-gate/2026/shaping.mp4', $customerC) === false,
+                'entitled customer unlocks lesson media');
+
+            // Detaching the offering returns the course to free for everyone.
+            bakery_sfb_set_course_offering($db, $gateCourseId, 0);
+            $freedGateCourse = bakery_sfb_course($db, $gateCourseId);
+            $assert(bakery_sfb_course_lock($db, $gateStranger, $freedGateCourse)['locked'] === false,
+                'offering detach returns the course to free');
+            $assert(bakery_sfb_media_path_locked($db, 'edu-gate/2026/shaping.mp4', $gateStranger) === false,
+                'detached-course media is free too');
+        } finally {
+            $db->prepare('DELETE FROM customers WHERE name = ?')->execute(['SFB Edu Gate Stranger']);
+            $db->prepare('DELETE FROM sfb_offerings WHERE title = ?')->execute(['Edu Gate Class']);
+            $db->exec("DELETE FROM sfb_lesson_steps WHERE lesson_id IN (SELECT id FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title = 'Edu Gate Course'))");
+            $db->exec("DELETE FROM sfb_course_lessons WHERE course_id IN (SELECT id FROM sfb_courses WHERE title = 'Edu Gate Course')");
+            $db->prepare('DELETE FROM sfb_courses WHERE title = ?')->execute(['Edu Gate Course']);
+        }
+    } else {
+        echo "NOTE  [skip] gating column not applied; migration 068 lifecycle asserts skipped\n";
+    }
+
     // ---- Cleanup ----------------------------------------------------------------
     $db->prepare('DELETE FROM customers WHERE id IN (?, ?, ?)')->execute([$customerA, $customerB, $customerC]);
     $db->prepare('DELETE FROM sfb_offerings WHERE title IN (?, ?, ?)')

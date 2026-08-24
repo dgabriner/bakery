@@ -2013,11 +2013,17 @@ function bakery_sfb_gating_ready(PDO $db) {
  */
 function bakery_sfb_course_lock(PDO $db, $customerId, array $course) {
     $requiredId = isset($course['required_offering_id']) ? (int)$course['required_offering_id'] : 0;
-    if ($requiredId <= 0 || !bakery_sfb_payments_ready($db)) {
+    if ($requiredId <= 0) {
         return ['locked' => false, 'offering' => null];
+    }
+    if (!bakery_sfb_payments_ready($db)) {
+        // Fail closed: with payment plumbing missing nobody can hold an
+        // entitlement, so a gated course must never silently read as free.
+        return ['locked' => true, 'offering' => null];
     }
     $offering = bakery_sfb_offering($db, $requiredId);
     if (!$offering || (int)$offering['is_active'] !== 1) {
+        // A retired offering frees its students instead of stranding them.
         return ['locked' => false, 'offering' => null];
     }
     $locked = !bakery_sfb_customer_entitled_to($db, (int)$customerId, $requiredId);

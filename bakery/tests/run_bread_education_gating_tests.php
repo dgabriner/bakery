@@ -38,6 +38,17 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
     $fail++;
 };
 
+// Step-body renderer (Oxlet 18): escape-first, safe links only, pure function.
+require_once __DIR__ . '/../includes/sfb_step_text.php';
+$r = bakery_sfb_render_step_text('Plain step & note <b>not bold</b>');
+$assert($r === 'Plain step &amp; note &lt;b&gt;not bold&lt;/b&gt;', 'renderer escapes plain text, adds no markup');
+$r = bakery_sfb_render_step_text('See https://example.com/recipe?id=1&x=2 today');
+$assert($r === 'See <a href="https://example.com/recipe?id=1&amp;x=2" target="_blank" rel="noopener noreferrer">https://example.com/recipe?id=1&amp;x=2</a> today', 'bare https URL becomes noopener anchor');
+$r = bakery_sfb_render_step_text("Fold once.\nThen rest the dough.");
+$assert($r === "Fold once.<br />\nThen rest the dough.", 'multiline keeps breaks via nl2br');
+$r = bakery_sfb_render_step_text('Never javascript:alert(1) here');
+$assert(strpos($r, '<a ') === false && strpos($r, 'javascript:') !== false, 'javascript: scheme is never linked');
+
 // Deterministic fixture pre-clean.
 $db->prepare('DELETE FROM customers WHERE name IN (?, ?)')->execute(['SFB Gate A', 'SFB Gate B']);
 $db->prepare('DELETE FROM sfb_offerings WHERE title = ?')->execute(['Gate Class']);
@@ -118,6 +129,28 @@ try {
         $assert(false, 'gate assignment on unknown course rejected');
     } catch (InvalidArgumentException $e) {
         $assert(true, 'gate assignment on unknown course rejected');
+    }
+
+    // Fail closed: with payment plumbing missing nobody can hold an
+    // entitlement, so a gated course must lock instead of silently reading
+    // free. Simulated via the table_exists cache — no DDL on the shared DB.
+    $failClosedCourse = bakery_sfb_course($db, $courseId);
+    if ((int)($failClosedCourse['required_offering_id'] ?? 0) > 0) {
+        $tablesCache = &bakery_table_exists_cache();
+        $tablesCache['sfb_offerings'] = false;
+        $tablesCache['sfb_offering_purchases'] = false;
+        try {
+            $lockNoPay = bakery_sfb_course_lock($db, $customerA, $failClosedCourse);
+            $assert($lockNoPay['locked'] === true && $lockNoPay['offering'] === null,
+                'missing payment tables fail closed on a gated course');
+            $assert(bakery_sfb_media_path_locked($db, 'gate/2026/fold.mp4', $customerA) === true,
+                'lesson media reverse-lock also fails closed without payment tables');
+        } finally {
+            bakery_forget_table_exists('sfb_offerings');
+            bakery_forget_table_exists('sfb_offering_purchases');
+        }
+    } else {
+        $assert(true, 'fail-closed probe skipped: fixture gate already cleared');
     }
 } catch (Throwable $e) {
     echo 'FAIL  unexpected: ' . $e->getMessage() . "\n";

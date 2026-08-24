@@ -93,7 +93,7 @@ function bakery_sfb_resources_render_card(array $piece): void {
                       echo ' · $' . number_format((float)$lock['offering']['price_cents'] / 100, 2);
                   }
                 ?></span>
-              <?php else: ?>
+              <?php elseif (!$lock['locked']): ?>
                 <span class="badge badge-ok"><?php bakery_te('sfb.course_free_label'); ?></span>
               <?php endif; ?>
               <?php if ($courseTotalSteps > 0 && !$lock['locked']): ?>
@@ -111,7 +111,7 @@ function bakery_sfb_resources_render_card(array $piece): void {
             ?>
             <div class="btn-row" style="padding:0 16px 16px;">
               <?php if ($lock['locked']): ?>
-                <a class="btn btn-block" href="sfb_offerings.php#offering-<?php echo (int)$lock['offering']['id']; ?>"><?php bakery_te('sfb.lesson_locked_cta'); ?></a>
+                <a class="btn btn-block" href="sfb_offerings.php<?php echo !empty($lock['offering']) ? '#offering-' . (int)$lock['offering']['id'] : ''; ?>"><?php bakery_te('sfb.lesson_locked_cta'); ?></a>
               <?php elseif ($firstLesson): ?>
                 <a class="btn btn-block<?php echo ($courseTotalSteps > 0 && $courseDoneSteps === $courseTotalSteps) ? ' btn-secondary' : ''; ?>" href="sfb_lesson.php?lesson=<?php echo (int)$firstLesson['id']; ?>"><?php
                   if ($courseTotalSteps > 0 && $courseDoneSteps === $courseTotalSteps) {

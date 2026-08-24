@@ -4,6 +4,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/sf_baker.php';
+require_once __DIR__ . '/includes/sfb_step_text.php';
 
 $customer = bakery_sfb_require_access($db);
 $customerId = (int)$customer['id'];
@@ -157,9 +158,11 @@ $portalCustomerName = $customer['name'];
         <div class="card-body">
           <h2><?php bakery_te('sfb.lesson_locked_title'); ?></h2>
           <p class="muted"><?php bakery_te('sfb.lesson_locked_copy'); ?></p>
-          <p><strong><?php echo htmlspecialchars((string)$lock['offering']['title'], ENT_QUOTES, 'UTF-8'); ?>
-            · $<?php echo number_format((float)$lock['offering']['price_cents'] / 100, 2); ?></strong></p>
-          <a class="btn btn-block" href="sfb_offerings.php#offering-<?php echo (int)$lock['offering']['id']; ?>"><?php bakery_te('sfb.lesson_locked_cta'); ?></a>
+          <?php if (!empty($lock['offering'])): ?>
+            <p><strong><?php echo htmlspecialchars((string)$lock['offering']['title'], ENT_QUOTES, 'UTF-8'); ?>
+              · $<?php echo number_format((float)$lock['offering']['price_cents'] / 100, 2); ?></strong></p>
+          <?php endif; ?>
+          <a class="btn btn-block" href="sfb_offerings.php<?php echo !empty($lock['offering']) ? '#offering-' . (int)$lock['offering']['id'] : ''; ?>"><?php bakery_te('sfb.lesson_locked_cta'); ?></a>
         </div>
       </section>
     <?php else: ?>
@@ -169,7 +172,7 @@ $portalCustomerName = $customer['name'];
         <div class="card-header"><h2><?php echo ($index + 1); ?>.</h2></div>
         <div class="card-body">
           <?php if (!empty($step['body_text'])): ?>
-            <p><?php echo nl2br(htmlspecialchars($step['body_text'], ENT_QUOTES, 'UTF-8')); ?></p>
+            <p><?php echo bakery_sfb_render_step_text($step['body_text']); ?></p>
           <?php endif; ?>
           <?php if (!empty($step['media_path'])): ?>
             <?php if (($step['media_kind'] ?? 'photo') === 'video'): ?>
