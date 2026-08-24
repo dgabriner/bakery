@@ -7,6 +7,7 @@
  *
  *   php scripts/save_kitchen_note_plan.php --date=2026-08-25
  *   php scripts/save_kitchen_note_plan.php --date=2026-08-25 --allow-production
+ *   php scripts/save_kitchen_note_plan.php --date=2026-08-25 --allow-production --commit
  */
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "CLI only\n");
@@ -16,6 +17,7 @@ if (PHP_SAPI !== 'cli') {
 define('ACCESS_ALLOWED', true);
 $root = dirname(__DIR__);
 $allowProduction = in_array('--allow-production', array_slice($argv, 1), true);
+$commitPlan = in_array('--commit', array_slice($argv, 1), true);
 
 putenv('USE_PROD_DB=false');
 $_ENV['USE_PROD_DB'] = 'false';
@@ -36,7 +38,7 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-    fwrite(STDERR, "Usage: php scripts/save_kitchen_note_plan.php --date=YYYY-MM-DD [--allow-production]\n");
+    fwrite(STDERR, "Usage: php scripts/save_kitchen_note_plan.php --date=YYYY-MM-DD [--allow-production] [--commit]\n");
     exit(1);
 }
 
@@ -82,22 +84,25 @@ if ($allowProduction) {
 }
 
 $kitchen = <<<'TXT'
+Buenos días ☀️
+
 3.0 de concha
 3.0 de fino
-1 de picón
-120 barras
+
+130 barras
 25 cortadillos
 15 colchones
-25 queiquitos
+20 queiquitos
 10 pudin
-1.nuez
-1 de guayaba
-2 taco / gragea 1 y 1
-1.0 puerco
+1 de nuez
+2 taco / gragea
+1. puerco
 2 de amarilla
 2 de rosada
 2 de chocolate
+
 1 bolillo
+2 de bolillo
 TXT;
 
 bakery_pack_ensure_defaults($stage);
@@ -111,8 +116,9 @@ if ($parsed['by_product'] === []) {
 }
 
 $names = $stage->query('SELECT id, name FROM products')->fetchAll(PDO::FETCH_KEY_PAIR);
-$allowed = array_fill_keys(array_map('intval', array_keys($parsed['by_product'])), true);
-$saved = bakery_production_plan_save_targets($stage, [$date => $parsed['by_product']], $allowed, null);
+$planQtys = bakery_pack_kitchen_plan_with_zeros($stage, $parsed['by_product']);
+$allowed = array_fill_keys(array_map('intval', array_keys($planQtys)), true);
+$saved = bakery_production_plan_save_targets($stage, [$date => $planQtys], $allowed, null);
 if (function_exists('bakery_record_operational_event')) {
     bakery_record_operational_event($stage, BAKERY_OP_PRODUCTION_PLAN_SAVED,
         'Saved kitchen-note production targets for ' . $date, [
@@ -130,5 +136,18 @@ echo "Saved {$saved} planned SKUs for delivery {$date} on {$targetLabel}\n";
 foreach ($parsed['by_product'] as $id => $qty) {
     $label = $names[$id] ?? ('#' . $id);
     echo sprintf("  %4d  %s\n", $qty, $label);
+}
+$zeroed = [];
+foreach ($planQtys as $id => $qty) {
+    if ((int)$qty === 0 && !isset($parsed['by_product'][$id])) {
+        $zeroed[] = $names[$id] ?? ('#' . $id);
+    }
+}
+if ($zeroed !== []) {
+    echo "Zeroed omitted kitchen SKUs: " . implode(', ', $zeroed) . "\n";
+}
+if ($commitPlan) {
+    $commit = bakery_production_plan_commit($stage, $date, null);
+    echo "Committed {$commit['products_count']} SKUs / {$commit['units_count']} pieces for {$date}\n";
 }
 exit(0);

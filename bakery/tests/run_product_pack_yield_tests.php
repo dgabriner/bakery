@@ -173,6 +173,45 @@ foreach (bakery_pack_picon_split($db, 1.0) as $pid => $pcs) {
 }
 $assert($piconPieces === array_sum(bakery_pack_picon_split($db, 1.0)), 'kitchen note: 1 gal picon matches picon split');
 
+$todayKitchen = <<<'TXT'
+Buenos días ☀️
+
+3.0 de concha
+3.0 de fino
+
+130 barras
+25 cortadillos
+15 colchones
+20 queiquitos
+10 pudin
+1 de nuez
+2 taco / gragea
+1. puerco
+2 de amarilla
+2 de rosada
+2 de chocolate
+
+1 bolillo
+2 de bolillo
+TXT;
+$today = bakery_pack_parse_kitchen_note($db, $todayKitchen);
+$assert(($today['unknown'] ?? []) === [], 'today kitchen note has no unknown lines');
+$assert(($today['by_product'][$tacoId] ?? 0) === 72, '2 taco / gragea without 1 y 1 → 1 gal taco');
+$assert(($today['by_product'][$grajeaId] ?? 0) === 80, '2 taco / gragea without 1 y 1 → 1 gal grajea');
+$assert(($today['by_product'][$bolillo] ?? 0) === 240, '1 bolillo + 2 de bolillo → 3 batches');
+$assert(($today['by_product'][$nuezId] ?? 0) === 80, '1 de nuez → 80');
+$puercoId = $productId($db, 'Puerco');
+$assert(($today['by_product'][$puercoId] ?? 0) === 48, '1. puerco → 1 gal');
+$assert(($today['by_product'][$barras] ?? 0) === 26, '20% of 130 barras kept whole');
+$assert(($today['by_product'][$rebanada] ?? 0) === 624, '104 barras → 624 rebanadas');
+$quequitos = $productId($db, 'Quequitos');
+$assert(($today['by_product'][$quequitos] ?? 0) === 400, '20 trays queiquitos → 400');
+$todayPlan = bakery_pack_kitchen_plan_with_zeros($db, $today['by_product']);
+$guayabaId = $productId($db, 'Guayaba');
+$assert(($todayPlan[$guayabaId] ?? -1) === 0, 'omitted guayaba is zeroed');
+$assert(($todayPlan[$liso] ?? -1) === 0, 'omitted picón Liso is zeroed');
+$assert(($todayPlan[$conchas] ?? 0) === 880, 'zeros helper keeps 3 gal concha');
+
 $nuezScale = bakery_pack_input_scale($db, $nuezId);
 $assert($nuezScale['unit'] === 'gallon' && (int)$nuezScale['pcs_per'] === 80, 'Nuez scale is 80 pcs/gal');
 $budinScale = bakery_pack_input_scale($db, $budin);

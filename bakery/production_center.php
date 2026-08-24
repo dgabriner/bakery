@@ -309,7 +309,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             if (!$planTableReady) {
                 throw new RuntimeException('Saved production plans are not installed yet. Run scripts/run_migrations.php first.');
             }
-            $planned = [$selectedDate => $kitchenParse['by_product']];
+            $planQtys = $kitchenParse['by_product'];
+            foreach (bakery_pack_kitchen_managed_ids($db) as $pid) {
+                if (!isset($planQtys[$pid]) && !empty($allowedProductIds[$pid])) {
+                    $planQtys[$pid] = 0;
+                }
+            }
+            $planned = [$selectedDate => $planQtys];
             $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
             $userId = isset($user['id']) ? (int)$user['id'] : null;
             $saved = bakery_production_plan_save_targets($db, $planned, $allowedProductIds, $userId);

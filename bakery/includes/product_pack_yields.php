@@ -554,6 +554,55 @@ function bakery_pack_kitchen_name_map(): array
     ];
 }
 
+/**
+ * Catalog IDs the kitchen-note language can name (pan dulce + bolillo family).
+ * Sour Flour loaves are not in this set.
+ *
+ * @return list<int>
+ */
+function bakery_pack_kitchen_managed_ids(PDO $db): array
+{
+    $ids = [];
+    $add = static function (?int $id) use (&$ids): void {
+        if ($id && $id > 0) {
+            $ids[$id] = true;
+        }
+    };
+    foreach (bakery_pack_kitchen_name_map() as $catalogName) {
+        $add(bakery_pack_resolve_product($db, $catalogName));
+    }
+    foreach (['Conchas', 'Cortadillos', 'Colchón', 'Quequitos', 'Budín', 'Barras', 'Barra (Rebanada)'] as $name) {
+        $add(bakery_pack_resolve_product($db, $name));
+    }
+    foreach (bakery_pack_fino_split($db, 1.0) as $id => $unused) {
+        $add((int)$id);
+    }
+    foreach (bakery_pack_picon_split($db, 1.0) as $id => $unused) {
+        $add((int)$id);
+    }
+    return array_map('intval', array_keys($ids));
+}
+
+/**
+ * Fill omitted kitchen-note SKUs with 0 so a new paste replaces yesterday's picón/guayaba.
+ *
+ * @param array<int,int> $byProduct
+ * @return array<int,int>
+ */
+function bakery_pack_kitchen_plan_with_zeros(PDO $db, array $byProduct): array
+{
+    $out = [];
+    foreach ($byProduct as $id => $qty) {
+        $out[(int)$id] = (int)$qty;
+    }
+    foreach (bakery_pack_kitchen_managed_ids($db) as $id) {
+        if (!array_key_exists($id, $out)) {
+            $out[$id] = 0;
+        }
+    }
+    return $out;
+}
+
 function bakery_pack_resolve_kitchen_name(PDO $db, string $raw): ?int
 {
     $id = bakery_pack_resolve_product($db, $raw);
@@ -605,9 +654,15 @@ function bakery_pack_parse_kitchen_note(PDO $db, string $text): array
             continue;
         }
 
-        if (preg_match('/(\d+(?:\.\d+)?)\s*taco\s*\/\s*(?:gragea|grajea)\s+(\d+)\s*y\s+(\d+)/u', $plain, $m)) {
-            $tacoQty = (float)$m[2];
-            $grajeaQty = (float)$m[3];
+        if (preg_match('/(\d+(?:\.\d+)?)\s*taco\s*\/\s*(?:gragea|grajea)(?:\s+(\d+)\s*y\s+(\d+))?/u', $plain, $m)) {
+            if (isset($m[2], $m[3]) && $m[2] !== '' && $m[3] !== '') {
+                $tacoQty = (float)$m[2];
+                $grajeaQty = (float)$m[3];
+            } else {
+                // "2 taco / gragea" means 2 gallons split evenly (1 + 1).
+                $tacoQty = ((float)$m[1]) / 2.0;
+                $grajeaQty = ((float)$m[1]) / 2.0;
+            }
             $tacoId = bakery_pack_resolve_kitchen_name($db, 'taco');
             $grajeaId = bakery_pack_resolve_kitchen_name($db, 'gragea');
             $tacoPieces = $tacoId ? bakery_pack_to_pieces($db, $tacoId, $tacoQty, 'gallon') : 0;
