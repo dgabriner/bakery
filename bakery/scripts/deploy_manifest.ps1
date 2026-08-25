@@ -6,6 +6,7 @@ function Get-BakeryDeployRootFiles {
         '.htaccess',
         'staging-robots.txt',
         'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
+        'staging_update.php', 'oven_light.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
         'zones.php', 'leads.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
         'products.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
