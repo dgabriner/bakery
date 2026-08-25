@@ -88,6 +88,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
     $dailySql = "
         SELECT do.id AS daily_order_id, do.customer_id, do.status, do.total_amount,
                do.driver_id AS legacy_driver_id,
+               c.is_active,
                c.name AS customer_name, c.address, c.zone, c.zone_id,
                {$zoneSelect},
                doi.id AS item_id, doi.product_id, doi.quantity, doi.delivered_quantity,
@@ -209,8 +210,18 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
         $customers[$cid]['has_standing'] = true;
     }
 
+    $today = date('Y-m-d');
     foreach ($dailyRows as $row) {
         $cid = (int)$row['customer_id'];
+        $inactive = isset($row['is_active']) && (int)$row['is_active'] !== 1;
+        if ($inactive && $date >= $today && !bakery_demand_review_is_advanced_status(
+            $row['status'] ?? null,
+            $row['assignment_status'] ?? null
+        )) {
+            // Soft-closed clients must not keep unstarted future demand in
+            // operating work. Past and in-progress dated rows stay visible.
+            continue;
+        }
         if (!isset($customers[$cid])) {
             $customers[$cid] = bakery_demand_review_empty_customer($row, $standingRouteByCustomer[$cid] ?? null);
         }
