@@ -12,6 +12,9 @@ DirectoryIndex index.html
   </FilesMatch>
 </IfModule>
 
+# The reusable authoring scaffold is intentionally not a public document.
+RedirectMatch 410 ^/breadeducation/TEMPLATE\.html$
+
 # ROUND2-FOLDER-301: flat filenames moved into topic folders.
 RedirectMatch 301 ^/breadeducation/first-loaf-shopping\.html$ /breadeducation/start/first-loaf-shopping.html
 RedirectMatch 301 ^/breadeducation/your-first-dutch-oven-bake\.html$ /breadeducation/start/your-first-dutch-oven-bake.html
