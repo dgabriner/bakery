@@ -22,33 +22,34 @@ Current reality lives in `sitemap.xml` plus this status.
 
 - **Hub / conversion:** `index.html`, classes, corporate workshops, private events, visit plan, SF Baker, find-our-bread, wholesale, home-oven-to-market.
 - **Cluster 1–5 as originally listed:** all shipped under topic folders (`start/`, `sourdough/`, `technique/`, `breads/`, `pan-dulce/`, `reference/`, `journal/`).
-- **Fixes clinic:** gummy crumb, no oven spring, pale crust, too sour, dense loaf, **starter not rising**, **sticky dough**, **loaf spreads flat**.
+- **Fixes clinic:** gummy crumb, no oven spring, pale crust, too sour, dense loaf, starter not rising, sticky dough, loaf spreads flat, **overproofed vs underproofed**.
+- **Proofing and readiness:** starter ready to mix, dough temperature at mix, autolyse, banneton and proofing, keeping and reheating bread.
 - **Starter lab:** starter science, revive a starter, traveling with starter, sourdough myths.
 - **More breads:** bagels, sandwich loaf, ciabatta, rye, English muffins.
 - **Spanish seed:** `es/` index, masa madre, primer horneado, conchas, glosario.
 
 ### Committed but unpublished
 
-- Integrity repair of nested-page assets/metadata (`24ae490`) and this failure-clinic tranche are local on `cursor/breadeducation-static-seo-integrity`. Git push is blocked until canonical GitHub remote ownership is confirmed. Live deploy is a separate owner action.
+- Integrity repair of nested-page assets/metadata (`24ae490`), failure-clinic 3 (`75221f4`), and this proofing-and-readiness tranche are local on `cursor/breadeducation-static-seo-integrity`. Git push is blocked until canonical GitHub remote ownership is confirmed. Live deploy is a separate owner action.
 
 ### Current batch
 
-- Failure clinic 3: starter not rising, sticky dough, loaf spreads flat — **landed this session**.
+- Proofing and readiness clinic (six pages): overproofed vs underproofed, starter ready to mix, dough temperature, autolyse, banneton and proofing, keeping and reheating — **landed this session**.
 
 ### Planned next (not started)
 
-- Overproofed vs underproofed (dedicated clinic; currently only a troubleshooting lens + Fresh Loaf thread).
-- When is the starter ready to mix (peak window for an established culture).
-- Dough temperature at mix.
-- Autolyse: when it helps and when to skip.
-- Keeping and reheating bread (storage — not the Fresh Loaf debrief page).
-- Banneton and proofing setup.
+- Preferment and mix decisions: levain vs starter vs discard in the mix; salt timing; mix/fold schedule as a decision page (not a second fermentation essay).
+- Crumb and crust clinic remainder: burnt bottom; bursting beside the score (if scoring-patterns does not already own it); ear vs no ear only if still uncovered.
+- Flour and water as ingredients: bread vs AP vs whole wheat for a formula; water (chlorine/temp) without fake lab claims; salt percentage in practice.
 
 ### Rejected / merged into another topic
 
 - Do not spin a second “quiet starter” page: new-week stalls stay on `starter-day-one.html`; fridge neglect stays on `revive-a-starter.html`.
 - Do not spin “flat loaf in the oven” as a duplicate of `no-oven-spring.html`. Spreading sideways is `loaf-spreads-flat.html`.
 - Do not spin “wet dough handling” as a duplicate of `hydration-by-feel.html`. Sticky-vs-slack diagnosis is `sticky-dough.html`.
+- Do not spin a second overnight-fridge schedule: that is `cold-retard.html`. Basket setup is `banneton-and-proofing.html`.
+- Do not spin a second “is a basket required?” shopping answer: that stays on `first-loaf-shopping.html`.
+- Do not spin storage as a Fresh Loaf debrief; keeping a baked loaf is `keeping-and-reheating-bread.html`. Autolyse is not a second fermentation essay.
 
 ## Topic clusters (in build order)
 

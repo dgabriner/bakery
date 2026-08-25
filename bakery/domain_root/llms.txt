@@ -57,6 +57,15 @@ Sour Flour teaches the art and science of bread baking and empowers bakers with 
 - [Starter not rising](https://bakery.sourflour.org/breadeducation/reference/fixes/starter-not-rising.html): new versus established culture; temperature, feeding ratio, flour, hydration, peak timing, acidity.
 - [Sticky dough](https://bakery.sourflour.org/breadeducation/reference/fixes/sticky-dough.html): normal tackiness versus high hydration, underdevelopment, or over-fermentation; when adding flour makes the loaf worse.
 - [Loaf spreads flat](https://bakery.sourflour.org/breadeducation/reference/fixes/loaf-spreads-flat.html): shape-holding failure — strength, fermentation stage, water, shaping — distinct from no oven spring.
+- [Overproofed vs underproofed](https://bakery.sourflour.org/breadeducation/reference/fixes/overproofed-vs-underproofed.html): poke, dough feel, score, and crumb for bulk versus final proof.
+
+## Proofing and readiness
+
+- [When is starter ready to mix](https://bakery.sourflour.org/breadeducation/sourdough/starter-ready-to-mix.html): peak window for an established culture; float test is optional evidence.
+- [Dough temperature at mix](https://bakery.sourflour.org/breadeducation/technique/dough-temperature.html): the dough's heat, not just the room; water is the lever in a cool kitchen.
+- [Autolyse](https://bakery.sourflour.org/breadeducation/technique/autolyse.html): flour-and-water rest before salt or levain; when to skip.
+- [Banneton and proofing](https://bakery.sourflour.org/breadeducation/technique/banneton-and-proofing.html): flour, load, cover, turn out — basket or bowl.
+- [Keeping and reheating bread](https://bakery.sourflour.org/breadeducation/reference/keeping-and-reheating-bread.html): cool fully, store, freeze, revive crust — not a gummy-crumb diagnosis.
 
 ## Pan dulce universe (recipes in grams)
 
