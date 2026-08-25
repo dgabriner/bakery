@@ -54,6 +54,9 @@ Sour Flour teaches the art and science of bread baking and empowers bakers with 
 - [Pale crust](https://bakery.sourflour.org/breadeducation/reference/fixes/pale-crust.html): oven truth, vent timing, rack logic.
 - [Too sour - or not sour enough](https://bakery.sourflour.org/breadeducation/reference/fixes/too-sour.html): steer the acid dial with temp/time/feed rhythm.
 - [Dense loaf](https://bakery.sourflour.org/breadeducation/reference/fixes/dense-loaf.html): weak starter, short bulk, collapsed shaping, cool oven.
+- [Starter not rising](https://bakery.sourflour.org/breadeducation/reference/fixes/starter-not-rising.html): new versus established culture; temperature, feeding ratio, flour, hydration, peak timing, acidity.
+- [Sticky dough](https://bakery.sourflour.org/breadeducation/reference/fixes/sticky-dough.html): normal tackiness versus high hydration, underdevelopment, or over-fermentation; when adding flour makes the loaf worse.
+- [Loaf spreads flat](https://bakery.sourflour.org/breadeducation/reference/fixes/loaf-spreads-flat.html): shape-holding failure — strength, fermentation stage, water, shaping — distinct from no oven spring.
 
 ## Pan dulce universe (recipes in grams)
 

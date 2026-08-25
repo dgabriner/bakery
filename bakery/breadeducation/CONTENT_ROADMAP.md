@@ -11,6 +11,45 @@ The Fresh Loaf is breadth; we are **place + practice**. Nobody else teaches SF s
 from inside a working San Francisco production bakery, and nobody else owns pan dulce.
 Every new page should say something only our bench can say.
 
+## Library state (2026-08-24)
+
+Do not treat the cluster list below as unpublished. It is the original multiplication plan.
+Current reality lives in `sitemap.xml` plus this status.
+
+**Agent resume:** continue worktree `bakery/tmp/cursor_workers/breadeducation_static_seo_integrity` on branch `cursor/breadeducation-static-seo-integrity`. Local ledger (gitignored): `tmp/seo_forge/SEO_CONTINUITY.md`. Do not mint a parallel SEO branch.
+
+### Published (physical HTML, in sitemap)
+
+- **Hub / conversion:** `index.html`, classes, corporate workshops, private events, visit plan, SF Baker, find-our-bread, wholesale, home-oven-to-market.
+- **Cluster 1–5 as originally listed:** all shipped under topic folders (`start/`, `sourdough/`, `technique/`, `breads/`, `pan-dulce/`, `reference/`, `journal/`).
+- **Fixes clinic:** gummy crumb, no oven spring, pale crust, too sour, dense loaf, **starter not rising**, **sticky dough**, **loaf spreads flat**.
+- **Starter lab:** starter science, revive a starter, traveling with starter, sourdough myths.
+- **More breads:** bagels, sandwich loaf, ciabatta, rye, English muffins.
+- **Spanish seed:** `es/` index, masa madre, primer horneado, conchas, glosario.
+
+### Committed but unpublished
+
+- Integrity repair of nested-page assets/metadata (`24ae490`) and this failure-clinic tranche are local on `cursor/breadeducation-static-seo-integrity`. Git push is blocked until canonical GitHub remote ownership is confirmed. Live deploy is a separate owner action.
+
+### Current batch
+
+- Failure clinic 3: starter not rising, sticky dough, loaf spreads flat — **landed this session**.
+
+### Planned next (not started)
+
+- Overproofed vs underproofed (dedicated clinic; currently only a troubleshooting lens + Fresh Loaf thread).
+- When is the starter ready to mix (peak window for an established culture).
+- Dough temperature at mix.
+- Autolyse: when it helps and when to skip.
+- Keeping and reheating bread (storage — not the Fresh Loaf debrief page).
+- Banneton and proofing setup.
+
+### Rejected / merged into another topic
+
+- Do not spin a second “quiet starter” page: new-week stalls stay on `starter-day-one.html`; fridge neglect stays on `revive-a-starter.html`.
+- Do not spin “flat loaf in the oven” as a duplicate of `no-oven-spring.html`. Spreading sideways is `loaf-spreads-flat.html`.
+- Do not spin “wet dough handling” as a duplicate of `hydration-by-feel.html`. Sticky-vs-slack diagnosis is `sticky-dough.html`.
+
 ## Topic clusters (in build order)
 
 ### Cluster 1 — SF authority (differentiators)
