@@ -354,6 +354,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
         'missing_daily' => 0,
         'empty_daily' => 0,
         'paused' => 0,
+        'missing_standing_lines' => 0,
         'standing_units' => 0,
         'daily_units' => 0,
         'unit_delta' => 0,
@@ -373,6 +374,16 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
         }
         $summary['standing_units'] += $customer['standing_units'];
         $summary['daily_units'] += $customer['daily_units'];
+        if (empty($customer['paused'])
+            && !empty($customer['has_standing'])
+            && !empty($customer['has_daily'])
+        ) {
+            foreach ($customer['line_map'] as $line) {
+                if ((int)($line['standing_qty'] ?? 0) > 0 && $line['daily_qty'] === null) {
+                    $summary['missing_standing_lines']++;
+                }
+            }
+        }
         if ($customer['is_advanced']) {
             $advancedStatusCount++;
         }

@@ -145,14 +145,17 @@ function bakery_demand_confirmation_state(PDO $db, string $date): array
 
 /**
  * Whether a demand-review summary is in a confirmable shape: dated orders
- * exist and no standing customer is left without a dated order. Changed,
- * one-off, and paused rows are review inputs, not blockers.
+ * exist, no standing customer is left without a dated order, and no
+ * generateable standing product line is still missing from those orders.
+ * Changed (quantity edits), one-off, and paused rows are review inputs,
+ * not blockers.
  */
 function bakery_demand_is_confirmable(array $summary): bool
 {
     return (int)$summary['customers_with_daily'] > 0
         && (int)$summary['missing_daily'] === 0
-        && (int)$summary['empty_daily'] === 0;
+        && (int)$summary['empty_daily'] === 0
+        && (int)($summary['missing_standing_lines'] ?? 0) === 0;
 }
 
 /**
@@ -171,6 +174,13 @@ function bakery_demand_confirmation_confirm(PDO $db, string $date, ?int $userId)
     if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
         throw new RuntimeException('Invalid operating date');
     }
+
+    if (!function_exists('bakery_ensure_daily_orders_for_date')) {
+        require_once __DIR__ . '/daily_order_generation.php';
+    }
+    bakery_ensure_daily_orders_for_date($db, $date, [
+        'assign_routes' => true,
+    ]);
 
     $review = bakery_demand_review_build($db, $date, []);
     $summary = $review['summary'];
@@ -236,6 +246,7 @@ function bakery_demand_readiness(PDO $db, string $date): array
         'paused' => 0,
         'missing_daily' => 0,
         'empty_daily' => 0,
+        'missing_standing_lines' => 0,
         'confirmable' => false,
         'confirmation' => null,
         'changed_since' => ['count' => 0, 'latest' => null, 'examples' => []],
@@ -262,6 +273,7 @@ function bakery_demand_readiness(PDO $db, string $date): array
     $base['paused'] = (int)$summary['paused'];
     $base['missing_daily'] = (int)$summary['missing_daily'];
     $base['empty_daily'] = (int)$summary['empty_daily'];
+    $base['missing_standing_lines'] = (int)($summary['missing_standing_lines'] ?? 0);
     $base['confirmable'] = bakery_demand_is_confirmable($summary);
     $base['confirmation'] = $confirmationState['confirmation'];
     $base['changed_since'] = $confirmationState['changed_since'];
@@ -271,7 +283,7 @@ function bakery_demand_readiness(PDO $db, string $date): array
         $base['state'] = 'no_demand';
     } elseif ($base['customers_with_daily'] === 0) {
         $base['state'] = 'not_generated';
-    } elseif ($base['missing_daily'] > 0 || $base['empty_daily'] > 0) {
+    } elseif ($base['missing_daily'] > 0 || $base['empty_daily'] > 0 || $base['missing_standing_lines'] > 0) {
         $base['state'] = 'incomplete';
     } elseif ($confirmationState['confirmation'] === null) {
         $base['state'] = 'ready_unconfirmed';

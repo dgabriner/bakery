@@ -461,7 +461,8 @@ function bakery_generate_daily_orders_week(PDO $db, string $date, array $options
 
 /**
  * Lazy auto-generate dated orders for one operating date when standing
- * demand exists but dated commercial orders are still missing.
+ * demand exists but dated commercial orders are still missing, including
+ * already-generated orders that lack newly added standing product lines.
  *
  * Intended for first Daily Run / Daily Orders page view so tomorrow's
  * demand is never a remembered manual click. Always preserves dated
@@ -523,7 +524,10 @@ function bakery_ensure_daily_orders_for_date(PDO $db, string $date, array $optio
     $expected = (int)($summary['expected_customers'] ?? 0);
     $withDaily = (int)($summary['customers_with_daily'] ?? 0);
     $missing = (int)($summary['missing_daily'] ?? 0);
-    $needsGeneration = $missing > 0 || ($expected > 0 && $withDaily === 0);
+    $missingStandingLines = (int)($summary['missing_standing_lines'] ?? 0);
+    $needsGeneration = $missing > 0
+        || $missingStandingLines > 0
+        || ($expected > 0 && $withDaily === 0);
 
     if (!$needsGeneration) {
         return $noop('already_generated');
