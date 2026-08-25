@@ -1,7 +1,7 @@
 <?php
 /**
  * Bonus atmospheric page — public, no auth.
- * Linked from staging_update.php as the cloud-agent surprise.
+ * Stop 1 of the Stage 2 night-shift tour.
  */
 define('ACCESS_ALLOWED', true);
 define('BAKERY_SKIP_REQUEST_SECURITY', true);
@@ -92,12 +92,35 @@ header('Expires: 0');
       pointer-events: none;
     }
 
+    .flicker {
+      position: absolute;
+      left: 50%;
+      bottom: 22%;
+      width: min(18vw, 5rem);
+      height: min(18vw, 5rem);
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 236, 180, 0.9), transparent 70%);
+      filter: blur(6px);
+      animation: flicker 2.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+
     .copy {
       position: relative;
       z-index: 2;
       width: min(100%, 34rem);
       text-align: center;
       padding-bottom: clamp(1rem, 8vh, 4rem);
+    }
+
+    .stop {
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 197, 106, 0.65);
+      margin-bottom: 0.65rem;
+      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
     }
 
     .brand {
@@ -108,7 +131,7 @@ header('Expires: 0');
       line-height: 0.9;
       color: var(--ash);
       text-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.06s both;
     }
 
     .line {
@@ -116,12 +139,19 @@ header('Expires: 0');
       font-size: clamp(1rem, 2.8vw, 1.2rem);
       font-weight: 500;
       color: var(--soft);
-      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.14s both;
     }
 
-    .back {
-      display: inline-block;
+    .nav {
       margin-top: 1.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.35rem;
+      justify-content: center;
+      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.24s both;
+    }
+
+    .nav a {
       color: var(--core);
       text-decoration: none;
       font-weight: 600;
@@ -129,10 +159,9 @@ header('Expires: 0');
       border-bottom: 1px solid rgba(255, 197, 106, 0.35);
       padding-bottom: 0.15rem;
       transition: border-color 0.25s ease, color 0.25s ease;
-      animation: rise 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
     }
 
-    .back:hover {
+    .nav a:hover {
       color: #ffe1a8;
       border-color: rgba(255, 225, 168, 0.7);
     }
@@ -157,8 +186,15 @@ header('Expires: 0');
       to { transform: translate3d(-28px, -36px, 0); }
     }
 
+    @keyframes flicker {
+      0%, 100% { opacity: 0.45; transform: translateX(-50%) scale(1); }
+      40% { opacity: 0.85; transform: translateX(-50%) scale(1.12); }
+      55% { opacity: 0.5; transform: translateX(-50%) scale(0.96); }
+      70% { opacity: 0.9; transform: translateX(-50%) scale(1.08); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
-      .dust, .oven, .heat, .brand, .line, .back { animation: none; }
+      .dust, .oven, .heat, .flicker, .stop, .brand, .line, .nav { animation: none; }
     }
   </style>
 </head>
@@ -167,10 +203,15 @@ header('Expires: 0');
     <div class="dust" aria-hidden="true"></div>
     <div class="heat" aria-hidden="true"></div>
     <div class="oven" aria-hidden="true"></div>
+    <div class="flicker" aria-hidden="true"></div>
     <div class="copy">
+      <p class="stop">Stop 1 · Night</p>
       <h1 class="brand">Sour Flour</h1>
       <p class="line">The oven light stays on while the city sleeps.</p>
-      <a class="back" href="staging_update.php">Back to the landing marker</a>
+      <nav class="nav" aria-label="Tour">
+        <a href="proof_window.php">Continue to the proof window</a>
+        <a href="staging_update.php">Back to landing</a>
+      </nav>
     </div>
   </main>
 </body>
