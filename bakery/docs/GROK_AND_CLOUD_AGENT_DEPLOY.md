@@ -3,6 +3,8 @@
 **Audience:** Grok Bot, Cursor on the web, and any agent that does **not** run on Danny’s Windows laptop.  
 **Product:** Sour Flour OS (`bakery/`).  
 **Owner remote:** `https://github.com/dgabriner/bakery.git`  
+**Canonical branch:** `main`  
+**Retired:** `https://github.com/SheepMiner/Bakery.git` — backup / old Cloud sandbox only. Do not clone it, open PRs against it, or merge its default (`chore/checkpoint-0a-repo-safety`).  
 **Give this file to cloud agents.** Local Cursor desktop still uses [DEV_WORKFLOW.md](DEV_WORKFLOW.md) and [AUTO_PUSH.md](AUTO_PUSH.md).
 
 ---
@@ -18,7 +20,7 @@
 | Layer | What it is | Your job |
 |---|---|---|
 | **Local laptop** (`bakerysf_stage_local`) | Danny’s everyday DB + optional SFTP auto-push | You usually do **not** control this |
-| **GitHub** (`dgabriner/bakery`) | Source of truth for application files | Commit and push additive branches |
+| **GitHub** (`dgabriner/bakery`, branch `main`) | Source of truth for application files | Commit and push additive branches to **this** repo |
 | **Hosted Staging** `https://staging.sourflour.org/` | Phone / acceptance site; DB `bakerysoftware` | Get files here via the Git → Staging path (below) |
 | **Live** `https://bakery.sourflour.org/bake/` | Real bakery ops; DB `bakerysf` | **Never** deploy here. Owner uses Staging Manager → click the Next button |
 
@@ -72,7 +74,7 @@ Edit → test if you can → commit → push branch to GitHub
 
 ### A) Cloud agent (you — Grok / Cursor web)
 
-1. Clone or open `dgabriner/bakery` (bakery app lives under the repo’s `bakery/` tree when the monorepo root is `windsurf-project`).
+1. Clone or open **`dgabriner/bakery` on `main`** (bakery app lives under the repo’s `bakery/` tree). Do not use `SheepMiner/Bakery`.
 2. Make the smallest change that closes the loop (see product context: close loops, do not add modules).
 3. Run whatever tests you can in your environment. Prefer named suites under `tests/run_*.php` when PHP + `bakerysf_test` exist; never point tests at Live or the nightly mirror.
 4. Commit and **push** to an additive branch on `origin`.
@@ -100,7 +102,7 @@ You (cloud) cannot and should not reproduce path B.
 
 Do not pretend Staging updated if you only pushed GitHub.
 
-When the Staging Git pull exists, the owner will name the branch Staging tracks (likely a dedicated `staging` branch or the current infra branch). Follow that name; do not invent a second production branch.
+When the Staging Git pull exists, it tracks **`main` on `dgabriner/bakery`**. Do not invent a second production branch. Do not merge SheepMiner `chore/checkpoint-*` into `main`.
 
 ---
 

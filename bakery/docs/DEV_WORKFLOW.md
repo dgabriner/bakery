@@ -12,7 +12,7 @@ database or local files directly to production.
 5. On Staging Manager, follow the one **Next** action. Apply an exact named
    database migration before files when the board says Live is behind; then
    wait for **Match** and a successful file worker.
-6. Commit finished work to an additive Git branch at a sensible checkpoint.
+6. Commit finished work to GitHub **`dgabriner/bakery`**. Canonical branch is `main`. Feature work uses additive `cursor/…` / `codex/…` branches off `main`. Do not push product work to `SheepMiner/Bakery`.
 
 Git stores application history. It does not contain database dumps or secrets,
 and commit/push does not deploy production. Git HEAD, a clean local tree, and a

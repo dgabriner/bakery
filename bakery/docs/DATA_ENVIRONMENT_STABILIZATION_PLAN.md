@@ -1,8 +1,10 @@
 # Data Environment and Git Stabilization Plan
 
+**Current Git (2026-08-24):** Canonical GitHub is `https://github.com/dgabriner/bakery.git` on **`main`**. `SheepMiner/Bakery` is retired as an active remote (archive tags `archive/sheepminer-*` preserve unique Cloud-agent SHAs). Do not merge SheepMiner `chore/checkpoint-0a-repo-safety` into `main`.
+
 **Owner intent recorded:** 2026-08-18  
 **Execution owner:** an agent, with the bakery owner approving only the named production gates  
-**Current status:** Local data, backup, restore-drill, staging, and release-candidate infrastructure is implemented on `codex/infrastructure-stabilization-20260818`. Clean commit `4610f73` is deployed to staging and awaits phone acceptance. Production remains unchanged and live promotion execution remains locked.
+**Current status (hosted):** Staging is `https://staging.sourflour.org/` / `bakerysoftware` / SFTP `bakeryOS`. Live promotion is Staging Manager → hosted workers. Laptop auto-push targets Staging only. Git `main` is the product history; hosted promotion still snapshots Staging file hashes (Git SHA on Live status is a follow-on).
 
 This is the authoritative plan for separating development, staging, production,
 backups, and Git without losing the current working tree or overwriting bakery
