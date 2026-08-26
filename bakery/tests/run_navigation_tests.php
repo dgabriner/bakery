@@ -74,6 +74,7 @@ navigation_test_assert(in_array('production.php', bakery_baker_scripts(), true),
 navigation_test_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'bakers can access Pack List');
 navigation_test_assert(!in_array('index.php', bakery_baker_scripts(), true), 'bakers cannot access the operations dashboard');
 navigation_test_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'bakers cannot access Production Center');
+navigation_test_assert(!in_array('production_manager.php', bakery_baker_scripts(), true), 'bakers cannot access Production Manager Dashboard');
 navigation_test_assert(in_array('driver.php', bakery_driver_scripts(), true), 'drivers can access My Route');
 navigation_test_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 'drivers can access Customer QR Login');
 navigation_test_assert(in_array('call_headquarters.php', bakery_driver_scripts(), true), 'drivers can access Call HQ');

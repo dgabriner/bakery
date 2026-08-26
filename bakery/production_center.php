@@ -874,6 +874,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             <p><?php bakery_te('production_center.hub_lead'); ?></p>
         </div>
         <div class="pc-heading-actions">
+            <a class="btn btn-primary" href="production_manager.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_dashboard'); ?></a>
             <a class="btn btn-outline" href="product_manager_plan.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_product_plan'); ?></a>
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_orders'); ?></a>
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_bake'); ?></a>

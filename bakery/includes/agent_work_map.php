@@ -48,6 +48,8 @@ function bakery_agent_work_map(): array
             'aliases' => ['commit-production-plan', '20-commit-production-plan', 'prompt-20'],
             'files' => [
                 'production_center.php',
+                'production_manager.php',
+                'includes/production_manager_dashboard.php',
                 'production.php',
                 'pack_list.php',
                 'pan_dulce_quantities.php',
