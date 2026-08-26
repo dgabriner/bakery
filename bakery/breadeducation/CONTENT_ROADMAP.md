@@ -11,6 +11,55 @@ The Fresh Loaf is breadth; we are **place + practice**. Nobody else teaches SF s
 from inside a working San Francisco production bakery, and nobody else owns pan dulce.
 Every new page should say something only our bench can say.
 
+## Library state (2026-08-24)
+
+Do not treat the cluster list below as unpublished. It is the original multiplication plan.
+Current reality lives in `sitemap.xml` plus this status.
+
+**Agent resume:** continue worktree `bakery/tmp/cursor_workers/breadeducation_static_seo_integrity` on branch `cursor/breadeducation-static-seo-integrity`. Local ledger (gitignored): `tmp/seo_forge/SEO_CONTINUITY.md`. Do not mint a parallel SEO branch.
+
+### Published (physical HTML, in sitemap)
+
+- **Hub / conversion:** `index.html`, classes, corporate workshops, private events, visit plan, SF Baker, find-our-bread, wholesale, home-oven-to-market.
+- **Cluster 1–5 as originally listed:** all shipped under topic folders (`start/`, `sourdough/`, `technique/`, `breads/`, `pan-dulce/`, `reference/`, `journal/`).
+- **Fixes clinic:** gummy crumb, no oven spring, pale crust, too sour, dense loaf, starter not rising, sticky dough, loaf spreads flat, **overproofed vs underproofed**.
+- **Proofing and readiness:** starter ready to mix, dough temperature at mix, autolyse, banneton and proofing, keeping and reheating bread.
+- **Preferment and mix:** levain vs starter vs discard, how much starter, salt timing, mix and folds, mix order.
+- **Flour, water, salt amount, crust hole:** flour for this formula, water for dough, salt percentage, burnt bottom.
+- **Starter lab:** starter science, revive a starter, traveling with starter, sourdough myths.
+- **More breads:** bagels, sandwich loaf, ciabatta, rye, English muffins.
+- **Spanish seed:** `es/` index, masa madre, primer horneado, conchas, glosario.
+
+### Live vs Git
+
+- **Live (2026-08-24):** `scripts/push_breadeducation_sftp.ps1` published 75 files to `https://bakery.sourflour.org/breadeducation/` (not `/bake`). Site-root `/llms.txt` updated from `domain_root/llms.txt`. TEMPLATE.html remains 410. Markdown stays local.
+- **Git:** Integrity repair (`24ae490`), failure-clinic 3 (`75221f4`), proofing (`bc883cd`), and preferment/mix (`cf12b75`) are on `cursor/breadeducation-static-seo-integrity`. Git push is blocked until canonical GitHub remote ownership is confirmed. Do not merge into `feat/square-invoicing`.
+
+### Current batch
+
+- Flour, water, salt percentage, and burnt bottom (four pages): uniqueness-checked against shopping, whole-grain ladder, dough-temperature, salt-timing, pale-crust, gummy, scoring — **landed this session**.
+
+### Planned next (not started)
+
+- Workday clock only if dough-temp + cold-retard do not cover schedule.
+- Equipment that is not a shopping list and not a clone of `steam-without-dutch-oven.html`.
+- Clinic remainder: stuck to the pot; dull vs blistered. Skip ear and bursting — `scoring-patterns.html` already owns those.
+- Pan dulce depth; native Spanish for remaining `es/` gaps.
+
+### Rejected / merged into another topic
+
+- Do not spin a second “quiet starter” page: new-week stalls stay on `starter-day-one.html`; fridge neglect stays on `revive-a-starter.html`.
+- Do not spin “flat loaf in the oven” as a duplicate of `no-oven-spring.html`. Spreading sideways is `loaf-spreads-flat.html`.
+- Do not spin “wet dough handling” as a duplicate of `hydration-by-feel.html`. Sticky-vs-slack diagnosis is `sticky-dough.html`.
+- Do not spin a second overnight-fridge schedule: that is `cold-retard.html`. Basket setup is `banneton-and-proofing.html`.
+- Do not spin a second “is a basket required?” shopping answer: that stays on `first-loaf-shopping.html`.
+- Do not spin storage as a Fresh Loaf debrief; keeping a baked loaf is `keeping-and-reheating-bread.html`. Autolyse is not a second fermentation essay.
+- Do not spin a second poolish/biga page; that stays on `yeasted.html`. Knead-vs-fold lives inside `mix-and-folds.html`, not a sixth mix page.
+- Do not spin a second salt-amount page; that is `salt-percentage.html`. `salt-timing.html` stays when salt arrives.
+- Do not spin a second flour shopping page; substitutions inside a written formula are `flour-for-this-formula.html`. The blend ladder stays on `whole-grain.html`.
+- Do not spin water temperature as a quality essay; that is `dough-temperature.html`. Tap vs filter vs chlorine is `water-for-dough.html`.
+- Do not spin a second pale-crust or gummy page for a dark base; that is `burnt-bottom.html`.
+
 ## Topic clusters (in build order)
 
 ### Cluster 1 — SF authority (differentiators)
@@ -58,7 +107,7 @@ classes / sf-baker / find-our-bread). No new CSS without a farm discussion.
 - [ ] Facts checked against DEBRIEF.md research record; nothing copied verbatim
 - [ ] Added to hub `#curriculum` grid (and pill row if beginner-facing)
 - [ ] Added to sitemap.xml with today's lastmod
-- [ ] Deployed via `scripts/push_breadeducation_sftp.ps1 -DryRun` first
+- [x] Deployed via `scripts/push_breadeducation_sftp.ps1 -DryRun` first, then live SFTP to `/breadeducation/` (2026-08-24)
 
 ## Cadence
 

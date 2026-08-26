@@ -1,12 +1,15 @@
-<?xml version="1.0" encoding="UTF-8"?>
+++ b/bakery/breadeducation/sitemap.xml<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://bakery.sourflour.org/breadeducation/</loc><lastmod>2026-08-24</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>https://bakery.sourflour.org/breadeducation/start/first-loaf-shopping.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://bakery.sourflour.org/breadeducation/start/your-first-dutch-oven-bake.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  
+<url><loc>https://bakery.sourflour.org/breadeducation/start/first-loaf-shopping.html</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>  <url><loc>https://bakery.sourflour.org/breadeducation/start/your-first-dutch-oven-bake.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/start/starter-day-one.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/sourdough.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/sf-sourdough.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/fermentation.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/starter-ready-to-mix.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/levain-vs-starter-vs-discard.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/how-much-starter.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/starter-science.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/revive-a-starter.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/sourdough/traveling-with-starter.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
@@ -20,6 +23,15 @@
   <url><loc>https://bakery.sourflour.org/breadeducation/technique/steam-without-dutch-oven.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/technique/cold-retard.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/technique/hydration-by-feel.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/dough-temperature.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/autolyse.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/banneton-and-proofing.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/salt-timing.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/mix-and-folds.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/mix-order.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/flour-for-this-formula.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/water-for-dough.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/technique/salt-percentage.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/breads/focaccia.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/breads/pizza-at-home.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/breads/baguettes.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -50,8 +62,14 @@
   <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/gummy-crumb.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/no-oven-spring.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/pale-crust.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/burnt-bottom.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/too-sour.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/dense-loaf.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/starter-not-rising.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/sticky-dough.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/loaf-spreads-flat.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/fixes/overproofed-vs-underproofed.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://bakery.sourflour.org/breadeducation/reference/keeping-and-reheating-bread.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/es/index.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/es/masa-madre-en-siete-dias.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://bakery.sourflour.org/breadeducation/es/primer-horneado.html</loc><lastmod>2026-08-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>

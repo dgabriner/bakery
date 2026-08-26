@@ -97,4 +97,10 @@ h3 { font-size: 1.2rem; margin: 0 0 .45rem; }
   .site-nav a { display: block; padding: .2rem 0; }
   .grid-2, .grid-3, .source-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 600px) { .hero { padding-top: 3.25rem; } .section { padding-top: 3rem; padding-bottom: 3rem; } }
+@media (max-width: 600px) {
+  .hero { padding-top: 3.25rem; }
+  .section { padding-top: 3rem; padding-bottom: 3rem; }
+  .data-table { font-size: .82rem; }
+  .data-table th, .data-table td { padding: .55rem .6rem; }
+  .crumbs { overflow-wrap: anywhere; }
+}
