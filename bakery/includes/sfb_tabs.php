@@ -12,6 +12,7 @@ $sfbTabs = [
     'formulas' => ['sfb_formulas.php', 'sfb.tab_formulas'],
     'batches' => ['sfb_batches.php', 'sfb.tab_batches'],
     'resources' => ['sfb_resources.php', 'sfb.tab_resources'],
+    'purchase' => ['sfb_offerings.php', 'sfb.tab_purchase'],
     'community' => ['sfb_community.php', 'sfb.tab_community'],
 ];
 ?>

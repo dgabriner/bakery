@@ -177,6 +177,31 @@ $portalCustomerName = $customer['name'];
       <a href="sfb_offerings.php"><?php bakery_te('sfb.offerings_quick'); ?></a>
     </div>
 
+    <?php if (bakery_sfb_payments_ready($db)): ?>
+      <section class="card" style="margin-bottom:14px;">
+        <div class="card-body">
+          <p class="hero-label"><?php bakery_te('sfb.offerings_eyebrow'); ?></p>
+          <h2 style="margin:0 0 6px;font-size:1.05rem;font-weight:600;"><?php bakery_te('sfb.purchase_home_dash_title'); ?></h2>
+          <p class="muted" style="margin:0 0 12px;"><?php bakery_te('sfb.purchase_home_dash_copy'); ?></p>
+          <a class="btn btn-block" href="sfb_offerings.php"><?php bakery_te('sfb.tab_purchase'); ?></a>
+        </div>
+      </section>
+    <?php endif; ?>
+
+    <?php if (bakery_sfb_starter_jar_ready($db)): ?>
+      <section class="card" style="margin-bottom:14px;">
+        <div class="card-body">
+          <p class="hero-label"><?php bakery_te('sfb.starter_jar_dash_eyebrow'); ?></p>
+          <h2 style="margin:0 0 6px;font-size:1.05rem;font-weight:600;"><?php bakery_te('sfb.starter_jar_dash_title'); ?></h2>
+          <p class="muted" style="margin:0 0 12px;"><?php bakery_te('sfb.starter_jar_dash_copy'); ?></p>
+          <a class="btn btn-block" href="starter.php"><?php bakery_te('sfb.starter_jar_dash_cta'); ?></a>
+          <?php if (bakery_sfb_first_loaf_kit_ready($db)): ?>
+            <a class="btn btn-secondary btn-block" href="starter.php?kit=1" style="margin-top:8px;"><?php bakery_te('sfb.purchase_home_kit_cta'); ?></a>
+          <?php endif; ?>
+        </div>
+      </section>
+    <?php endif; ?>
+
     <?php if ($starters): ?>
       <section class="card">
         <div class="card-header"><h2><?php bakery_te('sfb.starter_check'); ?></h2></div>

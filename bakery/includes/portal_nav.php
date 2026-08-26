@@ -7,7 +7,7 @@ $portalActivePage = $portalActivePage ?? 'home';
 $portalPrimaryTab = function_exists('bakery_portal_primary_tab')
     ? bakery_portal_primary_tab($portalActivePage)
     : 'home';
-$portalMoreActive = in_array($portalActivePage, ['history', 'catalog', 'notifications', 'account', 'sfb'], true);
+$portalMoreActive = in_array($portalActivePage, ['history', 'catalog', 'notifications', 'account', 'sfb', 'sfb_purchase'], true);
 
 $portalSfbEnabled = false;
 if (isset($db) && $db instanceof PDO) {
@@ -41,6 +41,7 @@ function bakery_portal_tab_active($tab, $primary) {
 <div class="portal-more-desktop" aria-label="<?php bakery_te('portal.more_options'); ?>">
   <?php if ($portalSfbEnabled): ?>
     <a href="sfb_dashboard.php"<?php echo $portalActivePage === 'sfb' ? ' class="active"' : ''; ?>><?php bakery_te('sfb.nav'); ?></a>
+    <a href="sfb_offerings.php"<?php echo $portalActivePage === 'sfb_purchase' ? ' class="active"' : ''; ?>><?php bakery_te('sfb.tab_purchase'); ?></a>
   <?php endif; ?>
   <a href="customer_portal_history.php"<?php echo $portalActivePage === 'history' ? ' class="active"' : ''; ?>><?php bakery_te('portal.history'); ?></a>
   <a href="customer_catalog.php"<?php echo $portalActivePage === 'catalog' ? ' class="active"' : ''; ?>><?php bakery_te('portal.catalog'); ?></a>
@@ -58,6 +59,10 @@ function bakery_portal_tab_active($tab, $primary) {
     <a class="portal-sheet__link" href="sfb_dashboard.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 3c-4 0-7 2.5-7 6 0 2 1 3.5 2 4.5V19a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-5.5c1-1 2-2.5 2-4.5 0-3.5-3-6-7-6z"/><path d="M9 8c1-1 2-1.5 3-1.5"/></svg>
       <?php bakery_te('sfb.nav'); ?>
+    </a>
+    <a class="portal-sheet__link" href="sfb_offerings.php">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
+      <?php bakery_te('sfb.tab_purchase'); ?>
     </a>
   <?php endif; ?>
   <a class="portal-sheet__link" href="customer_portal_history.php">

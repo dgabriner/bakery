@@ -139,6 +139,16 @@ $currentLocale = bakery_locale();
         <?php endif; ?>
         <p class="muted"><?php bakery_te('sfb.join_workshops_copy'); ?></p>
         <a class="btn" href="<?php echo htmlspecialchars($joinUrl . '&next=' . rawurlencode('/sfb_offerings.php'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.join_cta_workshops'); ?></a>
+        <a class="btn quiet" style="margin-top:10px;" href="<?php echo htmlspecialchars(BASE_URL . 'sfb_offerings.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.join_cta_purchase_home'); ?></a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <p class="eyebrow"><?php bakery_te('sfb.starter_jar_join_door'); ?></p>
+        <h2><?php bakery_te('sfb.starter_jar_join_title'); ?></h2>
+        <p class="muted"><?php bakery_te('sfb.starter_jar_join_copy'); ?></p>
+        <a class="btn" href="<?php echo htmlspecialchars(BASE_URL . 'starter.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.starter_jar_join_cta'); ?></a>
       </div>
     </div>
 
