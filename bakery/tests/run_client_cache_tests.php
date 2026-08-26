@@ -48,12 +48,20 @@ cache_assert('portal styles cache-bust csrf.js', strpos($portal, "bakery_asset_h
 $js = file_get_contents($root . '/includes/client_refresh.js');
 cache_assert('refresh script watches visibility', strpos($js, 'visibilitychange') !== false);
 cache_assert('refresh script honors skip meta', strpos($js, 'app-skip-client-refresh') !== false);
+cache_assert('refresh script does not hard-reload on bfcache alone', strpos($js, 'event.persisted') !== false && strpos($js, "if (event.persisted) {\n    window.location.reload();") === false && strpos($js, "if (event.persisted) {\n      window.location.reload();") === false);
+cache_assert('refresh script re-checks build after bfcache restore', strpos($js, 'checkRemoteBuild') !== false && preg_match('/event\.persisted\)\s*\{\s*checkRemoteBuild\(\);/', $js) === 1);
+cache_assert('refresh script requires durable reload latch', strpos($js, 'write(RELOAD_KEY, nextBuild)') !== false && strpos($js, 'infinite refresh loop') !== false);
+cache_assert('refresh script cools down automatic reloads', strpos($js, 'RELOAD_COOLDOWN_MS') !== false);
 $refreshPhp = file_get_contents($root . '/includes/client_refresh.php');
 cache_assert('refresh include can skip the script', strpos($refreshPhp, 'BAKERY_SKIP_CLIENT_REFRESH') !== false);
 $managerSrc = file_get_contents($root . '/manager.php');
 cache_assert('Staging Live board skips client refresh', strpos($managerSrc, "define('BAKERY_SKIP_CLIENT_REFRESH', true)") !== false);
 cache_assert('refresh script does not clear localStorage', strpos($js, 'localStorage.clear') === false);
 cache_assert('refresh script does not clear cookies', strpos($js, 'document.cookie') === false);
+
+$login = file_get_contents($root . '/login.php');
+cache_assert('login does not fight visualViewport scroll', strpos($login, 'visualViewport.addEventListener') === false);
+cache_assert('login does not force scrollTo on mobile', strpos($login, 'keepMobileAtTop') === false && strpos($login, 'scrollTo(0, 0)') === false);
 
 $htaccess = file_get_contents($root . '/.htaccess');
 cache_assert('Apache HTML/PHP responses are not stored', strpos($htaccess, 'no-store') !== false);

@@ -157,22 +157,12 @@ $currentLocale = bakery_locale();
       var form = input ? input.form : null;
       if (!input || !form) return;
 
-      var isMobile = window.matchMedia('(max-width: 560px)').matches;
-      var keepMobileAtTop = function () {
-        if (!isMobile) return;
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      };
-
-      input.focus({ preventScroll: true });
-      keepMobileAtTop();
-      requestAnimationFrame(keepMobileAtTop);
-      setTimeout(keepMobileAtTop, 100);
-      setTimeout(keepMobileAtTop, 350);
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', keepMobileAtTop);
-        window.visualViewport.addEventListener('scroll', keepMobileAtTop);
+      // Mobile layout is already position:fixed + overflow:hidden. Do not force
+      // document scroll on soft-keyboard resize — that shakes the screen.
+      try {
+        input.focus({ preventScroll: true });
+      } catch (error) {
+        input.focus();
       }
       var submitting = false;
       input.addEventListener('input', function () {
