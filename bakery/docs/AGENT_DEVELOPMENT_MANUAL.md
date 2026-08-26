@@ -73,6 +73,7 @@ Canonical slugs come from the brief. Aliases resolve; lesson progress is stored 
 - i18n in `lang/en.php` and `lang/es.php`.
 - Staging auto-push must never target `bakery.sourflour.org/bake`.
 - Do not reopen shipped loops (invoice send, credit returns, production-plan commit, demand-flip, bake-sheet confirm re-entry, load/skip status alignment) as if they were still holes. Remaining work is baker UX, bake-sheet waste, staff pings.
+- **Desktop, cloud, and mobile share one sync model** (GitHub = code truth; Staging SFTP = phone host; Live = owner Next only). See `.cursor/rules/git-staging-live-sync.mdc` and `AGENTS.md` — do not wait for the owner to re-explain.
 
 ## Intelligence, not volume
 

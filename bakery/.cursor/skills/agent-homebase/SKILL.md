@@ -37,6 +37,7 @@ Admin UI: `agent_homebase.php` (Craft tab has the poem).
 - Staging auto-push / cloud SFTP must never target `bakery.sourflour.org/bake`.
   “Stage and live” uses `scripts/cloud_agent_stage.py --queue-live` (hosted workers).
 - i18n: `lang/en.php` and `lang/es.php`.
+- Sync without owner nagging: GitHub keeps desktop/cloud/mobile code aligned; Staging is a separate host sync; Live is owner Next only (`.cursor/rules/git-staging-live-sync.mdc`).
 
 ## Commands
 
