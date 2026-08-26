@@ -209,6 +209,7 @@ t_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'baker_mix is 
 t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');
 t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not baker-accessible');
 t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'production center is not baker-accessible');
+t_assert(!in_array('production_manager.php', bakery_baker_scripts(), true), 'production manager dashboard is not baker-accessible');
 
 echo "=== Baker role ===\n";
 bakery_logout();
