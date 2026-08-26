@@ -20,7 +20,18 @@ Skills: `.cursor/skills/agent-homebase/SKILL.md`, `test-gate`, `close-a-loop`, `
 
 Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`. New schema files take the next unused `NNN` (`php scripts/next_schema_migration.php --name=slug`); do not reuse 062 or rename applied migrations.
 
-**Grok Bot / Cursor on the web:** clone **`https://github.com/dgabriner/bakery.git` on `main`**. Give them [docs/GROK_AND_CLOUD_AGENT_DEPLOY.md](docs/GROK_AND_CLOUD_AGENT_DEPLOY.md). They move code with Git only — no SFTP credentials; Live stays Staging Manager `confirm`. Do not use `SheepMiner/Bakery`.
+## Sync — every Cursor surface (desktop, cloud, mobile)
+
+You already know this; the owner should not have to re-teach it. Always-on rule: `.cursor/rules/git-staging-live-sync.mdc`.
+
+| Layer | Truth for | Updates via |
+|---|---|---|
+| **GitHub** `dgabriner/bakery` | Application code shared by all agents | `commit` / `push` / `pull` |
+| **Hosted Staging** | Phone / acceptance files | Desktop SFTP auto-push or an explicit Staging sync — **not** implied by a Git push |
+| **Live** `bakery.sourflour.org/bake/` | Real bakery | Owner Staging Manager → **Next** only |
+
+- **Desktop:** pull cloud/PR work before continuing; use staging auto-push / Sync for phone; commit so others stay aligned.
+- **Cloud / mobile:** clone **`https://github.com/dgabriner/bakery.git` on `main`**. Move code with Git ([docs/GROK_AND_CLOUD_AGENT_DEPLOY.md](docs/GROK_AND_CLOUD_AGENT_DEPLOY.md)). Do not use `SheepMiner/Bakery`. Do not SFTP Live. Say in the handoff whether Staging was actually updated.
 
 ## Model usage (Ox Alpha Free window, ends ~2026-08-27)
 

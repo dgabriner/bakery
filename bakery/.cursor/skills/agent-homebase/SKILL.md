@@ -36,6 +36,7 @@ Admin UI: `agent_homebase.php` (Craft tab has the poem).
 - Completing exception *work* never hides a still-true operational fact.
 - Staging auto-push must never target `bakery.sourflour.org/bake`.
 - i18n: `lang/en.php` and `lang/es.php`.
+- Sync without owner nagging: GitHub keeps desktop/cloud/mobile code aligned; Staging is a separate host sync; Live is owner Next only (`.cursor/rules/git-staging-live-sync.mdc`).
 
 ## Commands
 

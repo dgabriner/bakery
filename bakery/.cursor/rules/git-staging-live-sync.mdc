@@ -1,0 +1,43 @@
+---
+description: Git vs Staging SFTP vs Live — how every Cursor surface (desktop, cloud, mobile) keeps Sour Flour OS in sync.
+alwaysApply: true
+---
+
+# Git ↔ Staging ↔ Live sync
+
+You do **not** need the owner to re-explain deploy sync. Follow this every session.
+
+## Three layers (do not conflate)
+
+| Layer | Role | How it updates |
+|---|---|---|
+| **GitHub** (`dgabriner/bakery`) | Source of truth for application code | `commit` + `push` / `pull` on desktop, cloud, and mobile agents |
+| **Hosted Staging** | Phone / acceptance copy of app files | Desktop: auto-push / `push_sftp_stage.ps1`. Cloud: only if staging SFTP secrets exist and the owner asked to sync Staging. Never treat “pushed Git” as “Staging updated.” |
+| **Live** `bakery.sourflour.org/bake/` | Real bakery ops | Owner only — Staging Manager → **Next**. Never SFTP Live from an agent unless the owner explicitly authorizes that exact live operation. |
+
+Databases, `.env*`, uploads, and SFTP passwords are **not** in Git.
+
+## Surface-specific duties
+
+### Desktop (Cursor on Danny’s laptop)
+- Develop against local DB (`bakerysf_stage_local` / `bakerysf_test`).
+- Commit finished work and push so cloud/mobile see the same commits.
+- Staging phone feedback: hooks / **Sync to staging** / `scripts/push_sftp_stage.ps1` (uses gitignored `.env.sftp.stage`).
+- After a cloud PR lands: `git fetch` + `git pull` (or checkout the branch) before continuing — do not reinvent the change locally.
+
+### Cloud / mobile Cursor agents
+- Clone or open **`https://github.com/dgabriner/bakery.git`**. Canonical branch: **`main`**. Never `SheepMiner/Bakery`.
+- Move code with **Git** (additive `cursor/…` branches, PR). Full manual: `docs/GROK_AND_CLOUD_AGENT_DEPLOY.md`.
+- Do not invent a second production branch. Do not force-push shared branches.
+- New root `.php` pages must be listed in `scripts/deploy_manifest.ps1` `Get-BakeryDeployRootFiles`.
+- In handoffs, say whether Staging was actually synced. Pushing GitHub ≠ Staging ≠ Live.
+- Live stays Staging Manager `confirm`. Refuse “push to production” / “SFTP to bake” / “import staging DB over live.”
+
+## Stay in sync without owner nagging
+
+1. **Before coding:** `git fetch` / confirm you are on the intended branch relative to `origin/main`.
+2. **After coding:** commit + push the branch; open/update the PR.
+3. **Tell the truth about Staging/Live** in the handoff — never claim a host updated unless you verified it.
+4. **Desktop after cloud work:** pull the merged `main` (or the PR branch) so local and agents share one history.
+
+Details: `docs/GROK_AND_CLOUD_AGENT_DEPLOY.md`, `docs/AUTO_PUSH.md`, `docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md`.
