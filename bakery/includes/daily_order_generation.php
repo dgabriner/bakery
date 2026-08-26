@@ -54,7 +54,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
         $stmt = $db->prepare("
             SELECT so.customer_id, so.product_id, so.quantity,
                    COALESCE(p.price, 0) as price,
+                   p.wholesale_price,
                    c.default_pan_dulce_price,
+                   c.pricing_tier,
                    pl.name as product_line_name
             FROM standing_orders so
             JOIN customers c ON so.customer_id = c.id AND c.is_active = 1
@@ -238,13 +240,16 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                         }
 
                         // Determine the unit price based on product line and customer pricing
-                        $unitPrice = floatval($order['price'] ?? 0);
-
-                        // If this is a Pan Dulce product and customer has a custom price, use it
-                        if ($order['product_line_name'] === 'Pan Dulce' &&
-                            !empty($order['default_pan_dulce_price'])) {
-                            $unitPrice = floatval($order['default_pan_dulce_price']);
-                        }
+                        $unitPrice = bakery_resolve_customer_price($db, [
+                            'id' => (int)$order['customer_id'],
+                            'pricing_tier' => $order['pricing_tier'] ?? 'retail',
+                            'default_pan_dulce_price' => $order['default_pan_dulce_price'] ?? null,
+                        ], [
+                            'id' => $productId,
+                            'price' => floatval($order['price'] ?? 0),
+                            'wholesale_price' => $order['wholesale_price'] ?? null,
+                            'product_line_name' => $order['product_line_name'] ?? '',
+                        ]);
 
                         $lineTotal = $standingQty * $unitPrice;
 

@@ -741,9 +741,9 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
         $lineTotal = round($quantity * $unitPrice, 2);
         if ($existing) {
             $upd = $db->prepare(
-                'UPDATE daily_order_items SET quantity = ?, line_total = ? * unit_price WHERE id = ?'
+                'UPDATE daily_order_items SET quantity = ?, unit_price = ?, line_total = ? WHERE id = ?'
             );
-            $upd->execute([$quantity, $quantity, (int)$existing['id']]);
+            $upd->execute([$quantity, $unitPrice, $lineTotal, (int)$existing['id']]);
         } else {
             $ins = $db->prepare(
                 'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)

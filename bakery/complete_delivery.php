@@ -20,6 +20,7 @@ require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/driver_route_prep.php';
 require_once __DIR__ . '/includes/delivery_recovery.php';
 require_once __DIR__ . '/includes/delivery_skip.php';
+require_once __DIR__ . '/includes/customer_portal.php';
 
 if (PHP_SAPI !== 'cli') {
     header('Content-Type: application/json');
@@ -162,14 +163,81 @@ function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId): void
     }
 }
 
+/**
+ * Unified Pan Dulce catalog price when all Pan Dulce products share one rate.
+ * Returns 0 when the catalog is empty or mixed.
+ */
+function bakery_pan_dulce_catalog_standard_price(PDO $db): float {
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+    try {
+        $row = $db->query(
+            "SELECT MIN(p.price) AS min_price, MAX(p.price) AS max_price
+             FROM products p
+             JOIN dough_types dt ON dt.id = p.dough_type_id
+             JOIN product_lines pl ON pl.id = dt.product_line_id
+             WHERE pl.name = 'Pan Dulce'"
+        )->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $cached = 0.0;
+        return $cached;
+    }
+    if (!$row || $row['min_price'] === null) {
+        $cached = 0.0;
+        return $cached;
+    }
+    $min = round((float)$row['min_price'], 2);
+    $max = round((float)$row['max_price'], 2);
+    $cached = ($min > 0 && abs($min - $max) < 0.005) ? $min : 0.0;
+    return $cached;
+}
+
+/**
+ * Resolve a zero/blank line price using store pan dulce default, customer
+ * pricing tiers, and catalog standard — so drivers are not asked for a price
+ * that is already on file.
+ */
+function bakery_delivery_resolve_line_unit_price(PDO $db, array $order, array $item): float {
+    $unitPrice = round((float)($item['unit_price'] ?? 0), 2);
+    if ($unitPrice > 0) {
+        return $unitPrice;
+    }
+
+    $customer = [
+        'id' => (int)($order['customer_id'] ?? 0),
+        'pricing_tier' => $order['pricing_tier'] ?? 'retail',
+        'default_pan_dulce_price' => $order['default_pan_dulce_price'] ?? null,
+    ];
+    $product = [
+        'id' => (int)($item['product_id'] ?? 0),
+        'price' => (float)($item['standard_price'] ?? $item['price'] ?? 0),
+        'wholesale_price' => $item['wholesale_price'] ?? null,
+        'product_line_name' => $item['product_line_name'] ?? '',
+    ];
+
+    $resolved = round((float)bakery_resolve_customer_price($db, $customer, $product), 2);
+    if ($resolved > 0) {
+        return $resolved;
+    }
+
+    $catalogStandard = bakery_pan_dulce_catalog_standard_price($db);
+    if ($catalogStandard > 0) {
+        return $catalogStandard;
+    }
+
+    return 0.0;
+}
+
 function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
     $orderStmt = $db->prepare(
-        'SELECT do.id, do.order_date, do.status, do.total_amount,
+        'SELECT do.id, do.customer_id, do.order_date, do.status, do.total_amount,
                 do.delivery_order_total, do.delivery_pricing_label,
                 do.delivery_confirmed_at, do.delivered_pieces,
                 do.credits_taken_back, c.name AS customer_name,
                 c.address AS customer_address, c.phone AS customer_phone,
-                c.default_pan_dulce_price,
+                c.default_pan_dulce_price, c.pricing_tier,
                 CASE WHEN EXISTS (
                     SELECT 1
                     FROM daily_order_items payment_doi
@@ -205,7 +273,8 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
     $itemStmt = $db->prepare(
         "SELECT doi.id, doi.product_id, doi.quantity, doi.delivered_quantity,
                 doi.unit_price, doi.line_total, p.name AS product_name,
-                p.price AS standard_price, pl.name AS product_line_name,
+                p.price AS standard_price, p.wholesale_price,
+                pl.name AS product_line_name,
                 dt.name AS dough_type_name
          FROM daily_order_items doi
          JOIN products p ON p.id = doi.product_id
@@ -222,33 +291,29 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
     $hasPanDulce = false;
     $hasStorePrice = false;
     $hasStandardPrice = false;
+    $storePrice = isset($order['default_pan_dulce_price']) && $order['default_pan_dulce_price'] !== ''
+        ? (float)$order['default_pan_dulce_price']
+        : 0.0;
     foreach ($items as &$item) {
         $quantity = (int)$item['quantity'];
-        $unitPrice = round((float)$item['unit_price'], 2);
-        // Older daily orders can have a zero-priced line even though the active
-        // catalog price is configured. Resolve it here so drivers use the known
-        // standard price instead of being asked to enter one manually.
-        if ($unitPrice <= 0) {
-            $storePrice = ($item['product_line_name'] ?? '') === 'Pan Dulce'
-                ? (float)($order['default_pan_dulce_price'] ?? 0)
-                : 0.0;
-            $standardPrice = (float)($item['standard_price'] ?? 0);
-            $unitPrice = round($storePrice > 0 ? $storePrice : $standardPrice, 2);
-        }
+        // Older daily orders can have a zero-priced line even though the store
+        // default pan dulce price or catalog rate is configured. Resolve it here
+        // so drivers are not blocked on the invoice step.
+        $unitPrice = bakery_delivery_resolve_line_unit_price($db, $order, $item);
         $lineTotal = round($quantity * $unitPrice, 2);
         $orderedPieces += $quantity;
         $storedOrderTotal += $lineTotal;
         $item['quantity'] = $quantity;
         $item['unit_price'] = $unitPrice;
         $item['line_total'] = $lineTotal;
-        if (($item['product_line_name'] ?? '') === 'Pan Dulce') {
+        $isPanDulce = strcasecmp((string)($item['product_line_name'] ?? ''), 'Pan Dulce') === 0;
+        if ($isPanDulce) {
             $hasPanDulce = true;
-            $storePrice = $order['default_pan_dulce_price'];
-            if ($storePrice !== null && (float)$storePrice > 0 && abs($unitPrice - (float)$storePrice) < 0.005) {
-                $hasStorePrice = true;
-            } elseif (abs($unitPrice - (float)$item['standard_price']) < 0.005) {
-                $hasStandardPrice = true;
-            }
+        }
+        if ($storePrice > 0 && abs($unitPrice - $storePrice) < 0.005) {
+            $hasStorePrice = true;
+        } elseif (abs($unitPrice - (float)$item['standard_price']) < 0.005) {
+            $hasStandardPrice = true;
         }
     }
     unset($item);
@@ -259,7 +324,7 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
             $pricingLabel = 'Mixed Pan Dulce pricing';
         } elseif ($hasStorePrice) {
             $pricingLabel = 'Store price';
-        } elseif ($hasPanDulce) {
+        } elseif ($hasPanDulce || $hasStandardPrice) {
             $pricingLabel = 'Standard price';
         } else {
             $pricingLabel = 'Order pricing';
@@ -298,14 +363,39 @@ function bakery_delivery_pricing_missing(array $invoice): bool {
     return false;
 }
 
+/**
+ * Known piece price for a customer when line prices are blank: store default
+ * pan dulce rate, then unified catalog standard.
+ */
+function bakery_delivery_known_fallback_price(PDO $db, array $order): float {
+    $storePrice = isset($order['default_pan_dulce_price']) && $order['default_pan_dulce_price'] !== ''
+        ? round((float)$order['default_pan_dulce_price'], 2)
+        : 0.0;
+    if ($storePrice > 0) {
+        return $storePrice;
+    }
+    return bakery_pan_dulce_catalog_standard_price($db);
+}
+
 /** Persist valid catalog/store prices for historical zero-priced order lines. */
 function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId): void {
-    $stmt = $db->prepare(
-        "SELECT doi.id, doi.quantity, doi.unit_price, p.price AS standard_price,
-                pl.name AS product_line_name, c.default_pan_dulce_price
-         FROM daily_order_items doi
-         JOIN daily_orders do ON do.id = doi.daily_order_id
+    $orderStmt = $db->prepare(
+        'SELECT do.customer_id, c.default_pan_dulce_price, c.pricing_tier
+         FROM daily_orders do
          JOIN customers c ON c.id = do.customer_id
+         WHERE do.id = ?'
+    );
+    $orderStmt->execute([$dailyOrderId]);
+    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        return;
+    }
+
+    $stmt = $db->prepare(
+        "SELECT doi.id, doi.product_id, doi.quantity, doi.unit_price,
+                p.price AS standard_price, p.wholesale_price,
+                pl.name AS product_line_name
+         FROM daily_order_items doi
          JOIN products p ON p.id = doi.product_id
          LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
          LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
@@ -315,15 +405,43 @@ function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId):
     $update = $db->prepare(
         'UPDATE daily_order_items SET unit_price = ?, line_total = ? WHERE id = ? AND daily_order_id = ?'
     );
+    $fallback = bakery_delivery_known_fallback_price($db, $order);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-        $storePrice = ($item['product_line_name'] ?? '') === 'Pan Dulce'
-            ? (float)($item['default_pan_dulce_price'] ?? 0)
-            : 0.0;
-        $price = round($storePrice > 0 ? $storePrice : (float)$item['standard_price'], 2);
+        $price = bakery_delivery_resolve_line_unit_price($db, $order, $item);
+        if ($price <= 0 && $fallback > 0) {
+            $price = $fallback;
+        }
         if ($price > 0) {
             $update->execute([$price, round((int)$item['quantity'] * $price, 2), (int)$item['id'], $dailyOrderId]);
         }
     }
+}
+
+/**
+ * When line repair still leaves the invoice unpriced, apply the store default
+ * pan dulce (or catalog standard) as the order piece price so drivers can
+ * complete the stop without typing a known rate.
+ *
+ * @return array{ordered_pieces:int,order_total:float,average_price:float,pricing_label:string}|null
+ */
+function bakery_delivery_apply_known_price_if_missing(PDO $db, int $dailyOrderId): ?array {
+    $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    if (!bakery_delivery_pricing_missing($invoice)) {
+        return null;
+    }
+    $fallback = bakery_delivery_known_fallback_price($db, $invoice['order']);
+    if ($fallback <= 0) {
+        return null;
+    }
+    $summary = bakery_apply_driver_price($db, $dailyOrderId, $fallback);
+    $label = (isset($invoice['order']['default_pan_dulce_price'])
+        && (float)$invoice['order']['default_pan_dulce_price'] > 0)
+        ? 'Store price'
+        : 'Standard price';
+    $db->prepare('UPDATE daily_orders SET delivery_pricing_label = ? WHERE id = ?')
+        ->execute([$label, $dailyOrderId]);
+    $summary['pricing_label'] = $label;
+    return $summary;
 }
 
 function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPiece): array {
@@ -370,6 +488,8 @@ function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPi
 }
 
 function bakery_delivery_summary(PDO $db, int $dailyOrderId): array {
+    bakery_delivery_repair_missing_item_prices($db, $dailyOrderId);
+    bakery_delivery_apply_known_price_if_missing($db, $dailyOrderId);
     $invoice = bakery_delivery_invoice($db, $dailyOrderId);
     return [
         'ordered_pieces' => $invoice['ordered_pieces'],
@@ -442,12 +562,22 @@ function bakery_confirm_delivery(
 
     $driverPrice = null;
     if ($summary['pricing_missing']) {
-        if (!array_key_exists('price_per_piece', $options)) {
+        $known = bakery_delivery_known_fallback_price($db, $invoice['order']);
+        if ($known > 0) {
+            // Store / catalog price is on file — do not block the driver.
+            $driverPrice = $known;
+        } elseif (!array_key_exists('price_per_piece', $options)) {
             throw new Exception('Enter a price per piece for this customer');
+        } else {
+            $driverPrice = filter_var($options['price_per_piece'], FILTER_VALIDATE_FLOAT);
+            if ($driverPrice === false || $driverPrice <= 0) {
+                throw new Exception('Enter a valid price per piece greater than zero');
+            }
         }
-        $driverPrice = filter_var($options['price_per_piece'], FILTER_VALIDATE_FLOAT);
-        if ($driverPrice === false || $driverPrice <= 0) {
-            throw new Exception('Enter a valid price per piece greater than zero');
+    } elseif (array_key_exists('price_per_piece', $options)) {
+        $entered = filter_var($options['price_per_piece'], FILTER_VALIDATE_FLOAT);
+        if ($entered !== false && $entered > 0) {
+            $driverPrice = $entered;
         }
     }
 
@@ -489,16 +619,20 @@ function bakery_confirm_delivery(
     }
     try {
         bakery_delivery_repair_missing_item_prices($db, $dailyOrderId);
+        $appliedKnown = bakery_delivery_apply_known_price_if_missing($db, $dailyOrderId);
         $invoice = bakery_delivery_invoice($db, $dailyOrderId);
         $summary = [
             'ordered_pieces' => $invoice['ordered_pieces'],
             'order_total' => $invoice['order_total'],
             'average_price' => $invoice['average_price'],
-            'pricing_label' => $invoice['pricing_label'],
+            'pricing_label' => $appliedKnown['pricing_label'] ?? $invoice['pricing_label'],
             'pricing_missing' => bakery_delivery_pricing_missing($invoice),
         ];
 
         if ($summary['pricing_missing']) {
+            if ($driverPrice === null || $driverPrice <= 0) {
+                throw new Exception('Enter a price per piece for this customer');
+            }
             $summary = bakery_apply_driver_price($db, $dailyOrderId, (float)$driverPrice);
         }
 
