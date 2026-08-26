@@ -102,6 +102,10 @@ function bakery_sfb_portal_scripts() {
         'sfb_batches.php',
         'sfb_batch.php',
         'sfb_resources.php',
+        'sfb_offerings.php',
+        'sfb_lesson.php',
+        'sfb_media.php',
+        'starter.php',
         'sfb_community.php',
         'sfb_community_topic.php',
         'sfb_shared_batch.php',
@@ -2366,8 +2370,8 @@ function bakery_sfb_create_offering(PDO $db, $title, $priceDollars, $kind = 'cla
     if (!bakery_sfb_payments_ready($db)) {
         throw new RuntimeException('Education payments need a database update (migration 066)');
     }
-    if (!in_array((string)$kind, ['class', 'membership', 'kit', 'donation', 'credits'], true)) {
-        throw new InvalidArgumentException('Choose class, membership, kit, donation, or credits');
+    if (!in_array((string)$kind, ['class', 'membership', 'kit', 'donation', 'credits', 'gift'], true)) {
+        throw new InvalidArgumentException('Choose class, membership, kit, donation, credits, or gift');
     }
     $title = trim((string)$title);
     if ($title === '' || mb_strlen($title) > 150) {
@@ -2464,8 +2468,10 @@ function bakery_sfb_purchase(PDO $db, $purchaseId) {
  * Create a Square hosted checkout link for a recorded intent.
  * Requires credentials or the test handler seam; on success the attempt
  * moves to pending. Never invents a paid state.
+ *
+ * @param string|null $redirectUrl Absolute or site-relative return URL after pay.
  */
-function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
+function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId, $redirectUrl = null) {
     if (!square_is_configured() && !isset($GLOBALS['bakery_square_api_handler'])) {
         throw new RuntimeException('Square is not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID.');
     }
@@ -2477,6 +2483,12 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
     if (!in_array((string)$purchase['status'], ['intent', 'failed'], true)) {
         throw new InvalidArgumentException('This purchase already has a checkout');
     }
+
+    $defaultRedirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+        . '/sfb_offerings.php?purchased=' . (int)$purchase['id'];
+    $redirect = is_string($redirectUrl) && trim($redirectUrl) !== ''
+        ? trim($redirectUrl)
+        : $defaultRedirect;
 
     $resp = square_api_request('POST', '/v2/online-checkout/payment-links', [
         'idempotency_key' => 'os-edu-purchase-' . (int)$purchase['id'] . '-' . date('Ymd'),
@@ -2493,10 +2505,9 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
             ]],
         ],
         'checkout_options' => [
-            'redirect_url' => rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/') . 'sfb_offerings.php?purchased=' . (int)$purchase['id'],
+            'redirect_url' => $redirect,
         ],
-    ]);
-    $link = $resp['payment_link'] ?? [];
+    ]);    $link = $resp['payment_link'] ?? [];
     $url = (string)($link['url'] ?? '');
     // Square returns a singular payment_link.order_id; accept the older
     // order_ids-array shape too rather than storing no order reference.
@@ -2530,7 +2541,7 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId) {
  *
  * @return array{configured: bool, url: ?string, purchase_id: int}
  */
-function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId) {
+function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId, $redirectUrl = null) {
     require_once __DIR__ . '/square_config.php';
     $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
     $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, $offeringId);
@@ -2538,12 +2549,748 @@ function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId) {
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId];
     }
     try {
-        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId);
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId, $redirectUrl);
     } catch (Throwable $e) {
         // The intent stays recorded; the caller shows the honest notice.
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'error' => $e->getMessage()];
     }
     return ['configured' => true, 'url' => $checkout['url'], 'purchase_id' => $purchaseId];
+}
+
+/* ── Starter jar (physical kit: pickup $5 / ship $25) ─────────────────── */
+
+function bakery_sfb_starter_jar_ready(PDO $db) {
+    return bakery_sfb_payments_ready($db) && table_exists($db, 'sfb_starter_jar_orders');
+}
+
+/** Site-relative return path so signup stays inside the BASE_URL cookie scope. */
+function bakery_sfb_starter_jar_return_path(string $query = 'continue=1'): string {
+    $path = (defined('BASE_URL') ? (string)BASE_URL : '/') . 'starter.php';
+    if ($query !== '') {
+        $path .= (strpos($path, '?') === false ? '?' : '&') . ltrim($query, '?&');
+    }
+    return $path;
+}
+
+/** Canonical kit titles seeded by migration 070. */
+function bakery_sfb_starter_jar_offering_title(string $fulfillment): string {
+    if ($fulfillment === 'ship') {
+        return 'Sourdough Starter — Shipped';
+    }
+    return 'Sourdough Starter — Bakery Pickup';
+}
+
+/** Canonical First Loaf Kit title seeded by migration 072. Pickup only. */
+function bakery_sfb_first_loaf_kit_offering_title(): string {
+    return 'First Loaf Kit — Bakery Pickup';
+}
+
+function bakery_sfb_first_loaf_kit_ready(PDO $db) {
+    return bakery_sfb_starter_jar_ready($db)
+        && column_exists($db, 'sfb_starter_jar_orders', 'pack_kind');
+}
+
+function bakery_sfb_starter_jar_offering_by_title(PDO $db, string $title) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, title, description, price_cents, currency, kind, entitlement_days, units, is_active
+         FROM sfb_offerings WHERE title = ? AND is_active = 1 LIMIT 1'
+    );
+    $stmt->execute([$title]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_starter_jar_offering(PDO $db, string $fulfillment) {
+    return bakery_sfb_starter_jar_offering_by_title($db, bakery_sfb_starter_jar_offering_title($fulfillment));
+}
+
+function bakery_sfb_first_loaf_kit_offering(PDO $db) {
+    return bakery_sfb_starter_jar_offering_by_title($db, bakery_sfb_first_loaf_kit_offering_title());
+}
+
+/** @return 'jar'|'first_loaf_kit' */
+function bakery_sfb_starter_pack_kind_from_input(array $input): string {
+    $raw = strtolower(trim((string)($input['pack_kind'] ?? '')));
+    $fulfillment = strtolower(trim((string)($input['fulfillment'] ?? '')));
+    if ($raw === 'first_loaf_kit' || $fulfillment === 'kit') {
+        return 'first_loaf_kit';
+    }
+    return 'jar';
+}
+
+/**
+ * Normalize and validate a starter-jar request from the public form.
+ *
+ * @return array{fulfillment:string,pack_kind:string,pickup_day:?string,contact_name:string,ship_line1:?string,ship_line2:?string,ship_city:?string,ship_state:?string,ship_zip:?string,notes:?string}
+ */
+function bakery_sfb_starter_jar_normalize_draft(array $input): array {
+    $packKind = bakery_sfb_starter_pack_kind_from_input($input);
+    $fulfillment = strtolower(trim((string)($input['fulfillment'] ?? '')));
+    if ($packKind === 'first_loaf_kit') {
+        if ($fulfillment === 'ship') {
+            throw new InvalidArgumentException('The First Loaf Kit is bakery pickup only.');
+        }
+        $fulfillment = 'pickup';
+    }
+    if (!in_array($fulfillment, ['pickup', 'ship'], true)) {
+        throw new InvalidArgumentException('Choose bakery pickup or shipping.');
+    }
+    $name = trim((string)($input['contact_name'] ?? ''));
+    if ($name === '' || mb_strlen($name) > 120) {
+        throw new InvalidArgumentException('Enter your name (120 characters max).');
+    }
+    $notes = trim((string)($input['notes'] ?? ''));
+    if (mb_strlen($notes) > 255) {
+        throw new InvalidArgumentException('Notes are limited to 255 characters.');
+    }
+    $pickupDay = null;
+    $ship = [
+        'ship_line1' => null,
+        'ship_line2' => null,
+        'ship_city' => null,
+        'ship_state' => null,
+        'ship_zip' => null,
+    ];
+    if ($fulfillment === 'pickup') {
+        $pickupDay = strtolower(trim((string)($input['pickup_day'] ?? '')));
+        if (!in_array($pickupDay, ['tuesday', 'friday'], true)) {
+            throw new InvalidArgumentException('Pick Tuesday or Friday for bakery pickup.');
+        }
+    } else {
+        $ship['ship_line1'] = trim((string)($input['ship_line1'] ?? ''));
+        $ship['ship_line2'] = trim((string)($input['ship_line2'] ?? ''));
+        $ship['ship_city'] = trim((string)($input['ship_city'] ?? ''));
+        $ship['ship_state'] = trim((string)($input['ship_state'] ?? ''));
+        $ship['ship_zip'] = trim((string)($input['ship_zip'] ?? ''));
+        if ($ship['ship_line1'] === '' || mb_strlen($ship['ship_line1']) > 150) {
+            throw new InvalidArgumentException('Enter a shipping street address.');
+        }
+        if ($ship['ship_line2'] !== '' && mb_strlen($ship['ship_line2']) > 150) {
+            throw new InvalidArgumentException('Address line 2 is too long.');
+        }
+        if ($ship['ship_city'] === '' || mb_strlen($ship['ship_city']) > 80) {
+            throw new InvalidArgumentException('Enter a city.');
+        }
+        if ($ship['ship_state'] === '' || mb_strlen($ship['ship_state']) > 40) {
+            throw new InvalidArgumentException('Enter a state.');
+        }
+        if ($ship['ship_zip'] === '' || mb_strlen($ship['ship_zip']) > 20) {
+            throw new InvalidArgumentException('Enter a ZIP / postal code.');
+        }
+        if ($ship['ship_line2'] === '') {
+            $ship['ship_line2'] = null;
+        }
+    }
+    return array_merge([
+        'fulfillment' => $fulfillment,
+        'pack_kind' => $packKind,
+        'pickup_day' => $pickupDay,
+        'contact_name' => $name,
+        'notes' => $notes !== '' ? $notes : null,
+    ], $ship);
+}
+
+function bakery_sfb_starter_jar_order(PDO $db, $orderId) {
+    if (!bakery_sfb_starter_jar_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT o.*, p.status AS purchase_status, p.price_cents_snapshot, p.offering_title_snapshot,
+                p.checkout_url, p.paid_at
+         FROM sfb_starter_jar_orders o
+         JOIN sfb_offering_purchases p ON p.id = o.purchase_id
+         WHERE o.id = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$orderId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_starter_jar_for_purchase(PDO $db, $purchaseId) {
+    if (!bakery_sfb_starter_jar_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT o.*, p.status AS purchase_status, p.price_cents_snapshot, p.offering_title_snapshot,
+                p.checkout_url, p.paid_at
+         FROM sfb_starter_jar_orders o
+         JOIN sfb_offering_purchases p ON p.id = o.purchase_id
+         WHERE o.purchase_id = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$purchaseId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Record fulfillment + purchase attempt, then start Square checkout when ready.
+ *
+ * @return array{configured: bool, url: ?string, purchase_id: int, order_id: int, error?: string}
+ */
+function bakery_sfb_buy_starter_jar(PDO $db, $customerId, array $draft) {
+    if (!bakery_sfb_starter_jar_ready($db)) {
+        throw new RuntimeException('Starter jar sales need a database update (migration 070)');
+    }
+    $draft = bakery_sfb_starter_jar_normalize_draft($draft);
+    $packKind = (string)($draft['pack_kind'] ?? 'jar');
+    if ($packKind === 'first_loaf_kit') {
+        if (!bakery_sfb_first_loaf_kit_ready($db)) {
+            throw new RuntimeException('First Loaf Kit sales need a database update (migration 072)');
+        }
+        $offering = bakery_sfb_first_loaf_kit_offering($db);
+    } else {
+        $offering = bakery_sfb_starter_jar_offering($db, $draft['fulfillment']);
+    }
+    if (!$offering) {
+        throw new RuntimeException('Starter jar offerings are not available yet.');
+    }
+
+    bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        if (column_exists($db, 'customers', 'name')) {
+            $nameStmt = $db->prepare('SELECT name FROM customers WHERE id = ? LIMIT 1');
+            $nameStmt->execute([(int)$customerId]);
+            $currentName = (string)$nameStmt->fetchColumn();
+            if ($currentName === '' || preg_match('/^Baker \d+/', $currentName)) {
+                $db->prepare('UPDATE customers SET name = ? WHERE id = ?')
+                    ->execute([$draft['contact_name'], (int)$customerId]);
+            }
+        }
+
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id']);
+
+        $hasPackKind = column_exists($db, 'sfb_starter_jar_orders', 'pack_kind');
+        if ($hasPackKind) {
+            $ins = $db->prepare(
+                'INSERT INTO sfb_starter_jar_orders
+                    (customer_id, purchase_id, fulfillment, pack_kind, pickup_day, contact_name,
+                     ship_line1, ship_line2, ship_city, ship_state, ship_zip, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $ins->execute([
+                (int)$customerId,
+                $purchaseId,
+                $draft['fulfillment'],
+                $packKind,
+                $draft['pickup_day'],
+                $draft['contact_name'],
+                $draft['ship_line1'],
+                $draft['ship_line2'],
+                $draft['ship_city'],
+                $draft['ship_state'],
+                $draft['ship_zip'],
+                $draft['notes'],
+            ]);
+        } else {
+            $ins = $db->prepare(
+                'INSERT INTO sfb_starter_jar_orders
+                    (customer_id, purchase_id, fulfillment, pickup_day, contact_name,
+                     ship_line1, ship_line2, ship_city, ship_state, ship_zip, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $ins->execute([
+                (int)$customerId,
+                $purchaseId,
+                $draft['fulfillment'],
+                $draft['pickup_day'],
+                $draft['contact_name'],
+                $draft['ship_line1'],
+                $draft['ship_line2'],
+                $draft['ship_city'],
+                $draft['ship_state'],
+                $draft['ship_zip'],
+                $draft['notes'],
+            ]);
+        }
+        $orderId = (int)$db->lastInsertId();
+
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+        . '/starter.php?purchased=' . $purchaseId;
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    if ($forceNoSquare) {
+        return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'order_id' => $orderId];
+    }
+    require_once __DIR__ . '/square_config.php';
+    try {
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId, $redirect);
+    } catch (Throwable $e) {
+        return [
+            'configured' => false,
+            'url' => null,
+            'purchase_id' => $purchaseId,
+            'order_id' => $orderId,
+            'error' => $e->getMessage(),
+        ];
+    }
+    return [
+        'configured' => true,
+        'url' => $checkout['url'],
+        'purchase_id' => $purchaseId,
+        'order_id' => $orderId,
+    ];
+}
+
+/* ── Private workshops + gift certificates (purchase home) ─────────────── */
+
+function bakery_sfb_purchase_home_ready(PDO $db) {
+    return bakery_sfb_payments_ready($db)
+        && table_exists($db, 'sfb_private_workshop_bookings')
+        && table_exists($db, 'sfb_gift_certificates');
+}
+
+/** Catalog title for the public Starter Workshop seat (seeded in 067). */
+function bakery_sfb_starter_workshop_title(): string {
+    return 'Starter Workshop';
+}
+
+function bakery_sfb_gift_certificate_offering_title(): string {
+    return 'Gift Certificate — Starter Workshop';
+}
+
+function bakery_sfb_starter_workshop_offering(PDO $db) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, title, description, price_cents, currency, kind, entitlement_days, units, is_active
+         FROM sfb_offerings WHERE title = ? AND is_active = 1 LIMIT 1'
+    );
+    $stmt->execute([bakery_sfb_starter_workshop_title()]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_gift_certificate_offering(PDO $db) {
+    if (!bakery_sfb_payments_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, title, description, price_cents, currency, kind, entitlement_days, units, is_active
+         FROM sfb_offerings WHERE title = ? AND is_active = 1 LIMIT 1'
+    );
+    $stmt->execute([bakery_sfb_gift_certificate_offering_title()]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Private workshop price quote.
+ * Starter $80/person; Pizza Workshop Upgrade $100/person base;
+ * optional Bites & Snacks +$20/person; Drinks +$20/person.
+ *
+ * @return array{workshop_type:string,headcount:int,bites:bool,drinks:bool,price_cents:int,line_label:string}
+ */
+function bakery_sfb_private_workshop_quote(array $input): array {
+    $type = strtolower(trim((string)($input['workshop_type'] ?? 'starter')));
+    if (!in_array($type, ['starter', 'pizza'], true)) {
+        throw new InvalidArgumentException('Choose Starter Workshop or Pizza Workshop Upgrade.');
+    }
+    $headcount = (int)($input['headcount'] ?? 0);
+    if ($headcount < 1 || $headcount > 40) {
+        throw new InvalidArgumentException('Headcount must be between 1 and 40.');
+    }
+    $bites = !empty($input['bites']);
+    $drinks = !empty($input['drinks']);
+    $perPerson = $type === 'pizza' ? 10000 : 8000;
+    $cents = $perPerson * $headcount;
+    if ($bites) {
+        $cents += 2000 * $headcount;
+    }
+    if ($drinks) {
+        $cents += 2000 * $headcount;
+    }
+    $label = $type === 'pizza'
+        ? 'Private Pizza Workshop Upgrade'
+        : 'Private Starter Workshop';
+    $label .= ' × ' . $headcount;
+    if ($bites) {
+        $label .= ' + Bites & Snacks';
+    }
+    if ($drinks) {
+        $label .= ' + Drinks';
+    }
+    return [
+        'workshop_type' => $type,
+        'headcount' => $headcount,
+        'bites' => $bites,
+        'drinks' => $drinks,
+        'price_cents' => $cents,
+        'line_label' => $label,
+    ];
+}
+
+/**
+ * @return array{workshop_type:string,headcount:int,bites:bool,drinks:bool,contact_name:string,preferred_date:?string,notes:?string,price_cents:int,line_label:string}
+ */
+function bakery_sfb_private_workshop_normalize(array $input): array {
+    $quote = bakery_sfb_private_workshop_quote($input);
+    $name = trim((string)($input['contact_name'] ?? ''));
+    if ($name === '' || mb_strlen($name) > 120) {
+        throw new InvalidArgumentException('Enter a contact name (120 characters max).');
+    }
+    $preferred = trim((string)($input['preferred_date'] ?? ''));
+    if (mb_strlen($preferred) > 40) {
+        throw new InvalidArgumentException('Preferred date is limited to 40 characters.');
+    }
+    $notes = trim((string)($input['notes'] ?? ''));
+    if (mb_strlen($notes) > 255) {
+        throw new InvalidArgumentException('Notes are limited to 255 characters.');
+    }
+    return array_merge($quote, [
+        'contact_name' => $name,
+        'preferred_date' => $preferred !== '' ? $preferred : null,
+        'notes' => $notes !== '' ? $notes : null,
+    ]);
+}
+
+/**
+ * Record a custom-priced purchase attempt (title + cents frozen).
+ * Optional offering_id links catalog metadata without using catalog price.
+ */
+function bakery_sfb_record_custom_purchase(PDO $db, $customerId, string $title, int $priceCents, $offeringId = null, string $currency = 'USD') {
+    if (!bakery_sfb_payments_ready($db)) {
+        throw new RuntimeException('Education payments need a database update (migration 066)');
+    }
+    $title = trim($title);
+    if ($title === '' || mb_strlen($title) > 150) {
+        throw new InvalidArgumentException('Purchase title is required (150 characters max)');
+    }
+    if ($priceCents < 0 || $priceCents > 100000000) {
+        throw new InvalidArgumentException('Price must be between 0 and 1,000,000 dollars');
+    }
+    bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+    $offeringId = $offeringId !== null ? (int)$offeringId : null;
+    if ($offeringId !== null && $offeringId <= 0) {
+        $offeringId = null;
+    }
+    $ins = $db->prepare(
+        'INSERT INTO sfb_offering_purchases
+            (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
+         VALUES (?, ?, ?, ?, ?, "intent")'
+    );
+    $ins->execute([
+        (int)$customerId,
+        $offeringId,
+        $title,
+        $priceCents,
+        $currency !== '' ? strtoupper(substr($currency, 0, 3)) : 'USD',
+    ]);
+    return (int)$db->lastInsertId();
+}
+
+/**
+ * @return array{configured: bool, url: ?string, purchase_id: int, booking_id: int, error?: string}
+ */
+function bakery_sfb_buy_private_workshop(PDO $db, $customerId, array $input) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        throw new RuntimeException('Private workshop booking needs a database update (migration 071)');
+    }
+    $draft = bakery_sfb_private_workshop_normalize($input);
+    bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $purchaseId = bakery_sfb_record_custom_purchase(
+            $db,
+            $customerId,
+            $draft['line_label'],
+            (int)$draft['price_cents']
+        );
+        $ins = $db->prepare(
+            'INSERT INTO sfb_private_workshop_bookings
+                (customer_id, purchase_id, workshop_type, headcount, bites, drinks,
+                 contact_name, preferred_date, notes, price_cents_snapshot)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute([
+            (int)$customerId,
+            $purchaseId,
+            $draft['workshop_type'],
+            (int)$draft['headcount'],
+            $draft['bites'] ? 1 : 0,
+            $draft['drinks'] ? 1 : 0,
+            $draft['contact_name'],
+            $draft['preferred_date'],
+            $draft['notes'],
+            (int)$draft['price_cents'],
+        ]);
+        $bookingId = (int)$db->lastInsertId();
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+        . '/sfb_offerings.php?purchased=' . $purchaseId . '#private-workshop';
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    if ($forceNoSquare) {
+        return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'booking_id' => $bookingId];
+    }
+    require_once __DIR__ . '/square_config.php';
+    try {
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId, $redirect);
+    } catch (Throwable $e) {
+        return [
+            'configured' => false,
+            'url' => null,
+            'purchase_id' => $purchaseId,
+            'booking_id' => $bookingId,
+            'error' => $e->getMessage(),
+        ];
+    }
+    return [
+        'configured' => true,
+        'url' => $checkout['url'],
+        'purchase_id' => $purchaseId,
+        'booking_id' => $bookingId,
+    ];
+}
+
+function bakery_sfb_private_workshop_for_purchase(PDO $db, $purchaseId) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT b.*, p.status AS purchase_status, p.checkout_url, p.paid_at
+         FROM sfb_private_workshop_bookings b
+         JOIN sfb_offering_purchases p ON p.id = b.purchase_id
+         WHERE b.purchase_id = ? LIMIT 1'
+    );
+    $stmt->execute([(int)$purchaseId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_gift_code_generate(): string {
+    return 'SFG-' . strtoupper(bin2hex(random_bytes(4)));
+}
+
+/**
+ * Buy a Starter Workshop gift certificate (catalog price; pending code until paid).
+ *
+ * @return array{configured: bool, url: ?string, purchase_id: int, gift_id: int, error?: string}
+ */
+function bakery_sfb_buy_gift_certificate(PDO $db, $customerId, array $input = []) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        throw new RuntimeException('Gift certificates need a database update (migration 071)');
+    }
+    $offering = bakery_sfb_gift_certificate_offering($db);
+    if (!$offering) {
+        throw new RuntimeException('Gift certificate offering is not available yet.');
+    }
+    $recipient = trim((string)($input['recipient_name'] ?? ''));
+    if (mb_strlen($recipient) > 120) {
+        throw new InvalidArgumentException('Recipient name is limited to 120 characters.');
+    }
+    bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id']);
+        $code = bakery_sfb_gift_code_generate();
+        $ins = $db->prepare(
+            'INSERT INTO sfb_gift_certificates
+                (purchase_id, buyer_customer_id, code, amount_cents, for_offering_title, status, recipient_name)
+             VALUES (?, ?, ?, ?, ?, "pending", ?)'
+        );
+        $ins->execute([
+            $purchaseId,
+            (int)$customerId,
+            $code,
+            (int)$offering['price_cents'],
+            bakery_sfb_starter_workshop_title(),
+            $recipient !== '' ? $recipient : null,
+        ]);
+        $giftId = (int)$db->lastInsertId();
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+        . '/sfb_offerings.php?purchased=' . $purchaseId . '#gift-certificate';
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    if ($forceNoSquare) {
+        return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'gift_id' => $giftId];
+    }
+    require_once __DIR__ . '/square_config.php';
+    try {
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId, $redirect);
+    } catch (Throwable $e) {
+        return [
+            'configured' => false,
+            'url' => null,
+            'purchase_id' => $purchaseId,
+            'gift_id' => $giftId,
+            'error' => $e->getMessage(),
+        ];
+    }
+    return [
+        'configured' => true,
+        'url' => $checkout['url'],
+        'purchase_id' => $purchaseId,
+        'gift_id' => $giftId,
+    ];
+}
+
+/** Flip pending gift rows to available when the buyer's purchase becomes paid. */
+function bakery_sfb_maybe_issue_gift_certificate(PDO $db, $purchaseId) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        return;
+    }
+    $purchase = bakery_sfb_purchase($db, $purchaseId);
+    if (!$purchase || (string)$purchase['status'] !== 'paid') {
+        return;
+    }
+    $offering = $purchase['offering_id'] !== null ? bakery_sfb_offering($db, (int)$purchase['offering_id']) : null;
+    if (!$offering || (string)$offering['kind'] !== 'gift') {
+        return;
+    }
+    $upd = $db->prepare(
+        'UPDATE sfb_gift_certificates SET status = "available"
+         WHERE purchase_id = ? AND status = "pending"'
+    );
+    $upd->execute([(int)$purchaseId]);
+}
+
+function bakery_sfb_gift_certificate_by_code(PDO $db, string $code) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        return null;
+    }
+    $code = strtoupper(trim($code));
+    if ($code === '') {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT g.*, p.status AS purchase_status
+         FROM sfb_gift_certificates g
+         JOIN sfb_offering_purchases p ON p.id = g.purchase_id
+         WHERE g.code = ? LIMIT 1'
+    );
+    $stmt->execute([$code]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function bakery_sfb_gift_certificates_for_buyer(PDO $db, $customerId, $limit = 10) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT id, code, amount_cents, for_offering_title, status, recipient_name, created_at, redeemed_at
+         FROM sfb_gift_certificates
+         WHERE buyer_customer_id = ?
+         ORDER BY id DESC LIMIT ' . max(1, (int)$limit)
+    );
+    $stmt->execute([(int)$customerId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Redeem an available gift certificate for one Starter Workshop seat.
+ * @return int redeemed purchase id
+ */
+function bakery_sfb_redeem_gift_certificate(PDO $db, $customerId, string $code) {
+    if (!bakery_sfb_purchase_home_ready($db)) {
+        throw new RuntimeException('Gift certificates need a database update (migration 071)');
+    }
+    $workshop = bakery_sfb_starter_workshop_offering($db);
+    if (!$workshop) {
+        throw new RuntimeException('Starter Workshop is not available for redemption yet.');
+    }
+    bakery_sfb_assert_human_customer($db, $customerId, 'redeem gift certificates');
+    $code = strtoupper(trim($code));
+    if ($code === '') {
+        throw new InvalidArgumentException('Enter a gift certificate code.');
+    }
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $stmt = $db->prepare(
+            'SELECT id, amount_cents, for_offering_title, status
+             FROM sfb_gift_certificates WHERE code = ? FOR UPDATE'
+        );
+        $stmt->execute([$code]);
+        $gift = $stmt->fetch();
+        if (!$gift) {
+            throw new InvalidArgumentException('That gift certificate code was not found.');
+        }
+        if ((string)$gift['status'] !== 'available') {
+            throw new InvalidArgumentException('That gift certificate is not available to redeem.');
+        }
+        if ((string)$gift['for_offering_title'] !== bakery_sfb_starter_workshop_title()) {
+            throw new InvalidArgumentException('This gift certificate is not for the Starter Workshop.');
+        }
+        if ((int)$gift['amount_cents'] < (int)$workshop['price_cents']) {
+            throw new InvalidArgumentException('This gift certificate does not cover the Starter Workshop.');
+        }
+
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$workshop['id']);
+        $upd = $db->prepare(
+            'UPDATE sfb_offering_purchases
+             SET status = "paid", paid_with = "gift", paid_at = COALESCE(paid_at, NOW())
+             WHERE id = ? AND status IN ("intent")'
+        );
+        $upd->execute([$purchaseId]);
+        if ($upd->rowCount() === 0) {
+            throw new RuntimeException('Could not apply the gift certificate to this attempt');
+        }
+        $mark = $db->prepare(
+            'UPDATE sfb_gift_certificates
+             SET status = "redeemed", redeemed_purchase_id = ?, redeemed_customer_id = ?, redeemed_at = NOW()
+             WHERE id = ? AND status = "available"'
+        );
+        $mark->execute([$purchaseId, (int)$customerId, (int)$gift['id']]);
+        if ($mark->rowCount() === 0) {
+            throw new RuntimeException('Gift certificate could not be marked redeemed');
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $purchaseId;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
 }
 
 /**
@@ -2564,7 +3311,7 @@ function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePa
     if (!isset($allowedFrom[$status])) {
         throw new InvalidArgumentException('Unknown purchase status');
     }
-    if ($paidWith !== null && !in_array($paidWith, ['square', 'credit', 'manual'], true)) {
+    if ($paidWith !== null && !in_array($paidWith, ['square', 'credit', 'manual', 'gift'], true)) {
         throw new InvalidArgumentException('Unknown payment channel');
     }
     $placeholders = implode(', ', array_fill(0, count($allowedFrom[$status]), '?'));
@@ -2591,6 +3338,7 @@ function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePa
     $changed = $stmt->rowCount() > 0;
     if ($changed && $status === 'paid') {
         bakery_sfb_maybe_grant_credits($db, (int)$purchaseId);
+        bakery_sfb_maybe_issue_gift_certificate($db, (int)$purchaseId);
     }
     return $changed;
 }
@@ -2627,8 +3375,8 @@ function bakery_sfb_pay_with_credit(PDO $db, $customerId, $offeringId) {
     if (!$offering || (int)$offering['is_active'] !== 1) {
         throw new InvalidArgumentException('That offering is not available');
     }
-    if (in_array((string)$offering['kind'], ['credits', 'donation'], true)) {
-        throw new InvalidArgumentException('Credits and donations are paid with money, not credits');
+    if (in_array((string)$offering['kind'], ['credits', 'donation', 'gift'], true)) {
+        throw new InvalidArgumentException('Credits, donations, and gift certificates are paid with money, not credits');
     }
     $balance = bakery_sfb_credit_balance($db, $customerId);
     if ($balance < 1) {
@@ -2721,7 +3469,8 @@ function bakery_sfb_customer_purchases(PDO $db, $customerId, $limit = 20) {
         return [];
     }
     $stmt = $db->prepare(
-        'SELECT id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status, checkout_url, created_at, paid_at
+        'SELECT id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status, paid_with,
+                checkout_url, created_at, paid_at
          FROM sfb_offering_purchases WHERE customer_id = ?
          ORDER BY id DESC LIMIT ' . max(1, (int)$limit)
     );

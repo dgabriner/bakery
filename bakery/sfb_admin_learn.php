@@ -395,6 +395,42 @@ $currentLocale = bakery_locale();
                   · $<?php echo number_format((float)$purchaseRow['price_cents_snapshot'] / 100, 2); ?>
                   <br><small class="muted"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($purchaseRow['created_at'])), ENT_QUOTES, 'UTF-8'); ?><?php
                     if (!empty($purchaseRow['manual_note'])) { echo ' · ' . htmlspecialchars($purchaseRow['manual_note'], ENT_QUOTES, 'UTF-8'); }
+                    $jarOrder = bakery_sfb_starter_jar_for_purchase($db, (int)$purchaseRow['id']);
+                    if ($jarOrder) {
+                        echo ' · ';
+                        if ((string)$jarOrder['fulfillment'] === 'pickup') {
+                            echo htmlspecialchars(bakery_t('sfb.starter_jar_summary_pickup', [
+                                'name' => (string)$jarOrder['contact_name'],
+                                'day' => bakery_t('sfb.starter_jar_day_' . (string)$jarOrder['pickup_day']),
+                            ]), ENT_QUOTES, 'UTF-8');
+                        } else {
+                            $jarAddr = trim(implode(', ', array_filter([
+                                (string)$jarOrder['ship_line1'],
+                                trim((string)$jarOrder['ship_city'] . ' ' . (string)$jarOrder['ship_zip']),
+                            ])));
+                            echo htmlspecialchars(bakery_t('sfb.starter_jar_summary_ship', [
+                                'name' => (string)$jarOrder['contact_name'],
+                                'address' => $jarAddr,
+                            ]), ENT_QUOTES, 'UTF-8');
+                        }
+                    }
+                    $wsBooking = function_exists('bakery_sfb_private_workshop_for_purchase')
+                        ? bakery_sfb_private_workshop_for_purchase($db, (int)$purchaseRow['id'])
+                        : null;
+                    if ($wsBooking) {
+                        echo ' · ' . htmlspecialchars((string)$wsBooking['contact_name'], ENT_QUOTES, 'UTF-8');
+                        echo ' · ' . (int)$wsBooking['headcount'] . 'p';
+                        echo ' · ' . htmlspecialchars((string)$wsBooking['workshop_type'], ENT_QUOTES, 'UTF-8');
+                    }
+                    if (function_exists('bakery_sfb_purchase_home_ready') && bakery_sfb_purchase_home_ready($db)) {
+                        $giftLookup = $db->prepare('SELECT code, status FROM sfb_gift_certificates WHERE purchase_id = ? LIMIT 1');
+                        $giftLookup->execute([(int)$purchaseRow['id']]);
+                        $giftOps = $giftLookup->fetch();
+                        if ($giftOps) {
+                            echo ' · gift ' . htmlspecialchars((string)$giftOps['code'], ENT_QUOTES, 'UTF-8');
+                            echo ' (' . htmlspecialchars((string)$giftOps['status'], ENT_QUOTES, 'UTF-8') . ')';
+                        }
+                    }
                   ?></small>
                 </span>
                 <span class="line-qty" style="display:flex;gap:6px;align-items:center;">
@@ -445,6 +481,7 @@ $currentLocale = bakery_locale();
                     <option value="kit"><?php bakery_te('sfb.offering_kind_kit'); ?></option>
                     <option value="donation"><?php bakery_te('sfb.offering_kind_donation'); ?></option>
                     <option value="credits"><?php bakery_te('sfb.offering_kind_credits'); ?></option>
+                    <option value="gift"><?php bakery_te('sfb.offering_kind_gift'); ?></option>
                   </select>
                 </label>
               </div>
