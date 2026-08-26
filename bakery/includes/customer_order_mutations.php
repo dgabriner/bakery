@@ -1029,3 +1029,166 @@ function bakery_customer_format_confirmation(array $result, $scope = 'standing')
         'unchanged' => bakery_t('portal.confirm_regular_schedule_unchanged'),
     ];
 }
+
+/**
+ * Soft-close / reopen a wholesale client. Sole write path for customers.is_active.
+ *
+ * Deactivation retires eligible future dated demand. Reactivation does not
+ * revive retired rows; standing generation recreates future demand.
+ *
+ * @return array{customer_id:int,is_active:bool,retired:array}
+ */
+function bakery_customer_apply_active_status(PDO $db, int $customerId, bool $isActive, string $reason = ''): array
+{
+    if ($customerId <= 0) {
+        throw new InvalidArgumentException('A valid customer is required.');
+    }
+
+    $stmt = $db->prepare(
+        'SELECT id, name, is_active FROM customers WHERE id = ? LIMIT 1'
+    );
+    $stmt->execute([$customerId]);
+    $customer = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$customer) {
+        throw new RuntimeException('Customer not found.');
+    }
+
+    $reason = trim($reason);
+    $update = $db->prepare(
+        'UPDATE customers
+         SET is_active = ?, inactive_at = ?, inactive_reason = ?
+         WHERE id = ?'
+    );
+    $update->execute([
+        $isActive ? 1 : 0,
+        $isActive ? null : date('Y-m-d H:i:s'),
+        $isActive ? null : ($reason !== '' ? $reason : null),
+        $customerId,
+    ]);
+
+    $retired = [
+        'orders_retired' => 0,
+        'orders_protected' => 0,
+        'assignments_removed' => 0,
+        'daily_order_ids' => [],
+    ];
+    if (!$isActive) {
+        $retired = bakery_customer_retire_inactive_future_demand(
+            $db,
+            $customerId,
+            (string)$customer['name']
+        );
+    }
+
+    return [
+        'customer_id' => $customerId,
+        'is_active' => $isActive,
+        'retired' => $retired,
+    ];
+}
+
+/**
+ * Stop unstarted future operational demand for a client that is no longer active.
+ * Keeps the dated order shell. Does not rewrite past or in-progress work.
+ *
+ * @return array{orders_retired:int,orders_protected:int,assignments_removed:int,daily_order_ids:list<int>}
+ */
+function bakery_customer_retire_inactive_future_demand(PDO $db, int $customerId, string $customerName = ''): array
+{
+    $today = date('Y-m-d');
+    $result = [
+        'orders_retired' => 0,
+        'orders_protected' => 0,
+        'assignments_removed' => 0,
+        'daily_order_ids' => [],
+    ];
+    if ($customerId <= 0) {
+        return $result;
+    }
+
+    $stmt = $db->prepare(
+        'SELECT do.id, do.order_date, do.status, do.notes,
+                (
+                    SELECT doa.delivery_status
+                    FROM daily_order_assignments doa
+                    WHERE doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
+                    ORDER BY doa.id LIMIT 1
+                ) AS assignment_status
+         FROM daily_orders do
+         WHERE do.customer_id = ?
+           AND do.order_date >= ?
+         ORDER BY do.order_date, do.id'
+    );
+    $stmt->execute([$customerId, $today]);
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($orders === []) {
+        return $result;
+    }
+
+    $deleteItems = $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id = ?');
+    $updateOrder = $db->prepare(
+        'UPDATE daily_orders SET total_amount = 0, notes = ? WHERE id = ?'
+    );
+    $deletePendingAssignments = $db->prepare(
+        "DELETE FROM daily_order_assignments
+         WHERE daily_order_id = ?
+           AND delivery_date = ?
+           AND COALESCE(delivery_status, 'pending') IN ('pending', 'cancelled')"
+    );
+
+    foreach ($orders as $order) {
+        $dailyOrderId = (int)$order['id'];
+        $orderDate = (string)$order['order_date'];
+        if (bakery_demand_review_is_advanced_status(
+            $order['status'] ?? null,
+            $order['assignment_status'] ?? null
+        )) {
+            $result['orders_protected']++;
+            continue;
+        }
+
+        $deleteItems->execute([$dailyOrderId]);
+        $itemsRemoved = $deleteItems->rowCount();
+        $deletePendingAssignments->execute([$dailyOrderId, $orderDate]);
+        $assignmentsRemoved = $deletePendingAssignments->rowCount();
+        $result['assignments_removed'] += $assignmentsRemoved;
+
+        $existingNotes = trim((string)($order['notes'] ?? ''));
+        $inactiveNote = 'Customer inactive';
+        $notes = $existingNotes === '' || strpos($existingNotes, $inactiveNote) === false
+            ? trim($existingNotes . ($existingNotes !== '' ? "\n" : '') . $inactiveNote)
+            : $existingNotes;
+        $updateOrder->execute([$notes, $dailyOrderId]);
+
+        if ($itemsRemoved > 0 || $assignmentsRemoved > 0 || strpos($existingNotes, $inactiveNote) === false) {
+            $result['orders_retired']++;
+            $result['daily_order_ids'][] = $dailyOrderId;
+        }
+    }
+
+    if ($result['orders_retired'] > 0 || $result['orders_protected'] > 0) {
+        $label = $customerName !== '' ? $customerName : ('customer #' . $customerId);
+        bakery_record_operational_event(
+            $db,
+            BAKERY_OP_DAILY_ORDER_CLEARED,
+            $label . ' made inactive; retired ' . $result['orders_retired']
+                . ' future dated order(s)'
+                . ($result['orders_protected'] > 0
+                    ? (', protected ' . $result['orders_protected'])
+                    : ''),
+            [
+                'customer_id' => $customerId,
+                'operational_date' => $today,
+                'metadata' => [
+                    'reason' => 'customer_inactive',
+                    'daily_order_ids' => $result['daily_order_ids'],
+                    'orders_retired' => $result['orders_retired'],
+                    'orders_protected' => $result['orders_protected'],
+                    'assignments_removed' => $result['assignments_removed'],
+                ],
+            ]
+        );
+    }
+
+    return $result;
+}

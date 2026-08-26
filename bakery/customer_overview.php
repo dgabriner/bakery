@@ -2,6 +2,7 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/customer_order_mutations.php';
 
 // Add cache-busting headers to ensure fresh data
 header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -20,25 +21,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         if (!$customerId) {
             throw new InvalidArgumentException('A valid customer is required.');
         }
-        $stmt = $db->prepare(
-            'UPDATE customers
-             SET is_active = ?, inactive_at = ?, inactive_reason = ?
-             WHERE id = ?'
-        );
-        $stmt->execute([
-            $isActive ? 1 : 0,
-            $isActive ? null : date('Y-m-d H:i:s'),
-            $isActive ? null : ($reason !== '' ? $reason : null),
-            $customerId
+        $result = bakery_customer_apply_active_status($db, (int)$customerId, $isActive, $reason);
+        echo json_encode([
+            'success' => true,
+            'is_active' => !empty($result['is_active']),
+            'retired' => $result['retired'] ?? null,
         ]);
-        if ($stmt->rowCount() === 0) {
-            $check = $db->prepare('SELECT id FROM customers WHERE id = ?');
-            $check->execute([$customerId]);
-            if (!$check->fetchColumn()) {
-                throw new RuntimeException('Customer not found.');
-            }
-        }
-        echo json_encode(['success' => true, 'is_active' => $isActive]);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
