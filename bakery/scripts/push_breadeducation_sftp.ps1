@@ -99,11 +99,18 @@ $toUpload = @(
 )
 
 # Markdown stays internal (README, DEBRIEF research notes, content roadmaps).
+# TEMPLATE.html is an authoring scaffold, not a public page.
+$localOnlyFiles = @('TEMPLATE.html')
 $excludedMarkdown = @($toUpload | Where-Object { $_ -match '\.md$' })
-$toUpload = @($toUpload | Where-Object { $_ -notmatch '\.md$' })
+$excludedLocalOnly = @($toUpload | Where-Object { $_ -in $localOnlyFiles })
+$toUpload = @($toUpload | Where-Object { $_ -notmatch '\.md$' -and $_ -notin $localOnlyFiles })
 if ($excludedMarkdown.Count -gt 0) {
     Write-Host "Excluding $($excludedMarkdown.Count) markdown file(s):"
     foreach ($relExcluded in $excludedMarkdown) { Write-Host "  - $relExcluded" }
+}
+if ($excludedLocalOnly.Count -gt 0) {
+    Write-Host "Excluding $($excludedLocalOnly.Count) local-only authoring file(s):"
+    foreach ($relExcluded in $excludedLocalOnly) { Write-Host "  - $relExcluded" }
 }
 
 if ($toUpload.Count -eq 0) {
