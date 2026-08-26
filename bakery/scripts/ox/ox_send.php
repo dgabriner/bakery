@@ -30,13 +30,16 @@ if (is_file($serverFile)) {
     }
 }
 
-$bootstrap = 'MISSION START. Read your mission brief at '
-    . $j['prompt_file']
-    . ' and execute it exactly and completely. It defines your role limits, deliverable path, and required final reply.';
+$bootstrap = !empty($j['text'])
+    ? (string)$j['text']
+    : 'MISSION START. Read your mission brief at '
+        . $j['prompt_file']
+        . ' and execute it exactly and completely. It defines your role limits, deliverable path, and required final reply.';
 
+$agentPart = !empty($j['agent']) ? ' --agent "' . $j['agent'] . '"' : '';
 $cmd = 'opencode run --attach "' . $base . '"'
     . ' -s "' . $j['session'] . '"'
-    . ' --agent "' . ($j['agent'] ?? 'build') . '"'
+    . $agentPart
     . ' "' . str_replace('"', '', $bootstrap) . '"';
 
 $logs = dirname(__DIR__, 2) . '/tmp/ox/prompts/launch-' . gmdate('Ymd-His') . '-'

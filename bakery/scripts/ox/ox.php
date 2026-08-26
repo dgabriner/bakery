@@ -288,10 +288,16 @@ function ox_cmd_nudge(): void
     $promptOut = $GLOBALS['ox_tmp'] . '/prompts/nudge-' . $stamp . '.txt';
     file_put_contents($promptOut, $text);
     $sendFile = $GLOBALS['ox_tmp'] . '/prompts/send-nudge-' . $stamp . '.json';
-    file_put_contents($sendFile, json_encode([
+    $payload = [
         'session' => $sid,
         'prompt_file' => $promptOut,
-    ], JSON_PRETTY_PRINT));
+        'text' => $text,
+    ];
+    $agentArg = trim((string)($args['agent'] ?? ''));
+    if ($agentArg !== '') {
+        $payload['agent'] = $agentArg;
+    }
+    file_put_contents($sendFile, json_encode($payload, JSON_PRETTY_PRINT));
     $php = PHP_BINARY;
     $runner = __DIR__ . DIRECTORY_SEPARATOR . 'ox_send.php';
     pclose(popen("start /B \"\" \"{$php}\" \"{$runner}\" \"{$sendFile}\" > NUL 2>&1", 'r'));
