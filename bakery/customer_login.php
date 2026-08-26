@@ -14,15 +14,20 @@ if (function_exists('bakery_set_locale')) {
     bakery_set_locale('en', false);
 }
 
-if (bakery_portal_customer_id() > 0) {
-    header('Location: ' . BASE_URL . 'customer_portal.php');
-    exit;
-}
-
 $error = '';
 $next = $_GET['next'] ?? (BASE_URL . 'customer_portal.php');
 if (strpos($next, '/') !== 0) {
     $next = BASE_URL . 'customer_portal.php';
+}
+
+$nextPath = (string)(parse_url($next, PHP_URL_PATH) ?: '');
+$nextBase = basename($nextPath);
+$starterReturn = $nextBase === 'starter.php';
+$keepNextBases = ['starter.php', 'sfb_offerings.php'];
+
+if (bakery_portal_customer_id() > 0) {
+    header('Location: ' . $next);
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -45,21 +50,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         bakery_sfb_mark_invite_used($db, (int)$claimedInvite['id'], (int)$result['customer']['id']);
                     }
                 }
-                $dest = $_POST['next'] ?? $next;
+                $dest = (string)($_POST['next'] ?? $next);
                 if (strpos($dest, '/') !== 0) {
                     $dest = BASE_URL . 'sfb_batches.php?welcome=1';
                 }
-                // A new or newly activated account starts at its first batch.
-                // Existing customers return to the page they requested.
+                // A new account starts at first batch unless returning to a
+                // paid funnel (starter jar / workshops) that already holds details.
                 if (!empty($result['first_batch'])) {
-                    $dest = BASE_URL . 'sfb_batches.php?welcome=1';
+                    $destPath = (string)(parse_url($dest, PHP_URL_PATH) ?: '');
+                    $destBase = basename($destPath);
+                    if (!in_array($destBase, $keepNextBases, true)) {
+                        $dest = BASE_URL . 'sfb_batches.php?welcome=1';
+                    }
                 }
                 header('Location: ' . $dest);
                 exit;
             }
             $error = (string)($result['error'] ?? 'That 4-digit code does not match an account.');
-            // Failed signups must stay auditable and distinguishable from
-            // sign-in attempts in the login ledger (same convention as staff).
             $failurePrincipal = $mode === 'create' ? 'Customer portal signup' : 'Customer portal login';
             bakery_login_audit_record_failure($db, 'customer', $failurePrincipal, (string)$code);
             usleep(300000);
@@ -72,6 +79,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $page_title = bakery_t('portal.title_sign_in');
 $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
+$inviteQ = (string)($_GET['invite'] ?? '');
+$toggleHref = '?' . http_build_query(array_filter([
+    'create' => $createMode ? null : '1',
+    'next' => $next,
+    'invite' => $inviteQ !== '' ? $inviteQ : null,
+]));
+
+if ($starterReturn && $createMode) {
+    $heading = bakery_t('sfb.starter_jar_login_heading');
+    $subtitleCreate = bakery_t('sfb.starter_jar_login_create_copy');
+    $subtitleSignin = bakery_t('sfb.starter_jar_login_signin_copy');
+    $submitCreate = bakery_t('sfb.starter_jar_login_create_cta');
+    $submitSignin = bakery_t('sfb.starter_jar_login_signin_cta');
+} elseif ($starterReturn) {
+    $heading = bakery_t('sfb.starter_jar_login_heading');
+    $subtitleCreate = bakery_t('sfb.starter_jar_login_create_copy');
+    $subtitleSignin = bakery_t('sfb.starter_jar_login_signin_copy');
+    $submitCreate = bakery_t('sfb.starter_jar_login_create_cta');
+    $submitSignin = bakery_t('sfb.starter_jar_login_signin_cta');
+} else {
+    $heading = bakery_t('portal.heading');
+    $subtitleCreate = 'Use your mobile number and choose a unique 4-digit code. You can add your name and email later.';
+    $subtitleSignin = 'Enter your 4-digit code to continue.';
+    $submitCreate = 'Create account & start my first batch';
+    $submitSignin = 'Sign in';
+}
+$subtitle = $createMode ? $subtitleCreate : $subtitleSignin;
+$submitLabel = $createMode ? $submitCreate : $submitSignin;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -105,8 +140,8 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
 <body>
   <div class="wrap">
     <?php echo bakery_sour_flour_logo_img('logo'); ?>
-    <h1><?php bakery_te('portal.heading'); ?></h1>
-    <p class="subtitle" id="signinCopy"><?php echo $createMode ? 'Use your mobile number and choose a unique 4-digit code. You can add your name and email later.' : 'Enter your 4-digit code to continue.'; ?></p>
+    <h1><?php echo htmlspecialchars($heading, ENT_QUOTES, 'UTF-8'); ?></h1>
+    <p class="subtitle" id="signinCopy"><?php echo htmlspecialchars($subtitle, ENT_QUOTES, 'UTF-8'); ?></p>
     <?php if ($error): ?>
       <div class="error" role="alert"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
@@ -114,7 +149,7 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
       <?php echo bakery_csrf_field(); ?>
       <input type="hidden" name="next" value="<?php echo htmlspecialchars($next); ?>">
       <input type="hidden" name="mode" id="mode" value="<?php echo $createMode ? 'create' : 'signin'; ?>">
-      <input type="hidden" name="invite" value="<?php echo htmlspecialchars((string)($_GET['invite'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+      <input type="hidden" name="invite" value="<?php echo htmlspecialchars($inviteQ, ENT_QUOTES, 'UTF-8'); ?>">
       <div id="phoneField"<?php echo $createMode ? '' : ' hidden'; ?>>
       <label for="phone">Mobile phone number</label>
       <input type="tel" id="phone" name="phone"<?php echo $createMode ? ' required' : ''; ?>
@@ -126,9 +161,9 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
              inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4"
              autocomplete="current-password"
              value="<?php echo htmlspecialchars($_POST['code'] ?? ''); ?>">
-      <button type="submit" id="submitButton"><?php echo $createMode ? 'Create account & start my first batch' : 'Sign in'; ?></button>
+      <button type="submit" id="submitButton"><?php echo htmlspecialchars($submitLabel, ENT_QUOTES, 'UTF-8'); ?></button>
     </form>
-    <p class="privacy"><a href="?create=1" id="createLink"><?php echo $createMode ? 'Already have an account? Sign in with your code.' : 'First time here? Create an account.'; ?></a></p>
+    <p class="privacy"><a href="<?php echo htmlspecialchars($toggleHref, ENT_QUOTES, 'UTF-8'); ?>" id="createLink"><?php echo $createMode ? 'Already have an account? Sign in with your code.' : 'First time here? Create an account.'; ?></a></p>
     <a class="staff-link" href="<?php echo htmlspecialchars(BASE_URL); ?>login.php"><?php bakery_te('portal.staff_link'); ?></a>
   </div>
   <script>
@@ -142,6 +177,12 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
       var submitButton = document.getElementById('submitButton');
       var codeLabel = document.getElementById('codeLabel');
       var signinCopy = document.getElementById('signinCopy');
+      var copyCreate = <?php echo json_encode($subtitleCreate, JSON_UNESCAPED_UNICODE); ?>;
+      var copySignin = <?php echo json_encode($subtitleSignin, JSON_UNESCAPED_UNICODE); ?>;
+      var ctaCreate = <?php echo json_encode($submitCreate, JSON_UNESCAPED_UNICODE); ?>;
+      var ctaSignin = <?php echo json_encode($submitSignin, JSON_UNESCAPED_UNICODE); ?>;
+      var nextParam = <?php echo json_encode($next, JSON_UNESCAPED_UNICODE); ?>;
+      var inviteParam = <?php echo json_encode($inviteQ, JSON_UNESCAPED_UNICODE); ?>;
       if (!codeInput || !form) return;
       codeInput.addEventListener('input', function () {
         this.value = this.value.replace(/\D/g, '').slice(0, 4);
@@ -156,11 +197,17 @@ $createMode = (($_POST['mode'] ?? ($_GET['create'] ?? '')) === 'create');
         phoneField.hidden = !creating;
         phoneInput.required = creating;
         codeLabel.textContent = creating ? 'Choose a unique 4-digit code' : 'Your 4-digit code';
-        submitButton.textContent = creating ? 'Create account & start my first batch' : 'Sign in';
-        signinCopy.textContent = creating
-          ? 'Use your mobile number and choose a unique 4-digit code. You can add your name and email later.'
-          : 'Enter your 4-digit code to continue.';
+        submitButton.textContent = creating ? ctaCreate : ctaSignin;
+        signinCopy.textContent = creating ? copyCreate : copySignin;
         createLink.textContent = creating ? 'Already have an account? Sign in with your code.' : 'First time here? Create an account.';
+        var q = [];
+        if (creating) q.push('create=1');
+        if (nextParam) q.push('next=' + encodeURIComponent(nextParam));
+        if (inviteParam) q.push('invite=' + encodeURIComponent(inviteParam));
+        createLink.setAttribute('href', '?' + q.join('&'));
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', createLink.getAttribute('href'));
+        }
         (creating ? phoneInput : codeInput).focus();
       });
     })();

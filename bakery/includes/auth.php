@@ -43,6 +43,7 @@ function bakery_public_scripts() {
         'health_local.php',
         'customer_login.php',
         'sfb_join.php',
+        'starter.php',
         'customer_qr_login.php',
         'customer_portal_login.php',
         'customer_portal_logout.php',

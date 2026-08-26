@@ -189,6 +189,19 @@ $portalCustomerName = $customer['name'];
 
     <?php bakery_portal_sfb_bridge_card($db, $customer); ?>
 
+    <?php
+    require_once __DIR__ . '/includes/sf_baker.php';
+    if (bakery_sfb_starter_jar_ready($db)):
+    ?>
+    <section class="card">
+      <div class="card-body">
+        <h2 style="margin:0 0 4px;font-size:1.02rem;font-weight:600;"><?php bakery_te('sfb.starter_jar_dash_title'); ?></h2>
+        <p style="margin:0 0 12px;color:var(--muted);font-size:.88rem;"><?php bakery_te('sfb.starter_jar_dash_copy'); ?></p>
+        <a class="btn btn-block" href="<?php echo htmlspecialchars(BASE_URL . 'starter.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.starter_jar_dash_cta'); ?></a>
+      </div>
+    </section>
+    <?php endif; ?>
+
     <section class="card" style="text-align:center;padding:20px 16px">
       <p style="font-size:1.1rem;font-weight:600;margin:0 0 4px"><?php bakery_te('portal.tip_heading'); ?></p>
       <p style="color:var(--muted);font-size:.88rem;margin:0 0 14px"><?php bakery_te('portal.tip_body'); ?></p>

@@ -187,8 +187,20 @@ function bakery_portal_start_session(array $row, string $credentialCode = '', ar
     if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
         session_start();
     }
+    // Keep in-progress public funnels (starter jar draft, flash) across the
+    // session id rotate so signup does not orphan the request.
+    $carryKeys = ['starter_jar_draft', 'starter_jar_flash'];
+    $carry = [];
+    foreach ($carryKeys as $key) {
+        if (array_key_exists($key, $_SESSION ?? [])) {
+            $carry[$key] = $_SESSION[$key];
+        }
+    }
     if (session_status() === PHP_SESSION_ACTIVE && !headers_sent() && PHP_SAPI !== 'cli') {
         session_regenerate_id(true);
+    }
+    foreach ($carry as $key => $value) {
+        $_SESSION[$key] = $value;
     }
 
     $_SESSION['portal_customer_id'] = (int)$row['id'];
