@@ -40,6 +40,16 @@ If a script says “needs SFTP,” that script is for the **local desktop** or a
 
 Secrets stay where they already belong: Danny’s machine (desktop auto-push) or DreamHost Staging/Live workers. Same idea as Staging → Live today: the machine with credentials **pulls** or runs the job; agents only **trigger** safe steps.
 
+### Live ops staff login (owner-authorized)
+
+For **read-only** live checks (Login History, Bakery Manager routes, Daily Run), use the Cloud Agent environment secrets and skill:
+
+- Skill: [`.cursor/skills/live-ops-login/SKILL.md`](../.cursor/skills/live-ops-login/SKILL.md)
+- Secrets: `BAKERY_LIVE_AGENT_CODE` (Cursor Agent / manager — default), `BAKERY_LIVE_ADMIN_CODE` (Danny / admin — Login History and admin screens)
+- Live URL: `https://bakery.sourflour.org/bake/login.php`
+
+Do **not** put the digit codes in Git, PR bodies, or new docs. Staging DB is not live delivery progress.
+
 ---
 
 ## Best approach (canonical)
