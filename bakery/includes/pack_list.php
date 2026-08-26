@@ -114,6 +114,111 @@ function bakery_pack_backfill_form_html(string $action, string $date, string $vi
     return $html;
 }
 
+/**
+ * Packer day board rows: supposed bake/demand vs finished goods on hand.
+ *
+ * @param list<int>|null $allowedProductIds Null = all products with supposed or stock
+ * @return list<array{
+ *   product_id:int,
+ *   product_name:string,
+ *   dough_type:string,
+ *   supposed:int,
+ *   available:int,
+ *   loaded:int,
+ *   produced:int,
+ *   covered:int,
+ *   matches:bool,
+ *   short:int,
+ *   source:string
+ * }>
+ */
+function bakery_pack_day_count_rows(PDO $db, string $date, ?array $allowedProductIds = null): array
+{
+    if (!function_exists('bakery_production_produce_targets_by_product')) {
+        require_once __DIR__ . '/production_plan.php';
+    }
+    $targets = bakery_production_produce_targets_by_product($db, $date);
+    $supposedByProduct = $targets['by_product'] ?? [];
+    $source = (string)($targets['source'] ?? 'demand');
+
+    $availableByProduct = [];
+    $loadedByProduct = [];
+    $producedByProduct = [];
+    if (function_exists('bakery_inventory_ready') && bakery_inventory_ready($db)) {
+        $invStmt = $db->prepare(
+            'SELECT product_id, available_quantity, produced_quantity, loaded_quantity
+             FROM product_inventory_days WHERE delivery_date = ?'
+        );
+        $invStmt->execute([$date]);
+        foreach ($invStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pid = (int)$row['product_id'];
+            $availableByProduct[$pid] = (int)$row['available_quantity'];
+            $producedByProduct[$pid] = (int)$row['produced_quantity'];
+            $loadedByProduct[$pid] = (int)($row['loaded_quantity'] ?? 0);
+        }
+    }
+
+    $productIds = array_keys($supposedByProduct);
+    foreach (array_keys($availableByProduct + $producedByProduct + $loadedByProduct) as $pid) {
+        $productIds[] = (int)$pid;
+    }
+    $productIds = array_values(array_unique(array_map('intval', $productIds)));
+    if (is_array($allowedProductIds)) {
+        $allowed = array_flip(array_map('intval', $allowedProductIds));
+        $productIds = array_values(array_filter($productIds, static function ($pid) use ($allowed) {
+            return isset($allowed[(int)$pid]);
+        }));
+    }
+    if ($productIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $nameStmt = $db->prepare(
+        "SELECT p.id, p.name, COALESCE(dt.name, '') AS dough_type_name
+         FROM products p
+         LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+         WHERE p.id IN ($placeholders)"
+    );
+    $nameStmt->execute($productIds);
+    $meta = [];
+    foreach ($nameStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $meta[(int)$row['id']] = [
+            'name' => (string)$row['name'],
+            'dough' => (string)$row['dough_type_name'],
+        ];
+    }
+
+    $rows = [];
+    foreach ($productIds as $productId) {
+        $supposed = (int)($supposedByProduct[$productId] ?? 0);
+        $available = (int)($availableByProduct[$productId] ?? 0);
+        $loaded = (int)($loadedByProduct[$productId] ?? 0);
+        $produced = (int)($producedByProduct[$productId] ?? 0);
+        $covered = $available + $loaded;
+        if ($supposed <= 0 && $covered <= 0 && $produced <= 0) {
+            continue;
+        }
+        $rows[] = [
+            'product_id' => $productId,
+            'product_name' => (string)($meta[$productId]['name'] ?? ('Product #' . $productId)),
+            'dough_type' => (string)($meta[$productId]['dough'] ?? ''),
+            'supposed' => $supposed,
+            'available' => $available,
+            'loaded' => $loaded,
+            'produced' => $produced,
+            'covered' => $covered,
+            'matches' => $supposed > 0 && $covered >= $supposed,
+            'short' => max(0, $supposed - $covered),
+            'source' => $source,
+        ];
+    }
+    usort($rows, static function ($a, $b) {
+        return strcasecmp($a['product_name'], $b['product_name']);
+    });
+    return $rows;
+}
+
 function bakery_pack_qty_html(PDO $db, int $productId, int $qty): string
 {
     $qty = max(0, $qty);

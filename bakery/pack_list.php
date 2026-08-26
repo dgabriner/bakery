@@ -9,6 +9,7 @@ require_once 'includes/exception_desk.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/product_pack_yields.php';
 require_once 'includes/pack_list.php';
+require_once 'includes/production_plan.php';
 
 $page_title = bakery_t('page.pack_list');
 
@@ -539,6 +540,131 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array((string)($_POST['action'] ?? ''), [
+        'match_supposed',
+        'match_all_supposed',
+        'set_on_hand',
+        'seed_driver_loads',
+    ], true)
+) {
+    bakery_require_login();
+    bakery_require_csrf();
+    bakery_require_role(['baker', 'manager', 'administrator']);
+    $packDate = $selectedDate;
+    $postedAction = (string)$_POST['action'];
+    try {
+        if (!$inventoryReady) {
+            throw new RuntimeException(bakery_t('production.error_inventory_ops'));
+        }
+        $countRows = bakery_pack_day_count_rows(
+            $db,
+            $packDate,
+            is_array($bakerProductIds) ? $bakerProductIds : null
+        );
+        $supposedById = [];
+        foreach ($countRows as $row) {
+            $supposedById[(int)$row['product_id']] = (int)$row['supposed'];
+        }
+
+        if ($postedAction === 'seed_driver_loads') {
+            $summary = bakery_inventory_seed_driver_loads_from_supposed(
+                $db,
+                $packDate,
+                'Pack List seeded driver loads'
+            );
+            $qs = bakery_ops_workflow_query([
+                'date' => $packDate,
+                'view' => $viewMode,
+                'loads' => '1',
+                'drivers' => (string)$summary['drivers'],
+                'units' => (string)$summary['units'],
+                'short' => (string)$summary['short_units'],
+            ]);
+            header('Location: pack_list.php?' . http_build_query($qs));
+            exit;
+        }
+
+        if ($postedAction === 'match_all_supposed') {
+            $targets = [];
+            foreach ($countRows as $row) {
+                $pid = (int)$row['product_id'];
+                $supposed = (int)$row['supposed'];
+                if ($pid > 0 && $supposed > 0 && !(bool)$row['matches']) {
+                    $targets[$pid] = $supposed;
+                }
+            }
+            $summary = bakery_inventory_backfill_day_production(
+                $db,
+                $packDate,
+                $targets,
+                'Pack List matched supposed'
+            );
+            $qs = bakery_ops_workflow_query([
+                'date' => $packDate,
+                'view' => $viewMode,
+                'produced' => $summary['updated'] > 0 ? '1' : 'none',
+                'units' => (string)$summary['added_produced'],
+                'products' => (string)$summary['updated'],
+            ]);
+            header('Location: pack_list.php?' . http_build_query($qs));
+            exit;
+        }
+
+        $productId = (int)($_POST['product_id'] ?? 0);
+        if ($productId <= 0 || !isset($supposedById[$productId])) {
+            throw new InvalidArgumentException(bakery_t('pack_list.count_unknown_product'));
+        }
+
+        if ($postedAction === 'match_supposed') {
+            $supposed = (int)$supposedById[$productId];
+            if ($supposed <= 0) {
+                throw new InvalidArgumentException(bakery_t('pack_list.count_no_supposed'));
+            }
+            $result = bakery_inventory_match_supposed_production(
+                $db,
+                $packDate,
+                $productId,
+                $supposed,
+                'Pack List matched supposed'
+            );
+            $qs = bakery_ops_workflow_query([
+                'date' => $packDate,
+                'view' => $viewMode,
+                'produced' => !empty($result['changed']) ? '1' : 'none',
+                'units' => (string)max(0, (int)$result['produced_now'] - (int)($producedByProduct[$productId] ?? 0)),
+                'products' => !empty($result['changed']) ? '1' : '0',
+            ]);
+            header('Location: pack_list.php?' . http_build_query($qs));
+            exit;
+        }
+
+        // set_on_hand
+        $onHand = (int)($_POST['on_hand'] ?? -1);
+        if ($onHand < 0) {
+            throw new InvalidArgumentException(bakery_t('pack_list.count_bad_on_hand'));
+        }
+        bakery_inventory_set_finished_on_hand(
+            $db,
+            $packDate,
+            $productId,
+            $onHand,
+            'Pack List finished-goods count'
+        );
+        $qs = bakery_ops_workflow_query([
+            'date' => $packDate,
+            'view' => $viewMode,
+            'counted' => '1',
+            'product' => (string)$productId,
+            'units' => (string)$onHand,
+        ]);
+        header('Location: pack_list.php?' . http_build_query($qs));
+        exit;
+    } catch (Throwable $e) {
+        $packDeskError = $e->getMessage();
+    }
+}
+
 // Persisted check-offs for this date (survive refresh and are shared by all staff).
 $checkedMap = [];
 $packProgressReady = bakery_pack_progress_ready($db);
@@ -573,6 +699,43 @@ if ((string)($_GET['produced'] ?? '') === '1') {
 } elseif ((string)($_GET['produced'] ?? '') === 'none') {
     $packDeskNotice = bakery_t('pack_list.produced_none');
 }
+if ((string)($_GET['counted'] ?? '') === '1') {
+    $packDeskNotice = bakery_t('pack_list.count_saved', [
+        'count' => number_format((int)($_GET['units'] ?? 0)),
+    ]);
+}
+if ((string)($_GET['loads'] ?? '') === '1') {
+    $packDeskNotice = bakery_t('pack_list.loads_seeded', [
+        'drivers' => number_format((int)($_GET['drivers'] ?? 0)),
+        'units' => number_format((int)($_GET['units'] ?? 0)),
+        'short' => number_format((int)($_GET['short'] ?? 0)),
+    ]);
+}
+
+$packerCountRows = [];
+if ($inventoryReady) {
+    try {
+        $packerCountRows = bakery_pack_day_count_rows(
+            $db,
+            $selectedDate,
+            is_array($bakerProductIds) ? $bakerProductIds : null
+        );
+    } catch (Throwable $e) {
+        error_log('pack_list count board: ' . $e->getMessage());
+    }
+}
+$packerCountSource = $packerCountRows[0]['source'] ?? 'demand';
+$packerCountMatched = 0;
+$packerCountShort = 0;
+foreach ($packerCountRows as $countRow) {
+    if (!empty($countRow['matches'])) {
+        $packerCountMatched++;
+    }
+    $packerCountShort += (int)$countRow['short'];
+}
+$canPackerCount = $inventoryReady
+    && function_exists('bakery_user_has_role')
+    && bakery_user_has_role(['baker', 'manager', 'administrator']);
 
 $totalCustomers = count($byCustomer);
 $totalProducts = count($byProduct);
@@ -1152,6 +1315,99 @@ require_once 'includes/nav.php';
 
 .pack-complete-banner p { margin: 0 0 8px; color: #1d6534; font-weight: 700; }
 
+.pack-count-board {
+    background: #fff;
+    border: 1px solid var(--pack-border);
+    border-radius: 12px;
+    margin-bottom: 14px;
+    padding: 14px 16px;
+}
+.pack-count-board h2 {
+    color: #173f3c;
+    font-size: 1.1rem;
+    margin: 0 0 6px;
+}
+.pack-count-board__lead {
+    color: #4a635e;
+    font-size: .92rem;
+    margin: 0 0 12px;
+}
+.pack-count-board__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.pack-count-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.pack-count-table th,
+.pack-count-table td {
+    border-bottom: 1px solid #edf2f0;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+.pack-count-table th {
+    color: #4a635e;
+    font-size: .78rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+.pack-count-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.pack-count-table tr.is-match { background: #f3faf6; }
+.pack-count-table tr.is-short { background: #fff8f0; }
+.pack-count-status {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: .78rem;
+    font-weight: 700;
+    padding: 3px 10px;
+}
+.pack-count-status--ok { background: var(--pack-ok-bg); color: var(--pack-ok); }
+.pack-count-status--short { background: #ffe8cc; color: #8a5a12; }
+.pack-count-status--empty { background: #edf2f0; color: #4a635e; }
+.pack-count-row-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.pack-count-row-actions input[type="number"] {
+    border: 1px solid var(--pack-border);
+    border-radius: 8px;
+    font-size: 1rem;
+    max-width: 5.5rem;
+    padding: 6px 8px;
+}
+@media (max-width: 720px) {
+    .pack-count-table thead { display: none; }
+    .pack-count-table tr {
+        border: 1px solid var(--pack-border);
+        border-radius: 10px;
+        display: block;
+        margin-bottom: 10px;
+        padding: 8px;
+    }
+    .pack-count-table td {
+        border: 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 4px;
+    }
+    .pack-count-table td::before {
+        color: #4a635e;
+        content: attr(data-label);
+        font-size: .78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .pack-count-table .num { text-align: right; }
+}
+
 .pack-produced-banner {
     background: #fff6e5;
     border: 1px solid #efd7a8;
@@ -1250,10 +1506,10 @@ require_once 'includes/nav.php';
 @media print {
     .bakery-nav, .pack-toolbar__actions, .pack-view-toggle, .pack-check,
     .pack-session-note, .pack-date-form, .pack-day-shortcuts, .auth-bar,
-    footer, .pack-btn, .pack-all-form, .pack-produced-banner { display: none !important; }
+    footer, .pack-btn, .pack-all-form, .pack-produced-banner, .pack-count-board__actions, .pack-count-row-actions { display: none !important; }
     .pack-page { max-width: none; padding: 0; }
     .pack-toolbar { background: none; border: 0; padding: 0 0 8px; }
-    .pack-section, .pack-inventory-bar, .pack-totals { break-inside: avoid; }
+    .pack-section, .pack-inventory-bar, .pack-totals, .pack-count-board { break-inside: avoid; }
     .pack-line--checked { opacity: 1; }
     .pack-line--checked .pack-line__label { text-decoration: none; }
     .pack-section__header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -1400,6 +1656,113 @@ require_once 'includes/nav.php';
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+    <?php endif; ?>
+
+    <?php if ($canPackerCount && $packerCountRows !== []): ?>
+        <section class="pack-count-board" aria-label="<?php bakery_te('pack_list.count_title'); ?>">
+            <h2><?php bakery_te('pack_list.count_title'); ?></h2>
+            <p class="pack-count-board__lead">
+                <?php
+                echo htmlspecialchars(bakery_t('pack_list.count_lead', [
+                    'source' => $packerCountSource === 'committed_plan'
+                        ? bakery_t('pack_list.count_source_plan')
+                        : bakery_t('pack_list.count_source_demand'),
+                    'matched' => number_format($packerCountMatched),
+                    'products' => number_format(count($packerCountRows)),
+                    'short' => number_format($packerCountShort),
+                ]), ENT_QUOTES, 'UTF-8');
+                ?>
+            </p>
+            <div class="pack-count-board__actions">
+                <?php
+                $unmatched = max(0, count($packerCountRows) - $packerCountMatched);
+                if ($unmatched > 0):
+                ?>
+                    <form method="post" class="pack-all-form" onsubmit="return confirm(<?php echo htmlspecialchars(json_encode(bakery_t('pack_list.count_match_all_confirm', ['count' => number_format($unmatched)]), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>)">
+                        <?php echo bakery_csrf_field(); ?>
+                        <input type="hidden" name="action" value="match_all_supposed">
+                        <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="pack-btn pack-btn--primary"><?php bakery_te('pack_list.count_match_all'); ?></button>
+                    </form>
+                <?php endif; ?>
+                <form method="post" class="pack-all-form" onsubmit="return confirm(<?php echo htmlspecialchars(json_encode(bakery_t('pack_list.count_seed_loads_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>)">
+                    <?php echo bakery_csrf_field(); ?>
+                    <input type="hidden" name="action" value="seed_driver_loads">
+                    <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
+                    <button type="submit" class="pack-btn pack-btn--primary"><?php bakery_te('pack_list.count_seed_loads'); ?></button>
+                </form>
+                <?php if (!$isBaker): ?>
+                    <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.open_driver_loads'); ?></a>
+                <?php endif; ?>
+            </div>
+            <div style="overflow-x:auto">
+                <table class="pack-count-table">
+                    <thead>
+                        <tr>
+                            <th><?php bakery_te('pack_list.product'); ?></th>
+                            <th class="num"><?php bakery_te('pack_list.count_supposed'); ?></th>
+                            <th class="num"><?php bakery_te('pack_list.available'); ?></th>
+                            <th class="num"><?php bakery_te('pack_list.loaded'); ?></th>
+                            <th class="num"><?php bakery_te('pack_list.covered_stock'); ?></th>
+                            <th><?php bakery_te('pack_list.status'); ?></th>
+                            <th><?php bakery_te('pack_list.count_actions'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($packerCountRows as $countRow):
+                            $pid = (int)$countRow['product_id'];
+                            $rowClass = !empty($countRow['matches']) ? 'is-match' : ((int)$countRow['short'] > 0 ? 'is-short' : '');
+                            $statusClass = !empty($countRow['matches'])
+                                ? 'pack-count-status--ok'
+                                : ((int)$countRow['supposed'] > 0 ? 'pack-count-status--short' : 'pack-count-status--empty');
+                            $statusLabel = !empty($countRow['matches'])
+                                ? bakery_t('pack_list.covered')
+                                : ((int)$countRow['short'] > 0
+                                    ? bakery_t('pack_list.short', ['count' => number_format((int)$countRow['short'])])
+                                    : bakery_t('pack_list.count_no_supposed_short'));
+                            ?>
+                            <tr class="<?php echo $rowClass; ?>">
+                                <td data-label="<?php bakery_te('pack_list.product'); ?>">
+                                    <strong><?php echo htmlspecialchars($countRow['product_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                                    <?php if ($countRow['dough_type'] !== ''): ?>
+                                        <div class="pack-line__meta"><?php echo htmlspecialchars($countRow['dough_type'], ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="num" data-label="<?php bakery_te('pack_list.count_supposed'); ?>"><?php echo number_format((int)$countRow['supposed']); ?></td>
+                                <td class="num" data-label="<?php bakery_te('pack_list.available'); ?>"><?php echo number_format((int)$countRow['available']); ?></td>
+                                <td class="num" data-label="<?php bakery_te('pack_list.loaded'); ?>"><?php echo number_format((int)$countRow['loaded']); ?></td>
+                                <td class="num" data-label="<?php bakery_te('pack_list.covered_stock'); ?>"><?php echo number_format((int)$countRow['covered']); ?></td>
+                                <td data-label="<?php bakery_te('pack_list.status'); ?>">
+                                    <span class="pack-count-status <?php echo $statusClass; ?>"><?php echo htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                                </td>
+                                <td data-label="<?php bakery_te('pack_list.count_actions'); ?>">
+                                    <div class="pack-count-row-actions">
+                                        <?php if ((int)$countRow['supposed'] > 0 && empty($countRow['matches'])): ?>
+                                            <form method="post" class="pack-all-form">
+                                                <?php echo bakery_csrf_field(); ?>
+                                                <input type="hidden" name="action" value="match_supposed">
+                                                <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
+                                                <button type="submit" class="pack-btn"><?php echo htmlspecialchars(bakery_t('pack_list.count_match_one', ['count' => number_format((int)$countRow['supposed'])]), ENT_QUOTES, 'UTF-8'); ?></button>
+                                            </form>
+                                        <?php endif; ?>
+                                        <form method="post" class="pack-all-form pack-count-row-actions">
+                                            <?php echo bakery_csrf_field(); ?>
+                                            <input type="hidden" name="action" value="set_on_hand">
+                                            <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
+                                            <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
+                                            <label class="sf-sr-only" for="packOnHand<?php echo $pid; ?>"><?php bakery_te('pack_list.count_on_hand_label'); ?></label>
+                                            <input id="packOnHand<?php echo $pid; ?>" type="number" name="on_hand" min="0" step="1" value="<?php echo (int)$countRow['available']; ?>" inputmode="numeric">
+                                            <button type="submit" class="pack-btn"><?php bakery_te('pack_list.count_save_on_hand'); ?></button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if (!$isBaker && !empty($exceptions)): ?>

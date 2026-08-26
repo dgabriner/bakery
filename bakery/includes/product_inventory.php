@@ -1376,3 +1376,213 @@ function bakery_inventory_reopen_driver_closeout(PDO $db, string $date, int $dri
         throw $e;
     }
 }
+
+/**
+ * Packer count: set warehouse on-hand and keep produced at least on-hand + loaded.
+ *
+ * @return array{product_id:int,on_hand:int,available:int,produced:int,loaded:int,changed:bool}
+ */
+function bakery_inventory_set_finished_on_hand(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $onHand,
+    ?string $notes = null
+): array {
+    if ($productId <= 0 || $onHand < 0) {
+        throw new InvalidArgumentException('On-hand quantity cannot be negative.');
+    }
+    $date = bakery_inventory_validate_date($date);
+    $notes = ($notes !== null && trim($notes) !== '') ? trim($notes) : 'Packer finished-goods count';
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        bakery_inventory_set_count($db, $date, $productId, $onHand, $notes);
+        $rowStmt = $db->prepare(
+            'SELECT available_quantity, produced_quantity, loaded_quantity
+             FROM product_inventory_days
+             WHERE delivery_date = ? AND product_id = ?
+             FOR UPDATE'
+        );
+        $rowStmt->execute([$date, $productId]);
+        $row = $rowStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $available = (int)($row['available_quantity'] ?? 0);
+        $produced = (int)($row['produced_quantity'] ?? 0);
+        $loaded = (int)($row['loaded_quantity'] ?? 0);
+        $targetProduced = $available + $loaded;
+        $changed = true;
+        if ($produced < $targetProduced) {
+            $backfill = bakery_inventory_backfill_production(
+                $db,
+                $date,
+                $productId,
+                $targetProduced,
+                $notes
+            );
+            $produced = (int)$backfill['produced_now'];
+            $changed = $changed || !empty($backfill['changed']);
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return [
+            'product_id' => $productId,
+            'on_hand' => $onHand,
+            'available' => $available,
+            'produced' => $produced,
+            'loaded' => $loaded,
+            'changed' => $changed,
+        ];
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Match supposed bake/demand: raise produced (and free FG) to the target total.
+ *
+ * @return array{product_id:int,target:int,produced_now:int,changed:bool}
+ */
+function bakery_inventory_match_supposed_production(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $supposedQuantity,
+    ?string $notes = null
+): array {
+    $notes = ($notes !== null && trim($notes) !== '') ? trim($notes) : 'Packer matched supposed';
+    $backfill = bakery_inventory_backfill_production(
+        $db,
+        $date,
+        $productId,
+        $supposedQuantity,
+        $notes
+    );
+    return [
+        'product_id' => (int)$backfill['product_id'],
+        'target' => (int)$backfill['target'],
+        'produced_now' => (int)$backfill['produced_now'],
+        'changed' => !empty($backfill['changed']),
+    ];
+}
+
+/**
+ * Seed or refresh driver pickup loads from route supposed need, capped by warehouse FG.
+ * Walks drivers in name order so a short bake is shared down the list.
+ *
+ * @return array{drivers:int,products:int,units:int,short_units:int}
+ */
+function bakery_inventory_seed_driver_loads_from_supposed(
+    PDO $db,
+    string $date,
+    ?string $notes = null
+): array {
+    if (!bakery_inventory_ready($db)) {
+        throw new RuntimeException('Finished-goods inventory is not installed. Run the database migrations first.');
+    }
+    $date = bakery_inventory_validate_date($date);
+    $notes = ($notes !== null && trim($notes) !== '') ? trim($notes) : 'Packer seeded pickup from supposed';
+
+    $productStmt = $db->prepare(
+        "SELECT doa.driver_id, p.id AS product_id,
+                COALESCE(SUM(doi.quantity), 0) AS required_quantity,
+                COALESCE(MAX(li.loaded_quantity), 0) AS loaded_quantity
+         FROM daily_order_assignments doa
+         JOIN daily_orders do ON do.id = doa.daily_order_id
+         JOIN daily_order_items doi ON doi.daily_order_id = do.id
+         JOIN products p ON p.id = doi.product_id
+         LEFT JOIN driver_loads dl ON dl.driver_id = doa.driver_id AND dl.delivery_date = doa.delivery_date
+         LEFT JOIN driver_load_items li ON li.driver_load_id = dl.id AND li.product_id = p.id
+         WHERE doa.delivery_date = ? AND do.order_date = doa.delivery_date
+           AND doa.delivery_status <> 'cancelled'
+         GROUP BY doa.driver_id, p.id
+         HAVING COALESCE(SUM(doi.quantity), 0) > 0
+         ORDER BY doa.driver_id, p.id"
+    );
+    $productStmt->execute([$date]);
+    $needByDriver = [];
+    $loadedByDriver = [];
+    foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $driverId = (int)$row['driver_id'];
+        $productId = (int)$row['product_id'];
+        $needByDriver[$driverId][$productId] = (int)$row['required_quantity'];
+        $loadedByDriver[$driverId][$productId] = (int)$row['loaded_quantity'];
+    }
+    if ($needByDriver === []) {
+        return ['drivers' => 0, 'products' => 0, 'units' => 0, 'short_units' => 0];
+    }
+
+    $driverNames = [];
+    foreach (array_keys($needByDriver) as $driverId) {
+        $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ?');
+        $nameStmt->execute([$driverId]);
+        $driverNames[$driverId] = (string)($nameStmt->fetchColumn() ?: ('Driver #' . $driverId));
+    }
+    uksort($needByDriver, static function ($a, $b) use ($driverNames) {
+        return strcasecmp((string)($driverNames[$a] ?? ''), (string)($driverNames[$b] ?? ''));
+    });
+
+    $statusStmt = $db->prepare(
+        'SELECT status FROM driver_loads WHERE driver_id = ? AND delivery_date = ?'
+    );
+    $poolStmt = $db->prepare(
+        'SELECT product_id, available_quantity FROM product_inventory_days WHERE delivery_date = ?'
+    );
+
+    $summary = ['drivers' => 0, 'products' => 0, 'units' => 0, 'short_units' => 0];
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        foreach ($needByDriver as $driverId => $needs) {
+            $statusStmt->execute([$driverId, $date]);
+            $status = (string)($statusStmt->fetchColumn() ?: '');
+            if ($status === 'reconciled') {
+                continue;
+            }
+            $poolStmt->execute([$date]);
+            $pool = [];
+            foreach ($poolStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $pool[(int)$row['product_id']] = (int)$row['available_quantity'];
+            }
+            $quantities = [];
+            foreach ($needs as $productId => $need) {
+                $need = (int)$need;
+                if ($need <= 0) {
+                    continue;
+                }
+                $already = (int)($loadedByDriver[$driverId][$productId] ?? 0);
+                $free = (int)($pool[$productId] ?? 0);
+                $newLoad = min($need, $already + $free);
+                $quantities[$productId] = $newLoad;
+                $summary['products']++;
+                $summary['units'] += $newLoad;
+                $summary['short_units'] += max(0, $need - $newLoad);
+            }
+            if ($quantities === []) {
+                continue;
+            }
+            bakery_inventory_save_driver_load($db, $date, $driverId, $quantities, $notes);
+            $summary['drivers']++;
+            foreach ($quantities as $productId => $qty) {
+                $loadedByDriver[$driverId][$productId] = (int)$qty;
+            }
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return $summary;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}

@@ -77,6 +77,8 @@ $packSrc = (string)file_get_contents($root . '/pack_list.php');
 $loadSrc = (string)file_get_contents($root . '/driver_load.php');
 $assert(strpos($packSrc, 'backfill_day') !== false && strpos($packSrc, 'mark_day_produced') !== false, 'Pack List has day-batch mark produced');
 $assert(strpos($packSrc, 'backfill_production') !== false, 'Pack List has per-product mark produced');
+$assert(strpos($packSrc, 'match_supposed') !== false && strpos($packSrc, 'set_on_hand') !== false, 'Pack List has packer count actions');
+$assert(strpos($packSrc, 'seed_driver_loads') !== false && strpos($packSrc, 'pack-count-board') !== false, 'Pack List has driver-load seed board');
 $assert(strpos($loadSrc, 'backfill_day') !== false && strpos($loadSrc, 'mark_produced_qty') !== false, 'Load board can mark missing production');
 
 if (bakery_inventory_ready($db)) {
@@ -136,6 +138,83 @@ if (bakery_inventory_ready($db)) {
             $wipeInv();
             $day = bakery_inventory_backfill_day_production($db, $invDate, [$productA => 10, $productB => 6], 'pack list day batch');
             $assert((int)$day['updated'] === 2 && (int)$day['added_produced'] === 16, 'day batch marks both products');
+        }
+
+        $wipeInv();
+        $counted = bakery_inventory_set_finished_on_hand($db, $invDate, $productA, 18, 'pack list count test');
+        $row->execute([$invDate, $productA]);
+        $afterCount = $row->fetch(PDO::FETCH_ASSOC) ?: [];
+        $assert((int)$counted['on_hand'] === 18, 'count helper returns on-hand 18');
+        $assert((int)$afterCount['available_quantity'] === 18, 'packer count sets warehouse available');
+        $assert((int)$afterCount['produced_quantity'] >= 18, 'packer count keeps produced at least on hand');
+
+        $matched = bakery_inventory_match_supposed_production($db, $invDate, $productA, 30, 'pack list match test');
+        $row->execute([$invDate, $productA]);
+        $afterMatch = $row->fetch(PDO::FETCH_ASSOC) ?: [];
+        $assert(!empty($matched['changed']) && (int)$matched['produced_now'] === 30, 'match supposed raises produced to 30');
+        $assert((int)$afterMatch['available_quantity'] === 30, 'match supposed raises free FG to supposed');
+
+        $driverId = (int)$db->query('SELECT id FROM drivers ORDER BY id LIMIT 1')->fetchColumn();
+        $customerId = (int)$db->query('SELECT id FROM customers WHERE COALESCE(is_active,1)=1 ORDER BY id LIMIT 1')->fetchColumn();
+        if ($driverId > 0 && $customerId > 0) {
+            $seedDate = date('Y-m-d', strtotime('+55 days'));
+            $orderIds = $db->prepare('SELECT id FROM daily_orders WHERE order_date = ?');
+            $orderIds->execute([$seedDate]);
+            $ids = array_map('intval', $orderIds->fetchAll(PDO::FETCH_COLUMN));
+            if ($ids) {
+                $in = implode(',', $ids);
+                $db->exec("DELETE FROM daily_order_assignments WHERE daily_order_id IN ({$in})");
+                $db->exec("DELETE FROM daily_order_items WHERE daily_order_id IN ({$in})");
+                $db->exec("DELETE FROM daily_orders WHERE id IN ({$in})");
+            }
+            $loadIds = $db->prepare('SELECT id FROM driver_loads WHERE delivery_date = ?');
+            $loadIds->execute([$seedDate]);
+            foreach ($loadIds->fetchAll(PDO::FETCH_COLUMN) as $loadId) {
+                $db->prepare('DELETE FROM driver_load_items WHERE driver_load_id = ?')->execute([(int)$loadId]);
+            }
+            $db->prepare('DELETE FROM driver_loads WHERE delivery_date = ?')->execute([$seedDate]);
+            $db->prepare('DELETE FROM inventory_movements WHERE delivery_date = ?')->execute([$seedDate]);
+            $db->prepare('DELETE FROM product_inventory_days WHERE delivery_date = ? AND product_id = ?')->execute([$seedDate, $productA]);
+
+            $db->prepare(
+                "INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, 'pending', 0)"
+            )->execute([$customerId, $seedDate]);
+            $orderId = (int)$db->lastInsertId();
+            $db->prepare(
+                'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, 20, 0, 0)'
+            )->execute([$orderId, $productA]);
+            $db->prepare(
+                "INSERT INTO daily_order_assignments
+                 (daily_order_id, driver_id, delivery_date, route_order, scheduled_delivery_time, delivery_status)
+                 VALUES (?, ?, ?, 1, '08:00:00', 'pending')"
+            )->execute([$orderId, $driverId, $seedDate]);
+
+            bakery_inventory_set_finished_on_hand($db, $seedDate, $productA, 12, 'seed prep short bake');
+            $seed = bakery_inventory_seed_driver_loads_from_supposed($db, $seedDate, 'pack list seed test');
+            $loadQty = $db->prepare(
+                'SELECT li.loaded_quantity
+                 FROM driver_loads dl
+                 JOIN driver_load_items li ON li.driver_load_id = dl.id
+                 WHERE dl.delivery_date = ? AND dl.driver_id = ? AND li.product_id = ?'
+            );
+            $loadQty->execute([$seedDate, $driverId, $productA]);
+            $seeded = (int)$loadQty->fetchColumn();
+            $assert((int)$seed['drivers'] === 1, 'seed touches one driver');
+            $assert($seeded === 12, 'seed caps driver load at on-hand 12 when supposed is 20');
+            $assert((int)$seed['short_units'] === 8, 'seed reports 8 units still short');
+
+            $db->prepare('DELETE FROM daily_order_assignments WHERE daily_order_id = ?')->execute([$orderId]);
+            $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id = ?')->execute([$orderId]);
+            $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$orderId]);
+            $loadIds->execute([$seedDate]);
+            foreach ($loadIds->fetchAll(PDO::FETCH_COLUMN) as $loadId) {
+                $db->prepare('DELETE FROM driver_load_items WHERE driver_load_id = ?')->execute([(int)$loadId]);
+            }
+            $db->prepare('DELETE FROM driver_loads WHERE delivery_date = ?')->execute([$seedDate]);
+            $db->prepare('DELETE FROM inventory_movements WHERE delivery_date = ?')->execute([$seedDate]);
+            $db->prepare('DELETE FROM product_inventory_days WHERE delivery_date = ? AND product_id = ?')->execute([$seedDate, $productA]);
+        } else {
+            echo "SKIP seed loads — no driver/customer on bakerysf_test\n";
         }
 
         $wipeInv();
