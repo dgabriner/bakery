@@ -282,6 +282,38 @@ $realKindClash = bakery_staging_live_relax_067_kind_stop([
 ]);
 $assert(($realKindClash['compare']['state'] ?? '') === 'discrepancy', 'other type clashes stay Stop');
 
+$giftStopBoard = bakery_staging_live_relax_067_kind_stop([
+    'compare' => [
+        'state' => 'discrepancy',
+        'mismatches' => ['sfb_offerings.kind', 'sfb_offering_purchases.paid_with'],
+        'extra_on_live' => [],
+        'staging_only_migrations' => ['071_bread_education_purchase_home', '072_first_loaf_kit'],
+        'unexpected_database' => false,
+    ],
+    'candidates' => [
+        [
+            'id' => '071_bread_education_purchase_home',
+            'file' => '071_bread_education_purchase_home.sql',
+            'safe' => true,
+        ],
+        [
+            'id' => '072_first_loaf_kit',
+            'file' => '072_first_loaf_kit.sql',
+            'safe' => true,
+        ],
+    ],
+    'recommended' => null,
+    'stale_after_apply' => false,
+    'migration_status' => null,
+]);
+$assert(($giftStopBoard['compare']['state'] ?? '') === 'live_behind', '071 gift ENUM Stop becomes Live-behind');
+$assert(($giftStopBoard['recommended']['file'] ?? '') === '071_bread_education_purchase_home.sql', '071 is recommended after gift relax');
+$assert(($giftStopBoard['next'] ?? '') === 'migrate', 'gift relax opens the database button');
+$assert(array_column($giftStopBoard['recommended_all'] ?? [], 'id') === [
+    '071_bread_education_purchase_home',
+    '072_first_loaf_kit',
+], '071 relax keeps 072 in the remainder queue');
+
 $job067 = [
     'id' => '067_bread_education_offerings_v2',
     'file' => '067_bread_education_offerings_v2.sql',
@@ -309,8 +341,8 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 68, 'next unused schema number is 068');
-$assert(bakery_schema_next_migration_id('demo_feature') === '068_demo_feature', 'next id is 068_ plus slug');
+$assert(bakery_schema_next_migration_number() === 73, 'next unused schema number is 073');
+$assert(bakery_schema_next_migration_id('demo_feature') === '073_demo_feature', 'next id is 073_ plus slug');
 $third062 = bakery_schema_migration_ids_from_dir();
 $third062[] = '062_another_collision';
 $assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');

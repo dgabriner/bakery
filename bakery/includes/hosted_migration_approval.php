@@ -325,8 +325,31 @@ function bakery_staging_live_board(?PDO $db, bool $refreshLiveSchema = false, bo
 }
 
 /**
- * 067 widens sfb_offerings.kind by appending donation/credits. If Staging still
- * has an older compare that treats that as Stop, reopen the database button.
+ * Older Staging compares treated additive ENUM appends as Stop. 067 appends
+ * donation/credits on kind; 071 also appends gift on kind and paid_with.
+ */
+function bakery_staging_live_relax_additive_enum_stop(array $mismatches, array $stagingOnly): bool
+{
+    $allowed071 = ['sfb_offerings.kind', 'sfb_offering_purchases.paid_with'];
+    if ($mismatches === []) {
+        return false;
+    }
+    foreach ($mismatches as $name) {
+        if (!in_array((string)$name, $allowed071, true)) {
+            return false;
+        }
+    }
+    $ids = array_map('strval', $stagingOnly);
+    if (in_array('071_bread_education_purchase_home', $ids, true)) {
+        return true;
+    }
+    return $mismatches === ['sfb_offerings.kind']
+        && in_array('067_bread_education_offerings_v2', $ids, true);
+}
+
+/**
+ * 067/071 ENUM widens. If Staging still has an older compare that treats those
+ * as Stop, reopen the database button. Extra Live columns still Stop.
  */
 function bakery_staging_live_relax_067_kind_stop(array $board): array
 {
@@ -335,15 +358,15 @@ function bakery_staging_live_relax_067_kind_stop(array $board): array
         return bakery_staging_live_board_with_next($board);
     }
     $mismatches = array_values(array_map('strval', (array)($compare['mismatches'] ?? [])));
-    if ($mismatches !== ['sfb_offerings.kind']) {
-        return bakery_staging_live_board_with_next($board);
-    }
     foreach ((array)($compare['extra_on_live'] ?? []) as $name) {
         if (strpos((string)$name, 'index:') !== 0) {
             return bakery_staging_live_board_with_next($board);
         }
     }
-    if (!in_array('067_bread_education_offerings_v2', array_map('strval', (array)($compare['staging_only_migrations'] ?? [])), true)) {
+    if (!bakery_staging_live_relax_additive_enum_stop(
+        $mismatches,
+        array_map('strval', (array)($compare['staging_only_migrations'] ?? []))
+    )) {
         return bakery_staging_live_board_with_next($board);
     }
     $compare['mismatches'] = [];

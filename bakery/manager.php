@@ -46,15 +46,24 @@ if (!function_exists('bakery_staging_live_relax_067_kind_stop')) {
             return $keep($board);
         }
         $mismatches = array_values(array_map('strval', (array)($compare['mismatches'] ?? [])));
-        if ($mismatches !== ['sfb_offerings.kind']) {
-            return $keep($board);
-        }
         foreach ((array)($compare['extra_on_live'] ?? []) as $name) {
             if (strpos((string)$name, 'index:') !== 0) {
                 return $keep($board);
             }
         }
-        if (!in_array('067_bread_education_offerings_v2', array_map('strval', (array)($compare['staging_only_migrations'] ?? [])), true)) {
+        $allowed071 = ['sfb_offerings.kind', 'sfb_offering_purchases.paid_with'];
+        $ids = array_map('strval', (array)($compare['staging_only_migrations'] ?? []));
+        $enumOk = $mismatches !== [];
+        foreach ($mismatches as $name) {
+            if (!in_array((string)$name, $allowed071, true)) {
+                $enumOk = false;
+                break;
+            }
+        }
+        $relax071 = $enumOk && in_array('071_bread_education_purchase_home', $ids, true);
+        $relax067 = $mismatches === ['sfb_offerings.kind']
+            && in_array('067_bread_education_offerings_v2', $ids, true);
+        if (!$relax071 && !$relax067) {
             return $keep($board);
         }
         $compare['mismatches'] = [];
