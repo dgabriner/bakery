@@ -112,6 +112,30 @@ deploy_surface_assert(bakery_staging_live_skip_name('old_page_backup.php'), 'ski
 deploy_surface_assert(!bakery_staging_live_skip_name('login.php'), 'skip pattern keeps login.php');
 deploy_surface_assert(!bakery_staging_live_skip_name('staff_alerts_api.php'), 'skip pattern keeps staff_alerts_api.php');
 
+/* Staging-only night-shift tour (PR #1). Keep off Live send even if the files
+ * exist on a mixed Staging/desktop tree. Do not merge those pages onto main. */
+$tourPages = ['staging_update.php', 'oven_light.php', 'proof_window.php'];
+$excludeBody = deploy_surface_function_body($manifestSrc, 'Get-BakeryDeployExcludeNamePatterns');
+$rootFilesBody = deploy_surface_function_body($manifestSrc, 'Get-BakeryDeployRootFiles');
+foreach ($tourPages as $tourPage) {
+    deploy_surface_assert(
+        bakery_staging_live_skip_name($tourPage),
+        "hosted Live skip excludes $tourPage"
+    );
+    deploy_surface_assert(
+        strpos($excludeBody, "'" . $tourPage . "'") !== false,
+        "Get-BakeryDeployExcludeNamePatterns lists $tourPage"
+    );
+    deploy_surface_assert(
+        strpos($rootFilesBody, "'" . $tourPage . "'") === false,
+        "Get-BakeryDeployRootFiles does not whitelist $tourPage"
+    );
+}
+deploy_surface_assert(
+    strpos($listBody, 'Test-BakeryDeploySkipFile $file') !== false,
+    'whitelist completeness loop still honors Test-BakeryDeploySkipFile'
+);
+
 /* 4. PHP promotion list equals the actual root web set on disk (drift-proof). */
 $liveRootFiles = bakery_staging_live_root_files();
 $expectedRootFiles = deploy_surface_expected_root_files($root);
@@ -123,6 +147,12 @@ deploy_surface_assert($missingFromPhpList === [] && $staleInPhpList === [],
     'bakery_staging_live_root_files matches disk web-root minus skip patterns'
     . ($missingFromPhpList ? ' [missing: ' . implode(', ', $missingFromPhpList) . ']' : '')
     . ($staleInPhpList ? ' [stale: ' . implode(', ', $staleInPhpList) . ']' : ''));
+foreach ($tourPages as $tourPage) {
+    deploy_surface_assert(
+        !in_array($tourPage, $liveRootFiles, true),
+        "$tourPage is not in bakery_staging_live_root_files"
+    );
+}
 
 /* 5. Nav link-rot guard: catalog pages are inside the deployable root set. */
 $catalogSrc = (string)@file_get_contents($root . '/includes/navigation_catalog.php');

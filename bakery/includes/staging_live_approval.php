@@ -78,6 +78,7 @@ function bakery_staging_live_skip_name(string $name): bool {
         'driver_pages_probe.php', 'trace_driver_list.php', 'ping.php', 'run_sql_setup.php',
         'db_test.php', 'setup_directories.php', 'oauth_setup.php', 'auto_push_api.php',
         'sourflour.html', 'tmp_*.php', 'tmp_*.js', 'tmp_*.txt',
+        'staging_update.php', 'oven_light.php', 'proof_window.php',
         '.DS_Store', 'Thumbs.db', 'desktop.ini', '*.bak', '*~', '._*', '* (*).*',
     ] as $pattern) {
         if (fnmatch($pattern, $name, FNM_CASEFOLD)) return true;
