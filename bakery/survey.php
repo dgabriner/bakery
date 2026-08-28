@@ -188,6 +188,7 @@ $esc = static function ($v): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<?php require_once __DIR__ . '/includes/google_analytics.php'; ?>
 <title><?php echo $esc($pageTitle); ?></title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #f6f3ee; color: #24303e; }

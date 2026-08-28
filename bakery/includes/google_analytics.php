@@ -34,7 +34,7 @@ function bakery_google_analytics_should_load(?string $host = null): bool
     }
     try {
         $normalized = bakery_google_analytics_normalize_host(null);
-        if ($normalized === '' || in_array($normalized, ['localhost', '127.0.0.1', '::1'], true)) {
+        if ($normalized === '' || in_array($normalized, ['localhost', '127.0.0.1', '::1', '[::1]'], true)) {
             return false;
         }
         if ($normalized === 'bakery.sourflour.org' || $normalized === 'www.bakery.sourflour.org') {

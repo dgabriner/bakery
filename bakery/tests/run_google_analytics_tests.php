@@ -64,6 +64,7 @@ ga_assert('does not gtag-config the GA4 destination G-FEZ1KFZKPK', strpos($src, 
 ga_assert('does not gtag-config the Ads destination AW-987675312', strpos($src, "gtag('config', 'AW-987675312')") === false);
 
 ga_assert('loads on bakery.sourflour.org', bakery_google_analytics_should_load('bakery.sourflour.org') === true);
+ga_assert('loads on www.bakery.sourflour.org', bakery_google_analytics_should_load('www.bakery.sourflour.org') === true);
 ga_assert('config defines bakery_is_staging_host host', $stagingHost !== '');
 ga_assert('loads on staging host', $stagingHost !== '' && bakery_google_analytics_should_load($stagingHost) === true);
 ga_assert('loads on bakery host with port', bakery_google_analytics_should_load('bakery.sourflour.org:443') === true);
@@ -71,6 +72,7 @@ ga_assert('skips localhost', bakery_google_analytics_should_load('localhost') ==
 ga_assert('skips localhost with port', bakery_google_analytics_should_load('localhost:8080') === false);
 ga_assert('skips 127.0.0.1', bakery_google_analytics_should_load('127.0.0.1') === false);
 ga_assert('skips ::1', bakery_google_analytics_should_load('::1') === false);
+ga_assert('skips bracketed ::1', bakery_google_analytics_should_load('[::1]') === false);
 ga_assert('skips gourmetgastronomer.com', bakery_google_analytics_should_load('gourmetgastronomer.com') === false);
 ga_assert('skips empty host', bakery_google_analytics_should_load('') === false);
 
@@ -106,6 +108,9 @@ $wrappers = [
     'customer_login.php' => (string)file_get_contents($root . '/customer_login.php'),
     'customer_qr_login.php' => (string)file_get_contents($root . '/customer_qr_login.php'),
     'guias.php' => (string)file_get_contents($root . '/guias.php'),
+    'sfb_join.php' => (string)file_get_contents($root . '/sfb_join.php'),
+    'starter.php' => (string)file_get_contents($root . '/starter.php'),
+    'survey.php' => (string)file_get_contents($root . '/survey.php'),
 ];
 foreach ($wrappers as $name => $body) {
     ga_assert("$name requires google_analytics.php", strpos($body, 'google_analytics.php') !== false);
@@ -117,12 +122,20 @@ ga_assert('CSP is not disabled or emptied', strpos($config, "default-src 'self'"
 
 preg_match('/script-src[^;]+;/', $config, $scriptSrc);
 preg_match('/connect-src[^;]+;/', $config, $connectSrc);
+preg_match('/img-src[^;]+;/', $config, $imgSrc);
+preg_match('/frame-src[^;]+;/', $config, $frameSrc);
 $script = $scriptSrc[0] ?? '';
 $connect = $connectSrc[0] ?? '';
+$img = $imgSrc[0] ?? '';
+$frame = $frameSrc[0] ?? '';
 ga_assert('script-src allows googletagmanager.com', strpos($script, 'googletagmanager.com') !== false);
 ga_assert('script-src allows google-analytics.com', strpos($script, 'google-analytics.com') !== false);
+ga_assert('script-src allows googleadservices.com', strpos($script, 'googleadservices.com') !== false);
 ga_assert('connect-src allows googletagmanager.com', strpos($connect, 'googletagmanager.com') !== false);
 ga_assert('connect-src allows google-analytics.com', strpos($connect, 'google-analytics.com') !== false);
+ga_assert('img-src allows googletagmanager.com', strpos($img, 'googletagmanager.com') !== false);
+ga_assert('img-src allows google-analytics.com', strpos($img, 'google-analytics.com') !== false);
+ga_assert('frame-src allows googletagmanager.com', strpos($frame, 'googletagmanager.com') !== false);
 ga_assert('script-src still allows Maps', strpos($script, 'maps.googleapis.com') !== false);
 
 $htaccess = (string)file_get_contents($root . '/.htaccess');
@@ -141,6 +154,7 @@ ga_assert('breadeducation gtag.js does not invent a GTM- container', strpos($edu
 ga_assert('breadeducation gtag.js does not gtag-config G-FEZ1KFZKPK', strpos($eduJs, "gtag('config', 'G-FEZ1KFZKPK')") === false);
 ga_assert('breadeducation gtag.js skips localhost', strpos($eduJs, 'localhost') !== false);
 ga_assert('breadeducation gtag.js skips 127.0.0.1', strpos($eduJs, '127.0.0.1') !== false);
+ga_assert('breadeducation gtag.js allowlists bakery.sourflour.org', strpos($eduJs, "'bakery.sourflour.org'") !== false);
 
 $eduHtaccess = (string)file_get_contents($root . '/breadeducation/.htaccess');
 ga_assert('breadeducation .htaccess does not set CSP', stripos($eduHtaccess, 'Content-Security-Policy') === false);
