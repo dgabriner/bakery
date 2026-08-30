@@ -107,18 +107,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
     }
 
     try {
-        $survey = bakery_survey_create($db, [
-            'mode' => (string)($_POST['survey_mode'] ?? 'link'),
-            'kind' => (string)($_POST['survey_kind'] ?? 'route_review'),
-            'audience' => (string)($_POST['survey_audience'] ?? 'driver'),
-            'driver_id' => (int)($_POST['driver_id'] ?? 0),
-            'target_phone' => trim((string)($_POST['to_manual'] ?? '')),
-            'question' => (string)($_POST['question'] ?? ''),
-            'title' => trim((string)($_POST['title'] ?? '')),
-            'questions' => isset($_POST['q_text']) && is_array($_POST['q_text']) ? bakery_survey_collect_questions_from_post($_POST) : [],
-            'delivery_date' => trim((string)($_POST['date'] ?? '')),
-            'created_by' => (int)($user['id'] ?? 0),
-        ]);
+        $kind = (string)($_POST['survey_kind'] ?? 'route_review');
+        $driverId = (int)($_POST['driver_id'] ?? 0);
+        $deliveryDate = trim((string)($_POST['date'] ?? ''));
+        if ($kind === 'store_verify' && $driverId <= 0) {
+            $survey = bakery_survey_ensure_store_verify(
+                $db,
+                0,
+                $deliveryDate,
+                (int)($user['id'] ?? 0)
+            );
+        } else {
+            $survey = bakery_survey_create($db, [
+                'mode' => (string)($_POST['survey_mode'] ?? 'link'),
+                'kind' => $kind,
+                'audience' => (string)($_POST['survey_audience'] ?? 'driver'),
+                'driver_id' => $driverId,
+                'target_phone' => trim((string)($_POST['to_manual'] ?? '')),
+                'question' => (string)($_POST['question'] ?? ''),
+                'title' => trim((string)($_POST['title'] ?? '')),
+                'questions' => isset($_POST['q_text']) && is_array($_POST['q_text']) ? bakery_survey_collect_questions_from_post($_POST) : [],
+                'delivery_date' => $deliveryDate,
+                'created_by' => (int)($user['id'] ?? 0),
+            ]);
+        }
         $result = bakery_survey_send($db, $survey, (int)($user['id'] ?? 0));
         $flag = !empty($result['send']['ok']) ? 'sent' : (!empty($result['send']['recorded_only']) ? 'recorded' : 'error');
         safe_redirect('text_comms.php?view=surveys&survey=' . urlencode($flag)
@@ -845,6 +857,7 @@ require_once __DIR__ . '/includes/nav.php';
                     <div>
                         <label for="svDriver"><?php bakery_te('texts.survey_driver'); ?></label>
                         <select id="svDriver" name="driver_id">
+                            <option value="0"><?php bakery_te('texts.survey_driver_all'); ?></option>
                             <?php foreach ($driverChoices as $d): ?>
                                 <option value="<?php echo (int)$d['id']; ?>"><?php echo htmlspecialchars((string)$d['name'], ENT_QUOTES, 'UTF-8'); ?></option>
                             <?php endforeach; ?>

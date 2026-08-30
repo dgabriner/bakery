@@ -2,12 +2,12 @@
 /**
  * Survey landing page for Twilio link-mode surveys (drivers and managers).
  *
- * The token only selects WHICH survey opens; every action still rides the
- * normal staff/driver session gate (trusted-device login restores itself) and
- * the same mutation helpers My Route uses. No second auth system.
+ * An open store_verify / route_review token IS the auth — phones can open
+ * survey.php?t=TOKEN with no PIN. No token still rides the staff/driver
+ * session gate. Skip/claim/answer still require a logged-in role.
  *
  * GET  ?t=TOKEN                 render the survey
- * POST ?t=TOKEN  action=skip|unskip|claim|answer|close
+ * POST ?t=TOKEN  action=skip|unskip|claim|answer|close|verify_stores
  */
 define('ACCESS_ALLOWED', true);
 
@@ -18,10 +18,6 @@ require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/surveys.php';
 require_once __DIR__ . '/includes/text_comms.php';
 
-bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
-
-$user = bakery_current_user();
-$isManager = bakery_user_has_role(['administrator', 'manager']);
 $token = trim((string)($_REQUEST['t'] ?? ''));
 
 if (!bakery_surveys_ready($db)) {
@@ -45,9 +41,16 @@ try {
     );
 }
 
+if (bakery_survey_page_needs_login($token, $survey)) {
+    bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+}
+
+$user = bakery_current_user() ?: [];
+$isManager = bakery_user_has_role(['administrator', 'manager']);
+
 // Logged-in driver (no token): open this driver's next-delivery-day verify.
 if (!$survey && $token === '') {
-    $selfDriverId = bakery_route_worker_driver_id($db, $user, $nextDeliveryDate);
+    $selfDriverId = bakery_route_worker_driver_id($db, $user ?: null, $nextDeliveryDate);
     if ($selfDriverId <= 0 && !empty($user['driver_id'])) {
         $selfDriverId = (int)$user['driver_id'];
     }
@@ -103,8 +106,9 @@ if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate) && $surveyDate >= date('Y-m
     $verifyDate = $surveyDate;
 }
 
-// Drivers may only open their own survey; managers may inspect any.
-if (!$isManager && (string)$survey['audience'] === 'driver') {
+// Token-public store_verify / route_review skips identity. Logged-in
+// drivers without a public token may only open their own survey.
+if (bakery_survey_page_needs_identity($survey) && !$isManager && (string)$survey['audience'] === 'driver') {
     try {
         bakery_assert_driver_identity($db, $driverId, $verifyDate);
     } catch (RuntimeException $e) {
@@ -127,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('text_comms.php?view=surveys&survey=' . ($action === 'close' ? 'closed' : 'reopened'));
         }
         if ($action === 'skip') {
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
             $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
             bakery_delivery_assert_driver_access($db, $dailyOrderId);
             $reason = trim((string)($_POST['reason'] ?? ''));
@@ -145,6 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_skip', [], 'Stop skipped. Thank you!')));
         }
         if ($action === 'unskip') {
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
             $dailyOrderId = (int)($_POST['daily_order_id'] ?? 0);
             bakery_delivery_assert_driver_access($db, $dailyOrderId);
             bakery_unskip_delivery_stop($db, $dailyOrderId);
@@ -156,6 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_unskip', [], 'Stop restored.')));
         }
         if ($action === 'claim') {
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
             $customerId = (int)($_POST['customer_id'] ?? 0);
             $result = bakery_driver_plan_add_stop($db, $driverId, $deliveryDate, $customerId, false);
             bakery_survey_record_response($db, [
@@ -168,6 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode($result['message']));
         }
         if ($action === 'answer') {
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
             $questions = bakery_survey_questions($survey);
             $answered = 0;
             foreach ($questions as $q) {
@@ -191,20 +199,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_answer', [], 'Answer recorded. Thank you!')));
         }
         if ($action === 'verify_stores') {
-            if ($driverId > 0 && !$isManager) {
+            if (bakery_survey_page_needs_identity($survey) && $driverId > 0 && !$isManager) {
                 bakery_assert_driver_identity($db, $driverId, $verifyDate);
             }
-            $verifyData = bakery_survey_store_verify_data($db, $driverId, $verifyDate);
-            $postedOn = [];
-            if (isset($_POST['store_on']) && is_array($_POST['store_on'])) {
-                foreach ($_POST['store_on'] as $rawId) {
-                    $postedOn[] = (int)$rawId;
+            $isHqSubmit = ((string)($survey['kind'] ?? '') === 'store_verify' && $driverId <= 0);
+            if ($isHqSubmit) {
+                $hqGroups = bakery_survey_store_verify_hq_data($db, $verifyDate);
+                $postedByDriver = [];
+                if (isset($_POST['store_on']) && is_array($_POST['store_on'])) {
+                    foreach ($_POST['store_on'] as $rawDriverId => $ids) {
+                        if (!is_array($ids)) {
+                            continue;
+                        }
+                        $postedByDriver[(int)$rawDriverId] = array_map('intval', $ids);
+                    }
                 }
+                $choice = bakery_survey_store_verify_collect_hq($postedByDriver, $hqGroups);
+                $driverName = 'HQ';
+            } else {
+                $verifyData = bakery_survey_store_verify_data($db, $driverId, $verifyDate);
+                $postedOn = [];
+                if (isset($_POST['store_on']) && is_array($_POST['store_on'])) {
+                    foreach ($_POST['store_on'] as $rawId) {
+                        if (is_array($rawId)) {
+                            continue;
+                        }
+                        $postedOn[] = (int)$rawId;
+                    }
+                }
+                $choice = bakery_survey_store_verify_collect($postedOn, $verifyData['assigned'], $verifyData['other']);
+                $driverName = $verifyData['driver_name'] !== ''
+                    ? $verifyData['driver_name']
+                    : (string)($user['display_name'] ?? 'Driver');
             }
-            $choice = bakery_survey_store_verify_collect($postedOn, $verifyData['assigned'], $verifyData['other']);
-            $driverName = $verifyData['driver_name'] !== ''
-                ? $verifyData['driver_name']
-                : (string)($user['display_name'] ?? 'Driver');
             $result = bakery_survey_store_verify_submit($db, [
                 'survey_id' => (int)$survey['id'],
                 'driver_id' => $driverId,
@@ -213,6 +240,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'on' => $choice['on'],
                 'off' => $choice['off'],
                 'assigned_off_count' => $choice['assigned_off_count'],
+                'drivers' => $choice['drivers'] ?? [],
                 'staff_user_id' => (int)($user['id'] ?? 0),
             ]);
             $done = (string)bakery_t('survey.store_verify_done', [], 'Saved. Headquarters got your list.');
@@ -236,15 +264,22 @@ $data = [];
 $routeReview = false;
 $questions = bakery_survey_questions($survey);
 $surveyKind = (string)($survey['kind'] ?? '');
-$showStoreVerify = $driverId > 0 && in_array($surveyKind, ['route_review', 'store_verify'], true);
+$isHqStoreVerify = $surveyKind === 'store_verify' && $driverId <= 0;
+$showStoreVerify = $isHqStoreVerify
+    || ($driverId > 0 && in_array($surveyKind, ['route_review', 'store_verify'], true));
+$hqGroups = [];
 $storeVerify = ['driver_id' => $driverId, 'driver_name' => '', 'delivery_date' => $verifyDate, 'assigned' => [], 'other' => []];
-if ($showStoreVerify) {
+if ($isHqStoreVerify) {
+    $hqGroups = bakery_survey_store_verify_hq_data($db, $verifyDate);
+} elseif ($showStoreVerify) {
     $storeVerify = bakery_survey_store_verify_data($db, $driverId, $verifyDate);
     if ($storeVerify['driver_name'] === '' && !empty($user['display_name'])) {
         $storeVerify['driver_name'] = (string)$user['display_name'];
     }
 }
-if ($surveyKind === 'route_review') {
+// Skip/claim need a logged-in role (plan-search asserts identity). Token
+// GET still renders store-verify without calling that path.
+if ($surveyKind === 'route_review' && $user !== [] && $driverId > 0) {
     $routeReview = true;
     $data = bakery_survey_route_review_data($db, $driverId, $deliveryDate);
 }
@@ -303,8 +338,19 @@ $esc = static function ($v): string {
 </head>
 <body>
 <main>
-  <h1><?php echo $esc($showStoreVerify ? bakery_survey_text('survey.store_verify_title', [], 'Next delivery day') : bakery_survey_text('survey.page_title', [], 'Survey')); ?></h1>
-  <?php if ($showStoreVerify): ?>
+  <h1><?php
+    if ($isHqStoreVerify) {
+        echo $esc(bakery_survey_text('survey.store_verify_hq_title', [], 'All drivers — next delivery day'));
+    } elseif ($showStoreVerify) {
+        echo $esc(bakery_survey_text('survey.store_verify_title', [], 'Next delivery day'));
+    } else {
+        echo $esc(bakery_survey_text('survey.page_title', [], 'Survey'));
+    }
+  ?></h1>
+  <?php if ($isHqStoreVerify): ?>
+  <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_all_drivers', [], 'Every active driver. Assigned stores start ON; other stores start OFF. One send texts headquarters.')); ?></p>
+  <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>
+  <?php elseif ($showStoreVerify): ?>
   <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_driver', ['name' => $storeVerify['driver_name'] !== '' ? $storeVerify['driver_name'] : (string)($user['display_name'] ?? '')], 'Driver: :name')); ?></p>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>
   <?php elseif ($routeReview): ?>
@@ -324,7 +370,39 @@ $esc = static function ($v): string {
   <?php if ($flash !== ''): ?><div class="flash"><?php echo $esc($flash); ?></div><?php endif; ?>
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
 
-  <?php if ($showStoreVerify): ?>
+  <?php if ($isHqStoreVerify): ?>
+    <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" id="storeVerifyForm">
+      <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
+      <input type="hidden" name="action" value="verify_stores">
+      <?php foreach ($hqGroups as $group): ?>
+        <?php $gid = (int)($group['driver_id'] ?? 0); ?>
+        <p class="who"><?php echo $esc((string)($group['driver_name'] ?? '')); ?></p>
+        <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_assigned', ['count' => count($group['assigned'] ?? [])], 'Your assigned stores (:count)')); ?></div>
+        <?php if (!empty($group['assigned'])): ?>
+          <?php foreach ($group['assigned'] as $store): ?>
+          <label class="store on" data-store-toggle>
+            <input type="checkbox" name="store_on[<?php echo $gid; ?>][]" value="<?php echo (int)$store['id']; ?>" checked>
+            <span class="name"><?php echo $esc($store['name']); ?></span>
+            <span class="pill" data-on="<?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?>" data-off="<?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?></span>
+          </label>
+          <?php endforeach; ?>
+        <?php else: ?>
+          <p class="meta"><?php echo $esc(bakery_survey_text('survey.store_verify_no_stores', [], 'No assigned stores for this delivery day yet.')); ?></p>
+        <?php endif; ?>
+        <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_other', ['count' => count($group['other'] ?? [])], 'Other stores (:count)')); ?></div>
+        <?php foreach (($group['other'] ?? []) as $store): ?>
+        <label class="store" data-store-toggle>
+          <input type="checkbox" name="store_on[<?php echo $gid; ?>][]" value="<?php echo (int)$store['id']; ?>">
+          <span class="name"><?php echo $esc($store['name']); ?></span>
+          <span class="pill" data-on="<?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?>" data-off="<?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?></span>
+        </label>
+        <?php endforeach; ?>
+      <?php endforeach; ?>
+      <div class="submit-bar">
+        <button type="submit" class="btn primary"><?php echo $esc(bakery_survey_text('survey.store_verify_submit', [], 'Send my stores')); ?></button>
+      </div>
+    </form>
+  <?php elseif ($showStoreVerify): ?>
     <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" id="storeVerifyForm">
       <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
       <input type="hidden" name="action" value="verify_stores">
@@ -354,6 +432,8 @@ $esc = static function ($v): string {
         <button type="submit" class="btn primary"><?php echo $esc(bakery_survey_text('survey.store_verify_submit', [], 'Send my stores')); ?></button>
       </div>
     </form>
+  <?php endif; ?>
+  <?php if ($showStoreVerify): ?>
     <script>
     (function () {
       document.querySelectorAll('[data-store-toggle]').forEach(function (card) {

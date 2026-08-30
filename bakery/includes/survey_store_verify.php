@@ -28,11 +28,11 @@ function bakery_survey_validate_ymd(string $date): string
 
 /**
  * Soonest sell/delivery date after $fromDate whose weekday is a delivery day.
- * Defaults to Mon–Sat (Sunday is a typical Sour Flour bake, not a sell day).
+ * Defaults to every weekday including Sunday (Sat night → Sunday sell day).
  *
  * @param list<int> $deliveryWeekdays ISO-8601 weekdays (1=Mon … 7=Sun)
  */
-function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6]): string
+function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6, 7]): string
 {
     $fromDate = bakery_survey_validate_ymd($fromDate);
     $days = [];
@@ -46,7 +46,7 @@ function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekd
         }
     }
     if ($days === []) {
-        $days = [1 => true, 2 => true, 3 => true, 4 => true, 5 => true, 6 => true];
+        $days = [1 => true, 2 => true, 3 => true, 4 => true, 5 => true, 6 => true, 7 => true];
     }
     $cursor = new DateTime($fromDate);
     for ($i = 0; $i < 14; $i++) {
@@ -164,28 +164,101 @@ function bakery_survey_store_verify_collect(array $onIds, array $assigned, array
  */
 function bakery_survey_store_verify_sms_body(array $choice): string
 {
-    $driver = trim((string)($choice['driver_name'] ?? 'Driver'));
-    if ($driver === '') {
-        $driver = 'Driver';
-    }
     $date = trim((string)($choice['delivery_date'] ?? ''));
-    $names = [];
-    foreach ($choice['on'] ?? [] as $store) {
-        $name = trim((string)($store['name'] ?? ''));
-        if ($name !== '') {
-            $names[] = $name;
-        }
-    }
-    $onList = $names === [] ? '(none)' : implode(', ', $names);
     $assignedOff = (int)($choice['assigned_off_count'] ?? 0);
-    $body = $driver . ' ' . $date . "\nON: " . $onList;
-    if ($assignedOff > 0) {
-        $body .= "\nAssigned off: " . $assignedOff;
+    $groups = isset($choice['drivers']) && is_array($choice['drivers']) ? $choice['drivers'] : [];
+    if (count($groups) > 1) {
+        $lines = ['HQ ' . $date];
+        foreach ($groups as $group) {
+            $driver = trim((string)($group['driver_name'] ?? ''));
+            if ($driver === '') {
+                $driver = 'Driver';
+            }
+            $names = [];
+            foreach ($group['on'] ?? [] as $store) {
+                $name = trim((string)($store['name'] ?? ''));
+                if ($name !== '') {
+                    $names[] = $name;
+                }
+            }
+            $lines[] = $driver . ': ' . ($names === [] ? '(none)' : implode(', ', $names));
+        }
+        if ($assignedOff > 0) {
+            $lines[] = 'Assigned off: ' . $assignedOff;
+        }
+        $body = implode("\n", $lines);
+    } else {
+        $driver = trim((string)($choice['driver_name'] ?? 'Driver'));
+        if ($driver === '') {
+            $driver = 'Driver';
+        }
+        $names = [];
+        foreach ($choice['on'] ?? [] as $store) {
+            $name = trim((string)($store['name'] ?? ''));
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+        $onList = $names === [] ? '(none)' : implode(', ', $names);
+        $body = $driver . ' ' . $date . "\nON: " . $onList;
+        if ($assignedOff > 0) {
+            $body .= "\nAssigned off: " . $assignedOff;
+        }
     }
     if (strlen($body) > 320) {
         $body = substr($body, 0, 317) . '...';
     }
     return $body;
+}
+
+/**
+ * Posted HQ toggles keyed by driver id → on/off per driver.
+ *
+ * @param array<int|string, list<int>> $postedByDriver
+ * @param list<array{driver_id:int,driver_name:string,assigned:list,other:list}> $groups
+ * @return array{drivers:list<array<string,mixed>>,on:list<array{id:int,name:string}>,off:list<array{id:int,name:string}>,assigned_off_count:int,driver_name:string}
+ */
+function bakery_survey_store_verify_collect_hq(array $postedByDriver, array $groups): array
+{
+    $drivers = [];
+    $allOn = [];
+    $allOff = [];
+    $assignedOff = 0;
+    foreach ($groups as $group) {
+        $driverId = (int)($group['driver_id'] ?? 0);
+        $posted = [];
+        if (isset($postedByDriver[$driverId]) && is_array($postedByDriver[$driverId])) {
+            $posted = $postedByDriver[$driverId];
+        } elseif (isset($postedByDriver[(string)$driverId]) && is_array($postedByDriver[(string)$driverId])) {
+            $posted = $postedByDriver[(string)$driverId];
+        }
+        $choice = bakery_survey_store_verify_collect(
+            $posted,
+            $group['assigned'] ?? [],
+            $group['other'] ?? []
+        );
+        $drivers[] = [
+            'driver_id' => $driverId,
+            'driver_name' => (string)($group['driver_name'] ?? ''),
+            'on' => $choice['on'],
+            'off' => $choice['off'],
+            'assigned_off_count' => $choice['assigned_off_count'],
+        ];
+        foreach ($choice['on'] as $store) {
+            $allOn[] = $store;
+        }
+        foreach ($choice['off'] as $store) {
+            $allOff[] = $store;
+        }
+        $assignedOff += (int)$choice['assigned_off_count'];
+    }
+    return [
+        'drivers' => $drivers,
+        'on' => $allOn,
+        'off' => $allOff,
+        'assigned_off_count' => $assignedOff,
+        'driver_name' => 'HQ',
+    ];
 }
 
 /**
@@ -222,6 +295,7 @@ function bakery_survey_store_verify_log_payload(array $fields): array
         'on' => $on,
         'off' => $off,
         'assigned_off_count' => (int)($fields['assigned_off_count'] ?? 0),
+        'drivers' => isset($fields['drivers']) && is_array($fields['drivers']) ? $fields['drivers'] : [],
     ];
 }
 
@@ -263,7 +337,36 @@ function bakery_survey_delivery_weekdays(PDO $db): array
     }
     $list = array_map('intval', array_keys($days));
     sort($list);
-    return $list !== [] ? $list : [1, 2, 3, 4, 5, 6];
+    $list = $list !== [] ? $list : [1, 2, 3, 4, 5, 6, 7];
+    if (!in_array(7, $list, true)) {
+        $list[] = 7;
+        sort($list);
+    }
+    return $list;
+}
+
+/** Open store_verify / route_review tokens are the auth — no staff PIN. */
+function bakery_survey_token_allows_public(?array $survey): bool
+{
+    if (!is_array($survey) || $survey === []) {
+        return false;
+    }
+    $kind = (string)($survey['kind'] ?? '');
+    $status = (string)($survey['status'] ?? '');
+    return $status === 'open' && in_array($kind, ['store_verify', 'route_review'], true);
+}
+
+function bakery_survey_page_needs_login(string $token, array $survey): bool
+{
+    if (trim($token) === '') {
+        return true;
+    }
+    return !bakery_survey_token_allows_public($survey);
+}
+
+function bakery_survey_page_needs_identity(array $survey): bool
+{
+    return !bakery_survey_token_allows_public($survey);
 }
 
 /**
@@ -385,6 +488,36 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
         'assigned' => $assignedRows,
         'other' => $other,
     ];
+}
+
+/**
+ * Combined HQ snapshot: every active driver, assigned first, other stores below.
+ *
+ * @return list<array{driver_id:int,driver_name:string,delivery_date:string,assigned:list,other:list}>
+ */
+function bakery_survey_store_verify_hq_data(PDO $db, string $deliveryDate): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    $drivers = [];
+    if (function_exists('bakery_get_drivers')) {
+        $drivers = bakery_get_drivers($db, false);
+    } elseif (function_exists('table_exists') && table_exists($db, 'drivers')) {
+        $sql = 'SELECT id, name FROM drivers';
+        if (function_exists('bakery_drivers_support_archive_column') && bakery_drivers_support_archive_column($db)) {
+            $sql .= ' WHERE archived = 0';
+        }
+        $sql .= ' ORDER BY name ASC';
+        $drivers = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    }
+    $out = [];
+    foreach ($drivers as $row) {
+        $id = (int)($row['id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        $out[] = bakery_survey_store_verify_data($db, $id, $deliveryDate);
+    }
+    return $out;
 }
 
 /**

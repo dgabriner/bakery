@@ -33,8 +33,16 @@ $assert(
     'Friday bake day → next delivery is Saturday (sell day), not Friday'
 );
 $assert(
-    bakery_survey_next_delivery_date('2026-08-22', [1, 2, 3, 4, 5, 6]) === '2026-08-24',
-    'Saturday → next Mon-Sat delivery skips Sunday'
+    bakery_survey_next_delivery_date('2026-08-22', [1, 2, 3, 4, 5, 6, 7]) === '2026-08-23',
+    'Saturday → next delivery is Sunday (sell day), not Monday'
+);
+$assert(
+    bakery_survey_next_delivery_date('2026-08-29', [1, 2, 3, 4, 5, 6, 7]) === '2026-08-30',
+    'Sat night 2026-08-29 → Sunday 2026-08-30 deliveries'
+);
+$assert(
+    bakery_survey_next_delivery_date('2026-08-22') === '2026-08-23',
+    'default weekdays include Sunday so Sat night is Sunday'
 );
 $assert(
     bakery_survey_next_delivery_date('2026-08-23', [1, 2, 3, 4, 5, 6]) === '2026-08-24',
@@ -113,6 +121,92 @@ $assert(
     'log payload stores driver, date, timestamp, and on/off store ids+names'
 );
 
+// ---- Token is the auth for open store_verify / route_review -----------------
+$assert(
+    bakery_survey_token_allows_public([
+        'kind' => 'store_verify',
+        'status' => 'open',
+        'token' => 'aabbccddeeff00112233445566778899',
+    ]) === true,
+    'open store_verify token is public'
+);
+$assert(
+    bakery_survey_token_allows_public([
+        'kind' => 'route_review',
+        'status' => 'open',
+    ]) === true,
+    'open route_review token is public'
+);
+$assert(
+    bakery_survey_token_allows_public(['kind' => 'question', 'status' => 'open']) === false,
+    'question survey still requires login'
+);
+$assert(
+    bakery_survey_token_allows_public(['kind' => 'store_verify', 'status' => 'closed']) === false,
+    'closed store_verify is not public'
+);
+$assert(bakery_survey_token_allows_public([]) === false, 'missing survey is not public');
+$assert(bakery_survey_page_needs_login('', []) === true, 'no token still requires login');
+$assert(
+    bakery_survey_page_needs_login('nope', []) === true,
+    'invalid/missing token still requires login'
+);
+$assert(
+    bakery_survey_page_needs_login('aabbccddeeff00112233445566778899', [
+        'kind' => 'store_verify',
+        'status' => 'open',
+    ]) === false,
+    'valid open store_verify token does not require login'
+);
+$assert(
+    bakery_survey_page_needs_identity([
+        'kind' => 'store_verify',
+        'status' => 'open',
+    ]) === false,
+    'identity not required with a valid public token'
+);
+$assert(
+    bakery_survey_page_needs_identity(['kind' => 'question', 'status' => 'open']) === true,
+    'identity still required without a public token'
+);
+
+$hqGroups = [
+    [
+        'driver_id' => 1,
+        'driver_name' => 'Maria',
+        'assigned' => [['id' => 10, 'name' => 'Tamalero']],
+        'other' => [['id' => 99, 'name' => 'Other Cafe']],
+    ],
+    [
+        'driver_id' => 2,
+        'driver_name' => 'Luis',
+        'assigned' => [['id' => 11, 'name' => 'Bi-Rite']],
+        'other' => [['id' => 99, 'name' => 'Other Cafe']],
+    ],
+];
+$hq = bakery_survey_store_verify_collect_hq([
+    1 => [10],
+    2 => [11, 99],
+], $hqGroups);
+$assert(count($hq['drivers']) === 2, 'HQ combined groups by driver');
+$assert(
+    $hq['drivers'][0]['driver_name'] === 'Maria'
+        && array_column($hq['drivers'][0]['on'], 'id') === [10]
+        && (int)$hq['drivers'][0]['assigned_off_count'] === 0,
+    'HQ Maria keeps assigned Tamalero ON'
+);
+$assert(
+    $hq['drivers'][1]['driver_name'] === 'Luis'
+        && array_column($hq['drivers'][1]['on'], 'id') === [11, 99]
+        && (int)$hq['drivers'][1]['assigned_off_count'] === 0,
+    'HQ Luis can turn an other store ON'
+);
+$hqSms = bakery_survey_store_verify_sms_body($hq + ['delivery_date' => '2026-08-30', 'driver_name' => 'HQ']);
+$assert(
+    strpos($hqSms, 'Maria') !== false && strpos($hqSms, 'Luis') !== false && strpos($hqSms, '2026-08-30') !== false,
+    'HQ SMS names each driver and the delivery date'
+);
+
 // ---- Page + helpers stay on the existing survey -----------------------------
 $surveyPhp = (string)file_get_contents($root . '/survey.php');
 $surveysInc = (string)file_get_contents($root . '/includes/surveys.php');
@@ -126,6 +220,11 @@ $helperSrc = (string)file_get_contents($root . '/includes/survey_store_verify.ph
 $assert(strpos($helperSrc, 'bakery_text_send') !== false, 'SMS still goes through bakery_text_send');
 $assert(strpos($surveyPhp, "\$surveyKind === 'question'") !== false, 'question form is gated off store-verify');
 $assert(strpos($helperSrc, 'standing_routes') !== false && strpos($helperSrc, 'standing_orders') !== false, 'other stores require a delivery relationship');
+$assert(strpos($surveyPhp, 'bakery_survey_store_verify_hq_data') !== false, 'HQ combined page loads every driver');
+$assert(strpos($surveyPhp, 'store_on[') !== false, 'HQ checkboxes are namespaced by driver id');
+$assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'ensure reuses HQ store_verify for the date');
+$assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
+$assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
 
 $en = require $root . '/lang/en.php';
 $es = require $root . '/lang/es.php';
@@ -144,7 +243,20 @@ $keys = [
     'survey.action_store_verify',
     'survey.msg_store_verify_link',
     'texts.survey_kind_stores',
+    'survey.store_verify_hq_title',
+    'survey.store_verify_all_drivers',
+    'texts.survey_driver_all',
 ];
+$authSrc = (string)file_get_contents($root . '/includes/auth.php');
+$assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');
+$assert(
+    preg_match('/bakery_survey_page_needs_login[\s\S]{0,400}bakery_require_role/', $surveyPhp) === 1,
+    'token path decides before bakery_require_role'
+);
+$assert(
+    preg_match('/bakery_survey_page_needs_identity[\s\S]{0,250}bakery_assert_driver_identity/', $surveyPhp) === 1,
+    'identity check is gated by the public token helper'
+);
 foreach ($keys as $key) {
     $assert(isset($en[$key]) && trim((string)$en[$key]) !== '', "en has {$key}");
     $assert(isset($es[$key]) && trim((string)$es[$key]) !== '', "es has {$key}");

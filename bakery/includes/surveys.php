@@ -8,8 +8,8 @@
  *                 unassigned stores they can claim with one tap.
  *
  * Sends always go through bakery_text_send() so every attempt keeps its ledger
- * row. The link page rides the existing staff/driver session gate — no second
- * auth system.
+ * row. An open store_verify / route_review token is the auth on survey.php
+ * (no PIN). No token still requires a staff login.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -142,7 +142,9 @@ function bakery_survey_create(PDO $db, array $fields): array
     }
 
     $driverId = (int)($fields['driver_id'] ?? 0);
-    if ($audience === 'driver') {
+    if ($kind === 'store_verify' && $driverId <= 0) {
+        $driverId = 0;
+    } elseif ($audience === 'driver') {
         if ($driverId <= 0) {
             throw new RuntimeException('Driver surveys need a driver');
         }
@@ -236,7 +238,7 @@ function bakery_survey_create(PDO $db, array $fields): array
         $mode,
         $kind,
         $audience,
-        $audience === 'driver' ? $driverId : null,
+        $audience === 'driver' && $driverId > 0 ? $driverId : null,
         $audience === 'staff' ? (int)($fields['staff_user_id'] ?? 0) ?: null : null,
         $phone,
         $question !== '' ? $question : null,
@@ -634,7 +636,27 @@ function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliv
 {
     $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
     if ($driverId <= 0) {
-        throw new RuntimeException('Driver surveys need a driver');
+        $stmt = $db->prepare(
+            "SELECT * FROM surveys
+             WHERE delivery_date = ? AND status = 'open' AND kind = 'store_verify'
+               AND (driver_id IS NULL OR driver_id = 0)
+             ORDER BY id DESC
+             LIMIT 1"
+        );
+        $stmt->execute([$deliveryDate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return $row;
+        }
+        return bakery_survey_create($db, [
+            'mode' => 'link',
+            'kind' => 'store_verify',
+            'audience' => 'driver',
+            'driver_id' => 0,
+            'delivery_date' => $deliveryDate,
+            'created_by' => $createdBy,
+            'title' => 'HQ store verify',
+        ]);
     }
     $stmt = $db->prepare(
         "SELECT * FROM surveys
