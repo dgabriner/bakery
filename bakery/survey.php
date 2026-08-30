@@ -427,10 +427,15 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
   .move-panel { display: none; background: #eef3fa; border: 1px solid #c9d7ea; border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
   body.move-mode .move-panel { display: block; }
   .move-panel select { width: 100%; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid #d8d0c2; margin-top: 6px; }
+  .lang-row { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+  .bakery-lang-switch--inline { background: rgba(0,0,0,.06); border-radius: 999px; display: inline-flex; gap: 2px; padding: 3px; }
+  .bakery-lang-switch--inline .bakery-lang-switch__btn { border-radius: 999px; color: #6b6256; font-size: .82rem; padding: 6px 12px; text-decoration: none; }
+  .bakery-lang-switch--inline .bakery-lang-switch__btn--active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.12); color: #24303e; font-weight: 600; }
 </style>
 </head>
 <body>
 <main>
+  <div class="lang-row"><?php $langSwitchVariant = 'inline'; require __DIR__ . '/includes/language_switch.php'; ?></div>
   <h1><?php
     if ($isHqStoreVerify) {
         echo $esc(bakery_survey_text('survey.store_verify_hq_title', [], 'All drivers — next delivery day'));

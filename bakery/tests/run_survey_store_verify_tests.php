@@ -263,6 +263,35 @@ $assert(strpos($surveyPhp, 'bakery_survey_store_verify_group_by_zone') !== false
 $assert(strpos($surveyPhp, 'moveModeBtn') !== false, 'optional move-stores mode is available');
 $assert(strpos($surveyPhp, 'name="date"') !== false, 'date control can change the delivery day');
 $assert(strpos($surveyPhp, 'data-copy-url') !== false, 'HQ exposes copyable manager/driver links');
+$assert(strpos($surveyPhp, 'language_switch.php') !== false, 'survey page offers EN/ES switch');
+$i18nSrc = (string)file_get_contents($root . '/includes/i18n.php');
+$assert(
+    preg_match("/script === 'survey'/", $i18nSrc) === 1
+        || preg_match("/\\\$script === 'survey'/", $i18nSrc) === 1,
+    'survey.php defaults to Spanish like login'
+);
+
+// Runtime: anonymous survey visitors get Spanish until they pick English.
+$_SESSION = [];
+$_COOKIE = [];
+$_SERVER['SCRIPT_NAME'] = '/survey.php';
+require_once $root . '/includes/i18n.php';
+bakery_locale(true);
+$assert(bakery_locale() === 'es', 'anonymous survey locale resolves to Spanish');
+$GLOBALS['bakery_i18n_catalog'] = null;
+$assert(
+    bakery_t('survey.store_verify_hq_title') === 'Todos los repartidores — próximo día de entrega',
+    'Spanish catalog is active for survey HQ title'
+);
+bakery_set_locale('en', false);
+$GLOBALS['bakery_i18n_catalog'] = null;
+$assert(
+    bakery_t('survey.store_verify_hq_title') === 'All drivers — next delivery day',
+    'English switch works for survey strings'
+);
+$_SERVER['SCRIPT_NAME'] = '/cli.php';
+bakery_locale(true);
+
 $assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'ensure reuses HQ store_verify for the date');
 $assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
 $assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
