@@ -41,6 +41,9 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
 $assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'bakers can open Mix Today');
 $assert(in_array('production.php', bakery_baker_scripts(), true), 'Daily Production remains baker-accessible');
 
+$manifest = (string)file_get_contents($root . '/scripts/deploy_manifest.ps1');
+$assert(strpos($manifest, "'baker_mix.php'") !== false, 'deploy whitelist includes baker_mix.php');
+
 $page = (string)file_get_contents($root . '/baker_mix.php');
 $assert(strpos($page, 'bakery_baker_mix_sheet') !== false, 'page loads the mix sheet helper');
 $assert(strpos($page, 'bm-starter') !== false, 'page has starter feedings section markup');
