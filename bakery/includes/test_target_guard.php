@@ -22,7 +22,8 @@ function bakery_assert_local_connection(PDO $db, array $allowedNames, bool $allo
         throw new RuntimeException('Refusing test target: PDO connection has no selected database');
     }
     $actualNameLower = strtolower($actualName);
-    if (!in_array($actualNameLower, $allowedNames, true)) {
+    // Empty DATABASE() is already handled above when a selected DB is required.
+    if ($actualName !== '' && !in_array($actualNameLower, $allowedNames, true)) {
         throw new RuntimeException('Refusing test target: PDO is not connected to an allowed target (' . implode(', ', $allowedNames) . ')');
     }
     $connection = strtolower((string)$db->getAttribute(PDO::ATTR_CONNECTION_STATUS));

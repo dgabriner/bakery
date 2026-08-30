@@ -110,6 +110,10 @@ if ($navSelectedDriverName === '' && $navUser) {
   <div class="bakery-nav__inner">
     <span class="bakery-nav__brand"><?php bakery_te('nav.baker_workspace'); ?></span>
     <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'baker_mix' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>baker_mix.php?date=<?php echo urlencode($navBakerDate); ?>" aria-label="<?php bakery_te('nav.baker_mix'); ?>"<?php echo $currentPage === 'baker_mix' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.baker_mix'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.baker_mix_short'); ?></span>
+      </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'production' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>production.php?date=<?php echo urlencode($navBakerDate); ?>" aria-label="<?php bakery_te('nav.daily_production'); ?>"<?php echo $currentPage === 'production' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.daily_production'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.daily_production_short'); ?></span>
