@@ -69,6 +69,18 @@ navigation_test_assert(in_array('manager.php', $adminItems, true), 'administrato
 navigation_test_assert(in_array('route_summary.php', $adminItems, true), 'administrators receive Route Summary');
 navigation_test_assert(in_array('walkthroughs.php', $adminItems, true), 'administrators receive Walkthroughs');
 navigation_test_assert(in_array('driver.php?change_driver=1', $adminItems, true), 'administrators receive My Route');
+navigation_test_assert(in_array('text_comms.php?view=surveys', $adminItems, true), 'administrators receive Survey Center');
+
+$surveyCenterLabels = [];
+foreach (bakery_navigation_groups_for_role('manager') as $group) {
+    foreach ($group['items'] as $item) {
+        if (($item['href'] ?? '') === 'text_comms.php?view=surveys') {
+            $surveyCenterLabels[] = (string)($item['label'] ?? '');
+        }
+    }
+}
+navigation_test_assert($surveyCenterLabels !== [] && !in_array('nav.item.survey_center', $surveyCenterLabels, true), 'Survey Center translates via nav_key');
+navigation_test_assert(in_array('Survey Center', $surveyCenterLabels, true), 'Survey Center label resolves in English');
 
 navigation_test_assert(in_array('production.php', bakery_baker_scripts(), true), 'bakers can access Daily Production');
 navigation_test_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'bakers can access Pack List');
@@ -87,6 +99,7 @@ navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager na
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
 navigation_test_assert(strpos($managerNav, 'daily_orders.php') !== false, 'manager More includes Daily Orders');
+navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') !== false, 'manager More includes Survey Center');
 navigation_test_assert(strpos($managerNav, 'billing_center.php') !== false, 'manager More includes Billing Center');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--ops') === false, 'manager focused nav is not the admin ops shell');
 
@@ -141,6 +154,7 @@ navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'dr
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__more') !== false, 'driver navigation parks Pack, Stops, and QR behind More');
+navigation_test_assert(strpos($driverNav, 'survey.php') !== false, 'driver More includes Tomorrow\'s stores survey');
 navigation_test_assert(strpos($driverNav, 'driver_stops.php') !== false, 'Stops remains reachable from More');
 navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Call HQ, and More');
 

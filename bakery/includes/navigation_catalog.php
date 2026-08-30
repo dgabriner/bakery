@@ -64,6 +64,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'daily_run.php', 'label' => 'Daily Run', 'description' => 'Step-by-step operating checklist and end-of-day closeout for the selected date.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_brief.php', 'label' => 'Daily Brief', 'description' => 'One-page shift handoff: changes, production, routes, and exceptions.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Tonight’s store-verify links, coverage gaps, and survey results — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
             ],
         ],
@@ -114,6 +115,7 @@ function bakery_navigation_catalog() {
             'items' => [
                 ['href' => 'driver.php?change_driver=1', 'label' => 'My Route', 'description' => 'Choose a driver identity and work that driver\'s delivery route.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'driver_assignment.php', 'label' => 'Driver Assignment', 'description' => 'Assign delivery work to drivers for a selected date.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Tonight’s store-verify links, coverage gaps, and survey results — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_route.php', 'label' => 'Daily Route', 'description' => 'See the daily route plan by day, month, or list.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'drivers.php', 'label' => 'Driver Management', 'description' => 'Maintain driver records and their recurring routes.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'standing_routes.php', 'label' => 'Standing Routes', 'description' => 'Maintain the recurring customer-to-driver route plan.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -176,6 +178,9 @@ function bakery_navigation_item_available(array $item, $role) {
 }
 
 function bakery_navigation_item_page_key(array $item) {
+    if (!empty($item['nav_key'])) {
+        return (string)$item['nav_key'];
+    }
     $href = (string)($item['href'] ?? '');
     $path = parse_url($href, PHP_URL_PATH);
     $base = basename((string)$path, '.php');

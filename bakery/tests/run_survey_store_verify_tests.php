@@ -311,6 +311,59 @@ bakery_locale(true);
 $assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'ensure reuses HQ store_verify for the date');
 $assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
 $assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
+$assert(strpos($commsSrc, 'survey_coverage') !== false || strpos($commsSrc, 'surveyCoverage') !== false, 'Survey Center shows coverage radar');
+$assert(strpos($commsSrc, 'bakery_survey_store_verify_unassigned_stores') !== false, 'coverage radar uses unassigned-store helper');
+$assert(strpos($commsSrc, 'bakery_survey_store_verify_empty_drivers') !== false, 'coverage radar uses empty-driver helper');
+$assert(strpos($commsSrc, 'page.survey_center') !== false, 'surveys view uses Survey Center page title');
+
+$navCatalog = (string)file_get_contents($root . '/includes/navigation_catalog.php');
+$assert(strpos($navCatalog, "nav_key' => 'survey_center'") !== false, 'navigation catalog declares Survey Center nav_key');
+$assert(substr_count($navCatalog, "text_comms.php?view=surveys") >= 2, 'Survey Center appears in Workday and Delivery');
+$navSrc = (string)file_get_contents($root . '/includes/nav.php');
+$assert(strpos($navSrc, 'text_comms.php?view=surveys') !== false, 'manager More includes Survey Center shortcut');
+$assert(strpos($navSrc, 'survey.php') !== false, 'driver More includes tomorrow stores survey link');
+
+// ---- Coverage radar helpers -------------------------------------------------
+$hqFixture = [
+    [
+        'driver_id' => 1,
+        'driver_name' => 'Laura',
+        'assigned' => [
+            ['id' => 10, 'name' => 'Tamalero', 'zone' => 'Mission'],
+            ['id' => 11, 'name' => 'Bi-Rite', 'zone' => 'Mission'],
+        ],
+        'other' => [
+            ['id' => 20, 'name' => 'Orphan Cafe', 'zone' => 'Richmond'],
+            ['id' => 12, 'name' => 'Rainbow', 'zone' => 'Inner Sunset'],
+        ],
+    ],
+    [
+        'driver_id' => 2,
+        'driver_name' => 'Marcos',
+        'assigned' => [
+            ['id' => 12, 'name' => 'Rainbow', 'zone' => 'Inner Sunset'],
+        ],
+        'other' => [
+            ['id' => 10, 'name' => 'Tamalero', 'zone' => 'Mission'],
+            ['id' => 20, 'name' => 'Orphan Cafe', 'zone' => 'Richmond'],
+        ],
+    ],
+    [
+        'driver_id' => 3,
+        'driver_name' => 'Sergio',
+        'assigned' => [],
+        'other' => [
+            ['id' => 10, 'name' => 'Tamalero', 'zone' => 'Mission'],
+            ['id' => 20, 'name' => 'Orphan Cafe', 'zone' => 'Richmond'],
+        ],
+    ],
+];
+$unassigned = bakery_survey_store_verify_unassigned_stores($hqFixture);
+$assert(count($unassigned) === 1 && (int)$unassigned[0]['id'] === 20, 'unassigned stores are delivery-universe stores with no driver');
+$emptyDrivers = bakery_survey_store_verify_empty_drivers($hqFixture);
+$assert(count($emptyDrivers) === 1 && (int)$emptyDrivers[0]['driver_id'] === 3, 'empty drivers are active drivers with zero assigned stores');
+$assert(bakery_survey_store_verify_unassigned_stores([]) === [], 'empty HQ snapshot has no unassigned stores');
+$assert(bakery_survey_store_verify_empty_drivers([]) === [], 'empty HQ snapshot has no empty drivers');
 
 $en = require $root . '/lang/en.php';
 $es = require $root . '/lang/es.php';
@@ -344,6 +397,19 @@ $keys = [
     'survey.store_verify_move_pick',
     'survey.store_verify_manager_hint',
     'survey.store_verify_driver_hint',
+    'page.survey_center',
+    'nav.item.survey_center',
+    'nav.item_desc.survey_center',
+    'nav.survey_tomorrow',
+    'texts.view_surveys',
+    'texts.survey_coverage_title',
+    'texts.survey_coverage_help',
+    'texts.survey_coverage_open_hq',
+    'texts.survey_coverage_copy_hq',
+    'texts.survey_coverage_empty_drivers',
+    'texts.survey_coverage_unassigned',
+    'texts.survey_coverage_all_clear',
+    'texts.survey_coverage_assigned',
 ];
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
 $assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');

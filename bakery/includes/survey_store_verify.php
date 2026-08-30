@@ -605,6 +605,70 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
 }
 
 /**
+ * Stores that have delivery work on the HQ snapshot but are not assigned
+ * to any driver yet — the night-before coverage holes.
+ *
+ * @param list<array{assigned?:list,other?:list}> $hqGroups
+ * @return list<array{id:int,name:string,zone?:string}>
+ */
+function bakery_survey_store_verify_unassigned_stores(array $hqGroups): array
+{
+    $assignedAnywhere = [];
+    $universe = [];
+    foreach ($hqGroups as $group) {
+        foreach ($group['assigned'] ?? [] as $store) {
+            $id = (int)($store['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $assignedAnywhere[$id] = true;
+            $universe[$id] = $store;
+        }
+        foreach ($group['other'] ?? [] as $store) {
+            $id = (int)($store['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $universe[$id] = $store;
+        }
+    }
+    $gaps = [];
+    foreach ($universe as $id => $store) {
+        if (!isset($assignedAnywhere[$id])) {
+            $gaps[] = $store;
+        }
+    }
+    usort($gaps, static function (array $a, array $b): int {
+        return strnatcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? ''));
+    });
+    return $gaps;
+}
+
+/**
+ * Drivers with zero assigned stores on the HQ snapshot.
+ *
+ * @param list<array{driver_id?:int,driver_name?:string,assigned?:list}> $hqGroups
+ * @return list<array{driver_id:int,driver_name:string}>
+ */
+function bakery_survey_store_verify_empty_drivers(array $hqGroups): array
+{
+    $empty = [];
+    foreach ($hqGroups as $group) {
+        $id = (int)($group['driver_id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        if (($group['assigned'] ?? []) === []) {
+            $empty[] = [
+                'driver_id' => $id,
+                'driver_name' => (string)($group['driver_name'] ?? ''),
+            ];
+        }
+    }
+    return $empty;
+}
+
+/**
  * Combined HQ snapshot: every active driver, assigned first, other stores below.
  *
  * @return list<array{driver_id:int,driver_name:string,delivery_date:string,assigned:list,other:list}>
