@@ -71,6 +71,7 @@ navigation_test_assert(in_array('walkthroughs.php', $adminItems, true), 'adminis
 navigation_test_assert(in_array('driver.php?change_driver=1', $adminItems, true), 'administrators receive My Route');
 
 navigation_test_assert(in_array('production.php', bakery_baker_scripts(), true), 'bakers can access Daily Production');
+navigation_test_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'bakers can access Mix Today');
 navigation_test_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'bakers can access Pack List');
 navigation_test_assert(!in_array('index.php', bakery_baker_scripts(), true), 'bakers cannot access the operations dashboard');
 navigation_test_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'bakers cannot access Production Center');
@@ -127,6 +128,8 @@ navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket incl
 
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, 'Daily production') !== false, 'baker navigation includes Daily Production');
+navigation_test_assert(strpos($bakerNav, 'Mix today') !== false, 'baker navigation includes Mix Today');
+navigation_test_assert(strpos($bakerNav, 'baker_mix.php') !== false, 'baker navigation links Mix Today');
 navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker navigation omits Production Center');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');

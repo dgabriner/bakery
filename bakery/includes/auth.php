@@ -132,6 +132,7 @@ function bakery_is_driver_route_role($role): bool {
 function bakery_baker_scripts() {
     return [
         'production.php',
+        'baker_mix.php',
         'pack_list.php',
     ];
 }
