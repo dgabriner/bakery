@@ -106,7 +106,7 @@ if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate) && $surveyDate >= date('Y-m
 // Drivers may only open their own survey; managers may inspect any.
 if (!$isManager && (string)$survey['audience'] === 'driver') {
     try {
-        bakery_assert_driver_identity($db, $driverId, $deliveryDate);
+        bakery_assert_driver_identity($db, $driverId, $verifyDate);
     } catch (RuntimeException $e) {
         bakery_survey_fail(
             (string)bakery_t('survey.wrong_driver_title', [], 'Not your survey'),
@@ -419,7 +419,7 @@ $esc = static function ($v): string {
       <p class="meta"><?php echo $esc(bakery_survey_text('survey.no_unassigned', [], 'Every store has a driver. Nice.')); ?></p>
       <?php endif; ?>
     </div>
-  <?php else: ?>
+  <?php elseif ($surveyKind === 'question'): ?>
     <div class="card">
       <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" style="display:grid;gap:14px">
         <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">

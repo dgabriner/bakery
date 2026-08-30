@@ -179,9 +179,16 @@ $surveyRows = [];
 $driverChoices = [];
 $surveyDetail = null;
 $surveyDetailRow = null;
+$surveyComposerDate = $date;
 if ($view === 'surveys') {
     require_once __DIR__ . '/includes/surveys.php';
     $surveysReady = bakery_surveys_ready($db);
+    if (function_exists('bakery_survey_next_delivery_date')) {
+        $weekdays = function_exists('bakery_survey_delivery_weekdays')
+            ? bakery_survey_delivery_weekdays($db)
+            : [1, 2, 3, 4, 5, 6];
+        $surveyComposerDate = bakery_survey_next_delivery_date($today, $weekdays);
+    }
     if ($surveysReady) {
         $surveyRows = $db->query(
             'SELECT s.*,
@@ -867,7 +874,7 @@ require_once __DIR__ . '/includes/nav.php';
                 </div>
                 <div>
                     <label for="svDate"><?php bakery_te('common.date'); ?></label>
-                    <input type="date" id="svDate" name="date" value="<?php echo htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="date" id="svDate" name="date" value="<?php echo htmlspecialchars($surveyComposerDate, ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div id="svCustomQuestions">
                     <label><?php bakery_te('texts.survey_questions_label'); ?></label>

@@ -307,6 +307,7 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
              JOIN customers c ON c.id = do.customer_id AND c.is_active = 1
              {$origin}
              WHERE doa.driver_id = ? AND doa.delivery_date = ?
+               AND do.order_date = doa.delivery_date
              ORDER BY CAST(doa.route_order AS UNSIGNED), c.name"
         );
         $stmt->execute([$driverId, $deliveryDate]);
@@ -348,10 +349,25 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
 
     $other = [];
     if (function_exists('table_exists') && table_exists($db, 'customers')) {
+        $deliveryBits = [];
+        if (table_exists($db, 'standing_routes')) {
+            $deliveryBits[] = 'EXISTS (SELECT 1 FROM standing_routes sr0 WHERE sr0.customer_id = c.id)';
+        }
+        if (table_exists($db, 'standing_orders')) {
+            $deliveryBits[] = 'EXISTS (SELECT 1 FROM standing_orders so0 WHERE so0.customer_id = c.id)';
+        }
+        if (table_exists($db, 'daily_orders')) {
+            $deliveryBits[] = 'EXISTS (SELECT 1 FROM daily_orders do0 WHERE do0.customer_id = c.id AND do0.order_date = '
+                . $db->quote($deliveryDate) . ')';
+        }
+        $deliveryClause = $deliveryBits !== []
+            ? (' AND (' . implode(' OR ', $deliveryBits) . ')')
+            : '';
         $sql = "SELECT c.id, c.name
                 FROM customers c
                 WHERE c.is_active = 1
                 {$origin}
+                {$deliveryClause}
                 ORDER BY c.name";
         foreach ($db->query($sql) as $row) {
             $id = (int)$row['id'];

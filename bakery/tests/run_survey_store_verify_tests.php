@@ -120,7 +120,12 @@ $assert(strpos($surveyPhp, "action') === 'verify_stores'") !== false
     || strpos($surveyPhp, 'action === \'verify_stores\'') !== false, 'survey.php accepts verify_stores submit');
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify') !== false, 'survey.php renders store-verify helpers');
 $assert(strpos($surveysInc, 'survey_store_verify.php') !== false, 'surveys.php includes store-verify helpers');
-$assert(strpos($surveysInc, 'bakery_text_send') !== false, 'SMS still goes through bakery_text_send');
+$commsSrc = (string)file_get_contents($root . '/text_comms.php');
+$assert(strpos($commsSrc, 'surveyComposerDate') !== false, 'Text Comms survey date defaults to next delivery day');
+$helperSrc = (string)file_get_contents($root . '/includes/survey_store_verify.php');
+$assert(strpos($helperSrc, 'bakery_text_send') !== false, 'SMS still goes through bakery_text_send');
+$assert(strpos($surveyPhp, "\$surveyKind === 'question'") !== false, 'question form is gated off store-verify');
+$assert(strpos($helperSrc, 'standing_routes') !== false && strpos($helperSrc, 'standing_orders') !== false, 'other stores require a delivery relationship');
 
 $en = require $root . '/lang/en.php';
 $es = require $root . '/lang/es.php';
