@@ -857,10 +857,10 @@ require_once __DIR__ . '/includes/nav.php';
                     <div>
                         <label for="svDriver"><?php bakery_te('texts.survey_driver'); ?></label>
                         <select id="svDriver" name="driver_id">
-                            <option value="0"><?php bakery_te('texts.survey_driver_all'); ?></option>
                             <?php foreach ($driverChoices as $d): ?>
                                 <option value="<?php echo (int)$d['id']; ?>"><?php echo htmlspecialchars((string)$d['name'], ENT_QUOTES, 'UTF-8'); ?></option>
                             <?php endforeach; ?>
+                            <option value="0"><?php bakery_te('texts.survey_driver_all'); ?></option>
                         </select>
                     </div>
                 </div>
