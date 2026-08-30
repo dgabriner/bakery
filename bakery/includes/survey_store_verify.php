@@ -82,6 +82,9 @@ function bakery_survey_store_verify_partition(array $stores, array $assignedIds)
             continue;
         }
         $row = ['id' => $id, 'name' => $name];
+        if (array_key_exists('zone', $store)) {
+            $row['zone'] = trim((string)$store['zone']);
+        }
         if (isset($assignedLookup[$id])) {
             $assigned[] = $row;
         } else {
@@ -89,6 +92,96 @@ function bakery_survey_store_verify_partition(array $stores, array $assignedIds)
         }
     }
     return ['assigned' => $assigned, 'other' => $other];
+}
+
+/**
+ * Group stores by delivery zone for phone UI. Empty zone uses $emptyLabel.
+ *
+ * @param list<array{id:int,name:string,zone?:string}> $stores
+ * @return array<string, list<array{id:int,name:string,zone?:string}>>
+ */
+function bakery_survey_store_verify_group_by_zone(array $stores, string $emptyLabel = 'No zone'): array
+{
+    $groups = [];
+    foreach ($stores as $store) {
+        $id = (int)($store['id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        $zone = trim((string)($store['zone'] ?? ''));
+        if ($zone === '') {
+            $zone = $emptyLabel;
+        }
+        if (!isset($groups[$zone])) {
+            $groups[$zone] = [];
+        }
+        $groups[$zone][] = $store;
+    }
+    uksort($groups, static function (string $a, string $b) use ($emptyLabel): int {
+        if ($a === $emptyLabel) {
+            return 1;
+        }
+        if ($b === $emptyLabel) {
+            return -1;
+        }
+        return strnatcasecmp($a, $b);
+    });
+    return $groups;
+}
+
+/**
+ * Prefer an explicit Y-m-d request over the default next-delivery day.
+ */
+function bakery_survey_store_verify_resolve_date(string $defaultDate, ?string $requestedDate): string
+{
+    $defaultDate = bakery_survey_validate_ymd($defaultDate);
+    $requested = trim((string)$requestedDate);
+    if ($requested === '') {
+        return $defaultDate;
+    }
+    return bakery_survey_validate_ymd($requested);
+}
+
+/**
+ * Survey-only reassign: move store ids onto to_driver ON set; drop from others.
+ *
+ * @param array<int, list<int>> $postedByDriver
+ * @param list<array{store_id?:int,to_driver_id?:int}> $moves
+ * @return array<int, list<int>>
+ */
+function bakery_survey_store_verify_apply_moves(array $postedByDriver, array $moves): array
+{
+    $out = [];
+    foreach ($postedByDriver as $driverId => $ids) {
+        $clean = [];
+        foreach ((array)$ids as $id) {
+            $id = (int)$id;
+            if ($id > 0) {
+                $clean[$id] = true;
+            }
+        }
+        $out[(int)$driverId] = array_keys($clean);
+    }
+    foreach ($moves as $move) {
+        $storeId = (int)($move['store_id'] ?? 0);
+        $toDriver = (int)($move['to_driver_id'] ?? 0);
+        if ($storeId <= 0 || $toDriver <= 0) {
+            continue;
+        }
+        foreach ($out as $driverId => $ids) {
+            $out[$driverId] = array_values(array_filter(
+                $ids,
+                static fn(int $id): bool => $id !== $storeId
+            ));
+        }
+        if (!isset($out[$toDriver])) {
+            $out[$toDriver] = [];
+        }
+        if (!in_array($storeId, $out[$toDriver], true)) {
+            $out[$toDriver][] = $storeId;
+        }
+    }
+    return $out;
 }
 
 /**
@@ -378,8 +471,8 @@ function bakery_survey_page_needs_identity(array $survey): bool
  *   driver_id:int,
  *   driver_name:string,
  *   delivery_date:string,
- *   assigned:list<array{id:int,name:string}>,
- *   other:list<array{id:int,name:string}>
+ *   assigned:list<array{id:int,name:string,zone?:string}>,
+ *   other:list<array{id:int,name:string,zone?:string}>
  * }
  */
 function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliveryDate): array
@@ -401,10 +494,11 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
 
     $assignedIds = [];
     $assignedRows = [];
+    $zoneSelect = 'c.id, c.name, COALESCE(c.zone, \'\') AS zone';
 
     if (function_exists('table_exists') && table_exists($db, 'daily_order_assignments')) {
         $stmt = $db->prepare(
-            "SELECT DISTINCT c.id, c.name
+            "SELECT DISTINCT {$zoneSelect}
              FROM daily_order_assignments doa
              JOIN daily_orders do ON do.id = doa.daily_order_id
              JOIN customers c ON c.id = do.customer_id AND c.is_active = 1
@@ -420,7 +514,11 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
                 continue;
             }
             $assignedIds[$id] = true;
-            $assignedRows[] = ['id' => $id, 'name' => (string)$row['name']];
+            $assignedRows[] = [
+                'id' => $id,
+                'name' => (string)$row['name'],
+                'zone' => (string)($row['zone'] ?? ''),
+            ];
         }
     }
 
@@ -431,7 +529,7 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
             ? (int)bakery_standing_day_from_date($deliveryDate)
             : (int)date('N', strtotime($deliveryDate));
         $stmt = $db->prepare(
-            "SELECT DISTINCT c.id, c.name
+            "SELECT DISTINCT {$zoneSelect}
              FROM standing_routes sr
              JOIN customers c ON c.id = sr.customer_id AND c.is_active = 1
              {$origin}
@@ -446,7 +544,11 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
                 continue;
             }
             $assignedIds[$id] = true;
-            $assignedRows[] = ['id' => $id, 'name' => (string)$row['name']];
+            $assignedRows[] = [
+                'id' => $id,
+                'name' => (string)$row['name'],
+                'zone' => (string)($row['zone'] ?? ''),
+            ];
         }
     }
 
@@ -466,7 +568,7 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
         $deliveryClause = $deliveryBits !== []
             ? (' AND (' . implode(' OR ', $deliveryBits) . ')')
             : '';
-        $sql = "SELECT c.id, c.name
+        $sql = "SELECT {$zoneSelect}
                 FROM customers c
                 WHERE c.is_active = 1
                 {$origin}
@@ -477,7 +579,11 @@ function bakery_survey_store_verify_data(PDO $db, int $driverId, string $deliver
             if ($id <= 0 || isset($assignedIds[$id])) {
                 continue;
             }
-            $other[] = ['id' => $id, 'name' => (string)$row['name']];
+            $other[] = [
+                'id' => $id,
+                'name' => (string)$row['name'],
+                'zone' => (string)($row['zone'] ?? ''),
+            ];
         }
     }
 

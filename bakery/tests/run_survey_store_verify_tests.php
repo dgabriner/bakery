@@ -84,6 +84,42 @@ $assert(
     'posted toggles keep ON set and count assigned turned off'
 );
 
+$zoned = [
+    ['id' => 10, 'name' => 'Tamalero', 'zone' => 'Mission'],
+    ['id' => 11, 'name' => 'Bi-Rite', 'zone' => 'Mission'],
+    ['id' => 12, 'name' => 'Rainbow', 'zone' => 'Inner Sunset'],
+    ['id' => 99, 'name' => 'Other Cafe', 'zone' => ''],
+];
+$byZone = bakery_survey_store_verify_group_by_zone($zoned, 'No zone');
+$assert(
+    array_keys($byZone) === ['Inner Sunset', 'Mission', 'No zone']
+        && count($byZone['Mission']) === 2
+        && (int)$byZone['No zone'][0]['id'] === 99,
+    'stores group by zone with empty zone last'
+);
+$assert(
+    bakery_survey_store_verify_resolve_date('2026-08-31', null) === '2026-08-31',
+    'resolve date keeps default when request empty'
+);
+$assert(
+    bakery_survey_store_verify_resolve_date('2026-08-31', '2026-09-02') === '2026-09-02',
+    'resolve date prefers explicit request'
+);
+try {
+    bakery_survey_store_verify_resolve_date('2026-08-31', 'nope');
+    $assert(false, 'resolve date rejects junk');
+} catch (RuntimeException $e) {
+    $assert(true, 'resolve date rejects junk');
+}
+$moved = bakery_survey_store_verify_apply_moves(
+    [1 => [10, 11], 2 => [12]],
+    [['store_id' => 10, 'to_driver_id' => 2]]
+);
+$assert(
+    $moved[1] === [11] && $moved[2] === [12, 10],
+    'move applies store onto target driver ON set only'
+);
+
 // ---- SMS body is short and includes driver, date, ON stores -----------------
 $sms = bakery_survey_store_verify_sms_body([
     'driver_name' => 'Maria',
@@ -222,6 +258,11 @@ $assert(strpos($surveyPhp, "\$surveyKind === 'question'") !== false, 'question f
 $assert(strpos($helperSrc, 'standing_routes') !== false && strpos($helperSrc, 'standing_orders') !== false, 'other stores require a delivery relationship');
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify_hq_data') !== false, 'HQ combined page loads every driver');
 $assert(strpos($surveyPhp, 'store_on[') !== false, 'HQ checkboxes are namespaced by driver id');
+$assert(strpos($surveyPhp, 'driver-block') !== false, 'HQ drivers are collapsible');
+$assert(strpos($surveyPhp, 'bakery_survey_store_verify_group_by_zone') !== false, 'page groups stores by zone');
+$assert(strpos($surveyPhp, 'moveModeBtn') !== false, 'optional move-stores mode is available');
+$assert(strpos($surveyPhp, 'name="date"') !== false, 'date control can change the delivery day');
+$assert(strpos($surveyPhp, 'data-copy-url') !== false, 'HQ exposes copyable manager/driver links');
 $assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'ensure reuses HQ store_verify for the date');
 $assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
 $assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
@@ -246,6 +287,16 @@ $keys = [
     'survey.store_verify_hq_title',
     'survey.store_verify_all_drivers',
     'texts.survey_driver_all',
+    'survey.store_verify_no_zone',
+    'survey.store_verify_date',
+    'survey.store_verify_date_go',
+    'survey.store_verify_links',
+    'survey.store_verify_link_manager',
+    'survey.store_verify_copy_link',
+    'survey.store_verify_move_mode',
+    'survey.store_verify_move_help',
+    'survey.store_verify_move_to',
+    'survey.store_verify_move_pick',
 ];
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
 $assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');
