@@ -263,6 +263,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'delivery_date' => $verifyDate,
                 'on' => $choice['on'],
                 'off' => $choice['off'],
+                'added' => $choice['added'] ?? [],
+                'dropped' => $choice['dropped'] ?? [],
                 'assigned_off_count' => $choice['assigned_off_count'],
                 'drivers' => $choice['drivers'] ?? [],
                 'staff_user_id' => (int)($user['id'] ?? 0),

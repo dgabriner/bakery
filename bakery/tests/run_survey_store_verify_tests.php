@@ -80,8 +80,10 @@ $choice = bakery_survey_store_verify_collect([10, 12, 99], $split['assigned'], $
 $assert(
     array_column($choice['on'], 'id') === [10, 12, 99]
         && array_column($choice['off'], 'id') === [11]
-        && (int)$choice['assigned_off_count'] === 1,
-    'posted toggles keep ON set and count assigned turned off'
+        && (int)$choice['assigned_off_count'] === 1
+        && array_column($choice['dropped'], 'id') === [11]
+        && array_column($choice['added'], 'id') === [99],
+    'posted toggles keep ON set and name assigned drops + other adds'
 );
 
 $zoned = [
@@ -125,13 +127,19 @@ $assert(
     'move applies store onto target driver ON set only'
 );
 
-// ---- SMS body is short and includes driver, date, ON stores -----------------
+// ---- SMS body lists stores one-per-line and names what changed --------------
 $sms = bakery_survey_store_verify_sms_body([
     'driver_name' => 'Maria',
     'delivery_date' => '2026-08-25',
     'on' => [
         ['id' => 10, 'name' => 'Tamalero'],
         ['id' => 12, 'name' => 'Rainbow'],
+    ],
+    'added' => [
+        ['id' => 99, 'name' => 'Other Cafe'],
+    ],
+    'dropped' => [
+        ['id' => 11, 'name' => 'Bi-Rite'],
     ],
     'assigned_off_count' => 1,
 ]);
@@ -140,10 +148,11 @@ $assert(
         && strpos($sms, '2026-08-25') !== false
         && strpos($sms, 'Tamalero') !== false
         && strpos($sms, 'Rainbow') !== false
-        && strpos($sms, '1') !== false,
-    'SMS names the driver, date, ON stores, and assigned-off count'
+        && strpos($sms, "ON:\nTamalero\nRainbow") !== false
+        && strpos($sms, "Changed:\n+ Other Cafe\n- Bi-Rite") !== false,
+    'SMS lists each store on its own line and names adds/drops'
 );
-$assert(strlen($sms) <= 320, 'SMS body stays short for a phone text');
+$assert(strlen($sms) <= 1500, 'SMS body stays within the soft HQ ceiling');
 
 $payload = bakery_survey_store_verify_log_payload([
     'driver_id' => 7,
@@ -151,6 +160,8 @@ $payload = bakery_survey_store_verify_log_payload([
     'delivery_date' => '2026-08-25',
     'on' => [['id' => 10, 'name' => 'Tamalero']],
     'off' => [['id' => 11, 'name' => 'Bi-Rite']],
+    'added' => [],
+    'dropped' => [['id' => 11, 'name' => 'Bi-Rite']],
     'assigned_off_count' => 1,
     'created_at' => '2026-08-24 21:00:00',
 ]);
@@ -158,8 +169,9 @@ $assert(
     (int)$payload['driver_id'] === 7
         && $payload['delivery_date'] === '2026-08-25'
         && isset($payload['on'][0]['id'], $payload['off'][0]['name'], $payload['created_at'])
-        && (int)$payload['assigned_off_count'] === 1,
-    'log payload stores driver, date, timestamp, and on/off store ids+names'
+        && (int)$payload['assigned_off_count'] === 1
+        && array_column($payload['dropped'], 'name') === ['Bi-Rite'],
+    'log payload stores driver, date, timestamp, and on/off/changed store ids+names'
 );
 
 // ---- Token is the auth for open store_verify / route_review -----------------
@@ -246,6 +258,11 @@ $hqSms = bakery_survey_store_verify_sms_body($hq + ['delivery_date' => '2026-08-
 $assert(
     strpos($hqSms, 'Maria') !== false && strpos($hqSms, 'Luis') !== false && strpos($hqSms, '2026-08-30') !== false,
     'HQ SMS names each driver and the delivery date'
+);
+$assert(
+    strpos($hqSms, "Luis\nON:\nBi-Rite\nOther Cafe") !== false
+        && strpos($hqSms, "+ Other Cafe") !== false,
+    'HQ SMS lists Luis stores one-per-line and shows Other Cafe as added'
 );
 
 // ---- Page + helpers stay on the existing survey -----------------------------

@@ -215,10 +215,13 @@ function bakery_survey_store_verify_default_on_ids(array $assigned, array $other
 /**
  * Apply posted ON ids to assigned + other lists.
  *
+ * Defaults: assigned = ON, other = OFF. Diffs vs that baseline become
+ * `added` (other turned on) and `dropped` (assigned turned off).
+ *
  * @param list<int> $onIds
  * @param list<array{id:int,name:string}> $assigned
  * @param list<array{id:int,name:string}> $other
- * @return array{on:list<array{id:int,name:string}>,off:list<array{id:int,name:string}>,assigned_off_count:int}
+ * @return array{on:list<array{id:int,name:string}>,off:list<array{id:int,name:string}>,added:list<array{id:int,name:string}>,dropped:list<array{id:int,name:string}>,assigned_off_count:int}
  */
 function bakery_survey_store_verify_collect(array $onIds, array $assigned, array $other): array
 {
@@ -231,7 +234,6 @@ function bakery_survey_store_verify_collect(array $onIds, array $assigned, array
     }
     $on = [];
     $off = [];
-    $assignedOff = 0;
     foreach (array_merge($assigned, $other) as $store) {
         $id = (int)($store['id'] ?? 0);
         $name = trim((string)($store['name'] ?? ''));
@@ -245,28 +247,94 @@ function bakery_survey_store_verify_collect(array $onIds, array $assigned, array
             $off[] = $row;
         }
     }
+    $dropped = [];
     foreach ($assigned as $store) {
         $id = (int)($store['id'] ?? 0);
-        if ($id > 0 && !isset($onLookup[$id])) {
-            $assignedOff++;
+        $name = trim((string)($store['name'] ?? ''));
+        if ($id <= 0 || isset($onLookup[$id])) {
+            continue;
         }
+        $dropped[] = ['id' => $id, 'name' => $name !== '' ? $name : ('#' . $id)];
+    }
+    $added = [];
+    foreach ($other as $store) {
+        $id = (int)($store['id'] ?? 0);
+        $name = trim((string)($store['name'] ?? ''));
+        if ($id <= 0 || !isset($onLookup[$id])) {
+            continue;
+        }
+        $added[] = ['id' => $id, 'name' => $name !== '' ? $name : ('#' . $id)];
     }
     return [
         'on' => $on,
         'off' => $off,
-        'assigned_off_count' => $assignedOff,
+        'added' => $added,
+        'dropped' => $dropped,
+        'assigned_off_count' => count($dropped),
     ];
 }
 
 /**
- * Short SMS for HQ. English on purpose — the inbox is shared ops, not the driver UI.
+ * One store name per line for HQ SMS (readable on a phone).
  *
- * @param array{driver_name?:string,delivery_date?:string,on?:list<array{name?:string}>,assigned_off_count?:int} $choice
+ * @param list<array{name?:string}> $stores
+ * @return list<string>
+ */
+function bakery_survey_store_verify_sms_name_lines(array $stores, string $prefix = ''): array
+{
+    $lines = [];
+    foreach ($stores as $store) {
+        $name = trim((string)($store['name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $lines[] = $prefix . $name;
+    }
+    return $lines;
+}
+
+/**
+ * ON list + Changed (+ added / - dropped) block for one driver.
+ *
+ * @param array{on?:list,added?:list,dropped?:list} $group
+ * @return list<string>
+ */
+function bakery_survey_store_verify_sms_driver_lines(array $group): array
+{
+    $lines = ['ON:'];
+    $onLines = bakery_survey_store_verify_sms_name_lines($group['on'] ?? []);
+    if ($onLines === []) {
+        $lines[] = '(none)';
+    } else {
+        foreach ($onLines as $line) {
+            $lines[] = $line;
+        }
+    }
+    $lines[] = 'Changed:';
+    $addedLines = bakery_survey_store_verify_sms_name_lines($group['added'] ?? [], '+ ');
+    $droppedLines = bakery_survey_store_verify_sms_name_lines($group['dropped'] ?? [], '- ');
+    if ($addedLines === [] && $droppedLines === []) {
+        $lines[] = '(none)';
+    } else {
+        foreach ($addedLines as $line) {
+            $lines[] = $line;
+        }
+        foreach ($droppedLines as $line) {
+            $lines[] = $line;
+        }
+    }
+    return $lines;
+}
+
+/**
+ * SMS for HQ. English on purpose — shared ops inbox, not the driver UI.
+ * Stores are one-per-line; Changed lists adds (+) and drops (−) vs assigned defaults.
+ *
+ * @param array{driver_name?:string,delivery_date?:string,on?:list,added?:list,dropped?:list,drivers?:list,assigned_off_count?:int} $choice
  */
 function bakery_survey_store_verify_sms_body(array $choice): string
 {
     $date = trim((string)($choice['delivery_date'] ?? ''));
-    $assignedOff = (int)($choice['assigned_off_count'] ?? 0);
     $groups = isset($choice['drivers']) && is_array($choice['drivers']) ? $choice['drivers'] : [];
     if (count($groups) > 1) {
         $lines = ['HQ ' . $date];
@@ -275,17 +343,10 @@ function bakery_survey_store_verify_sms_body(array $choice): string
             if ($driver === '') {
                 $driver = 'Driver';
             }
-            $names = [];
-            foreach ($group['on'] ?? [] as $store) {
-                $name = trim((string)($store['name'] ?? ''));
-                if ($name !== '') {
-                    $names[] = $name;
-                }
+            $lines[] = $driver;
+            foreach (bakery_survey_store_verify_sms_driver_lines($group) as $line) {
+                $lines[] = $line;
             }
-            $lines[] = $driver . ': ' . ($names === [] ? '(none)' : implode(', ', $names));
-        }
-        if ($assignedOff > 0) {
-            $lines[] = 'Assigned off: ' . $assignedOff;
         }
         $body = implode("\n", $lines);
     } else {
@@ -293,21 +354,23 @@ function bakery_survey_store_verify_sms_body(array $choice): string
         if ($driver === '') {
             $driver = 'Driver';
         }
-        $names = [];
-        foreach ($choice['on'] ?? [] as $store) {
-            $name = trim((string)($store['name'] ?? ''));
-            if ($name !== '') {
-                $names[] = $name;
+        $block = $choice;
+        if (count($groups) === 1) {
+            $block = $groups[0];
+            $singleDriver = trim((string)($block['driver_name'] ?? ''));
+            if ($singleDriver !== '') {
+                $driver = $singleDriver;
             }
         }
-        $onList = $names === [] ? '(none)' : implode(', ', $names);
-        $body = $driver . ' ' . $date . "\nON: " . $onList;
-        if ($assignedOff > 0) {
-            $body .= "\nAssigned off: " . $assignedOff;
-        }
+        $lines = array_merge(
+            [$driver . ' ' . $date],
+            bakery_survey_store_verify_sms_driver_lines($block)
+        );
+        $body = implode("\n", $lines);
     }
-    if (strlen($body) > 320) {
-        $body = substr($body, 0, 317) . '...';
+    // Multi-segment SMS is fine for the HQ inbox; keep a soft ceiling.
+    if (strlen($body) > 1500) {
+        $body = substr($body, 0, 1497) . '...';
     }
     return $body;
 }
@@ -343,6 +406,8 @@ function bakery_survey_store_verify_collect_hq(array $postedByDriver, array $gro
             'driver_name' => (string)($group['driver_name'] ?? ''),
             'on' => $choice['on'],
             'off' => $choice['off'],
+            'added' => $choice['added'],
+            'dropped' => $choice['dropped'],
             'assigned_off_count' => $choice['assigned_off_count'],
         ];
         foreach ($choice['on'] as $store) {
@@ -384,6 +449,20 @@ function bakery_survey_store_verify_log_payload(array $fields): array
             'name' => (string)($store['name'] ?? ''),
         ];
     }
+    $added = [];
+    foreach ($fields['added'] ?? [] as $store) {
+        $added[] = [
+            'id' => (int)($store['id'] ?? 0),
+            'name' => (string)($store['name'] ?? ''),
+        ];
+    }
+    $dropped = [];
+    foreach ($fields['dropped'] ?? [] as $store) {
+        $dropped[] = [
+            'id' => (int)($store['id'] ?? 0),
+            'name' => (string)($store['name'] ?? ''),
+        ];
+    }
     $created = trim((string)($fields['created_at'] ?? ''));
     if ($created === '') {
         $created = date('Y-m-d H:i:s');
@@ -395,7 +474,9 @@ function bakery_survey_store_verify_log_payload(array $fields): array
         'created_at' => $created,
         'on' => $on,
         'off' => $off,
-        'assigned_off_count' => (int)($fields['assigned_off_count'] ?? 0),
+        'added' => $added,
+        'dropped' => $dropped,
+        'assigned_off_count' => (int)($fields['assigned_off_count'] ?? count($dropped)),
         'drivers' => isset($fields['drivers']) && is_array($fields['drivers']) ? $fields['drivers'] : [],
     ];
 }
