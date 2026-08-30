@@ -108,10 +108,7 @@ function bakery_survey_store_verify_group_by_zone(array $stores, string $emptyLa
         if ($id <= 0) {
             continue;
         }
-        $zone = trim((string)($store['zone'] ?? ''));
-        if ($zone === '') {
-            $zone = $emptyLabel;
-        }
+        $zone = bakery_survey_store_verify_zone_key($store, $emptyLabel);
         if (!isset($groups[$zone])) {
             $groups[$zone] = [];
         }
@@ -127,6 +124,17 @@ function bakery_survey_store_verify_group_by_zone(array $stores, string $emptyLa
         return strnatcasecmp($a, $b);
     });
     return $groups;
+}
+
+/**
+ * Display zone for a store row (empty → $emptyLabel). Used by UI + move placement.
+ *
+ * @param array{zone?:string} $store
+ */
+function bakery_survey_store_verify_zone_key(array $store, string $emptyLabel = 'No zone'): string
+{
+    $zone = trim((string)($store['zone'] ?? ''));
+    return $zone !== '' ? $zone : $emptyLabel;
 }
 
 /**

@@ -272,6 +272,8 @@ return [
     'survey.store_verify_move_help' => 'Toca una tienda y elige quién la cubre. Solo actualiza esta encuesta.',
     'survey.store_verify_move_to' => 'Mover al repartidor',
     'survey.store_verify_move_pick' => 'Elegir repartidor…',
+    'survey.store_verify_manager_hint' => 'Usa SÍ/NO en el repartidor que estás editando, o Mover tiendas para pasársela a otro.',
+    'survey.store_verify_driver_hint' => 'Toca para agregar o quitar tiendas de tu lista. Aquí no se mueven entre repartidores.',
     'survey.action_store_verify' => 'Lista de tiendas',
     'survey.msg_store_verify_link' => '¿Qué tiendas puedes cubrir el :date? Toca para confirmar:',
     'texts.lane_all' => 'Todos',

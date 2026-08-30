@@ -98,6 +98,11 @@ $assert(
     'stores group by zone with empty zone last'
 );
 $assert(
+    bakery_survey_store_verify_zone_key(['zone' => 'Mission'], 'No zone') === 'Mission'
+        && bakery_survey_store_verify_zone_key(['zone' => ''], 'Sin zona') === 'Sin zona',
+    'zone key keeps named zones and maps empty to empty-label'
+);
+$assert(
     bakery_survey_store_verify_resolve_date('2026-08-31', null) === '2026-08-31',
     'resolve date keeps default when request empty'
 );
@@ -260,7 +265,13 @@ $assert(strpos($surveyPhp, 'bakery_survey_store_verify_hq_data') !== false, 'HQ 
 $assert(strpos($surveyPhp, 'store_on[') !== false, 'HQ checkboxes are namespaced by driver id');
 $assert(strpos($surveyPhp, 'driver-block') !== false, 'HQ drivers are collapsible');
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify_group_by_zone') !== false, 'page groups stores by zone');
-$assert(strpos($surveyPhp, 'moveModeBtn') !== false, 'optional move-stores mode is available');
+$assert(strpos($surveyPhp, 'optional move-stores mode is available') !== false || strpos($surveyPhp, 'moveModeBtn') !== false, 'optional move-stores mode is available');
+$assert(substr_count($surveyPhp, 'id="moveModeBtn"') === 1, 'move mode exists once (HQ only)');
+$assert(strpos($surveyPhp, 'ensureZoneGroup') !== false, 'move places stores into matching zone groups');
+$assert(strpos($surveyPhp, 'zone-group') !== false, 'stores render inside zone-group containers');
+$assert(strpos($surveyPhp, 'data-zone=') !== false, 'store cards carry data-zone for move placement');
+$assert(strpos($surveyPhp, 'store_verify_driver_hint') !== false, 'driver survey explains add/drop only');
+$assert(strpos($surveyPhp, 'store_verify_manager_hint') !== false, 'manager survey explains move plus on/off');
 $assert(strpos($surveyPhp, 'name="date"') !== false, 'date control can change the delivery day');
 $assert(strpos($surveyPhp, 'data-copy-url') !== false, 'HQ exposes copyable manager/driver links');
 $assert(strpos($surveyPhp, 'language_switch.php') !== false, 'survey page offers EN/ES switch');
@@ -326,6 +337,8 @@ $keys = [
     'survey.store_verify_move_help',
     'survey.store_verify_move_to',
     'survey.store_verify_move_pick',
+    'survey.store_verify_manager_hint',
+    'survey.store_verify_driver_hint',
 ];
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
 $assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');

@@ -272,6 +272,8 @@ return [
     'survey.store_verify_move_help' => 'Tap a store, then choose who should cover it. This only updates this survey list.',
     'survey.store_verify_move_to' => 'Move to driver',
     'survey.store_verify_move_pick' => 'Choose driver…',
+    'survey.store_verify_manager_hint' => 'Use ON/OFF for the driver you are editing, or Move stores to hand a stop to someone else.',
+    'survey.store_verify_driver_hint' => 'Tap to add or drop stores on your list. No move between drivers here.',
     'survey.action_store_verify' => 'Store list',
     'survey.msg_store_verify_link' => 'Which stores can you cover on :date? Tap to confirm:',
     'texts.lane_all' => 'All',

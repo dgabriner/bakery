@@ -339,19 +339,23 @@ $renderStoreCards = static function (
     string $zoneEmpty,
     callable $esc
 ): void {
+    $lane = $defaultOn ? 'assigned' : 'other';
     $byZone = bakery_survey_store_verify_group_by_zone($stores, $zoneEmpty);
     foreach ($byZone as $zoneName => $zoneStores) {
+        echo '<div class="zone-group" data-zone="' . $esc($zoneName) . '" data-lane="' . $esc($lane) . '">';
         echo '<div class="zone-label">' . $esc($zoneName) . '</div>';
         foreach ($zoneStores as $store) {
             $checked = $defaultOn ? ' checked' : '';
             $onClass = $defaultOn ? ' on' : '';
             $pill = $defaultOn ? $onLabel : $offLabel;
-            echo '<label class="store' . $onClass . '" data-store-toggle data-store-id="' . (int)$store['id'] . '">';
+            $zoneKey = bakery_survey_store_verify_zone_key($store, $zoneEmpty);
+            echo '<label class="store' . $onClass . '" data-store-toggle data-store-id="' . (int)$store['id'] . '" data-zone="' . $esc($zoneKey) . '">';
             echo '<input type="checkbox" name="' . $esc($inputName) . '" value="' . (int)$store['id'] . '"' . $checked . '>';
             echo '<span class="name">' . $esc($store['name']) . '</span>';
             echo '<span class="pill" data-on="' . $esc($onLabel) . '" data-off="' . $esc($offLabel) . '">' . $esc($pill) . '</span>';
             echo '</label>';
         }
+        echo '</div>';
     }
 };
 $driverLinkTokens = [];
@@ -408,6 +412,8 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
   .submit-bar .btn { width: 100%; padding: 14px 16px; font-size: 16px; }
   .section-label { font-size: 13px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; opacity: .65; margin: 16px 0 8px; }
   .zone-label { font-size: 12px; font-weight: 700; color: #6b6256; margin: 10px 0 6px; padding-left: 2px; }
+  .zone-group { margin: 0 0 4px; }
+  .lane { margin: 0 0 4px; }
   .date-bar { display: flex; gap: 8px; align-items: end; margin: 0 0 14px; flex-wrap: wrap; }
   .date-bar label { font-size: 12px; font-weight: 700; opacity: .7; display: grid; gap: 4px; flex: 1; min-width: 140px; }
   .date-bar input[type="date"] { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #d8d0c2; background: #fff; }
@@ -448,9 +454,11 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
   <?php if ($isHqStoreVerify): ?>
   <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_all_drivers', [], 'Every active driver. Assigned stores start ON; other stores start OFF. One send texts headquarters.')); ?></p>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>
+  <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_manager_hint', [], 'Use ON/OFF for the driver you are editing, or Move stores to hand a stop to someone else.')); ?></p>
   <?php elseif ($showStoreVerify): ?>
   <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_driver', ['name' => $storeVerify['driver_name'] !== '' ? $storeVerify['driver_name'] : (string)($user['display_name'] ?? '')], 'Driver: :name')); ?></p>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>
+  <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_driver_hint', [], 'Tap to add or drop stores on your list. No move between drivers here.')); ?></p>
   <?php elseif ($routeReview): ?>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_review_sub', ['date' => $deliveryDate], 'Route review for :date')); ?></p>
   <?php else: ?>
@@ -533,14 +541,18 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
             <span class="count-chip" data-on-count><?php echo (int)$onCount; ?> <?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?></span>
           </summary>
           <div class="body" data-driver-body="<?php echo $gid; ?>">
-            <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_assigned', ['count' => count($group['assigned'] ?? [])], 'Your assigned stores (:count)')); ?></div>
-            <?php if (!empty($group['assigned'])): ?>
-              <?php $renderStoreCards($group['assigned'], 'store_on[' . $gid . '][]', true, $onLabel, $offLabel, $zoneEmpty, $esc); ?>
-            <?php else: ?>
-              <p class="meta"><?php echo $esc(bakery_survey_text('survey.store_verify_no_stores', [], 'No assigned stores for this delivery day yet.')); ?></p>
-            <?php endif; ?>
-            <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_other', ['count' => count($group['other'] ?? [])], 'Other stores (:count)')); ?></div>
-            <?php $renderStoreCards($group['other'] ?? [], 'store_on[' . $gid . '][]', false, $onLabel, $offLabel, $zoneEmpty, $esc); ?>
+            <div class="lane" data-lane-root="assigned">
+              <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_assigned', ['count' => count($group['assigned'] ?? [])], 'Your assigned stores (:count)')); ?></div>
+              <?php if (!empty($group['assigned'])): ?>
+                <?php $renderStoreCards($group['assigned'], 'store_on[' . $gid . '][]', true, $onLabel, $offLabel, $zoneEmpty, $esc); ?>
+              <?php else: ?>
+                <p class="meta" data-empty-assigned><?php echo $esc(bakery_survey_text('survey.store_verify_no_stores', [], 'No assigned stores for this delivery day yet.')); ?></p>
+              <?php endif; ?>
+            </div>
+            <div class="lane" data-lane-root="other">
+              <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_other', ['count' => count($group['other'] ?? [])], 'Other stores (:count)')); ?></div>
+              <?php $renderStoreCards($group['other'] ?? [], 'store_on[' . $gid . '][]', false, $onLabel, $offLabel, $zoneEmpty, $esc); ?>
+            </div>
           </div>
         </details>
       <?php endforeach; ?>
@@ -569,6 +581,7 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
   <?php if ($showStoreVerify): ?>
     <script>
     (function () {
+      var emptyZoneLabel = <?php echo json_encode($zoneEmpty, JSON_UNESCAPED_UNICODE); ?>;
       function syncCard(card) {
         var box = card.querySelector('input[type="checkbox"]');
         var pill = card.querySelector('.pill');
@@ -582,10 +595,41 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
           var chip = block.querySelector('[data-on-count]');
           if (!chip) return;
           var n = block.querySelectorAll('input[type="checkbox"]:checked').length;
-          var label = chip.textContent.replace(/^\d+/, String(n));
-          chip.textContent = label.match(/ON|SÍ|Sí/i) ? (n + ' ' + (chip.textContent.split(' ').slice(1).join(' ') || 'ON')) : (n + ' ON');
           chip.textContent = n + ' ON';
         });
+      }
+      function cleanupEmptyZoneGroups(root) {
+        if (!root) return;
+        root.querySelectorAll('.zone-group').forEach(function (group) {
+          if (!group.querySelector('[data-store-toggle]')) {
+            group.remove();
+          }
+        });
+      }
+      function ensureZoneGroup(body, zone, lane) {
+        lane = lane || 'assigned';
+        zone = zone || emptyZoneLabel;
+        var laneEl = body.querySelector('[data-lane-root="' + lane + '"]') || body;
+        var emptyNote = laneEl.querySelector('[data-empty-assigned]');
+        if (emptyNote) emptyNote.remove();
+        var group = null;
+        laneEl.querySelectorAll('.zone-group').forEach(function (candidate) {
+          if (!group && candidate.getAttribute('data-zone') === zone) {
+            group = candidate;
+          }
+        });
+        if (!group) {
+          group = document.createElement('div');
+          group.className = 'zone-group';
+          group.setAttribute('data-zone', zone);
+          group.setAttribute('data-lane', lane);
+          var label = document.createElement('div');
+          label.className = 'zone-label';
+          label.textContent = zone;
+          group.appendChild(label);
+          laneEl.appendChild(group);
+        }
+        return group;
       }
       document.querySelectorAll('[data-store-toggle]').forEach(function (card) {
         var box = card.querySelector('input[type="checkbox"]');
@@ -628,6 +672,7 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
       document.querySelectorAll('#storeVerifyForm [data-store-toggle]').forEach(function (card) {
         card.addEventListener('click', function (ev) {
           if (!document.body.classList.contains('move-mode')) return;
+          if (!moveBtn) return;
           ev.preventDefault();
           ev.stopPropagation();
           if (selectedCard) selectedCard.classList.remove('selected');
@@ -644,22 +689,35 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
         var box = selectedCard.querySelector('input[type="checkbox"]');
         var storeId = box ? box.value : selectedCard.getAttribute('data-store-id');
         if (!box || !storeId) return;
-        document.querySelectorAll('#storeVerifyForm input[type="checkbox"]').forEach(function (other) {
-          if (other.value === storeId && other !== box) {
-            other.checked = false;
-            var oc = other.closest('[data-store-toggle]');
-            if (oc) syncCard(oc);
+        var zone = selectedCard.getAttribute('data-zone') || emptyZoneLabel;
+        var sourceBody = selectedCard.closest('[data-driver-body]');
+
+        document.querySelectorAll('#storeVerifyForm [data-store-toggle]').forEach(function (other) {
+          if (other === selectedCard) return;
+          var otherBox = other.querySelector('input[type="checkbox"]');
+          if (otherBox && otherBox.value === storeId) {
+            var parentGroup = other.closest('.zone-group');
+            other.remove();
+            if (parentGroup && !parentGroup.querySelector('[data-store-toggle]')) {
+              parentGroup.remove();
+            }
           }
         });
+
         box.name = 'store_on[' + toDriver + '][]';
         box.checked = true;
         syncCard(selectedCard);
+        selectedCard.setAttribute('data-zone', zone);
+
         var body = document.querySelector('[data-driver-body="' + toDriver + '"]');
         if (body) {
-          body.insertBefore(selectedCard, body.querySelector('.submit-bar'));
+          var group = ensureZoneGroup(body, zone, 'assigned');
+          group.appendChild(selectedCard);
           var details = body.closest('details');
           if (details) details.open = true;
         }
+        cleanupEmptyZoneGroups(sourceBody);
+
         if (moveFields) {
           var sid = document.createElement('input');
           sid.type = 'hidden';
