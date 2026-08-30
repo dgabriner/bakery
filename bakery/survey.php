@@ -581,7 +581,6 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
   <?php if ($showStoreVerify): ?>
     <script>
     (function () {
-      var emptyZoneLabel = <?php echo json_encode($zoneEmpty, JSON_UNESCAPED_UNICODE); ?>;
       function syncCard(card) {
         var box = card.querySelector('input[type="checkbox"]');
         var pill = card.querySelector('.pill');
@@ -598,6 +597,28 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
           chip.textContent = n + ' ON';
         });
       }
+      document.querySelectorAll('[data-store-toggle]').forEach(function (card) {
+        var box = card.querySelector('input[type="checkbox"]');
+        if (!box) return;
+        box.addEventListener('change', function () { syncCard(card); refreshCounts(); });
+      });
+      document.querySelectorAll('[data-copy-url]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var rel = btn.getAttribute('data-copy-url') || '';
+          var url = rel.indexOf('http') === 0 ? rel : (window.location.origin.replace(/\/$/, '') + '/' + rel.replace(/^\//, ''));
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(function () {
+              btn.textContent = '✓';
+              setTimeout(function () { btn.textContent = btn.getAttribute('data-label') || 'Copy link'; }, 1200);
+            }).catch(function () { window.prompt('Copy link', url); });
+          } else {
+            window.prompt('Copy link', url);
+          }
+        });
+        btn.setAttribute('data-label', btn.textContent);
+      });
+      <?php if ($isHqStoreVerify): ?>
+      var emptyZoneLabel = <?php echo json_encode($zoneEmpty, JSON_UNESCAPED_UNICODE); ?>;
       function cleanupEmptyZoneGroups(root) {
         if (!root) return;
         root.querySelectorAll('.zone-group').forEach(function (group) {
@@ -631,28 +652,6 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
         }
         return group;
       }
-      document.querySelectorAll('[data-store-toggle]').forEach(function (card) {
-        var box = card.querySelector('input[type="checkbox"]');
-        if (!box) return;
-        box.addEventListener('change', function () { syncCard(card); refreshCounts(); });
-      });
-
-      document.querySelectorAll('[data-copy-url]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var rel = btn.getAttribute('data-copy-url') || '';
-          var url = rel.indexOf('http') === 0 ? rel : (window.location.origin.replace(/\/$/, '') + '/' + rel.replace(/^\//, ''));
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(function () {
-              btn.textContent = '✓';
-              setTimeout(function () { btn.textContent = btn.getAttribute('data-label') || 'Copy link'; }, 1200);
-            }).catch(function () { window.prompt('Copy link', url); });
-          } else {
-            window.prompt('Copy link', url);
-          }
-        });
-        btn.setAttribute('data-label', btn.textContent);
-      });
-
       var moveBtn = document.getElementById('moveModeBtn');
       var moveTarget = document.getElementById('moveTarget');
       var moveFields = document.getElementById('moveFields');
@@ -672,7 +671,6 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
       document.querySelectorAll('#storeVerifyForm [data-store-toggle]').forEach(function (card) {
         card.addEventListener('click', function (ev) {
           if (!document.body.classList.contains('move-mode')) return;
-          if (!moveBtn) return;
           ev.preventDefault();
           ev.stopPropagation();
           if (selectedCard) selectedCard.classList.remove('selected');
@@ -740,6 +738,7 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
           if (selectedCard) applyMove();
         });
       }
+      <?php endif; ?>
       refreshCounts();
     })();
     </script>
