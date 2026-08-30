@@ -267,6 +267,11 @@ $assert(strpos($surveyPhp, 'driver-block') !== false, 'HQ drivers are collapsibl
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify_group_by_zone') !== false, 'page groups stores by zone');
 $assert(strpos($surveyPhp, 'optional move-stores mode is available') !== false || strpos($surveyPhp, 'moveModeBtn') !== false, 'optional move-stores mode is available');
 $assert(substr_count($surveyPhp, 'id="moveModeBtn"') === 1, 'move mode exists once (HQ only)');
+$assert(
+    preg_match('/\$isHqStoreVerify[\s\S]{0,200}moveModeBtn[\s\S]{0,80}ensureZoneGroup/', $surveyPhp) === 1
+        || (strpos($surveyPhp, 'if ($isHqStoreVerify):') !== false && strpos($surveyPhp, 'ensureZoneGroup') !== false),
+    'move JS is gated to HQ manager survey only'
+);
 $assert(strpos($surveyPhp, 'ensureZoneGroup') !== false, 'move places stores into matching zone groups');
 $assert(strpos($surveyPhp, 'zone-group') !== false, 'stores render inside zone-group containers');
 $assert(strpos($surveyPhp, 'data-zone=') !== false, 'store cards carry data-zone for move placement');
