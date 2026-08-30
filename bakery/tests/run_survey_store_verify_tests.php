@@ -265,6 +265,43 @@ $assert(
     'HQ SMS lists Luis stores one-per-line and shows Other Cafe as added'
 );
 
+// ---- Route reconcile (dated assignments, not standing) ----------------------
+$plan = bakery_survey_store_verify_route_reconcile(
+    [10, 12, 99],
+    [
+        10 => ['customer_id' => 10, 'daily_order_id' => 100, 'delivery_status' => 'pending'],
+        11 => ['customer_id' => 11, 'daily_order_id' => 101, 'delivery_status' => 'pending'],
+        50 => ['customer_id' => 50, 'daily_order_id' => 150, 'delivery_status' => 'delivered'],
+    ]
+);
+$assert($plan['assign'] === [12, 99], 'reconcile assigns missing desired stores');
+$assert(
+    count($plan['unassign']) === 1 && (int)$plan['unassign'][0]['customer_id'] === 11,
+    'reconcile unassigns pending stores no longer ON'
+);
+$assert(
+    count($plan['blocked']) === 1 && (int)$plan['blocked'][0]['customer_id'] === 50,
+    'reconcile blocks delivered/in-transit from unassign'
+);
+$emptyPlan = bakery_survey_store_verify_route_reconcile([], []);
+$assert($emptyPlan['assign'] === [] && $emptyPlan['unassign'] === [], 'empty reconcile is a no-op');
+$routeLine = bakery_survey_store_verify_sms_route_line([
+    'assigned' => 2,
+    'moved' => 1,
+    'removed' => 1,
+    'errors' => [],
+]);
+$assert(strpos($routeLine, 'Route updated') !== false && strpos($routeLine, '+2') !== false, 'SMS route line summarizes apply');
+$assert(
+    bakery_survey_store_verify_sms_route_line(['skipped' => 'past_date']) === 'Route: not changed (past date)',
+    'SMS route line explains past-date skip'
+);
+$helperSrc = (string)file_get_contents($root . '/includes/survey_store_verify.php');
+$assert(strpos($helperSrc, 'bakery_survey_store_verify_apply_routes') !== false, 'submit path can apply dated routes');
+$assert(strpos($helperSrc, 'bakery_survey_store_verify_assign_customer') !== false, 'survey can assign a customer onto a dated route');
+$assert(strpos($helperSrc, 'bakery_survey_store_verify_unassign_customer') !== false, 'survey can remove a pending dated stop');
+$assert(strpos($helperSrc, 'standing_routes') === false || strpos($helperSrc, 'Does not rewrite standing_routes') !== false, 'apply docs that standing routes stay unchanged');
+
 // ---- Page + helpers stay on the existing survey -----------------------------
 $surveyPhp = (string)file_get_contents($root . '/survey.php');
 $surveysInc = (string)file_get_contents($root . '/includes/surveys.php');
@@ -274,8 +311,8 @@ $assert(strpos($surveyPhp, 'bakery_survey_store_verify') !== false, 'survey.php 
 $assert(strpos($surveysInc, 'survey_store_verify.php') !== false, 'surveys.php includes store-verify helpers');
 $commsSrc = (string)file_get_contents($root . '/text_comms.php');
 $assert(strpos($commsSrc, 'surveyComposerDate') !== false, 'Text Comms survey date defaults to next delivery day');
-$helperSrc = (string)file_get_contents($root . '/includes/survey_store_verify.php');
 $assert(strpos($helperSrc, 'bakery_text_send') !== false, 'SMS still goes through bakery_text_send');
+$assert(strpos($surveyPhp, 'store_verify_done_route') !== false, 'survey confirms when dated route was updated');
 $assert(strpos($surveyPhp, "\$surveyKind === 'question'") !== false, 'question form is gated off store-verify');
 $assert(strpos($helperSrc, 'standing_routes') !== false && strpos($helperSrc, 'standing_orders') !== false, 'other stores require a delivery relationship');
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify_hq_data') !== false, 'HQ combined page loads every driver');
@@ -394,6 +431,8 @@ $keys = [
     'survey.store_verify_off',
     'survey.store_verify_submit',
     'survey.store_verify_done',
+    'survey.store_verify_done_route',
+    'survey.store_verify_done_route_partial',
     'survey.store_verify_sms_failed',
     'survey.store_verify_no_stores',
     'survey.action_store_verify',

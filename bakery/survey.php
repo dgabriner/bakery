@@ -270,6 +270,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'staff_user_id' => (int)($user['id'] ?? 0),
             ]);
             $done = (string)bakery_t('survey.store_verify_done', [], 'Saved. Headquarters got your list.');
+            $route = is_array($result['route'] ?? null) ? $result['route'] : [];
+            $routeTouched = ((int)($route['assigned'] ?? 0) + (int)($route['removed'] ?? 0) + (int)($route['moved'] ?? 0)) > 0;
+            if ($routeTouched) {
+                $done = (string)bakery_t(
+                    'survey.store_verify_done_route',
+                    [],
+                    'Saved and updated tomorrow’s route. Headquarters got your list.'
+                );
+            } elseif (!empty($route['errors'])) {
+                $done = (string)bakery_t(
+                    'survey.store_verify_done_route_partial',
+                    [],
+                    'Saved your list. Some route updates could not apply — ask the bakery to check Driver Assignment.'
+                );
+            }
             if (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.store_verify_sms_failed',
