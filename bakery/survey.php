@@ -16,6 +16,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/surveys.php';
+require_once __DIR__ . '/includes/text_comms.php';
 
 bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
 
@@ -30,6 +31,9 @@ if (!bakery_surveys_ready($db)) {
     );
 }
 
+$deliveryWeekdays = bakery_survey_delivery_weekdays($db);
+$nextDeliveryDate = bakery_survey_next_delivery_date(date('Y-m-d'), $deliveryWeekdays);
+
 try {
     $survey = $token !== '' ? bakery_survey_find_by_token($db, $token) : [];
 } catch (Throwable $e) {
@@ -39,6 +43,27 @@ try {
         (string)bakery_t('survey.unavailable_title', [], 'Surveys not set up here'),
         (string)bakery_t('survey.unavailable_body', [], 'This environment does not have the survey tables yet (migration 061). Ask the administrator to apply database/schema/061_surveys.sql.')
     );
+}
+
+// Logged-in driver (no token): open this driver's next-delivery-day verify.
+if (!$survey && $token === '') {
+    $selfDriverId = bakery_route_worker_driver_id($db, $user, $nextDeliveryDate);
+    if ($selfDriverId <= 0 && !empty($user['driver_id'])) {
+        $selfDriverId = (int)$user['driver_id'];
+    }
+    if ($selfDriverId > 0) {
+        try {
+            $survey = bakery_survey_ensure_store_verify(
+                $db,
+                $selfDriverId,
+                $nextDeliveryDate,
+                (int)($user['id'] ?? 0)
+            );
+            $token = (string)($survey['token'] ?? '');
+        } catch (Throwable $e) {
+            error_log('survey.php ensure store-verify: ' . $e->getMessage());
+        }
+    }
 }
 
 function bakery_survey_fail(string $title, string $message): void
@@ -71,6 +96,11 @@ $driverId = (int)($survey['driver_id'] ?? 0);
 $deliveryDate = (string)($survey['delivery_date'] ?? '');
 if ($deliveryDate === '') {
     $deliveryDate = date('Y-m-d');
+}
+$surveyDate = (string)($survey['delivery_date'] ?? '');
+$verifyDate = $nextDeliveryDate;
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate) && $surveyDate >= date('Y-m-d')) {
+    $verifyDate = $surveyDate;
 }
 
 // Drivers may only open their own survey; managers may inspect any.
@@ -160,6 +190,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_answer', [], 'Answer recorded. Thank you!')));
         }
+        if ($action === 'verify_stores') {
+            if ($driverId > 0 && !$isManager) {
+                bakery_assert_driver_identity($db, $driverId, $verifyDate);
+            }
+            $verifyData = bakery_survey_store_verify_data($db, $driverId, $verifyDate);
+            $postedOn = [];
+            if (isset($_POST['store_on']) && is_array($_POST['store_on'])) {
+                foreach ($_POST['store_on'] as $rawId) {
+                    $postedOn[] = (int)$rawId;
+                }
+            }
+            $choice = bakery_survey_store_verify_collect($postedOn, $verifyData['assigned'], $verifyData['other']);
+            $driverName = $verifyData['driver_name'] !== ''
+                ? $verifyData['driver_name']
+                : (string)($user['display_name'] ?? 'Driver');
+            $result = bakery_survey_store_verify_submit($db, [
+                'survey_id' => (int)$survey['id'],
+                'driver_id' => $driverId,
+                'driver_name' => $driverName,
+                'delivery_date' => $verifyDate,
+                'on' => $choice['on'],
+                'off' => $choice['off'],
+                'assigned_off_count' => $choice['assigned_off_count'],
+                'staff_user_id' => (int)($user['id'] ?? 0),
+            ]);
+            $done = (string)bakery_t('survey.store_verify_done', [], 'Saved. Headquarters got your list.');
+            if (empty($result['sms_ok'])) {
+                $done = (string)bakery_t(
+                    'survey.store_verify_sms_failed',
+                    [],
+                    'Saved your list. The text to headquarters did not send — ask the bakery to check Twilio.'
+                );
+            }
+            safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode($done));
+        }
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&err=' . rawurlencode('unknown_action'));
     } catch (RuntimeException $e) {
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&err=' . rawurlencode($e->getMessage()));
@@ -170,10 +235,27 @@ $pageTitle = (string)bakery_t('survey.page_title', [], 'Survey');
 $data = [];
 $routeReview = false;
 $questions = bakery_survey_questions($survey);
-if ((string)$survey['kind'] === 'route_review') {
+$surveyKind = (string)($survey['kind'] ?? '');
+$showStoreVerify = $driverId > 0 && in_array($surveyKind, ['route_review', 'store_verify'], true);
+$storeVerify = ['driver_id' => $driverId, 'driver_name' => '', 'delivery_date' => $verifyDate, 'assigned' => [], 'other' => []];
+if ($showStoreVerify) {
+    $storeVerify = bakery_survey_store_verify_data($db, $driverId, $verifyDate);
+    if ($storeVerify['driver_name'] === '' && !empty($user['display_name'])) {
+        $storeVerify['driver_name'] = (string)$user['display_name'];
+    }
+}
+if ($surveyKind === 'route_review') {
     $routeReview = true;
     $data = bakery_survey_route_review_data($db, $driverId, $deliveryDate);
 }
+$actionLabels = [
+    'skip' => 'survey.action_skip',
+    'unskip' => 'survey.action_unskip',
+    'claim' => 'survey.action_claim',
+    'answer' => 'survey.action_answer',
+    'reply' => 'survey.action_reply',
+    'store_verify' => 'survey.action_store_verify',
+];
 $responses = [];
 $stmt = $db->prepare("SELECT action, question_key, respondent, response, created_at FROM survey_responses WHERE survey_id = ? AND action <> 'sent' ORDER BY id DESC LIMIT 40");
 $stmt->execute([(int)$survey['id']]);
@@ -207,12 +289,25 @@ $esc = static function ($v): string {
   .flash { background: #e8f3ea; border: 1px solid #bcd9c2; color: #276b33; padding: 9px 12px; border-radius: 9px; margin-bottom: 10px; font-size: 14px; }
   .flash.err { background: #fdeaea; border-color: #eec3c3; color: #a33; }
   form.inline { display: contents; }
+  .who { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  .store { width: 100%; text-align: left; background: #fff; border: 2px solid #d8d0c2; border-radius: 14px; padding: 16px 14px; margin: 0 0 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; -webkit-tap-highlight-color: transparent; }
+  .store .name { font-size: 17px; }
+  .store .pill { font-size: 13px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: #efe9df; color: #6b6256; }
+  .store.on { border-color: #276b33; background: #e8f3ea; }
+  .store.on .pill { background: #276b33; color: #fff; }
+  .store input { position: absolute; opacity: 0; pointer-events: none; }
+  .submit-bar { position: sticky; bottom: 0; background: #f6f3ee; padding: 10px 0 4px; }
+  .submit-bar .btn { width: 100%; padding: 14px 16px; font-size: 16px; }
+  .section-label { font-size: 13px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; opacity: .65; margin: 16px 0 8px; }
 </style>
 </head>
 <body>
 <main>
-  <h1><?php echo $esc(bakery_survey_text('survey.page_title', [], 'Survey')); ?></h1>
-  <?php if ($routeReview): ?>
+  <h1><?php echo $esc($showStoreVerify ? bakery_survey_text('survey.store_verify_title', [], 'Next delivery day') : bakery_survey_text('survey.page_title', [], 'Survey')); ?></h1>
+  <?php if ($showStoreVerify): ?>
+  <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_driver', ['name' => $storeVerify['driver_name'] !== '' ? $storeVerify['driver_name'] : (string)($user['display_name'] ?? '')], 'Driver: :name')); ?></p>
+  <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>
+  <?php elseif ($routeReview): ?>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_review_sub', ['date' => $deliveryDate], 'Route review for :date')); ?></p>
   <?php else: ?>
   <p class="sub"><?php
@@ -228,6 +323,53 @@ $esc = static function ($v): string {
   <?php endif; ?>
   <?php if ($flash !== ''): ?><div class="flash"><?php echo $esc($flash); ?></div><?php endif; ?>
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
+
+  <?php if ($showStoreVerify): ?>
+    <form method="post" action="survey.php?t=<?php echo $esc($token); ?>" id="storeVerifyForm">
+      <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
+      <input type="hidden" name="action" value="verify_stores">
+      <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_assigned', ['count' => count($storeVerify['assigned'])], 'Your assigned stores (:count)')); ?></div>
+      <?php if ($storeVerify['assigned']): ?>
+        <?php foreach ($storeVerify['assigned'] as $store): ?>
+        <label class="store on" data-store-toggle>
+          <input type="checkbox" name="store_on[]" value="<?php echo (int)$store['id']; ?>" checked>
+          <span class="name"><?php echo $esc($store['name']); ?></span>
+          <span class="pill" data-on="<?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?>" data-off="<?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?></span>
+        </label>
+        <?php endforeach; ?>
+      <?php else: ?>
+        <p class="meta"><?php echo $esc(bakery_survey_text('survey.store_verify_no_stores', [], 'No assigned stores for this delivery day yet.')); ?></p>
+      <?php endif; ?>
+
+      <div class="section-label"><?php echo $esc(bakery_survey_text('survey.store_verify_other', ['count' => count($storeVerify['other'])], 'Other stores (:count)')); ?></div>
+      <?php foreach ($storeVerify['other'] as $store): ?>
+      <label class="store" data-store-toggle>
+        <input type="checkbox" name="store_on[]" value="<?php echo (int)$store['id']; ?>">
+        <span class="name"><?php echo $esc($store['name']); ?></span>
+        <span class="pill" data-on="<?php echo $esc(bakery_survey_text('survey.store_verify_on', [], 'ON')); ?>" data-off="<?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_off', [], 'OFF')); ?></span>
+      </label>
+      <?php endforeach; ?>
+
+      <div class="submit-bar">
+        <button type="submit" class="btn primary"><?php echo $esc(bakery_survey_text('survey.store_verify_submit', [], 'Send my stores')); ?></button>
+      </div>
+    </form>
+    <script>
+    (function () {
+      document.querySelectorAll('[data-store-toggle]').forEach(function (card) {
+        var box = card.querySelector('input[type="checkbox"]');
+        var pill = card.querySelector('.pill');
+        if (!box || !pill) return;
+        function sync() {
+          var on = box.checked;
+          card.classList.toggle('on', on);
+          pill.textContent = on ? (pill.getAttribute('data-on') || 'ON') : (pill.getAttribute('data-off') || 'OFF');
+        }
+        box.addEventListener('change', sync);
+      });
+    })();
+    </script>
+  <?php endif; ?>
 
   <?php if ($routeReview): ?>
     <div class="card">
