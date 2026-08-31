@@ -107,18 +107,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
     }
 
     try {
-        $survey = bakery_survey_create($db, [
-            'mode' => (string)($_POST['survey_mode'] ?? 'link'),
-            'kind' => (string)($_POST['survey_kind'] ?? 'route_review'),
-            'audience' => (string)($_POST['survey_audience'] ?? 'driver'),
-            'driver_id' => (int)($_POST['driver_id'] ?? 0),
-            'target_phone' => trim((string)($_POST['to_manual'] ?? '')),
-            'question' => (string)($_POST['question'] ?? ''),
-            'title' => trim((string)($_POST['title'] ?? '')),
-            'questions' => isset($_POST['q_text']) && is_array($_POST['q_text']) ? bakery_survey_collect_questions_from_post($_POST) : [],
-            'delivery_date' => trim((string)($_POST['date'] ?? '')),
-            'created_by' => (int)($user['id'] ?? 0),
-        ]);
+        $kind = (string)($_POST['survey_kind'] ?? 'route_review');
+        $driverId = (int)($_POST['driver_id'] ?? 0);
+        $deliveryDate = trim((string)($_POST['date'] ?? ''));
+        if ($kind === 'store_verify' && $driverId <= 0) {
+            $survey = bakery_survey_ensure_store_verify(
+                $db,
+                0,
+                $deliveryDate,
+                (int)($user['id'] ?? 0)
+            );
+        } else {
+            $survey = bakery_survey_create($db, [
+                'mode' => (string)($_POST['survey_mode'] ?? 'link'),
+                'kind' => $kind,
+                'audience' => (string)($_POST['survey_audience'] ?? 'driver'),
+                'driver_id' => $driverId,
+                'target_phone' => trim((string)($_POST['to_manual'] ?? '')),
+                'question' => (string)($_POST['question'] ?? ''),
+                'title' => trim((string)($_POST['title'] ?? '')),
+                'questions' => isset($_POST['q_text']) && is_array($_POST['q_text']) ? bakery_survey_collect_questions_from_post($_POST) : [],
+                'delivery_date' => $deliveryDate,
+                'created_by' => (int)($user['id'] ?? 0),
+            ]);
+        }
         $result = bakery_survey_send($db, $survey, (int)($user['id'] ?? 0));
         $flag = !empty($result['send']['ok']) ? 'sent' : (!empty($result['send']['recorded_only']) ? 'recorded' : 'error');
         safe_redirect('text_comms.php?view=surveys&survey=' . urlencode($flag)
@@ -130,6 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
 }
 
 $page_title = (string)bakery_t('page.text_comms');
+if ($view === 'surveys') {
+    $page_title = (string)bakery_t('page.survey_center');
+}
 
 $date = trim((string)($_GET['date'] ?? $today));
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
@@ -179,9 +194,24 @@ $surveyRows = [];
 $driverChoices = [];
 $surveyDetail = null;
 $surveyDetailRow = null;
+$surveyComposerDate = $date;
+$surveyCoverage = [
+    'delivery_date' => $date,
+    'hq_url' => '',
+    'hq_token' => '',
+    'drivers' => [],
+    'unassigned' => [],
+    'empty_drivers' => [],
+];
 if ($view === 'surveys') {
     require_once __DIR__ . '/includes/surveys.php';
     $surveysReady = bakery_surveys_ready($db);
+    if (function_exists('bakery_survey_next_delivery_date')) {
+        $weekdays = function_exists('bakery_survey_delivery_weekdays')
+            ? bakery_survey_delivery_weekdays($db)
+            : [1, 2, 3, 4, 5, 6];
+        $surveyComposerDate = bakery_survey_next_delivery_date($today, $weekdays);
+    }
     if ($surveysReady) {
         $surveyRows = $db->query(
             'SELECT s.*,
@@ -201,6 +231,44 @@ if ($view === 'surveys') {
             if ($surveyDetailRow) {
                 $surveyDetail = bakery_survey_results($db, $sid);
             }
+        }
+
+        // Coverage radar: next delivery day's store-verify board.
+        try {
+            $coverageDate = $surveyComposerDate;
+            $hqGroups = bakery_survey_store_verify_hq_data($db, $coverageDate);
+            $hqSurvey = bakery_survey_ensure_store_verify($db, 0, $coverageDate, (int)($user['id'] ?? 0));
+            $hqToken = (string)($hqSurvey['token'] ?? '');
+            $driverLinks = [];
+            foreach ($hqGroups as $group) {
+                $gid = (int)($group['driver_id'] ?? 0);
+                if ($gid <= 0) {
+                    continue;
+                }
+                $linkSurvey = bakery_survey_ensure_store_verify($db, $gid, $coverageDate, (int)($user['id'] ?? 0));
+                $tok = (string)($linkSurvey['token'] ?? '');
+                $driverLinks[] = [
+                    'driver_id' => $gid,
+                    'driver_name' => (string)($group['driver_name'] ?? ''),
+                    'assigned_count' => count($group['assigned'] ?? []),
+                    'token' => $tok,
+                    'url' => $tok !== ''
+                        ? (BASE_URL . 'survey.php?t=' . rawurlencode($tok) . '&date=' . rawurlencode($coverageDate))
+                        : '',
+                ];
+            }
+            $surveyCoverage = [
+                'delivery_date' => $coverageDate,
+                'hq_token' => $hqToken,
+                'hq_url' => $hqToken !== ''
+                    ? (BASE_URL . 'survey.php?t=' . rawurlencode($hqToken) . '&date=' . rawurlencode($coverageDate))
+                    : '',
+                'drivers' => $driverLinks,
+                'unassigned' => bakery_survey_store_verify_unassigned_stores($hqGroups),
+                'empty_drivers' => bakery_survey_store_verify_empty_drivers($hqGroups),
+            ];
+        } catch (Throwable $e) {
+            error_log('survey coverage board: ' . $e->getMessage());
         }
     }
 }
@@ -711,6 +779,89 @@ require_once __DIR__ . '/includes/nav.php';
     <?php if (!$surveysReady): ?>
         <div class="tc-banner tc-banner-warn"><?php bakery_te('texts.surveys_unavailable'); ?></div>
     <?php else: ?>
+    <?php if (!is_array($surveyDetailRow)): ?>
+    <section class="tc-panel" style="margin-bottom:14px;">
+        <div class="tc-panel-head">
+            <?php bakery_te('texts.survey_coverage_title'); ?>
+            <small><?php echo htmlspecialchars((string)$surveyCoverage['delivery_date'], ENT_QUOTES, 'UTF-8'); ?></small>
+        </div>
+        <div style="padding:12px 16px; display:grid; gap:12px;">
+            <p class="tc-hint" style="margin:0;"><?php bakery_te('texts.survey_coverage_help'); ?></p>
+            <?php if ($surveyCoverage['hq_url'] !== ''): ?>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+                <a class="tc-btn" href="<?php echo htmlspecialchars((string)$surveyCoverage['hq_url'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_coverage_open_hq'); ?></a>
+                <button type="button" class="tc-btn" data-copy-url="<?php echo htmlspecialchars((string)$surveyCoverage['hq_url'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_coverage_copy_hq'); ?></button>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($surveyCoverage['empty_drivers'] || $surveyCoverage['unassigned']): ?>
+            <div class="tc-banner tc-banner-warn" style="margin:0;">
+                <?php if ($surveyCoverage['empty_drivers']): ?>
+                    <div><strong><?php bakery_te('texts.survey_coverage_empty_drivers', ['count' => count($surveyCoverage['empty_drivers'])]); ?></strong>
+                    <?php
+                      $names = array_map(static fn($d) => (string)($d['driver_name'] ?? ''), $surveyCoverage['empty_drivers']);
+                      echo ' — ' . htmlspecialchars(implode(', ', array_filter($names)), ENT_QUOTES, 'UTF-8');
+                    ?></div>
+                <?php endif; ?>
+                <?php if ($surveyCoverage['unassigned']): ?>
+                    <div style="margin-top:6px;"><strong><?php bakery_te('texts.survey_coverage_unassigned', ['count' => count($surveyCoverage['unassigned'])]); ?></strong>
+                    <?php
+                      $storeNames = [];
+                      foreach (array_slice($surveyCoverage['unassigned'], 0, 8) as $store) {
+                          $storeNames[] = (string)($store['name'] ?? '');
+                      }
+                      echo ' — ' . htmlspecialchars(implode(', ', array_filter($storeNames)), ENT_QUOTES, 'UTF-8');
+                      if (count($surveyCoverage['unassigned']) > 8) {
+                          echo '…';
+                      }
+                    ?></div>
+                <?php endif; ?>
+            </div>
+            <?php else: ?>
+            <div class="tc-banner" style="margin:0;"><?php bakery_te('texts.survey_coverage_all_clear'); ?></div>
+            <?php endif; ?>
+
+            <div style="display:grid; gap:8px;">
+                <?php foreach ($surveyCoverage['drivers'] as $row): ?>
+                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; border-top:1px solid rgba(0,0,0,.08); padding-top:8px;">
+                    <div>
+                        <strong><?php echo htmlspecialchars((string)$row['driver_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <span class="tc-hint"> · <?php bakery_te('texts.survey_coverage_assigned', ['count' => (int)$row['assigned_count']]); ?></span>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <?php if ($row['url'] !== ''): ?>
+                        <a href="<?php echo htmlspecialchars((string)$row['url'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
+                        <button type="button" class="tc-btn" style="padding:4px 10px;" data-copy-url="<?php echo htmlspecialchars((string)$row['url'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('survey.store_verify_copy_link'); ?></button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </section>
+    <script>
+    (function () {
+      document.querySelectorAll('[data-copy-url]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var url = btn.getAttribute('data-copy-url') || '';
+          if (!url) return;
+          if (url.indexOf('http') !== 0) {
+            url = window.location.origin.replace(/\/$/, '') + '/' + url.replace(/^\//, '');
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(function () {
+              var prev = btn.textContent;
+              btn.textContent = '✓';
+              setTimeout(function () { btn.textContent = prev; }, 1200);
+            }).catch(function () { window.prompt('Copy', url); });
+          } else {
+            window.prompt('Copy', url);
+          }
+        });
+      });
+    })();
+    </script>
+    <?php endif; ?>
     <?php if (is_array($surveyDetailRow) && is_array($surveyDetail)): ?>
     <?php
         $dRow = $surveyDetailRow;
@@ -726,7 +877,7 @@ require_once __DIR__ . '/includes/nav.php';
         <section class="tc-panel">
             <div class="tc-panel-head">
                 <span>
-                    <?php echo htmlspecialchars((string)(($dRow['title'] ?? '') !== '' ? $dRow['title'] : (($dRow['kind'] === 'route_review') ? bakery_t('texts.survey_kind_route') : bakery_t('texts.survey_kind_question'))), ENT_QUOTES, 'UTF-8'); ?>
+                    <?php echo htmlspecialchars((string)(($dRow['title'] ?? '') !== '' ? $dRow['title'] : bakery_t($dRow['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($dRow['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : 'texts.survey_kind_question'))), ENT_QUOTES, 'UTF-8'); ?>
                     <span class="tc-lane"><?php bakery_te($dRow['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
                 </span>
                 <small>
@@ -841,6 +992,7 @@ require_once __DIR__ . '/includes/nav.php';
                             <?php foreach ($driverChoices as $d): ?>
                                 <option value="<?php echo (int)$d['id']; ?>"><?php echo htmlspecialchars((string)$d['name'], ENT_QUOTES, 'UTF-8'); ?></option>
                             <?php endforeach; ?>
+                            <option value="0"><?php bakery_te('texts.survey_driver_all'); ?></option>
                         </select>
                     </div>
                 </div>
@@ -849,6 +1001,7 @@ require_once __DIR__ . '/includes/nav.php';
                         <label for="svKind"><?php bakery_te('texts.survey_kind'); ?></label>
                         <select id="svKind" name="survey_kind">
                             <option value="route_review"><?php bakery_te('texts.survey_kind_route'); ?></option>
+                            <option value="store_verify"><?php bakery_te('texts.survey_kind_stores'); ?></option>
                             <option value="question"><?php bakery_te('texts.survey_kind_question'); ?></option>
                         </select>
                     </div>
@@ -866,7 +1019,7 @@ require_once __DIR__ . '/includes/nav.php';
                 </div>
                 <div>
                     <label for="svDate"><?php bakery_te('common.date'); ?></label>
-                    <input type="date" id="svDate" name="date" value="<?php echo htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="date" id="svDate" name="date" value="<?php echo htmlspecialchars($surveyComposerDate, ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div id="svCustomQuestions">
                     <label><?php bakery_te('texts.survey_questions_label'); ?></label>
@@ -915,7 +1068,7 @@ require_once __DIR__ . '/includes/nav.php';
                                 <a href="<?php echo htmlspecialchars($detailQs, ENT_QUOTES, 'UTF-8'); ?>" style="font-weight:600; color:inherit; text-decoration:underline;">
                                     <?php echo htmlspecialchars($listTitle !== '' ? $listTitle : bakery_t('texts.survey_kind_question'), ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
-                                <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : 'texts.survey_kind_question'); ?></span>
+                                <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($s['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : 'texts.survey_kind_question')); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['audience'] === 'driver' ? 'texts.survey_audience_driver' : 'texts.survey_audience_staff'); ?></span>
                                 <span class="tc-status"><?php bakery_te($s['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
                             </span>

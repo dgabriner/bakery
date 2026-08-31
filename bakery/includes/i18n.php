@@ -60,7 +60,8 @@ function bakery_locale(bool $forceRefresh = false): string {
     }
 
     $script = basename($_SERVER['SCRIPT_NAME'] ?? '', '.php');
-    if ($script === 'login' || $script === 'baker') {
+    // Phone surveys (drivers/managers) and login default to Spanish.
+    if ($script === 'login' || $script === 'baker' || $script === 'survey') {
         return $resolved = 'es';
     }
     if ($script === 'customer_portal_login' || $script === 'customer_login') {

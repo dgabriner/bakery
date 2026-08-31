@@ -237,6 +237,7 @@ function bakery_agent_work_map(): array
                 'includes/text_comms.php',
                 'includes/text_comms_media.php',
                 'includes/surveys.php',
+                'includes/survey_store_verify.php',
                 'text_comms.php',
                 'text_comms_api.php',
                 'text_media.php',
@@ -257,6 +258,7 @@ function bakery_agent_work_map(): array
                 'tests/run_text_comms_tests.php',
                 'tests/run_text_comms_media_tests.php',
                 'tests/run_survey_tests.php',
+                'tests/run_survey_store_verify_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [

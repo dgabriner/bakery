@@ -8,8 +8,8 @@
  *                 unassigned stores they can claim with one tap.
  *
  * Sends always go through bakery_text_send() so every attempt keeps its ledger
- * row. The link page rides the existing staff/driver session gate — no second
- * auth system.
+ * row. An open store_verify / route_review token is the auth on survey.php
+ * (no PIN). No token still requires a staff login.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -18,6 +18,7 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/driver_assignments.php';
 require_once __DIR__ . '/driver_route_prep.php';
 require_once __DIR__ . '/delivery_skip.php';
+require_once __DIR__ . '/survey_store_verify.php';
 
 function bakery_surveys_ready(PDO $db): bool
 {
@@ -33,7 +34,7 @@ function bakery_survey_modes(): array
 
 function bakery_survey_kinds(): array
 {
-    return ['route_review', 'question'];
+    return ['route_review', 'store_verify', 'question'];
 }
 
 function bakery_survey_question_types(): array
@@ -125,7 +126,7 @@ function bakery_survey_create(PDO $db, array $fields): array
     if (!in_array($audience, bakery_survey_audiences(), true)) {
         throw new RuntimeException('Unknown survey audience');
     }
-    if ($kind === 'route_review' && $audience !== 'driver') {
+    if (($kind === 'route_review' || $kind === 'store_verify') && $audience !== 'driver') {
         throw new RuntimeException('Route review surveys target drivers');
     }
 
@@ -141,7 +142,9 @@ function bakery_survey_create(PDO $db, array $fields): array
     }
 
     $driverId = (int)($fields['driver_id'] ?? 0);
-    if ($audience === 'driver') {
+    if ($kind === 'store_verify' && $driverId <= 0) {
+        $driverId = 0;
+    } elseif ($audience === 'driver') {
         if ($driverId <= 0) {
             throw new RuntimeException('Driver surveys need a driver');
         }
@@ -155,7 +158,7 @@ function bakery_survey_create(PDO $db, array $fields): array
     }
 
     $deliveryDate = trim((string)($fields['delivery_date'] ?? ''));
-    if ($kind === 'route_review') {
+    if ($kind === 'route_review' || $kind === 'store_verify') {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
             throw new RuntimeException('Route review needs a valid delivery date');
         }
@@ -235,7 +238,7 @@ function bakery_survey_create(PDO $db, array $fields): array
         $mode,
         $kind,
         $audience,
-        $audience === 'driver' ? $driverId : null,
+        $audience === 'driver' && $driverId > 0 ? $driverId : null,
         $audience === 'staff' ? (int)($fields['staff_user_id'] ?? 0) ?: null : null,
         $phone,
         $question !== '' ? $question : null,
@@ -315,7 +318,7 @@ function bakery_survey_record_response(PDO $db, array $fields): int
         substr(trim((string)($fields['action'] ?? 'reply')), 0, 24),
         isset($fields['daily_order_id']) && (int)$fields['daily_order_id'] > 0 ? (int)$fields['daily_order_id'] : null,
         isset($fields['customer_id']) && (int)$fields['customer_id'] > 0 ? (int)$fields['customer_id'] : null,
-        isset($fields['response']) ? substr(trim((string)$fields['response']), 0, 2000) : null,
+        isset($fields['response']) ? substr(trim((string)$fields['response']), 0, 16000) : null,
         isset($fields['question_key']) ? substr(trim((string)$fields['question_key']), 0, 24) : null,
         isset($fields['respondent']) ? substr(trim((string)$fields['respondent']), 0, 80) : null,
     ]);
@@ -491,14 +494,14 @@ function bakery_survey_build_message(array $survey): string
         $headline = str_replace(':count', (string)count($questions), $headline) . $numbered;
     }
 
-    if ($kind === 'route_review') {
+    if ($kind === 'route_review' || $kind === 'store_verify') {
         $dateLabel = (string)$survey['delivery_date'];
         if ($mode === 'link') {
-            $body = bakery_survey_text(
-                'survey.msg_route_review_link',
-                ['date' => $dateLabel],
-                'Quick route check for :date — tap the link to skip stores you cannot cover or claim open stops:'
-            );
+            $msgKey = $kind === 'store_verify' ? 'survey.msg_store_verify_link' : 'survey.msg_route_review_link';
+            $fallback = $kind === 'store_verify'
+                ? 'Which stores can you cover on :date? Tap to confirm:'
+                : 'Quick route check for :date — tap the link to skip stores you cannot cover or claim open stops:';
+            $body = bakery_survey_text($msgKey, ['date' => $dateLabel], $fallback);
             $body .= "\n" . bakery_survey_link_url((string)$survey['token']);
         } else {
             $body = bakery_survey_text(
@@ -623,4 +626,57 @@ function bakery_survey_collect_questions_from_post(array $post): array
         ];
     }
     return $out;
+}
+
+/**
+ * Open (or create) the store-verify survey for this driver + next delivery day
+ * so a logged-in driver can tap survey.php without a prior token.
+ */
+function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    if ($driverId <= 0) {
+        $stmt = $db->prepare(
+            "SELECT * FROM surveys
+             WHERE delivery_date = ? AND status = 'open' AND kind = 'store_verify'
+               AND (driver_id IS NULL OR driver_id = 0)
+             ORDER BY id DESC
+             LIMIT 1"
+        );
+        $stmt->execute([$deliveryDate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return $row;
+        }
+        return bakery_survey_create($db, [
+            'mode' => 'link',
+            'kind' => 'store_verify',
+            'audience' => 'driver',
+            'driver_id' => 0,
+            'delivery_date' => $deliveryDate,
+            'created_by' => $createdBy,
+            'title' => 'HQ store verify',
+        ]);
+    }
+    $stmt = $db->prepare(
+        "SELECT * FROM surveys
+         WHERE driver_id = ? AND delivery_date = ? AND status = 'open'
+           AND kind IN ('store_verify', 'route_review')
+         ORDER BY (kind = 'store_verify') DESC, id DESC
+         LIMIT 1"
+    );
+    $stmt->execute([$driverId, $deliveryDate]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        return $row;
+    }
+    return bakery_survey_create($db, [
+        'mode' => 'link',
+        'kind' => 'store_verify',
+        'audience' => 'driver',
+        'driver_id' => $driverId,
+        'delivery_date' => $deliveryDate,
+        'created_by' => $createdBy,
+        'title' => 'Store verify',
+    ]);
 }
