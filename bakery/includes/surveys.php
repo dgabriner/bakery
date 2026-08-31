@@ -20,6 +20,7 @@ require_once __DIR__ . '/driver_route_prep.php';
 require_once __DIR__ . '/delivery_skip.php';
 require_once __DIR__ . '/survey_store_verify.php';
 require_once __DIR__ . '/survey_route_order.php';
+require_once __DIR__ . '/survey_dual_hub.php';
 
 function bakery_surveys_ready(PDO $db): bool
 {

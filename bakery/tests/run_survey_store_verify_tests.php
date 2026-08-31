@@ -468,11 +468,26 @@ $keys = [
     'texts.survey_coverage_help',
     'texts.survey_coverage_open_hq',
     'texts.survey_coverage_copy_hq',
+    'texts.survey_step1_title',
+    'texts.survey_step2_title',
+    'texts.survey_coverage_open_hq_verify',
+    'texts.survey_coverage_open_hq_order',
+    'texts.survey_open_verify',
+    'texts.survey_open_order',
+    'survey.sibling_to_order',
+    'survey.sibling_to_verify',
+    'survey.hub_title',
     'texts.survey_coverage_empty_drivers',
     'texts.survey_coverage_unassigned',
     'texts.survey_coverage_all_clear',
     'texts.survey_coverage_assigned',
 ];
+$tcSrc = (string)file_get_contents($root . '/text_comms.php');
+$assert(strpos($tcSrc, 'survey_step1_title') !== false, 'Survey Center shows step 1 lock-stores card');
+$assert(strpos($tcSrc, 'survey_step2_title') !== false, 'Survey Center shows step 2 set-order card');
+$assert(strpos($tcSrc, 'bakery_survey_dual_hub_links') !== false, 'coverage board mints dual hub links');
+$assert(strpos($surveyPhp, 'sibling_to_order') !== false, 'store-verify page links forward to order');
+$assert(strpos((string)file_get_contents($root . '/includes/survey_route_order_render.php'), 'sibling_to_verify') !== false, 'order page links back to lock-stores');
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
 $assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');
 $assert(
