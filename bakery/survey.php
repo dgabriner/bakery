@@ -7,7 +7,7 @@
  * session gate. Skip/claim/answer still require a logged-in role.
  *
  * GET  ?t=TOKEN                 render the survey
- * POST ?t=TOKEN  action=skip|unskip|claim|answer|close|verify_stores
+ * POST ?t=TOKEN  action=skip|unskip|claim|answer|close|verify_stores|order_route
  */
 define('ACCESS_ALLOWED', true);
 
@@ -298,6 +298,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . '&done=' . rawurlencode($done)
             );
         }
+        if ($action === 'order_route') {
+            if ((string)($survey['kind'] ?? '') !== 'route_order') {
+                throw new RuntimeException('Not a route-order survey');
+            }
+            $orderDriverId = (int)($_POST['driver_id'] ?? 0);
+            if ($driverId > 0) {
+                $orderDriverId = $driverId;
+            }
+            if ($orderDriverId <= 0) {
+                throw new RuntimeException('Driver required');
+            }
+            if (bakery_survey_page_needs_identity($survey) && !$isManager) {
+                bakery_assert_driver_identity($db, $orderDriverId, $verifyDate);
+            }
+            $orderIds = [];
+            if (isset($_POST['order_ids']) && is_array($_POST['order_ids'])) {
+                foreach ($_POST['order_ids'] as $raw) {
+                    if (is_array($raw)) {
+                        continue;
+                    }
+                    $orderIds[] = (int)$raw;
+                }
+            }
+            $routeData = bakery_survey_route_order_data($db, $orderDriverId, $verifyDate);
+            $stores = [];
+            $byId = [];
+            foreach ($routeData['movable'] as $row) {
+                $byId[(int)$row['daily_order_id']] = $row;
+            }
+            foreach ($orderIds as $oid) {
+                if (isset($byId[$oid])) {
+                    $stores[] = ['name' => (string)($byId[$oid]['name'] ?? ''), 'daily_order_id' => $oid];
+                }
+            }
+            $result = bakery_survey_route_order_submit($db, [
+                'survey_id' => (int)$survey['id'],
+                'driver_id' => $orderDriverId,
+                'driver_name' => $routeData['driver_name'] !== '' ? $routeData['driver_name'] : ('#' . $orderDriverId),
+                'delivery_date' => $verifyDate,
+                'ordered_daily_order_ids' => $orderIds,
+                'stores' => $stores,
+                'staff_user_id' => (int)($user['id'] ?? 0),
+            ]);
+            if (empty($result['ok'])) {
+                safe_redirect(
+                    'survey.php?t=' . rawurlencode($token)
+                    . '&date=' . rawurlencode($verifyDate)
+                    . '&err=' . rawurlencode((string)bakery_t('survey.route_order_err', [], 'Could not save that order.'))
+                );
+            }
+            $done = (string)bakery_t('survey.route_order_done', [], 'Order saved. Headquarters got the sequence.');
+            if (empty($result['sms_ok'])) {
+                $done = (string)bakery_t(
+                    'survey.route_order_sms_failed',
+                    [],
+                    'Order saved. The text to headquarters did not send — ask the bakery to check Twilio.'
+                );
+            }
+            safe_redirect(
+                'survey.php?t=' . rawurlencode($token)
+                . '&date=' . rawurlencode($verifyDate)
+                . '&done=' . rawurlencode($done)
+            );
+        }
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate) . '&err=' . rawurlencode('unknown_action'));
     } catch (RuntimeException $e) {
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate) . '&err=' . rawurlencode($e->getMessage()));
@@ -309,6 +373,9 @@ $data = [];
 $routeReview = false;
 $questions = bakery_survey_questions($survey);
 $surveyKind = (string)($survey['kind'] ?? '');
+if ($surveyKind === 'route_order') {
+    require __DIR__ . '/includes/survey_route_order_render.php';
+}
 $isHqStoreVerify = $surveyKind === 'store_verify' && $driverId <= 0;
 $showStoreVerify = $isHqStoreVerify
     || ($driverId > 0 && in_array($surveyKind, ['route_review', 'store_verify'], true));

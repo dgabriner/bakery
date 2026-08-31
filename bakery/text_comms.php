@@ -117,6 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
                 $deliveryDate,
                 (int)($user['id'] ?? 0)
             );
+        } elseif ($kind === 'route_order') {
+            $survey = bakery_survey_ensure_route_order(
+                $db,
+                $driverId > 0 ? $driverId : 0,
+                $deliveryDate,
+                (int)($user['id'] ?? 0)
+            );
         } else {
             $survey = bakery_survey_create($db, [
                 'mode' => (string)($_POST['survey_mode'] ?? 'link'),
@@ -880,7 +887,7 @@ require_once __DIR__ . '/includes/nav.php';
         <section class="tc-panel">
             <div class="tc-panel-head">
                 <span>
-                    <?php echo htmlspecialchars((string)(($dRow['title'] ?? '') !== '' ? $dRow['title'] : bakery_t($dRow['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($dRow['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : 'texts.survey_kind_question'))), ENT_QUOTES, 'UTF-8'); ?>
+                    <?php echo htmlspecialchars((string)(($dRow['title'] ?? '') !== '' ? $dRow['title'] : bakery_t($dRow['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($dRow['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : ($dRow['kind'] === 'route_order' ? 'texts.survey_kind_order' : 'texts.survey_kind_question')))), ENT_QUOTES, 'UTF-8'); ?>
                     <span class="tc-lane"><?php bakery_te($dRow['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
                 </span>
                 <small>
@@ -1005,6 +1012,7 @@ require_once __DIR__ . '/includes/nav.php';
                         <select id="svKind" name="survey_kind">
                             <option value="route_review"><?php bakery_te('texts.survey_kind_route'); ?></option>
                             <option value="store_verify"><?php bakery_te('texts.survey_kind_stores'); ?></option>
+                            <option value="route_order"><?php bakery_te('texts.survey_kind_order'); ?></option>
                             <option value="question"><?php bakery_te('texts.survey_kind_question'); ?></option>
                         </select>
                     </div>
@@ -1071,7 +1079,7 @@ require_once __DIR__ . '/includes/nav.php';
                                 <a href="<?php echo htmlspecialchars($detailQs, ENT_QUOTES, 'UTF-8'); ?>" style="font-weight:600; color:inherit; text-decoration:underline;">
                                     <?php echo htmlspecialchars($listTitle !== '' ? $listTitle : bakery_t('texts.survey_kind_question'), ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
-                                <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($s['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : 'texts.survey_kind_question')); ?></span>
+                                <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($s['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : ($s['kind'] === 'route_order' ? 'texts.survey_kind_order' : 'texts.survey_kind_question'))); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['audience'] === 'driver' ? 'texts.survey_audience_driver' : 'texts.survey_audience_staff'); ?></span>
                                 <span class="tc-status"><?php bakery_te($s['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
                             </span>
