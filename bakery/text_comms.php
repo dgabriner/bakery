@@ -253,7 +253,7 @@ if ($view === 'surveys') {
                     'assigned_count' => count($group['assigned'] ?? []),
                     'token' => $tok,
                     'url' => $tok !== ''
-                        ? (BASE_URL . 'survey.php?t=' . rawurlencode($tok) . '&date=' . rawurlencode($coverageDate))
+                        ? bakery_survey_link_url($tok, $coverageDate)
                         : '',
                 ];
             }
@@ -261,7 +261,7 @@ if ($view === 'surveys') {
                 'delivery_date' => $coverageDate,
                 'hq_token' => $hqToken,
                 'hq_url' => $hqToken !== ''
-                    ? (BASE_URL . 'survey.php?t=' . rawurlencode($hqToken) . '&date=' . rawurlencode($coverageDate))
+                    ? bakery_survey_link_url($hqToken, $coverageDate)
                     : '',
                 'drivers' => $driverLinks,
                 'unassigned' => bakery_survey_store_verify_unassigned_stores($hqGroups),
@@ -845,8 +845,11 @@ require_once __DIR__ . '/includes/nav.php';
         btn.addEventListener('click', function () {
           var url = btn.getAttribute('data-copy-url') || '';
           if (!url) return;
-          if (url.indexOf('http') !== 0) {
-            url = window.location.origin.replace(/\/$/, '') + '/' + url.replace(/^\//, '');
+          // Keep Live /bake/ (and any BASE_URL prefix) when absolutizing.
+          try {
+            url = new URL(url, window.location.href).href;
+          } catch (e) {
+            return;
           }
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(function () {
