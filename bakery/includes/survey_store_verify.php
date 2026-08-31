@@ -535,7 +535,7 @@ function bakery_survey_token_allows_public(?array $survey): bool
     }
     $kind = (string)($survey['kind'] ?? '');
     $status = (string)($survey['status'] ?? '');
-    return $status === 'open' && in_array($kind, ['store_verify', 'route_review'], true);
+    return $status === 'open' && in_array($kind, ['store_verify', 'route_review', 'route_order'], true);
 }
 
 function bakery_survey_page_needs_login(string $token, array $survey): bool
