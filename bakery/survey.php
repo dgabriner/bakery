@@ -48,23 +48,59 @@ if (bakery_survey_page_needs_login($token, $survey)) {
 $user = bakery_current_user() ?: [];
 $isManager = bakery_user_has_role(['administrator', 'manager']);
 
-// Logged-in driver (no token): open this driver's next-delivery-day verify.
+// Logged-in staff/driver (no token): dual hub — lock stores + set order.
 if (!$survey && $token === '') {
     $selfDriverId = bakery_route_worker_driver_id($db, $user ?: null, $nextDeliveryDate);
     if ($selfDriverId <= 0 && !empty($user['driver_id'])) {
         $selfDriverId = (int)$user['driver_id'];
     }
-    if ($selfDriverId > 0) {
+    $hubDriverId = $selfDriverId > 0 ? $selfDriverId : 0;
+    if ($isManager || $selfDriverId > 0) {
         try {
-            $survey = bakery_survey_ensure_store_verify(
+            $hub = bakery_survey_dual_hub_links(
                 $db,
-                $selfDriverId,
+                $isManager && $selfDriverId <= 0 ? 0 : $hubDriverId,
                 $nextDeliveryDate,
                 (int)($user['id'] ?? 0)
             );
-            $token = (string)($survey['token'] ?? '');
+            $esc = static function ($s): string {
+                return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+            };
+            $pageTitle = (string)bakery_t('survey.hub_title', [], 'Tomorrow’s route surveys');
+            echo '<!DOCTYPE html><html lang="' . $esc(bakery_locale()) . '"><head><meta charset="utf-8">'
+                . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                . '<title>' . $esc($pageTitle) . '</title>'
+                . '<style>body{font-family:system-ui,sans-serif;margin:0;background:#f6f3ee;color:#24303e}'
+                . 'main{max-width:520px;margin:0 auto;padding:16px 14px 40px}'
+                . 'h1{font-size:20px;margin:8px 0 6px}.sub{font-size:13px;opacity:.7;margin:0 0 14px}'
+                . '.card{display:block;background:#fff;border:1px solid #e4ddd2;border-radius:14px;padding:16px;margin:0 0 12px;text-decoration:none;color:inherit}'
+                . '.card strong{display:block;font-size:16px;margin-bottom:4px}.card span{font-size:13px;opacity:.7}'
+                . '.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}'
+                . '.btn{font:inherit;border:none;border-radius:9px;padding:10px 12px;font-weight:600;background:#2c5aa0;color:#fff;text-decoration:none}'
+                . '.ghost{background:#efe9df;color:#24303e}</style></head><body><main>';
+            echo '<div class="lang-row">';
+            $langSwitchVariant = 'inline';
+            require __DIR__ . '/includes/language_switch.php';
+            echo '</div>';
+            echo '<h1>' . $esc($pageTitle) . '</h1>';
+            echo '<p class="sub">' . $esc(bakery_t('survey.hub_sub', ['date' => $hub['delivery_date']], 'Do step 1 first, then step 2. Same day: :date')) . '</p>';
+            if ($hub['verify_url'] !== '') {
+                echo '<a class="card" href="' . $esc($hub['verify_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step1_title', [], '1 · Lock stores')) . '</strong>'
+                    . '<span>' . $esc(bakery_t('texts.survey_step1_help', [], 'Yes/No which stops')) . '</span>'
+                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_verify', [], 'Lock stores')) . '</span></div></a>';
+            }
+            if ($hub['order_url'] !== '') {
+                echo '<a class="card" href="' . $esc($hub['order_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step2_title', [], '2 · Set order')) . '</strong>'
+                    . '<span>' . $esc(bakery_t('texts.survey_step2_help', [], 'Tap delivery sequence')) . '</span>'
+                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_order', [], 'Set order')) . '</span></div></a>';
+            }
+            if ($isManager) {
+                echo '<p class="sub"><a class="btn ghost" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys') . '">' . $esc(bakery_t('nav.item.survey_center', [], 'Survey Center')) . '</a></p>';
+            }
+            echo '</main></body></html>';
+            exit;
         } catch (Throwable $e) {
-            error_log('survey.php ensure store-verify: ' . $e->getMessage());
+            error_log('survey.php dual hub: ' . $e->getMessage());
         }
     }
 }
@@ -459,6 +495,15 @@ if ($isHqStoreVerify) {
 }
 // Absolute (BASE_URL-aware) so Copy Link keeps Live's /bake/ prefix.
 $selfUrl = bakery_survey_link_url($token, $verifyDate);
+$siblingOrderUrl = '';
+if ($showStoreVerify || $isHqStoreVerify) {
+    try {
+        $sib = bakery_survey_dual_hub_links($db, $driverId, $verifyDate, (int)($user['id'] ?? 0));
+        $siblingOrderUrl = (string)($sib['order_url'] ?? '');
+    } catch (Throwable $e) {
+        error_log('survey sibling order link: ' . $e->getMessage());
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo $esc(bakery_locale()); ?>">
@@ -536,6 +581,9 @@ $selfUrl = bakery_survey_link_url($token, $verifyDate);
         echo $esc(bakery_survey_text('survey.page_title', [], 'Survey'));
     }
   ?></h1>
+  <?php if ($siblingOrderUrl !== ''): ?>
+  <p class="sub"><a href="<?php echo $esc($siblingOrderUrl); ?>" style="color:#2c5aa0;font-weight:700;"><?php echo $esc(bakery_survey_text('survey.sibling_to_order', [], 'Next: set delivery order →')); ?></a></p>
+  <?php endif; ?>
   <?php if ($isHqStoreVerify): ?>
   <p class="who"><?php echo $esc(bakery_survey_text('survey.store_verify_all_drivers', [], 'Every active driver. Assigned stores start ON; other stores start OFF. One send texts headquarters.')); ?></p>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.store_verify_sub', ['date' => $verifyDate], 'Tap the stores you will cover on :date')); ?></p>

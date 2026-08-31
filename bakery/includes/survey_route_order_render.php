@@ -29,6 +29,13 @@ if ($isHq) {
     }
 }
 $selfUrl = bakery_survey_link_url($token, $verifyDate);
+$siblingVerifyUrl = '';
+try {
+    $sib = bakery_survey_dual_hub_links($db, $driverId, $verifyDate, (int)($user['id'] ?? 0));
+    $siblingVerifyUrl = (string)($sib['verify_url'] ?? '');
+} catch (Throwable $e) {
+    error_log('route_order sibling verify link: ' . $e->getMessage());
+}
 $pageTitle = (string)bakery_survey_text('survey.page_title', [], 'Survey');
 $esc = static function ($s): string {
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
@@ -133,6 +140,9 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
 
   <h1><?php echo $esc(bakery_survey_text($isHq ? 'survey.route_order_hq_title' : 'survey.route_order_title', [], 'Delivery order')); ?></h1>
+  <?php if ($siblingVerifyUrl !== ''): ?>
+  <p class="sub"><a href="<?php echo $esc($siblingVerifyUrl); ?>" style="color:#2c5aa0;font-weight:700;"><?php echo $esc(bakery_survey_text('survey.sibling_to_verify', [], '← Back: lock which stores')); ?></a></p>
+  <?php endif; ?>
   <?php if ($isHq): ?>
     <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_order_sub', ['date' => $verifyDate], 'Tap stores in the order you will deliver on :date')); ?></p>
   <?php else: ?>
