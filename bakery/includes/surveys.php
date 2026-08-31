@@ -449,10 +449,14 @@ function bakery_survey_results(PDO $db, int $surveyId): array
 /**
  * Full clickable URL for the survey link page — SMS links must be absolute.
  * Falls back to a relative path only when there is no request context (CLI).
+ * Optional $date keeps store-verify deep links on the intended delivery day.
  */
-function bakery_survey_link_url(string $token): string
+function bakery_survey_link_url(string $token, string $date = ''): string
 {
     $path = 'survey.php?t=' . rawurlencode($token);
+    if ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $path .= '&date=' . rawurlencode($date);
+    }
     $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
     if ($host === '') {
         return (defined('BASE_URL') ? BASE_URL : '/') . $path;

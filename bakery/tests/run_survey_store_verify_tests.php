@@ -333,6 +333,12 @@ $assert(strpos($surveyPhp, 'store_verify_driver_hint') !== false, 'driver survey
 $assert(strpos($surveyPhp, 'store_verify_manager_hint') !== false, 'manager survey explains move plus on/off');
 $assert(strpos($surveyPhp, 'name="date"') !== false, 'date control can change the delivery day');
 $assert(strpos($surveyPhp, 'data-copy-url') !== false, 'HQ exposes copyable manager/driver links');
+$assert(strpos($surveyPhp, 'bakery_survey_link_url') !== false, 'copy links use bakery_survey_link_url (BASE_URL-aware)');
+$assert(strpos($surveyPhp, 'new URL(rel, window.location.href)') !== false, 'copy JS resolves URLs against the current page');
+$assert(
+    strpos($surveyPhp, "location.origin.replace(/\\/$/, '') + '/' + rel") === false,
+    'copy JS must not strip Live /bake/ via origin+/+relative'
+);
 $assert(strpos($surveyPhp, 'language_switch.php') !== false, 'survey page offers EN/ES switch');
 $i18nSrc = (string)file_get_contents($root . '/includes/i18n.php');
 $assert(

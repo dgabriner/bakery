@@ -390,7 +390,8 @@ if ($isHqStoreVerify) {
         }
     }
 }
-$selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate);
+// Absolute (BASE_URL-aware) so Copy Link keeps Live's /bake/ prefix.
+$selfUrl = bakery_survey_link_url($token, $verifyDate);
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo $esc(bakery_locale()); ?>">
@@ -518,7 +519,7 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
           if ($gid <= 0 || $dtok === '') {
               continue;
           }
-          $durl = 'survey.php?t=' . rawurlencode($dtok) . '&date=' . rawurlencode($verifyDate);
+          $durl = bakery_survey_link_url($dtok, $verifyDate);
         ?>
         <div class="row">
           <span><?php echo $esc($gname); ?></span>
@@ -622,7 +623,15 @@ $selfUrl = 'survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($ver
       document.querySelectorAll('[data-copy-url]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var rel = btn.getAttribute('data-copy-url') || '';
-          var url = rel.indexOf('http') === 0 ? rel : (window.location.origin.replace(/\/$/, '') + '/' + rel.replace(/^\//, ''));
+          if (!rel) return;
+          // Resolve against the current page so Live /bake/ is preserved
+          // (origin + '/' + relative path wrongly drops the app prefix).
+          var url;
+          try {
+            url = new URL(rel, window.location.href).href;
+          } catch (e) {
+            return;
+          }
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(function () {
               btn.textContent = '✓';
