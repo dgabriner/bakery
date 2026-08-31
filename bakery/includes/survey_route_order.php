@@ -334,6 +334,18 @@ function bakery_survey_route_order_submit(PDO $db, array $fields): array
             'response' => $json,
         ]);
         $recorded = true;
+        if (function_exists('bakery_survey_find_by_id') && function_exists('bakery_survey_track_submit')) {
+            $surveyRow = bakery_survey_find_by_id($db, $surveyId);
+            if ($surveyRow) {
+                bakery_survey_track_submit(
+                    $db,
+                    $surveyRow,
+                    'route_order',
+                    (int)($fields['staff_user_id'] ?? 0) ?: null,
+                    $driverId > 0 ? $driverId : null
+                );
+            }
+        }
     }
 
     $body = bakery_survey_route_order_sms_body($payload);

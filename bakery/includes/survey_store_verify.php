@@ -805,6 +805,18 @@ function bakery_survey_store_verify_submit(PDO $db, array $fields): array
             'response' => $json,
         ]);
         $recorded = true;
+        if (function_exists('bakery_survey_find_by_id') && function_exists('bakery_survey_track_submit')) {
+            $surveyRow = bakery_survey_find_by_id($db, $surveyId);
+            if ($surveyRow) {
+                bakery_survey_track_submit(
+                    $db,
+                    $surveyRow,
+                    'store_verify',
+                    (int)($fields['staff_user_id'] ?? 0) ?: null,
+                    (int)($fields['driver_id'] ?? 0) ?: null
+                );
+            }
+        }
     } elseif ($surveyId > 0 && function_exists('table_exists') && table_exists($db, 'survey_responses')) {
         $stmt = $db->prepare(
             'INSERT INTO survey_responses (survey_id, action, response, respondent)

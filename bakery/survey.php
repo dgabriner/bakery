@@ -164,6 +164,20 @@ if (bakery_survey_page_needs_identity($survey) && !$isManager && (string)$survey
     }
 }
 
+$sessionDriverId = bakery_route_worker_driver_id($db, $user ?: null, $verifyDate);
+if ($sessionDriverId <= 0 && !empty($user['driver_id'])) {
+    $sessionDriverId = (int)$user['driver_id'];
+}
+$interactionStaffId = (int)($user['id'] ?? 0);
+$interactionDriverId = $sessionDriverId > 0 ? $sessionDriverId : ($driverId > 0 ? $driverId : 0);
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    bakery_survey_record_interaction($db, $survey, 'open', [
+        'staff_user_id' => $interactionStaffId > 0 ? $interactionStaffId : null,
+        'driver_id' => $interactionDriverId > 0 ? $interactionDriverId : null,
+    ]);
+}
+
 $flash = trim((string)($_GET['done'] ?? ''));
 $error = trim((string)($_GET['err'] ?? ''));
 
@@ -192,6 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'daily_order_id' => $dailyOrderId,
                 'response' => $reason,
             ]);
+            bakery_survey_track_submit($db, $survey, 'skip', $interactionStaffId ?: null, $interactionDriverId ?: null);
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_skip', [], 'Stop skipped. Thank you!')));
         }
         if ($action === 'unskip') {
@@ -204,6 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'action' => 'unskip',
                 'daily_order_id' => $dailyOrderId,
             ]);
+            bakery_survey_track_submit($db, $survey, 'unskip', $interactionStaffId ?: null, $interactionDriverId ?: null);
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_unskip', [], 'Stop restored.')));
         }
         if ($action === 'claim') {
@@ -217,6 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'daily_order_id' => (int)$result['daily_order_id'],
                 'response' => $result['message'],
             ]);
+            bakery_survey_track_submit($db, $survey, 'claim', $interactionStaffId ?: null, $interactionDriverId ?: null);
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode($result['message']));
         }
         if ($action === 'answer') {
@@ -241,6 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($answered === 0) {
                 safe_redirect('survey.php?t=' . rawurlencode($token) . '&err=' . rawurlencode((string)bakery_t('survey.err_empty_answer', [], 'Please write an answer first.')));
             }
+            bakery_survey_track_submit($db, $survey, 'answer', $interactionStaffId ?: null, $interactionDriverId ?: null);
             safe_redirect('survey.php?t=' . rawurlencode($token) . '&done=' . rawurlencode((string)bakery_t('survey.done_answer', [], 'Answer recorded. Thank you!')));
         }
         if ($action === 'verify_stores') {
