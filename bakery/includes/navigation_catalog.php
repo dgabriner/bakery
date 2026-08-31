@@ -75,7 +75,7 @@ function bakery_navigation_catalog() {
             'tier' => 'primary',
             'roles' => ['administrator', 'manager'],
             'items' => [
-                ['href' => 'production_manager.php', 'label' => 'Production Manager', 'description' => 'Dashboard of dough types, batch sizes, and pieces for the delivery day — expandable by dough.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'production_manager.php', 'label' => 'Production Manager', 'description' => 'Sense board: dough batches, week order volume, route plan vs actual, and demand vs supply for one delivery day.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'production_center.php', 'label' => 'Production Center', 'description' => 'Production Manager hub: plan one delivery day, assign short bakes to stores, commit for bakers.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'product_manager_plan.php', 'label' => 'Product Manager Plan', 'description' => 'Standards, standing, cover-window demand, and finished goods for the bake horizon.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'ingredient_requirements.php', 'label' => 'Ingredient Planner', 'description' => 'Material requirements from the production plan through formulas to stock and purchase hints.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],

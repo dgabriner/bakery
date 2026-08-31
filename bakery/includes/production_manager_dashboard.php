@@ -5,6 +5,11 @@
  * Groups bake quantities by dough type with pieces, batch size (gal/tray),
  * dough weight, and expandable SKU rows. Complements Production Center
  * (edit/commit) and Daily Production (baker sheet).
+ *
+ * Extra sense tabs (same page, no second module):
+ *   week   — past week / typical weekday order volume
+ *   routes — standing route plan vs dated assignments (incomplete OK)
+ *   supply — forecasted demand vs produced / on-hand
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -13,6 +18,9 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/product_pack_yields.php';
 require_once __DIR__ . '/product_inventory.php';
+
+/** @var list<string> */
+define('BAKERY_PMD_VIEWS', ['batches', 'week', 'routes', 'supply']);
 
 /**
  * Resolve an operating date (default: tomorrow).
@@ -25,6 +33,15 @@ function bakery_pmd_resolve_date(string $raw): string
         return $raw;
     }
     return date('Y-m-d', strtotime('+1 day'));
+}
+
+/**
+ * Resolve the sense tab (default: batches).
+ */
+function bakery_pmd_resolve_view(string $raw): string
+{
+    $raw = strtolower(trim($raw));
+    return in_array($raw, BAKERY_PMD_VIEWS, true) ? $raw : 'batches';
 }
 
 /**
@@ -172,7 +189,7 @@ function bakery_pmd_build(PDO $db, string $date): array
                     COALESCE(available_quantity, 0) AS available_quantity,
                     COALESCE(produced_quantity, 0) AS produced_quantity
              FROM product_inventory_days
-             WHERE inventory_date = ?'
+             WHERE delivery_date = ?'
         );
         $invStmt->execute([$date]);
         foreach ($invStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -202,16 +219,12 @@ function bakery_pmd_build(PDO $db, string $date): array
                 'planned_pieces' => (int)array_sum($draft),
                 'produced_pieces' => 0,
                 'dough_grams' => 0,
+                'dough_weight' => bakery_pmd_format_dough_weight(0),
                 'prior_pieces' => 0,
+                'delta_vs_prior' => 0,
             ],
             'doughs' => [],
-            'links' => [
-                'production_center' => (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date),
-                'production' => (defined('BASE_URL') ? BASE_URL : '') . 'production.php?date=' . rawurlencode($date),
-                'pack_list' => (defined('BASE_URL') ? BASE_URL : '') . 'pack_list.php?date=' . rawurlencode($date),
-                'ingredient_requirements' => (defined('BASE_URL') ? BASE_URL : '') . 'ingredient_requirements.php?date=' . rawurlencode($date) . '&source=demand',
-                'product_manager_plan' => (defined('BASE_URL') ? BASE_URL : '') . 'product_manager_plan.php?date=' . rawurlencode($date),
-            ],
+            'links' => bakery_pmd_links($date),
         ];
     }
 
@@ -429,12 +442,507 @@ function bakery_pmd_build(PDO $db, string $date): array
             'delta_vs_prior' => $sumPieces - $sumPrior,
         ],
         'doughs' => $doughs,
-        'links' => [
-            'production_center' => (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date),
-            'production' => (defined('BASE_URL') ? BASE_URL : '') . 'production.php?date=' . rawurlencode($date),
-            'pack_list' => (defined('BASE_URL') ? BASE_URL : '') . 'pack_list.php?date=' . rawurlencode($date),
-            'ingredient_requirements' => (defined('BASE_URL') ? BASE_URL : '') . 'ingredient_requirements.php?date=' . rawurlencode($date) . '&source=demand',
-            'product_manager_plan' => (defined('BASE_URL') ? BASE_URL : '') . 'product_manager_plan.php?date=' . rawurlencode($date),
+        'links' => bakery_pmd_links($date),
+    ];
+}
+
+/**
+ * Shared deep links for the Production Manager sense board.
+ *
+ * @return array<string,string>
+ */
+function bakery_pmd_links(string $date): array
+{
+    $base = defined('BASE_URL') ? BASE_URL : '';
+    $q = rawurlencode($date);
+    return [
+        'production_center' => $base . 'production_center.php?date=' . $q,
+        'production' => $base . 'production.php?date=' . $q,
+        'pack_list' => $base . 'pack_list.php?date=' . $q,
+        'ingredient_requirements' => $base . 'ingredient_requirements.php?date=' . $q . '&source=demand',
+        'product_manager_plan' => $base . 'product_manager_plan.php?date=' . $q,
+        'daily_orders' => $base . 'daily_orders.php?date=' . $q,
+        'daily_route' => $base . 'daily_route.php?date=' . $q,
+        'route_manager' => $base . 'route_manager.php?date=' . $q,
+        'inventory' => $base . 'inventory.php?date=' . $q,
+        'standing_routes' => $base . 'standing_routes.php',
+    ];
+}
+
+/**
+ * Past-week daily order volume + typical weekday sense for the selected day.
+ *
+ * Uses dated daily_orders / items (commercial commitment). Incomplete days
+ * still show — zeros mean no dated orders on file yet.
+ *
+ * @return array<string,mixed>
+ */
+function bakery_pmd_week_orders(PDO $db, string $date): array
+{
+    $date = bakery_pmd_resolve_date($date);
+    $start = date('Y-m-d', strtotime($date . ' -6 days'));
+    $weekday = bakery_standing_day_from_date($date);
+    $dayNames = function_exists('bakery_day_names') ? bakery_day_names() : [];
+    $dayLabel = $dayNames[$weekday] ?? date('l', strtotime($date));
+
+    $byDate = [];
+    for ($i = 0; $i < 7; $i++) {
+        $d = date('Y-m-d', strtotime($start . " +{$i} days"));
+        $wd = bakery_standing_day_from_date($d);
+        $byDate[$d] = [
+            'date' => $d,
+            'label' => date('D n/j', strtotime($d)),
+            'weekday' => $wd,
+            'weekday_label' => $dayNames[$wd] ?? date('l', strtotime($d)),
+            'is_selected' => $d === $date,
+            'customers' => 0,
+            'lines' => 0,
+            'pieces' => 0,
+            'has_orders' => false,
+        ];
+    }
+
+    if (table_exists($db, 'daily_orders') && table_exists($db, 'daily_order_items')) {
+        try {
+            $stmt = $db->prepare(
+                'SELECT do.order_date,
+                        COUNT(DISTINCT do.id) AS order_count,
+                        COUNT(DISTINCT do.customer_id) AS customers,
+                        COUNT(doi.id) AS lines,
+                        COALESCE(SUM(doi.quantity), 0) AS pieces
+                 FROM daily_orders do
+                 LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
+                 WHERE do.order_date BETWEEN ? AND ?
+                 GROUP BY do.order_date'
+            );
+            $stmt->execute([$start, $date]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $d = (string)$row['order_date'];
+                if (!isset($byDate[$d])) {
+                    continue;
+                }
+                $byDate[$d]['customers'] = (int)$row['customers'];
+                $byDate[$d]['lines'] = (int)$row['lines'];
+                $byDate[$d]['pieces'] = (int)$row['pieces'];
+                $byDate[$d]['has_orders'] = ((int)$row['order_count']) > 0;
+            }
+        } catch (Throwable $e) {
+            error_log('pmd week orders: ' . $e->getMessage());
+        }
+    }
+
+    $days = array_values($byDate);
+    $pieceVals = array_map(static fn(array $d): int => (int)$d['pieces'], $days);
+    $activeDays = array_values(array_filter($days, static fn(array $d): bool => !empty($d['has_orders'])));
+    $activePieces = array_map(static fn(array $d): int => (int)$d['pieces'], $activeDays);
+    $weekTotal = array_sum($pieceVals);
+    $weekAvg = $activePieces !== []
+        ? (int)round(array_sum($activePieces) / count($activePieces))
+        : 0;
+
+    // Typical for this weekday: last 8 matching weekdays ending on selected date.
+    $typicalPieces = [];
+    $typicalCustomers = [];
+    if (table_exists($db, 'daily_orders') && table_exists($db, 'daily_order_items')) {
+        try {
+            $lookbackStart = date('Y-m-d', strtotime($date . ' -56 days'));
+            $stmt = $db->prepare(
+                'SELECT do.order_date,
+                        COUNT(DISTINCT do.customer_id) AS customers,
+                        COALESCE(SUM(doi.quantity), 0) AS pieces
+                 FROM daily_orders do
+                 LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
+                 WHERE do.order_date BETWEEN ? AND ?
+                 GROUP BY do.order_date
+                 ORDER BY do.order_date DESC'
+            );
+            $stmt->execute([$lookbackStart, $date]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if (bakery_standing_day_from_date((string)$row['order_date']) !== $weekday) {
+                    continue;
+                }
+                $typicalPieces[] = (int)$row['pieces'];
+                $typicalCustomers[] = (int)$row['customers'];
+                if (count($typicalPieces) >= 8) {
+                    break;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('pmd typical weekday: ' . $e->getMessage());
+        }
+    }
+
+    $typicalAvg = $typicalPieces !== []
+        ? (int)round(array_sum($typicalPieces) / count($typicalPieces))
+        : 0;
+    $selected = $byDate[$date];
+    $vsTypical = $typicalAvg > 0 ? ((int)$selected['pieces'] - $typicalAvg) : null;
+
+    // Top products on the selected day (simple sense of mix).
+    $topProducts = [];
+    if (table_exists($db, 'daily_order_items') && table_exists($db, 'daily_orders') && table_exists($db, 'products')) {
+        try {
+            $stmt = $db->prepare(
+                'SELECT p.id AS product_id, p.name,
+                        COALESCE(SUM(doi.quantity), 0) AS pieces,
+                        COUNT(DISTINCT do.customer_id) AS customers
+                 FROM daily_order_items doi
+                 JOIN daily_orders do ON do.id = doi.daily_order_id
+                 JOIN products p ON p.id = doi.product_id
+                 WHERE do.order_date = ?
+                 GROUP BY p.id, p.name
+                 HAVING pieces > 0
+                 ORDER BY pieces DESC, p.name ASC
+                 LIMIT 12'
+            );
+            $stmt->execute([$date]);
+            $topProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($topProducts as &$tp) {
+                $tp['product_id'] = (int)$tp['product_id'];
+                $tp['pieces'] = (int)$tp['pieces'];
+                $tp['customers'] = (int)$tp['customers'];
+            }
+            unset($tp);
+        } catch (Throwable $e) {
+            error_log('pmd week top products: ' . $e->getMessage());
+        }
+    }
+
+    return [
+        'date' => $date,
+        'start' => $start,
+        'weekday' => $weekday,
+        'weekday_label' => $dayLabel,
+        'days' => $days,
+        'summary' => [
+            'week_pieces' => $weekTotal,
+            'week_avg_active' => $weekAvg,
+            'active_days' => count($activeDays),
+            'selected_pieces' => (int)$selected['pieces'],
+            'selected_customers' => (int)$selected['customers'],
+            'typical_weekday_avg' => $typicalAvg,
+            'typical_sample_size' => count($typicalPieces),
+            'vs_typical' => $vsTypical,
         ],
+        'top_products' => $topProducts,
+        'incomplete' => count($activeDays) < 7,
+        'links' => bakery_pmd_links($date),
+    ];
+}
+
+/**
+ * Standing weekday route plan lined up with dated route actuals.
+ *
+ * Incomplete data is expected — missing assignments or delivery times still
+ * appear so the gap is visible.
+ *
+ * @return array<string,mixed>
+ */
+function bakery_pmd_route_plan_vs_actual(PDO $db, string $date): array
+{
+    $date = bakery_pmd_resolve_date($date);
+    $weekday = bakery_standing_day_from_date($date);
+    $dayClause = bakery_standing_day_in_clause($weekday);
+    $dayNames = function_exists('bakery_day_names') ? bakery_day_names() : [];
+    $dayLabel = $dayNames[$weekday] ?? date('l', strtotime($date));
+
+    $plannedByCustomer = [];
+    if (table_exists($db, 'standing_routes') && table_exists($db, 'customers') && table_exists($db, 'drivers')) {
+        try {
+            $sql = "SELECT sr.customer_id, c.name AS customer_name, c.zone,
+                           sr.driver_id AS plan_driver_id, d.name AS plan_driver_name,
+                           sr.route_order AS plan_route_order
+                    FROM standing_routes sr
+                    JOIN customers c ON c.id = sr.customer_id
+                    JOIN drivers d ON d.id = sr.driver_id
+                    WHERE sr.day_of_week {$dayClause['sql']}
+                    ORDER BY d.name, COALESCE(sr.route_order, 9999), c.name";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($dayClause['values']);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cid = (int)$row['customer_id'];
+                $plannedByCustomer[$cid] = [
+                    'customer_id' => $cid,
+                    'customer_name' => (string)$row['customer_name'],
+                    'zone' => (string)($row['zone'] ?? ''),
+                    'plan_driver_id' => (int)$row['plan_driver_id'],
+                    'plan_driver_name' => (string)$row['plan_driver_name'],
+                    'plan_route_order' => $row['plan_route_order'] !== null ? (int)$row['plan_route_order'] : null,
+                ];
+            }
+        } catch (Throwable $e) {
+            error_log('pmd route plan: ' . $e->getMessage());
+        }
+    }
+
+    $actualByCustomer = [];
+    if (table_exists($db, 'daily_order_assignments') && table_exists($db, 'daily_orders')) {
+        try {
+            $stmt = $db->prepare(
+                "SELECT do.customer_id, c.name AS customer_name, c.zone,
+                        doa.driver_id AS actual_driver_id, d.name AS actual_driver_name,
+                        doa.route_order AS actual_route_order,
+                        doa.delivery_status,
+                        doa.scheduled_delivery_time,
+                        doa.actual_delivery_time,
+                        doa.estimated_delivery_time
+                 FROM daily_order_assignments doa
+                 JOIN daily_orders do ON do.id = doa.daily_order_id
+                 JOIN customers c ON c.id = do.customer_id
+                 JOIN drivers d ON d.id = doa.driver_id
+                 WHERE doa.delivery_date = ?
+                 ORDER BY d.name, COALESCE(doa.route_order, 9999), c.name"
+            );
+            $stmt->execute([$date]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cid = (int)$row['customer_id'];
+                // If a customer somehow has multiple assignments, keep the first (lowest route order).
+                if (isset($actualByCustomer[$cid])) {
+                    continue;
+                }
+                $actualByCustomer[$cid] = [
+                    'customer_id' => $cid,
+                    'customer_name' => (string)$row['customer_name'],
+                    'zone' => (string)($row['zone'] ?? ''),
+                    'actual_driver_id' => (int)$row['actual_driver_id'],
+                    'actual_driver_name' => (string)$row['actual_driver_name'],
+                    'actual_route_order' => isset($row['actual_route_order']) ? (int)$row['actual_route_order'] : null,
+                    'delivery_status' => (string)($row['delivery_status'] ?? 'pending'),
+                    'scheduled_delivery_time' => $row['scheduled_delivery_time'] ?? null,
+                    'actual_delivery_time' => $row['actual_delivery_time'] ?? null,
+                    'estimated_delivery_time' => $row['estimated_delivery_time'] ?? null,
+                ];
+            }
+        } catch (Throwable $e) {
+            error_log('pmd route actual: ' . $e->getMessage());
+        }
+    }
+
+    $ids = array_unique(array_merge(array_keys($plannedByCustomer), array_keys($actualByCustomer)));
+    $rows = [];
+    $match = 0;
+    $reassigned = 0;
+    $planOnly = 0;
+    $actualOnly = 0;
+    $delivered = 0;
+    $pending = 0;
+
+    foreach ($ids as $cid) {
+        $plan = $plannedByCustomer[$cid] ?? null;
+        $act = $actualByCustomer[$cid] ?? null;
+        $name = $plan['customer_name'] ?? $act['customer_name'] ?? ('#' . $cid);
+        $zone = $plan['zone'] ?? $act['zone'] ?? '';
+        $planDriver = $plan['plan_driver_name'] ?? null;
+        $actDriver = $act['actual_driver_name'] ?? null;
+        $status = $act['delivery_status'] ?? null;
+
+        if ($plan && $act) {
+            $same = ((int)$plan['plan_driver_id'] === (int)$act['actual_driver_id']);
+            $alignment = $same ? 'match' : 'reassigned';
+            if ($same) {
+                $match++;
+            } else {
+                $reassigned++;
+            }
+        } elseif ($plan && !$act) {
+            $alignment = 'plan_only';
+            $planOnly++;
+        } else {
+            $alignment = 'actual_only';
+            $actualOnly++;
+        }
+
+        if ($status === 'delivered') {
+            $delivered++;
+        } elseif ($status !== null && !in_array($status, ['cancelled'], true)) {
+            $pending++;
+        }
+
+        $rows[] = [
+            'customer_id' => (int)$cid,
+            'customer_name' => $name,
+            'zone' => $zone,
+            'plan_driver_name' => $planDriver,
+            'plan_route_order' => $plan['plan_route_order'] ?? null,
+            'actual_driver_name' => $actDriver,
+            'actual_route_order' => $act['actual_route_order'] ?? null,
+            'delivery_status' => $status,
+            'scheduled_delivery_time' => $act['scheduled_delivery_time'] ?? null,
+            'actual_delivery_time' => $act['actual_delivery_time'] ?? null,
+            'alignment' => $alignment,
+        ];
+    }
+
+    usort($rows, static function (array $a, array $b): int {
+        $da = (string)($a['plan_driver_name'] ?? $a['actual_driver_name'] ?? '');
+        $dbn = (string)($b['plan_driver_name'] ?? $b['actual_driver_name'] ?? '');
+        $byDriver = strcasecmp($da, $dbn);
+        if ($byDriver !== 0) {
+            return $byDriver;
+        }
+        $oa = $a['plan_route_order'] ?? $a['actual_route_order'] ?? 9999;
+        $ob = $b['plan_route_order'] ?? $b['actual_route_order'] ?? 9999;
+        return $oa <=> $ob ?: strcasecmp($a['customer_name'], $b['customer_name']);
+    });
+
+    return [
+        'date' => $date,
+        'weekday' => $weekday,
+        'weekday_label' => $dayLabel,
+        'rows' => $rows,
+        'summary' => [
+            'planned_stops' => count($plannedByCustomer),
+            'actual_stops' => count($actualByCustomer),
+            'matched' => $match,
+            'reassigned' => $reassigned,
+            'plan_only' => $planOnly,
+            'actual_only' => $actualOnly,
+            'delivered' => $delivered,
+            'open' => $pending,
+        ],
+        'incomplete' => $planOnly > 0 || $actualOnly > 0 || count($actualByCustomer) === 0,
+        'links' => bakery_pmd_links($date),
+    ];
+}
+
+/**
+ * Forecasted / dated demand need vs produced and on-hand inventory.
+ *
+ * Standing is forecast; dated demand is the operating commitment (via bake list).
+ *
+ * @return array<string,mixed>
+ */
+function bakery_pmd_demand_vs_supply(PDO $db, string $date): array
+{
+    $date = bakery_pmd_resolve_date($date);
+    $bakeList = bakery_production_bake_list($db, $date);
+    $inventoryReady = function_exists('bakery_inventory_ready') && bakery_inventory_ready($db);
+
+    $onHand = [];
+    $produced = [];
+    $loaded = [];
+    if ($inventoryReady && table_exists($db, 'product_inventory_days')) {
+        try {
+            $stmt = $db->prepare(
+                'SELECT product_id,
+                        COALESCE(available_quantity, 0) AS available_quantity,
+                        COALESCE(produced_quantity, 0) AS produced_quantity,
+                        COALESCE(loaded_quantity, 0) AS loaded_quantity
+                 FROM product_inventory_days
+                 WHERE delivery_date = ?'
+            );
+            $stmt->execute([$date]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $pid = (int)$row['product_id'];
+                $onHand[$pid] = (int)$row['available_quantity'];
+                $produced[$pid] = (int)$row['produced_quantity'];
+                $loaded[$pid] = (int)$row['loaded_quantity'];
+            }
+        } catch (Throwable $e) {
+            error_log('pmd supply inventory: ' . $e->getMessage());
+        }
+    }
+
+    $rows = [];
+    $sumDemand = 0;
+    $sumBake = 0;
+    $sumProduced = 0;
+    $sumOnHand = 0;
+    $shortCount = 0;
+    $okCount = 0;
+
+    $names = [];
+    $productIds = [];
+    foreach ($bakeList['items'] as $item) {
+        $productIds[] = (int)$item['product_id'];
+    }
+    $productIds = array_values(array_unique(array_filter($productIds)));
+    if ($productIds !== [] && table_exists($db, 'products')) {
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+        try {
+            $nameStmt = $db->prepare("SELECT id, name FROM products WHERE id IN ({$placeholders})");
+            $nameStmt->execute($productIds);
+            foreach ($nameStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $names[(int)$row['id']] = (string)$row['name'];
+            }
+        } catch (Throwable $e) {
+            error_log('pmd supply names: ' . $e->getMessage());
+        }
+    }
+
+    foreach ($bakeList['items'] as $item) {
+        $pid = (int)$item['product_id'];
+        $demand = (int)$item['demand_quantity'];
+        $bake = (int)$item['bake_quantity'];
+        $made = (int)($produced[$pid] ?? 0);
+        $hand = (int)($onHand[$pid] ?? 0);
+        $load = (int)($loaded[$pid] ?? 0);
+        // Cover = best finished-goods signal available for the day.
+        $cover = max($made, $hand);
+        $gap = $demand - $cover;
+        if ($demand <= 0 && $bake <= 0 && $made <= 0 && $hand <= 0) {
+            continue;
+        }
+        $tone = 'ok';
+        if ($demand > 0 && $gap > 0) {
+            $tone = 'short';
+            $shortCount++;
+        } elseif ($demand > 0 && $gap <= 0) {
+            $okCount++;
+        } elseif ($demand <= 0 && ($bake > 0 || $made > 0 || $hand > 0)) {
+            $tone = 'extra';
+        }
+
+        $rows[] = [
+            'product_id' => $pid,
+            'name' => $names[$pid] ?? ('#' . $pid),
+            'demand' => $demand,
+            'bake' => $bake,
+            'produced' => $made,
+            'on_hand' => $hand,
+            'loaded' => $load,
+            'cover' => $cover,
+            'gap' => $gap,
+            'tone' => $tone,
+            'source' => (string)($item['source'] ?? ''),
+        ];
+        $sumDemand += $demand;
+        $sumBake += $bake;
+        $sumProduced += $made;
+        $sumOnHand += $hand;
+    }
+
+    usort($rows, static function (array $a, array $b): int {
+        $toneRank = ['short' => 0, 'extra' => 1, 'ok' => 2];
+        $ra = $toneRank[$a['tone']] ?? 9;
+        $rb = $toneRank[$b['tone']] ?? 9;
+        if ($ra !== $rb) {
+            return $ra <=> $rb;
+        }
+        // Larger shortage first.
+        if ($a['tone'] === 'short' && $b['tone'] === 'short') {
+            return $b['gap'] <=> $a['gap'];
+        }
+        return strcasecmp($a['name'], $b['name']);
+    });
+
+    return [
+        'date' => $date,
+        'committed' => !empty($bakeList['committed']),
+        'bake_source' => !empty($bakeList['committed']) ? 'committed_plan' : 'demand',
+        'inventory_ready' => $inventoryReady,
+        'rows' => $rows,
+        'summary' => [
+            'products' => count($rows),
+            'demand' => $sumDemand,
+            'bake' => $sumBake,
+            'produced' => $sumProduced,
+            'on_hand' => $sumOnHand,
+            'short_skus' => $shortCount,
+            'covered_skus' => $okCount,
+            'net_gap' => $sumDemand - max($sumProduced, $sumOnHand),
+        ],
+        'incomplete' => !$inventoryReady || ($sumProduced === 0 && $sumOnHand === 0 && $sumDemand > 0),
+        'links' => bakery_pmd_links($date),
     ];
 }

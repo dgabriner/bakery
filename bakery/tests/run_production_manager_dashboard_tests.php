@@ -31,6 +31,16 @@ $assert(is_file($root . '/includes/production_manager_dashboard.php'), 'dashboar
 
 $assert(bakery_pmd_resolve_date('2026-08-27') === '2026-08-27', 'resolve valid date');
 $assert(bakery_pmd_resolve_date('nope') === date('Y-m-d', strtotime('+1 day')), 'resolve invalid → tomorrow');
+$assert(bakery_pmd_resolve_view('week') === 'week', 'resolve week view');
+$assert(bakery_pmd_resolve_view('ROUTES') === 'routes', 'resolve routes view case-insensitive');
+$assert(bakery_pmd_resolve_view('nope') === 'batches', 'resolve bad view → batches');
+$assert(bakery_pmd_resolve_view('') === 'batches', 'resolve empty view → batches');
+
+$links = bakery_pmd_links('2026-08-27');
+$assert(strpos($links['production_center'], 'production_center.php') !== false, 'links include production center');
+$assert(strpos($links['daily_orders'], 'daily_orders.php') !== false, 'links include daily orders');
+$assert(strpos($links['route_manager'], 'route_manager.php') !== false, 'links include route manager');
+$assert(strpos($links['inventory'], 'inventory.php') !== false, 'links include inventory');
 
 $wt = bakery_pmd_format_dough_weight(79200);
 $assert($wt['grams'] === 79200, 'dough weight grams');
@@ -86,6 +96,21 @@ if (is_readable($envPath)) {
             $assert(is_array($board['doughs']), 'doughs is list');
             $assert(isset($board['summary']['pieces']), 'summary pieces');
             $assert(strpos($board['links']['production_center'], 'production_center.php') !== false, 'center link');
+
+            $week = bakery_pmd_week_orders($db, $date);
+            $assert(count($week['days']) === 7, 'week has 7 days');
+            $assert(isset($week['summary']['week_pieces'], $week['summary']['typical_weekday_avg']), 'week summary keys');
+            $assert(is_array($week['top_products']), 'week top products list');
+
+            $routes = bakery_pmd_route_plan_vs_actual($db, $date);
+            $assert(isset($routes['summary']['planned_stops'], $routes['summary']['actual_stops']), 'routes summary keys');
+            $assert(is_array($routes['rows']), 'routes rows list');
+
+            $supply = bakery_pmd_demand_vs_supply($db, $date);
+            $assert(isset($supply['summary']['demand'], $supply['summary']['short_skus']), 'supply summary keys');
+            $assert(is_array($supply['rows']), 'supply rows list');
+            $assert(isset($supply['inventory_ready']), 'supply inventory_ready flag');
+
             $ranBoard = true;
         }
     } catch (Throwable $e) {
