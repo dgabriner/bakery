@@ -56,11 +56,12 @@ Server-side role enforcement lives in `includes/auth.php`; menu in
 | **Order/customer manager** | Find a customer fast; see their normal pattern and today's exception; create/edit orders safely; manage standing orders, pauses, pricing. |
 | **Production planner** | Turn confirmed demand into one production plan; know the baker sees the approved numbers; hear about late changes. Works in Production Center + Ingredient Planner. |
 | **Baker** | A clear, sequenced workload: what, how much, which dough, formula grams. Sees only Daily Production + Pack List, filtered to assigned product lines. Should never reverse-engineer orders. |
+| **Cashier** | Capture and maintain product catalog photos. Sees **Product Photos** only (`product_photos.php` + upload API). Initial user: Sarita, code `8989`. |
 | **Packing staff** | What goes in whose bag/box, what's short, what's done. Pack List (by product or by customer). |
 | **Driver / Driver Assistant** | Mobile-first: next stop, compact remaining-stop map (live location + numbered pins) with next-leg, next-three, and full-day views, driving distance/time, delivery-window context, next-three horizon, remembered scope, and zoom controls; then navigate, photo → pieces/credits → COD → invoice preview → confirm. Remaining stops can be reordered on My Route (`Go next` or compact Adjust). A Driver Assistant works the paired driver's route (default or dated pairing), so both update the same stops and delivery records. Driver code login creates a rolling trusted-phone credential that can rebuild a lost PHP session; explicit logout or deactivation revokes access. Sees My Route + Call HQ only. The reference implementation for role UX — study it before building other role flows. |
 | **Customer (portal)** | See/edit upcoming deliveries and standing order, pause weeks, view invoices/statements/photos, report issues. Login: 4-digit code or staff-generated QR. |
 
-Defaults: baker/driver/manager UIs lean Spanish, admin English; i18n is complete —
+Defaults: baker/driver/manager/cashier UIs lean Spanish, admin English; i18n is complete —
 `lang/en.php` and `lang/es.php` sit at exact key parity (3,052/3,052, verified 2026-08-23),
 with no raw-key references left in any scanned surface. If you add user-facing strings, add
 `lang/en.php` AND `lang/es.php` keys in the same change — Spanish must be a genuine

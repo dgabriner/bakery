@@ -15,7 +15,9 @@ if ($existingUser = bakery_current_user()) {
         ? 'driver.php'
         : ($existingRole === 'baker'
             ? ('production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day'))))
-            : ($existingRole === 'manager' ? 'manager.php' : 'index.php'));
+            : ($existingRole === 'cashier'
+                ? 'product_photos.php'
+                : ($existingRole === 'manager' ? 'manager.php' : 'index.php')));
     header('Location: ' . BASE_URL . $existingHome);
     exit;
 }
@@ -45,12 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (function_exists('bakery_served_at_app_root') && bakery_served_at_app_root() && strpos($dest, '/bakery/') === 0) {
                     $dest = substr($dest, 7) ?: '/';
                 }
-                // Drivers land on their route; bakers on their daily production work.
+                // Drivers land on their route; bakers on production; cashiers on product photos.
                 $user = bakery_current_user();
                 if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
                     $dest = BASE_URL . 'driver.php';
                 } elseif ($user && $user['role_slug'] === 'baker') {
                     $dest = BASE_URL . 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
+                } elseif ($user && ($user['role_slug'] ?? '') === 'cashier') {
+                    $dest = BASE_URL . 'product_photos.php';
                 } elseif ($user && ($user['role_slug'] ?? '') === 'manager') {
                     $dest = BASE_URL . 'manager.php';
                 }

@@ -209,6 +209,10 @@ t_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'baker_mix is 
 t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');
 t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not baker-accessible');
 t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'production center is not baker-accessible');
+t_assert(in_array('product_photos.php', bakery_cashier_scripts(), true), 'product_photos is cashier-accessible');
+t_assert(in_array('upload_product_photo.php', bakery_cashier_scripts(), true), 'upload_product_photo is cashier-accessible');
+t_assert(!in_array('products.php', bakery_cashier_scripts(), true), 'products CRUD is not cashier-accessible');
+t_assert(!in_array('index.php', bakery_cashier_scripts(), true), 'index is not cashier-accessible');
 
 echo "=== Baker role ===\n";
 bakery_logout();
@@ -223,6 +227,25 @@ t_assert($bakerUser && $bakerUser['role_slug'] === 'baker', 'baker role remains 
 t_assert(bakery_user_has_permission($db, 'ops.manage'), 'baker has ops.manage');
 t_assert(($bakerUser['role_slug'] ?? '') !== 'administrator', 'baker session is not administrator');
 
+echo "=== Cashier role / Sarita ===\n";
+bakery_logout();
+auth_test_reset_session();
+t_assert(bakery_ensure_sarita_cashier($db) === true, 'Sarita cashier can be ensured');
+$sarita = $db->query(
+    "SELECT u.login_code, u.display_name, u.is_active, r.slug AS role_slug
+     FROM users u JOIN roles r ON r.id = u.role_id
+     WHERE u.email = 'sarita@sourflour.local' LIMIT 1"
+)->fetch(PDO::FETCH_ASSOC);
+t_assert($sarita && $sarita['role_slug'] === 'cashier', 'Sarita has cashier role');
+t_assert($sarita && $sarita['login_code'] === '8989', 'Sarita login code is 8989');
+t_assert($sarita && (int)$sarita['is_active'] === 1, 'Sarita is active');
+t_assert(bakery_login($db, '8989'), 'Sarita can sign in with code 8989');
+$cashierUser = bakery_current_user();
+t_assert($cashierUser && $cashierUser['role_slug'] === 'cashier', 'logged-in Sarita session is cashier');
+t_assert($cashierUser && $cashierUser['display_name'] === 'Sarita', 'logged-in display name is Sarita');
+t_assert(bakery_user_has_permission($db, 'ops.manage'), 'cashier has ops.manage for catalog photo work');
+bakery_logout();
+auth_test_reset_session();
 function auth_test_http_request($method, $url, $options = []) {
     $headers = $options['headers'] ?? [];
     if (!empty($options['cookie'])) {

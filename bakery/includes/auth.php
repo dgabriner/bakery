@@ -141,6 +141,17 @@ function bakery_baker_scripts() {
 }
 
 /**
+ * Cashier pages (managers/admins also allowed). Cashiers capture and manage
+ * product catalog photos only — no product CRUD, orders, or routes.
+ */
+function bakery_cashier_scripts() {
+    return [
+        'product_photos.php',
+        'upload_product_photo.php',
+    ];
+}
+
+/**
  * Normalize a 4-digit login code. Returns '' when invalid.
  */
 function bakery_normalize_login_code($code) {
@@ -372,7 +383,54 @@ function bakery_baker_product_ids(PDO $db) {
 }
 
 /**
- * Ensure primary staff code logins (admin, baker, drivers).
+ * Ensure cashier role exists and seed Sarita (code 8989) as the initial cashier.
+ * Idempotent — safe on every environment after the cashier role migration.
+ */
+function bakery_ensure_cashier_role(PDO $db) {
+    $db->exec(
+        "INSERT INTO roles (slug, name, description) VALUES
+         ('cashier', 'Cashier', 'Product catalog photos only')
+         ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)"
+    );
+
+    $permStmt = $db->prepare('SELECT id FROM permissions WHERE slug = ? LIMIT 1');
+    $permStmt->execute(['ops.manage']);
+    $permId = $permStmt->fetchColumn();
+    if ($permId) {
+        $roleStmt = $db->prepare('SELECT id FROM roles WHERE slug = ? LIMIT 1');
+        $roleStmt->execute(['cashier']);
+        $roleId = $roleStmt->fetchColumn();
+        if ($roleId) {
+            $link = $db->prepare(
+                'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE role_id = role_id'
+            );
+            $link->execute([(int)$roleId, (int)$permId]);
+        }
+    }
+    return true;
+}
+
+/**
+ * Ensure Sarita cashier login (code 8989) exists.
+ */
+function bakery_ensure_sarita_cashier(PDO $db) {
+    if (!table_exists($db, 'users') || !table_exists($db, 'roles')) {
+        return false;
+    }
+    bakery_ensure_login_code_column($db);
+    bakery_ensure_cashier_role($db);
+    return bakery_upsert_code_user($db, [
+        'email' => 'sarita@sourflour.local',
+        'display_name' => 'Sarita',
+        'role' => 'cashier',
+        'code' => '8989',
+        'driver_id' => null,
+    ]);
+}
+
+/**
+ * Ensure primary staff code logins (admin, baker, drivers, cashier).
  */
 function bakery_ensure_staff_code_users(PDO $db) {
     if (!IS_LOCAL) {
@@ -380,6 +438,7 @@ function bakery_ensure_staff_code_users(PDO $db) {
     }
     bakery_ensure_login_code_column($db);
     bakery_ensure_baker_user($db);
+    bakery_ensure_sarita_cashier($db);
 
     if (BAKERY_ADMIN_EMAIL !== '' && BAKERY_ADMIN_CODE !== '') {
         bakery_upsert_code_user($db, [
@@ -1048,6 +1107,7 @@ function bakery_enforce_request_security(PDO $db = null) {
     $isDiagnostic = in_array($script, bakery_diagnostic_scripts(), true);
     $isDriverScript = in_array($script, bakery_driver_scripts(), true);
     $isBakerScript = in_array($script, bakery_baker_scripts(), true);
+    $isCashierScript = in_array($script, bakery_cashier_scripts(), true);
 
     if ($isDiagnostic) {
         bakery_require_role(['administrator']);
@@ -1058,8 +1118,10 @@ function bakery_enforce_request_security(PDO $db = null) {
         bakery_require_role(['administrator', 'manager', 'baker']);
     } elseif ($isDriverScript) {
         bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+    } elseif ($isCashierScript) {
+        bakery_require_role(['administrator', 'manager', 'cashier']);
     } else {
-        // Default ops UI: manager + administrator. Drivers/bakers stay on their scripts.
+        // Default ops UI: manager + administrator. Drivers/bakers/cashiers stay on their scripts.
         bakery_require_role(['administrator', 'manager']);
     }
 

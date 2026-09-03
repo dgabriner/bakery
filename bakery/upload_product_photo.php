@@ -1,6 +1,6 @@
 <?php
 /**
- * Manager API for product catalog photos.
+ * Product catalog photo API (manager / administrator / cashier).
  */
 define('ACCESS_ALLOWED', true);
 

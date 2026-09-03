@@ -132,10 +132,10 @@ function bakery_navigation_catalog() {
             'label' => 'Products & Recipes',
             'description' => 'Keep the products and formulas used by production accurate.',
             'tier' => 'extras',
-            'roles' => ['administrator', 'manager'],
+            'roles' => ['administrator', 'manager', 'cashier'],
             'items' => [
                 ['href' => 'products.php', 'label' => 'Products', 'description' => 'Manage the products that can be ordered and produced.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
-                ['href' => 'product_photos.php', 'label' => 'Product Photos', 'description' => 'Capture and manage catalog images with a primary photo per product.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'product_photos.php', 'label' => 'Product Photos', 'description' => 'Capture and manage catalog images with a primary photo per product.', 'roles' => ['administrator', 'manager', 'cashier'], 'usage' => 'occasional'],
                 ['href' => 'dough_types.php', 'label' => 'Dough Types & Lines', 'description' => 'Organize dough types and product lines.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'formulas.php', 'label' => 'Formulas', 'description' => 'Maintain dough formulas and recipe ratios.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'ingredients.php', 'label' => 'Ingredients', 'description' => 'Maintain the raw ingredient catalogue.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -275,6 +275,7 @@ function bakery_navigation_role_label($role) {
         'administrator' => 'Administrator',
         'manager' => 'Manager',
         'baker' => 'Baker',
+        'cashier' => 'Cashier',
         'driver' => 'Driver',
         'driver_assistant' => 'Driver Assistant',
     ];

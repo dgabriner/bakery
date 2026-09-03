@@ -17,7 +17,7 @@ function bakery_default_locale_for_role(?string $roleSlug, bool $isPortalCustome
     if ($isPortalCustomer) {
         return 'en';
     }
-    if (in_array($roleSlug, ['baker', 'driver', 'manager'], true)) {
+    if (in_array($roleSlug, ['baker', 'driver', 'driver_assistant', 'manager', 'cashier'], true)) {
         return 'es';
     }
     return 'en';

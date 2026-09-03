@@ -21,6 +21,7 @@ $roleLabels = [
     'administrator' => 'Administrator',
     'manager' => 'Manager',
     'baker' => 'Baker',
+    'cashier' => 'Cashier',
     'driver' => 'Driver',
     'driver_assistant' => 'Driver Assistant',
 ];

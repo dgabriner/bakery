@@ -87,10 +87,20 @@ navigation_test_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 
 navigation_test_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'bakers can access Pack List');
 navigation_test_assert(!in_array('index.php', bakery_baker_scripts(), true), 'bakers cannot access the operations dashboard');
 navigation_test_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'bakers cannot access Production Center');
+navigation_test_assert(in_array('product_photos.php', bakery_cashier_scripts(), true), 'cashiers can access Product Photos');
+navigation_test_assert(in_array('upload_product_photo.php', bakery_cashier_scripts(), true), 'cashiers can upload product photos');
+navigation_test_assert(!in_array('products.php', bakery_cashier_scripts(), true), 'cashiers cannot access Products CRUD');
+navigation_test_assert(!in_array('index.php', bakery_cashier_scripts(), true), 'cashiers cannot access the operations dashboard');
 navigation_test_assert(in_array('driver.php', bakery_driver_scripts(), true), 'drivers can access My Route');
 navigation_test_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 'drivers can access Customer QR Login');
 navigation_test_assert(in_array('call_headquarters.php', bakery_driver_scripts(), true), 'drivers can access Call HQ');
 
+$cashierItems = [];
+foreach (bakery_navigation_groups_for_role('cashier') as $group) {
+    $cashierItems = array_merge($cashierItems, array_column($group['items'], 'href'));
+}
+navigation_test_assert($cashierItems === ['product_photos.php'], 'cashier catalog exposes only Product Photos');
+navigation_test_assert(bakery_navigation_role_label('cashier') === 'Cashier', 'cashier role label resolves');
 $managerNav = navigation_test_render_nav('manager', 'production');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--manager') !== false, 'manager navigation uses the focused manager shell');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--focused') !== false, 'manager navigation is a focused workspace');
@@ -147,6 +157,14 @@ navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker 
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__label-short') !== false, 'baker navigation includes compact mobile labels');
+
+$cashierNav = navigation_test_render_nav('cashier', 'product_photos');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav--cashier') !== false, 'cashier navigation uses the compact cashier bar');
+navigation_test_assert(strpos($cashierNav, 'product_photos.php') !== false, 'cashier navigation links Product Photos');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav__logout') !== false, 'cashier navigation includes logout');
+navigation_test_assert(strpos($cashierNav, 'Production Center') === false, 'cashier navigation omits Production Center');
+navigation_test_assert(strpos($cashierNav, 'Daily Orders') === false, 'cashier navigation omits Daily Orders');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashier navigation is not the admin ops shell');
 
 $driverNav = navigation_test_render_nav('driver', 'driver');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--driver') !== false, 'driver navigation uses the compact mobile bar');

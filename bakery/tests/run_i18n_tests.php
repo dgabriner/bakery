@@ -36,6 +36,7 @@ i18n_assert('English login title', bakery_t('login.title') === 'Sign in code');
 i18n_assert('Baker default es', bakery_default_locale_for_role('baker', false) === 'es');
 i18n_assert('Driver default es', bakery_default_locale_for_role('driver', false) === 'es');
 i18n_assert('Manager default es', bakery_default_locale_for_role('manager', false) === 'es');
+i18n_assert('Cashier default es', bakery_default_locale_for_role('cashier', false) === 'es');
 i18n_assert('Admin default en', bakery_default_locale_for_role('administrator', false) === 'en');
 i18n_assert('Customer default en', bakery_default_locale_for_role(null, true) === 'en');
 

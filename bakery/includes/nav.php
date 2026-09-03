@@ -150,6 +150,20 @@ if ($navSelectedDriverName === '' && $navUser) {
     </div>
   </div>
 </nav>
+<?php elseif ($navRole === 'cashier'): ?>
+<nav class="bakery-nav bakery-nav--focused bakery-nav--cashier" aria-label="<?php bakery_te('nav.cashier_workspace_aria'); ?>">
+  <div class="bakery-nav__inner">
+    <span class="bakery-nav__brand"><?php bakery_te('nav.cashier_workspace'); ?></span>
+    <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'product_photos' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>product_photos.php" aria-label="<?php bakery_te('nav.item.product_photos'); ?>"<?php echo $currentPage === 'product_photos' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.product_photos'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.product_photos_short'); ?></span>
+      </a>
+      <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
+      <?php echo $navLogoutForm; ?>
+    </div>
+  </div>
+</nav>
 <?php elseif ($navRole === 'manager'): ?>
 <?php
   $navManagerDateRaw = $_GET['date'] ?? date('Y-m-d');
