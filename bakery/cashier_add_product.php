@@ -157,9 +157,49 @@ require_once __DIR__ . '/includes/header.php';
   background: #f7faf8;
   margin-bottom: 1.25rem;
 }
-.photo-box input[type=file] {
-  width: 100%;
-  margin-top: .5rem;
+.photo-source-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem;
+  margin-top: .75rem;
+}
+.photo-source-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  background: #fff;
+  border: 1.5px solid #c3cec9;
+  border-radius: 12px;
+  padding: .75rem .5rem;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #1d4a3e;
+}
+.photo-source-btn:active { background: #e8f5f0; }
+.photo-source-btn--chosen { border-color: #2f6f5e; background: #e8f5f0; }
+.photo-preview-wrap {
+  margin-top: .75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .5rem;
+}
+.photo-preview {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.photo-clear-btn {
+  background: none;
+  border: none;
+  color: #8a2b22;
+  font-size: .85rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
 }
 .cashier-add .actions {
   display: grid;
@@ -248,7 +288,21 @@ require_once __DIR__ . '/includes/header.php';
     <div class="photo-box">
       <strong><?php echo htmlspecialchars(bakery_t('cashier_add.photo'), ENT_QUOTES, 'UTF-8'); ?></strong>
       <p class="hint"><?php echo htmlspecialchars(bakery_t('cashier_add.photo_hint'), ENT_QUOTES, 'UTF-8'); ?></p>
-      <input type="file" name="photo" accept="image/*" capture="environment">
+      <div class="photo-source-btns">
+        <label class="photo-source-btn" id="labelCamera">
+          <span>📷</span> <?php echo htmlspecialchars(bakery_t('cashier_add.photo_camera'), ENT_QUOTES, 'UTF-8'); ?>
+          <input type="file" id="photoCamera" accept="image/*" capture="environment" hidden>
+        </label>
+        <label class="photo-source-btn" id="labelLibrary">
+          <span>🖼</span> <?php echo htmlspecialchars(bakery_t('cashier_add.photo_library'), ENT_QUOTES, 'UTF-8'); ?>
+          <input type="file" id="photoLibrary" accept="image/*" hidden>
+        </label>
+      </div>
+      <input type="file" name="photo" id="photoHidden" accept="image/*" hidden>
+      <p class="photo-preview-wrap" id="photoPreviewWrap" hidden>
+        <img id="photoPreview" alt="" class="photo-preview">
+        <button type="button" class="photo-clear-btn" id="photoClear"><?php echo htmlspecialchars(bakery_t('cashier_add.photo_clear'), ENT_QUOTES, 'UTF-8'); ?></button>
+      </p>
     </div>
 
     <div class="actions">
@@ -279,6 +333,56 @@ require_once __DIR__ . '/includes/header.php';
     el.addEventListener('change', syncKind);
   });
   syncKind();
+
+  // Photo source: camera vs library → funnels into hidden form input + preview
+  var photoCamera  = document.getElementById('photoCamera');
+  var photoLibrary = document.getElementById('photoLibrary');
+  var photoHidden  = document.getElementById('photoHidden');
+  var previewWrap  = document.getElementById('photoPreviewWrap');
+  var previewImg   = document.getElementById('photoPreview');
+  var clearBtn     = document.getElementById('photoClear');
+  var labelCamera  = document.getElementById('labelCamera');
+  var labelLibrary = document.getElementById('labelLibrary');
+
+  function applyFile(file, sourceLabel) {
+    if (!file) return;
+    var dt = new DataTransfer();
+    dt.items.add(file);
+    photoHidden.files = dt.files;
+
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      previewImg.src = e.target.result;
+      previewWrap.hidden = false;
+    };
+    reader.readAsDataURL(file);
+
+    if (labelCamera) labelCamera.classList.remove('photo-source-btn--chosen');
+    if (labelLibrary) labelLibrary.classList.remove('photo-source-btn--chosen');
+    if (sourceLabel) sourceLabel.classList.add('photo-source-btn--chosen');
+  }
+
+  if (photoCamera) {
+    photoCamera.addEventListener('change', function () {
+      applyFile(this.files[0], labelCamera);
+    });
+  }
+  if (photoLibrary) {
+    photoLibrary.addEventListener('change', function () {
+      applyFile(this.files[0], labelLibrary);
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      photoHidden.value = '';
+      if (photoCamera) photoCamera.value = '';
+      if (photoLibrary) photoLibrary.value = '';
+      previewImg.src = '';
+      previewWrap.hidden = true;
+      if (labelCamera) labelCamera.classList.remove('photo-source-btn--chosen');
+      if (labelLibrary) labelLibrary.classList.remove('photo-source-btn--chosen');
+    });
+  }
 })();
 </script>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
