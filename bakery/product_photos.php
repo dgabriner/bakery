@@ -143,10 +143,18 @@ require_once __DIR__ . '/includes/nav.php';
       </div>
 
       <div class="photo-capture__actions">
-        <label class="photo-capture__camera-btn">
-          <span aria-hidden="true">📷</span> Take photo
-          <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
-        </label>
+        <div class="photo-capture__sources" role="group" aria-label="Photo upload source">
+          <label class="photo-capture__camera-btn">
+            <span aria-hidden="true">📷</span>
+            <?php echo htmlspecialchars(bakery_t('cashier_add.photo_camera'), ENT_QUOTES, 'UTF-8'); ?>
+            <input type="file" id="photoCameraInput" accept="image/*" capture="environment" hidden>
+          </label>
+          <label class="photo-capture__camera-btn">
+            <span aria-hidden="true">🖼</span>
+            <?php echo htmlspecialchars(bakery_t('cashier_add.photo_library'), ENT_QUOTES, 'UTF-8'); ?>
+            <input type="file" id="photoLibraryInput" accept="image/*" hidden>
+          </label>
+        </div>
         <label class="photo-capture__option">
           <input type="checkbox" id="setPrimary" checked>
           Set as primary
@@ -539,6 +547,16 @@ require_once __DIR__ . '/includes/nav.php';
   min-height: 54px;
   width: 100%;
 }
+.photo-capture__sources {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (min-width: 520px) {
+  .photo-capture__sources {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .photo-capture__option {
   align-items: center;
   color: var(--muted);
@@ -680,13 +698,14 @@ require_once __DIR__ . '/includes/nav.php';
     });
   }
 
-  var photoInput = document.getElementById('photoInput');
+  var photoCameraInput = document.getElementById('photoCameraInput');
+  var photoLibraryInput = document.getElementById('photoLibraryInput');
   var setPrimary = document.getElementById('setPrimary');
   var uploadStatus = document.getElementById('uploadStatus');
   var gallery = document.getElementById('gallery');
   var productIdEl = document.getElementById('selectedProductId');
 
-  if (!photoInput || !productIdEl) return;
+  if ((!photoCameraInput && !photoLibraryInput) || !productIdEl) return;
 
   function csrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
@@ -719,11 +738,20 @@ require_once __DIR__ . '/includes/nav.php';
       .catch(function () { uploadStatus.textContent = 'Network error'; });
   }
 
-  photoInput.addEventListener('change', function () {
-    if (photoInput.files && photoInput.files[0]) {
-      uploadFile(photoInput.files[0]);
-    }
-  });
+  if (photoCameraInput) {
+    photoCameraInput.addEventListener('change', function () {
+      if (photoCameraInput.files && photoCameraInput.files[0]) {
+        uploadFile(photoCameraInput.files[0]);
+      }
+    });
+  }
+  if (photoLibraryInput) {
+    photoLibraryInput.addEventListener('change', function () {
+      if (photoLibraryInput.files && photoLibraryInput.files[0]) {
+        uploadFile(photoLibraryInput.files[0]);
+      }
+    });
+  }
 
   if (gallery) {
     gallery.addEventListener('click', function (e) {
