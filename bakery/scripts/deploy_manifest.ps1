@@ -17,6 +17,7 @@ function Get-BakeryDeployRootFiles {
         'route_manager.php', 'route_summary.php', 'map.php', 'call_headquarters.php',
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
         'upload_driver_photo.php',
+        'cashier_shop_photos.php', 'upload_shop_photo.php',
         'daily_run.php', 'daily_run_api.php', 'daily_brief.php',
         'manager.php', 'billing_center.php', 'billing_api.php', 'billing_export.php', 'production_center.php',
         'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php', 'customer_portal_regular.php',
@@ -46,6 +47,7 @@ function Get-BakeryDeployOptionalPaths {
     return @(
         @{ Path = 'vendor\phpmailer'; Required = $false },
         @{ Path = 'uploads\driver_photos'; Required = $false; Files = @('.htaccess') },
+        @{ Path = 'uploads\shop_photos'; Required = $false; Files = @('.htaccess') },
         @{ Path = 'uploads\product_photos\catalog'; Required = $false }
     )
 }
