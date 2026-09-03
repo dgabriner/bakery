@@ -8,7 +8,7 @@ function Get-BakeryDeployRootFiles {
         'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
         'zones.php', 'leads.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
-        'products.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
+        'products.php', 'product_photos.php', 'cashier_add_product.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
         'daily_orders.php', 'standing_orders.php', 'standing_orders_manager.php', 'orders.php',
         'bread_distribution.php', 'product_distribution.php',
         'production.php', 'baker_mix.php', 'pack_list.php',

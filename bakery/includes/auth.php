@@ -142,12 +142,14 @@ function bakery_baker_scripts() {
 
 /**
  * Cashier pages (managers/admins also allowed). Cashiers capture and manage
- * product catalog photos only — no product CRUD, orders, or routes.
+ * Cashier pages (managers/admins also allowed). Cashiers manage the product
+ * catalog photos and a simple add-product form for bakery and store items.
  */
 function bakery_cashier_scripts() {
     return [
         'product_photos.php',
         'upload_product_photo.php',
+        'cashier_add_product.php',
     ];
 }
 
@@ -389,7 +391,7 @@ function bakery_baker_product_ids(PDO $db) {
 function bakery_ensure_cashier_role(PDO $db) {
     $db->exec(
         "INSERT INTO roles (slug, name, description) VALUES
-         ('cashier', 'Cashier', 'Product catalog photos only')
+         ('cashier', 'Cashier', 'Product catalog add + photos')
          ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)"
     );
 

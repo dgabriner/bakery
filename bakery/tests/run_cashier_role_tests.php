@@ -109,8 +109,73 @@ $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 
 c_assert(in_array('product_photos.php', bakery_cashier_scripts(), true), 'product_photos is a cashier script');
 c_assert(in_array('upload_product_photo.php', bakery_cashier_scripts(), true), 'upload_product_photo is a cashier script');
+c_assert(in_array('cashier_add_product.php', bakery_cashier_scripts(), true), 'cashier_add_product is a cashier script');
 c_assert(!in_array('products.php', bakery_cashier_scripts(), true), 'products.php is not a cashier script');
 c_assert(!in_array('daily_orders.php', bakery_cashier_scripts(), true), 'daily_orders.php is not a cashier script');
+
+// Minimal catalog tables so cashier add-product helpers can be exercised.
+$db->exec(
+    "CREATE TABLE IF NOT EXISTS product_lines (
+        id INT NOT NULL AUTO_INCREMENT,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        color_code VARCHAR(7) DEFAULT '#b75c3f',
+        sort_order INT DEFAULT 0,
+        PRIMARY KEY (id),
+        UNIQUE KEY name (name)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+$db->exec(
+    "CREATE TABLE IF NOT EXISTS dough_types (
+        id INT NOT NULL AUTO_INCREMENT,
+        name VARCHAR(50) NOT NULL,
+        description TEXT,
+        product_line_id INT DEFAULT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY name (name),
+        KEY idx_dough_types_product_line (product_line_id)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+$db->exec(
+    "CREATE TABLE IF NOT EXISTS products (
+        id INT NOT NULL AUTO_INCREMENT,
+        name VARCHAR(100) NOT NULL,
+        dough_type_id INT DEFAULT NULL,
+        price DECIMAL(10,2) DEFAULT 0.00,
+        wholesale_price DECIMAL(10,2) DEFAULT NULL,
+        weight_grams INT DEFAULT NULL,
+        description TEXT,
+        PRIMARY KEY (id),
+        UNIQUE KEY name (name)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+cashier_apply_sql_file($db, $root . '/database/schema/076_retail_store_shelf.sql');
+
+require_once dirname(__DIR__) . '/includes/cashier_catalog.php';
+$shelfId = bakery_ensure_retail_store_shelf($db);
+c_assert($shelfId > 0, 'retail store shelf dough type exists');
+$retailName = 'Cashier Test Chips ' . substr(bin2hex(random_bytes(3)), 0, 6);
+$created = bakery_cashier_create_product($db, [
+    'kind' => 'retail',
+    'name' => $retailName,
+    'price' => 2.5,
+]);
+c_assert(!empty($created['ok']), 'cashier can create retail product');
+c_assert(!empty($created['id']), 'retail product has id');
+$row = $db->prepare('SELECT name, price, dough_type_id FROM products WHERE id = ?');
+$row->execute([(int)$created['id']]);
+$product = $row->fetch(PDO::FETCH_ASSOC);
+c_assert($product && $product['name'] === $retailName, 'retail product name saved');
+c_assert($product && abs((float)$product['price'] - 2.5) < 0.001, 'retail product price saved');
+c_assert($product && (int)$product['dough_type_id'] === $shelfId, 'retail product uses store shelf');
+$db->prepare('DELETE FROM products WHERE id = ?')->execute([(int)$created['id']]);
+
+$bakeryFail = bakery_cashier_create_product($db, [
+    'kind' => 'bakery',
+    'name' => 'Cashier Bakery Missing Dough',
+    'price' => 4,
+]);
+c_assert(empty($bakeryFail['ok']) && ($bakeryFail['error'] ?? '') === 'dough_required', 'bakery product requires dough');
 
 $role = $db->query("SELECT id, name FROM roles WHERE slug = 'cashier' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 c_assert(!empty($role['id']), 'cashier role exists after migration 074');

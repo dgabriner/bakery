@@ -155,6 +155,10 @@ if ($navSelectedDriverName === '' && $navUser) {
   <div class="bakery-nav__inner">
     <span class="bakery-nav__brand"><?php bakery_te('nav.cashier_workspace'); ?></span>
     <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'cashier_add_product' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>cashier_add_product.php" aria-label="<?php bakery_te('nav.item.cashier_add_product'); ?>"<?php echo $currentPage === 'cashier_add_product' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.cashier_add_product'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.cashier_add_product_short'); ?></span>
+      </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'product_photos' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>product_photos.php" aria-label="<?php bakery_te('nav.item.product_photos'); ?>"<?php echo $currentPage === 'product_photos' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.product_photos'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.product_photos_short'); ?></span>

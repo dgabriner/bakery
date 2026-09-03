@@ -211,6 +211,7 @@ t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not bak
 t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'production center is not baker-accessible');
 t_assert(in_array('product_photos.php', bakery_cashier_scripts(), true), 'product_photos is cashier-accessible');
 t_assert(in_array('upload_product_photo.php', bakery_cashier_scripts(), true), 'upload_product_photo is cashier-accessible');
+t_assert(in_array('cashier_add_product.php', bakery_cashier_scripts(), true), 'cashier_add_product is cashier-accessible');
 t_assert(!in_array('products.php', bakery_cashier_scripts(), true), 'products CRUD is not cashier-accessible');
 t_assert(!in_array('index.php', bakery_cashier_scripts(), true), 'index is not cashier-accessible');
 

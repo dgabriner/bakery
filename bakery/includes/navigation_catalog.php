@@ -135,6 +135,7 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator', 'manager', 'cashier'],
             'items' => [
                 ['href' => 'products.php', 'label' => 'Products', 'description' => 'Manage the products that can be ordered and produced.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'cashier_add_product.php', 'label' => 'Add Product', 'description' => 'Quickly add a bakery or store item and take its photo.', 'roles' => ['administrator', 'manager', 'cashier'], 'usage' => 'everyday'],
                 ['href' => 'product_photos.php', 'label' => 'Product Photos', 'description' => 'Capture and manage catalog images with a primary photo per product.', 'roles' => ['administrator', 'manager', 'cashier'], 'usage' => 'occasional'],
                 ['href' => 'dough_types.php', 'label' => 'Dough Types & Lines', 'description' => 'Organize dough types and product lines.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'formulas.php', 'label' => 'Formulas', 'description' => 'Maintain dough formulas and recipe ratios.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],

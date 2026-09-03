@@ -9,7 +9,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Administrator | Every current module, user management, historical navigation, and administrator-only diagnostics. |
 | Manager | Same operational permissions as before (production, orders, customers, drivers, routes, products, insights). Phone home is a focused workspace on **Bakery Manager**: Today, Routes, Kitchen, Missed, plus More for the rest of the catalog. Cannot alter users or roles, and does not receive historical or diagnostic tools. |
 | Baker | **Daily Production**, **Mix Today**, and **Pack List** only. |
-| Cashier | **Product Photos** only — browse the catalog and add, replace, or delete product images. |
+| Cashier | **Add Product** and **Product Photos** — add bakery or store items (coffee, chips, snacks), then take catalog photos. |
 | Driver | **My Route** and **Call HQ** only. Delivery completion, photos, and route-specific actions are contained within My Route. |
 
 ## Current manager and administrator modules
@@ -41,6 +41,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Delivery | Route Summary | Photo-first review of the day's stops with customer, amount sold, and driver. |
 | Delivery | Customer Map | Customer locations and delivery zones. |
 | Products & Recipes | Products | Products that can be ordered and produced. |
+| Products & Recipes | Add Product | Quick cashier form for bakery or store shelf items, with optional photo. |
 | Products & Recipes | Product Photos | Capture and manage catalog images (primary + gallery). Cashiers land here. |
 | Products & Recipes | Dough Types & Lines | Dough and product-line organization. |
 | Products & Recipes | Formulas | Dough formulas and recipe ratios. |
