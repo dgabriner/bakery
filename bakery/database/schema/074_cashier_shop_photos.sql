@@ -1,27 +1,23 @@
 -- Cashier role and shop photos table.
 -- Shop photos are taken by cashiers, organized by date, cashier, and photo category
 -- (window display, trays, general, etc.).
+-- Hosted-gate portable: INSERT IGNORE + CREATE TABLE IF NOT EXISTS only.
 
-INSERT INTO roles (slug, name, description) VALUES
-('cashier', 'Cashier', 'Shop floor access: take and review daily shop photos')
-ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
+INSERT IGNORE INTO roles (slug, name, description) VALUES
+('cashier', 'Cashier', 'Shop floor access: take and review daily shop photos');
 
-INSERT INTO permissions (slug, description) VALUES
-('shop.photos', 'Upload and view daily shop photos')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
+INSERT IGNORE INTO permissions (slug, description) VALUES
+('shop.photos', 'Upload and view daily shop photos');
 
-INSERT INTO role_permissions (role_id, permission_id)
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r
 JOIN permissions p ON p.slug = 'shop.photos'
-WHERE r.slug = 'cashier'
-ON DUPLICATE KEY UPDATE role_id = role_id;
+WHERE r.slug = 'cashier';
 
--- Allow managers and administrators to view shop photos too
-INSERT INTO role_permissions (role_id, permission_id)
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r
 JOIN permissions p ON p.slug = 'shop.photos'
-WHERE r.slug IN ('administrator', 'manager')
-ON DUPLICATE KEY UPDATE role_id = role_id;
+WHERE r.slug IN ('administrator', 'manager');
 
 CREATE TABLE IF NOT EXISTS shop_photos (
   id            INT NOT NULL AUTO_INCREMENT,

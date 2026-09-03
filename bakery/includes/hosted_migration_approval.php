@@ -468,7 +468,10 @@ function bakery_hosted_migration_approve_jobs(array $jobs): array {
     if (count($jobs) === 1) {
         return bakery_hosted_migration_approve((string)$jobs[0]['file']);
     }
-    if (!defined('IS_STAGING') || !IS_STAGING || !bakery_user_has_role(['administrator'])) {
+    $authorized = function_exists('bakery_hosted_live_queue_authorized')
+        ? bakery_hosted_live_queue_authorized()
+        : (defined('IS_STAGING') && IS_STAGING && bakery_user_has_role(['administrator']));
+    if (!$authorized) {
         throw new RuntimeException('Live database migration is available only to Staging administrators.');
     }
     if ($jobs === []) {
@@ -553,7 +556,10 @@ function bakery_hosted_migration_approve_jobs(array $jobs): array {
 }
 
 function bakery_hosted_migration_approve(string $file): array {
-    if (!defined('IS_STAGING') || !IS_STAGING || !bakery_user_has_role(['administrator'])) {
+    $authorized = function_exists('bakery_hosted_live_queue_authorized')
+        ? bakery_hosted_live_queue_authorized()
+        : (defined('IS_STAGING') && IS_STAGING && bakery_user_has_role(['administrator']));
+    if (!$authorized) {
         throw new RuntimeException('Live database migration is available only to Staging administrators.');
     }
     $file = basename(trim($file));

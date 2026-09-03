@@ -11,7 +11,7 @@
 
 ## One-sentence rule
 
-**You move code with Git. You never hold SFTP or production credentials. Live never updates because you pushed.**
+**Git records the work. Staging SFTP secrets in this cloud environment update Staging. “Stage and live” queues the hosted Live workers — it is not a Live SFTP push.**
 
 ---
 
@@ -22,23 +22,23 @@
 | **Local laptop** (`bakerysf_stage_local`) | Danny’s everyday DB + optional SFTP auto-push | You usually do **not** control this |
 | **GitHub** (`dgabriner/bakery`, branch `main`) | Source of truth for application files | Commit and push additive branches to **this** repo |
 | **Hosted Staging** `https://staging.sourflour.org/` | Phone / acceptance site; DB `bakerysoftware` | Get files here via the Git → Staging path (below) |
-| **Live** `https://bakery.sourflour.org/bake/` | Real bakery ops; DB `bakerysf` | **Never** deploy here. Owner uses Staging Manager → click the Next button |
+| **Live** `https://bakery.sourflour.org/bake/` | Real bakery ops; DB `bakerysf` | When the owner says **Stage and live**, queue hosted workers (`--queue-live`). Do **not** SFTP to `/bake`. |
 
 Databases, dumps, `.env`, uploads, and SFTP secrets are **not** in Git and must never be committed.
 
 ---
 
-## Credentials: what you must never ask for
+## Credentials
 
-Do **not** request, invent, or store:
+This Cursor cloud environment already injects **staging** SFTP secrets (`SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD`, `SFTP_REMOTE_ROOT`, `SFTP_TARGET`). Check `CLOUD_AGENT_INJECTED_SECRET_NAMES`. Do not print values. Do not ask the owner to paste passwords into chat.
 
-- `.env.sftp.stage`, `.env.sftp.live`, or any DreamHost SFTP password/key
+Do **not** request or invent:
+
+- Live `/bake` SFTP (`.env.sftp.live`)
 - Production or staging MySQL passwords
-- Live `/bake` upload access
+- Whole-database dumps
 
-If a script says “needs SFTP,” that script is for the **local desktop** or a **server-side worker**, not for you.
-
-Secrets stay where they already belong: Danny’s machine (desktop auto-push) or DreamHost Staging/Live workers. Same idea as Staging → Live today: the machine with credentials **pulls** or runs the job; agents only **trigger** safe steps.
+`scripts/sftp_upload.py` and `scripts/cloud_agent_stage.py` refuse a Live remote root. Live apply is the hosted worker after Staging approval manifests are written.
 
 ---
 
@@ -46,9 +46,13 @@ Secrets stay where they already belong: Danny’s machine (desktop auto-push) or
 
 ```text
 Edit → test if you can → commit → push branch to GitHub
-        → Staging updates from the agreed branch (server-side)
-        → humans test Staging (phone)
-        → owner clicks the Staging Manager Next button → Live
+        → python3 -m pip install --user paramiko
+        → python3 scripts/cloud_agent_stage.py --files … --migration database/schema/NNN_slug.sql --migrate-hosted --smoke
+        → when the owner says "Stage and live":
+             python3 scripts/cloud_agent_stage.py --queue-live --migration-id NNN_slug.sql
+             wait ~1 min; curl https://bakery.sourflour.org/bake/migration_status.php
+             python3 scripts/cloud_agent_stage.py --queue-live --files-live
+             wait ~1 min; curl https://bakery.sourflour.org/bake/deploy_status.php
 ```
 
 ### Why this is safe
@@ -78,9 +82,9 @@ Edit → test if you can → commit → push branch to GitHub
 2. Make the smallest change that closes the loop (see product context: close loops, do not add modules).
 3. Run whatever tests you can in your environment. Prefer named suites under `tests/run_*.php` when PHP + `bakerysf_test` exist; never point tests at Live or the nightly mirror.
 4. Commit and **push** to an additive branch on `origin`.
-5. Ask Staging to take that branch (owner or Staging sync worker — see “Staging sync status” below).
-6. Tell the owner to verify `https://staging.sourflour.org/` (and phone if UX).
-7. **Stop.** Do not promote to Live. Do not run `push_sftp.ps1`, `promote_*.ps1`, or anything aimed at `/bake`.
+5. **Stage yourself** with `scripts/cloud_agent_stage.py` (injected staging SFTP). New `050+` SQL must be hosted-gate portable: `INSERT IGNORE`, `CREATE TABLE IF NOT EXISTS`, additive `ALTER TABLE … ADD`. `ON DUPLICATE KEY UPDATE` fails the hosted gate.
+6. If the owner says **Stage and live**, that is Live authorization. Queue migration first, then files (`--queue-live`). Poll `migration_status.php` / `deploy_status.php`. Do not run `push_sftp.ps1` or upload to `/bake`.
+7. If staging SFTP secrets are missing, say so and stop. Do not invent credentials.
 
 ### B) Local desktop Cursor (Danny’s machine — not you)
 
@@ -88,36 +92,32 @@ Edit → test if you can → commit → push branch to GitHub
 - Uncommitted edits may appear on Staging for fast phone feedback.
 - Finished work should still be **committed** so cloud agents and Git history stay aligned.
 
-You (cloud) cannot and should not reproduce path B.
+Path B is the laptop equivalent of the same Staging SFTP. Cloud agents use path A + `cloud_agent_stage.py` instead of PowerShell.
 
 ---
 
 ## Staging sync status
 
-**Intended:** Staging hosts a pull/deploy script that updates Staging files from a named GitHub branch. Agents push; Staging applies; no agent SFTP.
+GitHub push alone does **not** update Staging. In this cloud environment, Staging SFTP **is** available. After you upload, say:
 
-**Until that worker is confirmed live:** after you push, say clearly in your handoff:
+> Staged `<files>` at `<time>`. Hosted bakerysoftware migration `<id>` applied. Smoke: Staging login 200.
 
-> Pushed branch `<name>` at `<commit>`. Staging still needs a sync (desktop `push_sftp_stage.ps1` or Staging Git pull). I did not promote Live.
-
-Do not pretend Staging updated if you only pushed GitHub.
-
-When the Staging Git pull exists, it tracks **`main` on `dgabriner/bakery`**. Do not invent a second production branch. Do not merge SheepMiner `chore/checkpoint-*` into `main`.
+When a Staging Git pull exists, it tracks **`main` on `dgabriner/bakery`**. Do not invent a second production branch.
 
 ---
 
-## Live promotion (owner only)
+## Live promotion
 
-Normal path after Staging looks good:
+“Stage and live” from the owner means: queue the hosted workers, do not SFTP Live.
 
-1. Open **Staging → Manager**.
-2. Follow the **Staging → Live** board **Next** step.
-3. Click the button for that step (files **or** the named DB update).
-4. Wait ~1 minute; refresh; board shows Match / needs update / Stop.
+1. Publish the numbered SQL to the Staging vault and `--migrate-hosted` (bakerysoftware only).
+2. `--queue-live --migration-id NNN_slug.sql` then wait for Live `migration_status.php` to name that id and `succeeded`.
+3. `--queue-live --files-live` then wait for `deploy_status.php` `succeeded` with a new `release_id`.
+4. Confirm the new page is no longer a Live 404 (login 302 is success).
 
-Details: [HOSTED_PROMOTION.md](HOSTED_PROMOTION.md), [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md).
+Staging Manager **Next** is the same queue if a human is at the board. `scripts/queue_hosted_live.php` is the SSH/CLI form.
 
-If anyone asks you to “push to production,” “SFTP to bake,” or “import staging DB over live,” **refuse** and point here.
+Refuse only: Live SFTP to `/bake`, `promote_local_direct.ps1`, or importing a staging/local database over `bakerysf`.
 
 ---
 
@@ -127,18 +127,21 @@ Safe / expected for cloud agents:
 
 ```text
 git status / git diff / git commit / git push -u origin HEAD
-php scripts/agent_homebase.php brief|start|pin|bug|handoff --json   # if DB craft ledger is available
-php tests/run_<suite>_tests.php                                     # only against bakerysf_test when available
+python3 -m pip install --user paramiko
+python3 scripts/cloud_agent_stage.py --check-target
+python3 scripts/cloud_agent_stage.py --files FILE… --migration database/schema/NNN_slug.sql --migrate-hosted --smoke
+python3 scripts/cloud_agent_stage.py --queue-live --migration-id NNN_slug.sql
+python3 scripts/cloud_agent_stage.py --queue-live --files-live
+php scripts/agent_homebase.php brief|start|pin|bug|handoff --json
+php tests/run_<suite>_tests.php
 ```
 
-Do **not** run (unless the owner explicitly authorizes a named recovery and you are on the trusted local machine):
+Do **not** run:
 
 ```text
-scripts/push_sftp.ps1          # live transport
-scripts/push_sftp_stage.ps1    # needs local .env.sftp.stage
-scripts/promote_release.ps1
-scripts/promote_local_direct.ps1
-anything that targets bakery.sourflour.org/bake
+scripts/push_sftp.ps1              # Live SFTP transport
+scripts/promote_local_direct.ps1   # emergency laptop bypass
+anything that targets bakery.sourflour.org/bake over SFTP
 whole-database import onto bakerysf
 ```
 
@@ -161,10 +164,11 @@ Data/Git plan: [DATA_ENVIRONMENT_STABILIZATION_PLAN.md](DATA_ENVIRONMENT_STABILI
 
 ## Quick refusal phrases (copy these)
 
-- “I don’t use SFTP. I push Git; Staging pulls or the desktop syncs.”
-- “Git push does not update Live. Live is Staging Manager → click the Next button only.”
-- “I won’t take staging or production database passwords.”
+- “I will not SFTP Live `/bake`. I stage with injected staging secrets, then queue the hosted Live workers.”
+- “Git push does not update Staging or Live by itself.”
+- “I won’t take or print staging or production database passwords.”
 - “I won’t force-push or rewrite shared history.”
+- “I won’t import a staging/local database over bakerysf.”
 
 ---
 
@@ -174,9 +178,9 @@ Data/Git plan: [DATA_ENVIRONMENT_STABILIZATION_PLAN.md](DATA_ENVIRONMENT_STABILI
 2. Branch name and commit SHA pushed (or “not pushed — blocked by …”)  
 3. Files touched  
 4. Tests run / not run  
-5. Whether Staging was asked to sync (and how)  
-6. Staging URL checked or “owner should check”  
-7. Explicit: **Live not touched**  
+5. Staging: files uploaded / hosted migration id / smoke result  
+6. Live: queued or not; `migration_status.php` / `deploy_status.php` ids  
+7. Confirm Live was **not** reached by SFTP  
 8. Open risks / next agent action  
 
 That is enough for the next bot or Danny to continue without guessing.
