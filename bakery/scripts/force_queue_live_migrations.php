@@ -55,6 +55,7 @@ if ($admin) {
 $jobs = [
     ['file' => '074_cashier_role.sql', 'id' => '074_cashier_role'],
     ['file' => '075_sarita_cashier_user.sql', 'id' => '075_sarita_cashier_user'],
+    ['file' => '076_retail_store_shelf.sql', 'id' => '076_retail_store_shelf'],
 ];
 $result = bakery_hosted_migration_approve_jobs($jobs);
 echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
