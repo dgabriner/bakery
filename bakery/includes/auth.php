@@ -125,6 +125,9 @@ function bakery_cashier_scripts() {
     return [
         'cashier_shop_photos.php',
         'upload_shop_photo.php',
+        'product_photos.php',
+        'upload_product_photo.php',
+        'cashier_add_product.php',
     ];
 }
 
@@ -167,7 +170,7 @@ function bakery_role_home(string $role): string {
         case 'manager':
             return 'manager.php';
         case 'cashier':
-            return 'cashier_shop_photos.php';
+            return 'product_photos.php';
         default:
             return 'index.php';
     }
@@ -433,7 +436,54 @@ function bakery_baker_product_ids(PDO $db) {
 }
 
 /**
- * Ensure primary staff code logins (admin, baker, drivers).
+ * Ensure cashier role exists and has catalog permissions.
+ * Idempotent — safe on every environment after the cashier role migration.
+ */
+function bakery_ensure_cashier_role(PDO $db) {
+    $db->exec(
+        "INSERT INTO roles (slug, name, description) VALUES
+         ('cashier', 'Cashier', 'Shop photos, catalog photos, and add product')
+         ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)"
+    );
+
+    $permStmt = $db->prepare('SELECT id FROM permissions WHERE slug = ? LIMIT 1');
+    $permStmt->execute(['ops.manage']);
+    $permId = $permStmt->fetchColumn();
+    if ($permId) {
+        $roleStmt = $db->prepare('SELECT id FROM roles WHERE slug = ? LIMIT 1');
+        $roleStmt->execute(['cashier']);
+        $roleId = $roleStmt->fetchColumn();
+        if ($roleId) {
+            $link = $db->prepare(
+                'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE role_id = role_id'
+            );
+            $link->execute([(int)$roleId, (int)$permId]);
+        }
+    }
+    return true;
+}
+
+/**
+ * Ensure Sarita cashier login (code 8989) exists.
+ */
+function bakery_ensure_sarita_cashier(PDO $db) {
+    if (!table_exists($db, 'users') || !table_exists($db, 'roles')) {
+        return false;
+    }
+    bakery_ensure_login_code_column($db);
+    bakery_ensure_cashier_role($db);
+    return bakery_upsert_code_user($db, [
+        'email' => 'sarita@sourflour.local',
+        'display_name' => 'Sarita',
+        'role' => 'cashier',
+        'code' => '8989',
+        'driver_id' => null,
+    ]);
+}
+
+/**
+ * Ensure primary staff code logins (admin, baker, drivers, cashier).
  */
 function bakery_ensure_staff_code_users(PDO $db) {
     if (!IS_LOCAL) {
@@ -441,6 +491,7 @@ function bakery_ensure_staff_code_users(PDO $db) {
     }
     bakery_ensure_login_code_column($db);
     bakery_ensure_baker_user($db);
+    bakery_ensure_sarita_cashier($db);
 
     if (BAKERY_ADMIN_EMAIL !== '' && BAKERY_ADMIN_CODE !== '') {
         bakery_upsert_code_user($db, [

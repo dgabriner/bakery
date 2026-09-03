@@ -4,7 +4,7 @@
 -- Hosted-gate portable: INSERT IGNORE + CREATE TABLE IF NOT EXISTS only.
 
 INSERT IGNORE INTO roles (slug, name, description) VALUES
-('cashier', 'Cashier', 'Shop floor access: take and review daily shop photos');
+('cashier', 'Cashier', 'Shop photos, catalog photos, and add product');
 
 INSERT IGNORE INTO permissions (slug, description) VALUES
 ('shop.photos', 'Upload and view daily shop photos');

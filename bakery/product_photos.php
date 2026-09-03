@@ -77,6 +77,11 @@ $selectedId = (int)($_GET['product_id'] ?? 0);
 $selectedProduct = null;
 $selectedMeta = ['type' => '', 'class' => ''];
 $images = [];
+$photoUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
+$photoRole = (string)($photoUser['role_slug'] ?? '');
+$canQuickAddProduct = in_array($photoRole, ['cashier', 'manager', 'administrator'], true);
+$photoUploadFailed = !empty($_GET['photo_error']);
+
 
 if ($photosEnabled && $selectedId > 0) {
     require_once __DIR__ . '/includes/product_photo_handler.php';
@@ -123,6 +128,11 @@ require_once __DIR__ . '/includes/nav.php';
         <?php echo htmlspecialchars($selectedMeta['class']); ?>
       </p>
       <h1 class="photo-capture__title"><?php echo htmlspecialchars($selectedProduct['name']); ?></h1>
+      <?php if ($photoUploadFailed): ?>
+        <p class="photo-app__notice photo-app__notice--warn" role="status">
+          <?php echo htmlspecialchars(bakery_t('cashier_add.photo_upload_failed'), ENT_QUOTES, 'UTF-8'); ?>
+        </p>
+      <?php endif; ?>
 
       <div class="photo-capture__hero">
         <?php if ($selectedProduct['image_url']): ?>
@@ -133,10 +143,18 @@ require_once __DIR__ . '/includes/nav.php';
       </div>
 
       <div class="photo-capture__actions">
-        <label class="photo-capture__camera-btn">
-          <span aria-hidden="true">📷</span> Take photo
-          <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
-        </label>
+        <div class="photo-capture__sources" role="group" aria-label="Photo upload source">
+          <label class="photo-capture__camera-btn">
+            <span aria-hidden="true">📷</span>
+            <?php echo htmlspecialchars(bakery_t('cashier_add.photo_camera'), ENT_QUOTES, 'UTF-8'); ?>
+            <input type="file" id="photoCameraInput" accept="image/*" capture="environment" hidden>
+          </label>
+          <label class="photo-capture__camera-btn">
+            <span aria-hidden="true">🖼</span>
+            <?php echo htmlspecialchars(bakery_t('cashier_add.photo_library'), ENT_QUOTES, 'UTF-8'); ?>
+            <input type="file" id="photoLibraryInput" accept="image/*" hidden>
+          </label>
+        </div>
         <label class="photo-capture__option">
           <input type="checkbox" id="setPrimary" checked>
           Set as primary
@@ -172,6 +190,13 @@ require_once __DIR__ . '/includes/nav.php';
     <header class="photo-app__hero-header">
       <h1 class="photo-app__title">Product Photos</h1>
       <p class="photo-app__subtitle">Tap a product to take or update its catalog photo.</p>
+      <?php if ($canQuickAddProduct): ?>
+        <p class="photo-app__add-wrap">
+          <a class="photo-app__add" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_add_product.php', ENT_QUOTES, 'UTF-8'); ?>">
+            <?php echo htmlspecialchars(bakery_t('cashier_add.add_cta'), ENT_QUOTES, 'UTF-8'); ?>
+          </a>
+        </p>
+      <?php endif; ?>
       <div class="photo-app__stats">
         <span><strong><?php echo (int)$stats['with_photo']; ?></strong> with photos</span>
         <span><strong><?php echo (int)$missingCount; ?></strong> need photos</span>
@@ -280,6 +305,25 @@ require_once __DIR__ . '/includes/nav.php';
   margin: 0 0 6px;
 }
 .photo-app__subtitle { color: var(--muted); font-size: .92rem; margin: 0 0 12px; }
+.photo-app__add-wrap { margin: 0 0 12px; }
+.photo-app__add {
+  display: inline-block;
+  background: #2f6f5e;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: .95rem;
+}
+.photo-app__notice--warn {
+  background: #fff4e5;
+  border: 1px solid #f0c36d;
+  color: #7a4e00;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 0 0 12px;
+}
 .photo-app__stats {
   display: flex;
   flex-wrap: wrap;
@@ -503,6 +547,16 @@ require_once __DIR__ . '/includes/nav.php';
   min-height: 54px;
   width: 100%;
 }
+.photo-capture__sources {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (min-width: 520px) {
+  .photo-capture__sources {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .photo-capture__option {
   align-items: center;
   color: var(--muted);
@@ -644,13 +698,14 @@ require_once __DIR__ . '/includes/nav.php';
     });
   }
 
-  var photoInput = document.getElementById('photoInput');
+  var photoCameraInput = document.getElementById('photoCameraInput');
+  var photoLibraryInput = document.getElementById('photoLibraryInput');
   var setPrimary = document.getElementById('setPrimary');
   var uploadStatus = document.getElementById('uploadStatus');
   var gallery = document.getElementById('gallery');
   var productIdEl = document.getElementById('selectedProductId');
 
-  if (!photoInput || !productIdEl) return;
+  if ((!photoCameraInput && !photoLibraryInput) || !productIdEl) return;
 
   function csrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
@@ -683,11 +738,20 @@ require_once __DIR__ . '/includes/nav.php';
       .catch(function () { uploadStatus.textContent = 'Network error'; });
   }
 
-  photoInput.addEventListener('change', function () {
-    if (photoInput.files && photoInput.files[0]) {
-      uploadFile(photoInput.files[0]);
-    }
-  });
+  if (photoCameraInput) {
+    photoCameraInput.addEventListener('change', function () {
+      if (photoCameraInput.files && photoCameraInput.files[0]) {
+        uploadFile(photoCameraInput.files[0]);
+      }
+    });
+  }
+  if (photoLibraryInput) {
+    photoLibraryInput.addEventListener('change', function () {
+      if (photoLibraryInput.files && photoLibraryInput.files[0]) {
+        uploadFile(photoLibraryInput.files[0]);
+      }
+    });
+  }
 
   if (gallery) {
     gallery.addEventListener('click', function (e) {
