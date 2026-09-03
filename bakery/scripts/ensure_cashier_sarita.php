@@ -11,7 +11,10 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-$root = dirname(__DIR__);
+$root = rtrim((string)getenv('BAKERY_HOSTED_STAGE_ROOT'), '/');
+if ($root === '') {
+    $root = dirname(__DIR__);
+}
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/auth.php';
