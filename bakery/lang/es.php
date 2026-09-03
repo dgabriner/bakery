@@ -57,6 +57,7 @@ return [
     // Roles
     'role.administrator' => 'Administrador',
     'role.manager' => 'Gerente',
+    'role.cashier' => 'Cajero',
     'role.baker' => 'Panadero',
     'role.driver' => 'Repartidor',
     'role.driver_assistant' => 'Asistente de repartidor',

@@ -66,6 +66,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'cashier_shop_photos.php', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
             ],
         ],
         [
@@ -274,6 +275,7 @@ function bakery_navigation_role_label($role) {
     $labels = [
         'administrator' => 'Administrator',
         'manager' => 'Manager',
+        'cashier' => 'Cashier',
         'baker' => 'Baker',
         'driver' => 'Driver',
         'driver_assistant' => 'Driver Assistant',

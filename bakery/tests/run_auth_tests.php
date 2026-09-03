@@ -204,6 +204,8 @@ t_assert(in_array('driver_session_ping.php', bakery_driver_scripts(), true), 'dr
 t_assert(in_array('upload_driver_photo.php', bakery_driver_scripts(), true), 'upload_driver_photo is driver-accessible');
 t_assert(in_array('get_driver_orders.php', bakery_driver_scripts(), true), 'get_driver_orders is driver-accessible');
 t_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 'customer QR generator is driver-accessible');
+t_assert(in_array('cashier_shop_photos.php', bakery_cashier_scripts(), true), 'cashier shop photos is cashier-accessible');
+t_assert(in_array('upload_shop_photo.php', bakery_cashier_scripts(), true), 'upload shop photo API is cashier-accessible');
 t_assert(in_array('production.php', bakery_baker_scripts(), true), 'production is baker-accessible');
 t_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'baker_mix is baker-accessible');
 t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');

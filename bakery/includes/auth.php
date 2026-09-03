@@ -118,6 +118,16 @@ function bakery_driver_scripts() {
     ];
 }
 
+/**
+ * Cashier-only pages (managers/admins also allowed).
+ */
+function bakery_cashier_scripts() {
+    return [
+        'cashier_shop_photos.php',
+        'upload_shop_photo.php',
+    ];
+}
+
 /** Roles that work a driver route (the assistant works their paired driver's route). */
 function bakery_driver_route_roles(): array {
     return ['driver', 'driver_assistant'];
@@ -1048,6 +1058,9 @@ function bakery_enforce_request_security(PDO $db = null) {
     $isDiagnostic = in_array($script, bakery_diagnostic_scripts(), true);
     $isDriverScript = in_array($script, bakery_driver_scripts(), true);
     $isBakerScript = in_array($script, bakery_baker_scripts(), true);
+    $isCashierScript = function_exists('bakery_cashier_scripts')
+        ? in_array($script, bakery_cashier_scripts(), true)
+        : false;
 
     if ($isDiagnostic) {
         bakery_require_role(['administrator']);
@@ -1058,6 +1071,8 @@ function bakery_enforce_request_security(PDO $db = null) {
         bakery_require_role(['administrator', 'manager', 'baker']);
     } elseif ($isDriverScript) {
         bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+    } elseif ($isCashierScript) {
+        bakery_require_role(['cashier', 'administrator', 'manager']);
     } else {
         // Default ops UI: manager + administrator. Drivers/bakers stay on their scripts.
         bakery_require_role(['administrator', 'manager']);

@@ -57,6 +57,7 @@ return [
     // Roles
     'role.administrator' => 'Administrator',
     'role.manager' => 'Manager',
+    'role.cashier' => 'Cashier',
     'role.baker' => 'Baker',
     'role.driver' => 'Driver',
     'role.driver_assistant' => 'Driver Assistant',
