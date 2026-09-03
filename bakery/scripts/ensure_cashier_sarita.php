@@ -3,6 +3,7 @@
  * Ensure cashier role + Sarita (code 8989) exist.
  *
  * Usage: php scripts/ensure_cashier_sarita.php
+ * Also safe as a hosted Staging --stage-tool (uses BAKERY_HOSTED_STAGE_ROOT).
  */
 define('ACCESS_ALLOWED', true);
 
@@ -15,6 +16,19 @@ $root = rtrim((string)getenv('BAKERY_HOSTED_STAGE_ROOT'), '/');
 if ($root === '') {
     $root = dirname(__DIR__);
 }
+
+require_once $root . '/includes/env_loader.php';
+$stagingEnv = $root . DIRECTORY_SEPARATOR . '.env';
+if (is_readable($stagingEnv) && getenv('BAKERY_HOSTED_STAGE_ROOT')) {
+    bakery_load_env_file($stagingEnv, true);
+    putenv('APP_ENV=staging');
+    $_ENV['APP_ENV'] = 'staging';
+    $_SERVER['APP_ENV'] = 'staging';
+    putenv('USE_PROD_DB=false');
+    $_ENV['USE_PROD_DB'] = 'false';
+    $_SERVER['USE_PROD_DB'] = 'false';
+}
+
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/auth.php';
