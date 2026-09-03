@@ -10,13 +10,7 @@ require_once __DIR__ . '/includes/auth.php';
 
 // Already logged in → home
 if ($existingUser = bakery_current_user()) {
-    $existingRole = $existingUser['role_slug'] ?? '';
-    $existingHome = bakery_is_driver_route_role($existingRole)
-        ? 'driver.php'
-        : ($existingRole === 'baker'
-            ? ('production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day'))))
-            : ($existingRole === 'manager' ? 'manager.php' : 'index.php'));
-    header('Location: ' . BASE_URL . $existingHome);
+    header('Location: ' . BASE_URL . bakery_role_home($existingUser['role_slug'] ?? ''));
     exit;
 }
 
@@ -45,14 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (function_exists('bakery_served_at_app_root') && bakery_served_at_app_root() && strpos($dest, '/bakery/') === 0) {
                     $dest = substr($dest, 7) ?: '/';
                 }
-                // Drivers land on their route; bakers on their daily production work.
+                // Focused workspaces land on their dedicated home, not the ops dashboard.
                 $user = bakery_current_user();
-                if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
-                    $dest = BASE_URL . 'driver.php';
-                } elseif ($user && $user['role_slug'] === 'baker') {
-                    $dest = BASE_URL . 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
-                } elseif ($user && ($user['role_slug'] ?? '') === 'manager') {
-                    $dest = BASE_URL . 'manager.php';
+                $role = $user['role_slug'] ?? '';
+                if ($user && bakery_role_uses_dedicated_home($role)) {
+                    $dest = BASE_URL . bakery_role_home($role);
                 }
                 header('Location: ' . $dest);
                 exit;

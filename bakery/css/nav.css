@@ -1000,11 +1000,13 @@
 @media (max-width: 720px) {
   body.workspace-driver,
   body.workspace-baker,
-  body.workspace-manager {
+  body.workspace-manager,
+  body.workspace-cashier {
     padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 
-  body.workspace-baker {
+  body.workspace-baker,
+  body.workspace-cashier {
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   }
 

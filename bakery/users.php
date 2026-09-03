@@ -17,13 +17,7 @@ $page_title = bakery_t('page.users');
 $error = '';
 $success = '';
 
-$roleLabels = [
-    'administrator' => 'Administrator',
-    'manager' => 'Manager',
-    'baker' => 'Baker',
-    'driver' => 'Driver',
-    'driver_assistant' => 'Driver Assistant',
-];
+$roleLabels = bakery_assignable_role_labels();
 
 function bakery_users_page_roles(PDO $db) {
     return $db->query('SELECT id, slug, name FROM roles ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
@@ -331,6 +325,9 @@ require_once __DIR__ . '/includes/nav.php';
           <?php
           $selectedRole = $editUser['role_slug'] ?? ($_POST['role_slug'] ?? 'driver');
           foreach ($roles as $role):
+            if (!isset($roleLabels[$role['slug']])) {
+                continue;
+            }
           ?>
             <option value="<?php echo htmlspecialchars($role['slug']); ?>"
               <?php echo $selectedRole === $role['slug'] ? 'selected' : ''; ?>>

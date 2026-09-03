@@ -206,6 +206,11 @@ t_assert(in_array('get_driver_orders.php', bakery_driver_scripts(), true), 'get_
 t_assert(in_array('qr_login.php', bakery_driver_scripts(), true), 'customer QR generator is driver-accessible');
 t_assert(in_array('cashier_shop_photos.php', bakery_cashier_scripts(), true), 'cashier shop photos is cashier-accessible');
 t_assert(in_array('upload_shop_photo.php', bakery_cashier_scripts(), true), 'upload shop photo API is cashier-accessible');
+t_assert(bakery_role_home('cashier') === 'cashier_shop_photos.php', 'cashier home is shop photos, not the ops dashboard');
+t_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
+t_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
+t_assert(bakery_ops_index_bypass_home('cashier') === 'cashier_shop_photos.php', 'cashiers hitting the ops dashboard are sent to shop photos');
+t_assert(isset(bakery_assignable_role_labels()['cashier']), 'User Management can assign the cashier type');
 t_assert(in_array('production.php', bakery_baker_scripts(), true), 'production is baker-accessible');
 t_assert(in_array('baker_mix.php', bakery_baker_scripts(), true), 'baker_mix is baker-accessible');
 t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is baker-accessible');

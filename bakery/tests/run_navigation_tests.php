@@ -139,6 +139,29 @@ navigation_test_assert($adminItemCount > 0 && array_sum($usageCounts) === $admin
 navigation_test_assert($usageCounts['everyday'] >= 10, 'everyday bucket includes the core operating tabs');
 navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket includes setup and admin tabs');
 
+navigation_test_assert(function_exists('bakery_role_home'), 'role home helper exists');
+navigation_test_assert(bakery_role_home('cashier') === 'cashier_shop_photos.php', 'cashier home is shop photos, not the ops dashboard');
+navigation_test_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
+navigation_test_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
+navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'cashier_shop_photos.php', 'cashiers hitting the ops dashboard are sent to shop photos');
+navigation_test_assert(bakery_ops_index_bypass_home('administrator') === null, 'administrators may open the ops dashboard');
+navigation_test_assert(isset(bakery_assignable_role_labels()['cashier']), 'User Management can assign the cashier type');
+$loginSrc = (string)file_get_contents(dirname(__DIR__) . '/login.php');
+$usersSrc = (string)file_get_contents(dirname(__DIR__) . '/users.php');
+navigation_test_assert(strpos($loginSrc, 'bakery_role_home') !== false, 'login sends staff to bakery_role_home');
+navigation_test_assert(strpos($usersSrc, 'bakery_assignable_role_labels') !== false, 'users.php validates types via bakery_assignable_role_labels');
+
+$cashierNav = navigation_test_render_nav('cashier', 'cashier_shop_photos');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav bakery-nav--focused bakery-nav--cashier') !== false, 'cashier navigation uses the focused cashier shell');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashier navigation is not the admin ops shell');
+navigation_test_assert(strpos($cashierNav, 'cashier_shop_photos.php') !== false, 'cashier navigation links Shop Photos');
+navigation_test_assert(strpos($cashierNav, 'href="' . BASE_URL . 'index.php"') === false, 'cashier navigation does not link the ops dashboard');
+navigation_test_assert(strpos($cashierNav, 'manager.php') === false, 'cashier navigation does not link Manager Mode');
+navigation_test_assert(strpos($cashierNav, 'bakery-nav__logout') !== false, 'cashier navigation includes logout in the focused bar');
+
+$headerSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/header.php');
+navigation_test_assert(strpos($headerSrc, 'workspace-cashier') !== false, 'header treats cashier as a focused workspace');
+
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, 'Daily production') !== false, 'baker navigation includes Daily Production');
 navigation_test_assert(strpos($bakerNav, 'Mix today') !== false, 'baker navigation includes Mix Today');

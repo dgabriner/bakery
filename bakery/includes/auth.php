@@ -2,7 +2,7 @@
 /**
  * Authentication, authorization, and CSRF (Checkpoint 0D).
  *
- * Roles: administrator, manager, driver, driver_assistant, baker (extensible via permissions tables).
+ * Roles: administrator, manager, driver, driver_assistant, baker, cashier (extensible via permissions tables).
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -135,6 +135,57 @@ function bakery_driver_route_roles(): array {
 
 function bakery_is_driver_route_role($role): bool {
     return in_array((string)$role, bakery_driver_route_roles(), true);
+}
+
+/**
+ * Staff types that User Management may assign. The cashier role exists in
+ * `roles` after migration 074; omitting it here makes the profile form show
+ * Cashier from the database then reject Save with "Invalid user type."
+ */
+function bakery_assignable_role_labels(): array {
+    return [
+        'administrator' => 'Administrator',
+        'manager' => 'Manager',
+        'baker' => 'Baker',
+        'cashier' => 'Cashier',
+        'driver' => 'Driver',
+        'driver_assistant' => 'Driver Assistant',
+    ];
+}
+
+/**
+ * Landing page after login for each staff role.
+ * Administrators keep the requested URL (usually the ops dashboard).
+ */
+function bakery_role_home(string $role): string {
+    if (bakery_is_driver_route_role($role)) {
+        return 'driver.php';
+    }
+    switch ($role) {
+        case 'baker':
+            return 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
+        case 'manager':
+            return 'manager.php';
+        case 'cashier':
+            return 'cashier_shop_photos.php';
+        default:
+            return 'index.php';
+    }
+}
+
+function bakery_role_uses_dedicated_home(string $role): bool {
+    return bakery_role_home($role) !== 'index.php';
+}
+
+/**
+ * Roles that are 403 on index.php unless redirected first.
+ * Drivers are allowed on index and redirected by the page itself.
+ */
+function bakery_ops_index_bypass_home(string $role): ?string {
+    if ($role === 'cashier') {
+        return bakery_role_home($role);
+    }
+    return null;
 }
 
 /**
@@ -1054,6 +1105,13 @@ function bakery_enforce_request_security(PDO $db = null) {
     }
 
     bakery_require_login();
+
+    $currentRole = (string)(bakery_current_user()['role_slug'] ?? '');
+    $indexHome = bakery_ops_index_bypass_home($currentRole);
+    if ($script === 'index.php' && $indexHome !== null) {
+        header('Location: ' . BASE_URL . $indexHome);
+        exit;
+    }
 
     $isDiagnostic = in_array($script, bakery_diagnostic_scripts(), true);
     $isDriverScript = in_array($script, bakery_driver_scripts(), true);
