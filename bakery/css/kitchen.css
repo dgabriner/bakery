@@ -1,0 +1,130 @@
+/* Baker Today: sticky Mix / Bake / Pack segments + Pack List phone focus */
+
+.kitchen-segments {
+  background: var(--sf-surface, #fff);
+  border-bottom: 1px solid var(--sf-border, #d7e4df);
+  display: flex;
+  gap: 0;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.kitchen-segments__btn {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--sf-text-secondary, #5a6f69);
+  display: inline-flex;
+  flex: 1 1 0;
+  font: inherit;
+  font-weight: 700;
+  justify-content: center;
+  min-height: var(--sf-touch-min, 44px);
+  padding: 0.55rem 0.4rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.kitchen-segments__btn.is-active {
+  border-bottom-color: var(--sf-primary, #1f4f49);
+  color: var(--sf-primary, #1f4f49);
+}
+
+.kitchen-segments__btn:focus-visible {
+  outline: 2px solid var(--sf-primary, #1f4f49);
+  outline-offset: -2px;
+}
+
+.pack-phone-focus {
+  align-items: center;
+  background: var(--sf-surface, #fff);
+  border: 1px solid var(--sf-border, #d7e4df);
+  border-radius: 12px;
+  display: none;
+  gap: 0.5rem;
+  justify-content: space-between;
+  margin: 0 0 0.85rem;
+  padding: 0.45rem 0.55rem;
+  position: sticky;
+  top: 2.75rem;
+  z-index: 35;
+}
+
+.pack-phone-focus__btn {
+  align-items: center;
+  background: #f3f7f5;
+  border: 1px solid #c9d9d3;
+  border-radius: 10px;
+  color: #1f4f49;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  justify-content: center;
+  min-height: var(--sf-touch-min, 44px);
+  min-width: var(--sf-touch-min, 44px);
+  padding: 0 0.85rem;
+  text-decoration: none;
+}
+
+.pack-phone-focus__btn[aria-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.pack-phone-focus__meta {
+  color: #3f5852;
+  flex: 1 1 auto;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .pack-page--baker .pack-phone-focus {
+    display: flex;
+  }
+
+  .pack-page--baker .pack-section:not(.is-phone-focus) {
+    display: none;
+  }
+
+  .pack-page--baker .pack-section.is-phone-focus {
+    display: block;
+  }
+
+  .pack-page--baker .pack-check {
+    flex: 0 0 56px;
+    font-size: 1.35rem;
+    height: 56px;
+    min-height: 56px;
+    min-width: 56px;
+    width: 56px;
+  }
+
+  .pack-page--baker .pack-line {
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 56px;
+    padding: 0.75rem 0.65rem;
+  }
+
+  .pack-page--baker .pack-line__qty {
+    font-size: 1.2rem;
+    min-width: 48px;
+  }
+
+  .pack-page--baker .pack-section__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pack-page--baker .pack-totals,
+  .pack-page--baker .pack-count-board,
+  .pack-page--baker .pack-inventory-bar {
+    overflow-x: auto;
+  }
+}

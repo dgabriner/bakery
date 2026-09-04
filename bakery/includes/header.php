@@ -51,6 +51,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/tokens.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/base.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/nav.css'); ?>">
+    <link rel="stylesheet" href="<?php echo bakery_asset_href('css/kitchen.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/styles.css'); ?>">
     <script defer src="<?php echo bakery_asset_href('includes/shell.js'); ?>"></script>
     <?php if ($authUser): ?>

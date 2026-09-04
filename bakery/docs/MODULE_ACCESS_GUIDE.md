@@ -8,7 +8,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | --- | --- |
 | Administrator | Every current module, user management, historical navigation, and administrator-only diagnostics. |
 | Manager | Same operational permissions as before (production, orders, customers, drivers, routes, products, insights). Phone home is a focused workspace on **Bakery Manager**: Today, Routes, Kitchen, Missed, plus More for the rest of the catalog. Cannot alter users or roles, and does not receive historical or diagnostic tools. |
-| Baker | **Daily Production**, **Mix Today**, and **Pack List** only. |
+| Baker | **Today** workspace: Mix / Bake / Pack segments on Mix Today, Daily Production, and Pack List. |
 | Driver | **My Route** and **Call HQ** only. Delivery completion, photos, and route-specific actions are contained within My Route. |
 
 ## Current manager and administrator modules

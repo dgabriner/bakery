@@ -171,7 +171,8 @@ function bakery_agent_program_work_map(): array
             ['includes/kitchen_segments.php', 'includes/nav.php', 'baker_mix.php', 'production.php', 'pack_list.php', 'includes/pack_list.php'],
             ['tests/run_baker_mix_tests.php', 'tests/run_production_confirm_tests.php', 'tests/run_pack_list_tests.php'],
             ['Bakers never open Production Center', 'Pack check-off semantics and inventory math unchanged'],
-            'docs/prompts/45-kitchen-one-screen.md'
+            'docs/prompts/45-kitchen-one-screen.md',
+            'shipped'
         ),
         'sfb-bottom-nav' => $m(
             'SF Baker bottom tabs + More replacing the eight-tab strip',

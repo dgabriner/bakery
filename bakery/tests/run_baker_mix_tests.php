@@ -54,7 +54,14 @@ $prod = (string)file_get_contents($root . '/production.php');
 $assert(strpos($prod, 'baker_mix') === false, 'Daily Production page is unchanged by Mix Today');
 
 $nav = (string)file_get_contents($root . '/includes/nav.php');
-$assert(strpos($nav, 'baker_mix.php') !== false, 'baker nav includes Mix Today');
+$assert(strpos($nav, 'nav.baker_today') !== false, 'baker nav includes Today entry');
+$assert(strpos($nav, 'baker_mix.php') === false, 'baker bottom nav no longer peers Mix Today');
+
+$seg = (string)file_get_contents($root . '/includes/kitchen_segments.php');
+$assert(strpos($seg, 'bakery_kitchen_segments_html') !== false, 'kitchen segments helper exists');
+$assert(strpos($page, 'bakery_kitchen_segments_render') !== false, 'Mix Today renders kitchen segments');
+$assert(strpos($prod, 'bakery_kitchen_segments_render') !== false, 'Daily Production renders kitchen segments for bakers');
+$assert(strpos($prod, 'baker_mix.php') === false, 'Daily Production page source does not hardcode Mix Today links');
 
 $en = include $root . '/lang/en.php';
 $es = include $root . '/lang/es.php';
@@ -63,6 +70,10 @@ foreach ([
     'baker_mix.starter_title',
     'baker_mix.batches_title',
     'nav.baker_mix',
+    'nav.baker_today',
+    'kitchen.segment_mix',
+    'kitchen.segment_bake',
+    'kitchen.segment_pack',
     'page.baker_mix',
 ] as $key) {
     $assert(isset($en[$key]) && $en[$key] !== '', "en has $key");

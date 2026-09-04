@@ -174,9 +174,9 @@ $navCss = (string)file_get_contents(dirname(__DIR__) . '/css/nav.css');
 navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups') !== false, 'nav.css lays out the cashier focused bar');
 
 $bakerNav = navigation_test_render_nav('baker', 'production');
-navigation_test_assert(strpos($bakerNav, 'Daily production') !== false, 'baker navigation includes Daily Production');
-navigation_test_assert(strpos($bakerNav, 'Mix today') !== false, 'baker navigation includes Mix Today');
-navigation_test_assert(strpos($bakerNav, 'baker_mix.php') !== false, 'baker navigation links Mix Today');
+navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
+navigation_test_assert(strpos($bakerNav, 'production.php') !== false, 'baker Today links to Daily Production home');
+navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 1, 'baker navigation has a single Today entry');
 navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker navigation omits Production Center');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
