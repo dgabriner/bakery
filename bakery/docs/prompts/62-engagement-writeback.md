@@ -26,3 +26,5 @@ Failed-stop rules are law (reason + note; retry only from failed; reassign via D
 ## Done when
 
 Both loops close in one tap from the screen where the decision happens; the four suites plus `run_exception_desk_tests.php` are green.
+
+**Status:** shipped 2026-09-04 — Apply to route (preview + confirm + `operational_events`) on survey results; recovery Text customer via `bakery_text_send` (`context_type=recovery`); Create credit via `bakery_delivery_issue_submit_from_recovery` into Service Issues. Staging and Live were not touched.
