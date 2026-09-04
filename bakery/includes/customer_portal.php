@@ -619,11 +619,26 @@ function bakery_resolve_customer_price(PDO $db, array $customer, array $product)
         return (float)$product['wholesale_price'];
     }
 
-    if (($product['product_line_name'] ?? '') === 'Pan Dulce' && !empty($customer['default_pan_dulce_price'])) {
-        return (float)$customer['default_pan_dulce_price'];
+    $productLine = trim((string)($product['product_line_name'] ?? ''));
+    $storePanDulce = isset($customer['default_pan_dulce_price'])
+        ? (float)$customer['default_pan_dulce_price']
+        : 0.0;
+    if (strcasecmp($productLine, 'Pan Dulce') === 0 && $storePanDulce > 0) {
+        return $storePanDulce;
     }
 
-    return (float)($product['price'] ?? 0);
+    $catalogPrice = (float)($product['price'] ?? 0);
+    if ($catalogPrice > 0) {
+        return $catalogPrice;
+    }
+
+    // Last resort for zero-priced lines (missing product-line join or blank catalog):
+    // the store's default pan dulce rate is the known piece price for this customer.
+    if ($storePanDulce > 0) {
+        return $storePanDulce;
+    }
+
+    return 0.0;
 }
 
 /**

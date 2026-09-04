@@ -215,7 +215,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 // Get product price and check if it's Pan Dulce
                 $stmt = $db->prepare("
-                    SELECT p.price, c.default_pan_dulce_price, pl.name as product_line_name
+                    SELECT p.price, p.wholesale_price, c.id AS customer_id, c.pricing_tier,
+                           c.default_pan_dulce_price, pl.name as product_line_name
                     FROM products p
                     JOIN dough_types dt ON p.dough_type_id = dt.id
                     JOIN product_lines pl ON dt.product_line_id = pl.id
@@ -227,13 +228,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $productData = $stmt->fetch();
                 
                 // Determine the unit price based on product line and customer pricing
-                $unitPrice = floatval($productData['price'] ?? 0);
-                
-                // If this is a Pan Dulce product and customer has a custom price, use it
-                if ($productData['product_line_name'] === 'Pan Dulce' && 
-                    !empty($productData['default_pan_dulce_price'])) {
-                    $unitPrice = floatval($productData['default_pan_dulce_price']);
-                }
+                $unitPrice = bakery_resolve_customer_price($db, [
+                    'id' => (int)($productData['customer_id'] ?? 0),
+                    'pricing_tier' => $productData['pricing_tier'] ?? 'retail',
+                    'default_pan_dulce_price' => $productData['default_pan_dulce_price'] ?? null,
+                ], [
+                    'id' => $productId,
+                    'price' => floatval($productData['price'] ?? 0),
+                    'wholesale_price' => $productData['wholesale_price'] ?? null,
+                    'product_line_name' => $productData['product_line_name'] ?? '',
+                ]);
                 
                 $lineTotal = $quantity * $unitPrice;
                 
@@ -242,6 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE 
                     quantity = quantity + VALUES(quantity),
+                    unit_price = VALUES(unit_price),
                     line_total = quantity * unit_price
                 ");
                 $stmt->execute([$orderId, $productId, $quantity, $unitPrice, $lineTotal]);
