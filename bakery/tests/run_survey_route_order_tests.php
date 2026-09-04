@@ -73,6 +73,11 @@ if ($wiringReady) {
         'public token allowlist includes route_order'
     );
     $assert(strpos($surveyPhp, 'order_route') !== false, 'survey.php handles order_route action');
+    $assert(strpos($surveyPhp, 'apply_route_order') !== false, 'survey.php can Apply to route for route-order results');
+    $helperRo = (string)file_get_contents($root . '/includes/survey_route_order.php');
+    $assert(strpos($helperRo, 'bakery_survey_route_order_preview') !== false, 'route-order preview helper exists');
+    $assert(strpos($helperRo, 'bakery_survey_route_order_confirm_apply') !== false, 'route-order confirm apply exists');
+    $assert(strpos($helperRo, 'survey_route_order_applied') !== false, 'route-order apply records operational_events');
     $assert(strpos($surveyPhp, 'route_order') !== false, 'survey.php renders route_order');
     $assert(strpos($surveyPhp, 'new URL(rel, window.location.href)') !== false
         || strpos($surveyPhp, 'bakery_survey_link_url') !== false, 'copy links stay BASE_URL-aware');

@@ -271,6 +271,109 @@ function bakery_delivery_issue_submit(PDO $db, array $customer, int $dailyOrderI
     return bakery_delivery_issue_format_row($issue);
 }
 
+/**
+ * Staff/recovery handoff into the Service Issues queue. Does not require
+ * delivery_confirmed_at (failed stops never confirmed). Never mutates invoices.
+ *
+ * @param array<string,mixed> $case delivery_recovery_cases row (+ optional customer_id)
+ * @param array<string,mixed> $input category, description, credit_requested
+ * @return array<string,mixed>
+ */
+function bakery_delivery_issue_submit_from_recovery(PDO $db, array $case, array $input = []): array
+{
+    bakery_delivery_issues_ensure_schema($db);
+    $dailyOrderId = (int)($case['daily_order_id'] ?? 0);
+    if ($dailyOrderId <= 0) {
+        throw new InvalidArgumentException('Recovery case is missing a daily order');
+    }
+    $customerId = (int)($case['customer_id'] ?? 0);
+    $orderDate = (string)($case['delivery_date'] ?? '');
+    $orderStmt = $db->prepare(
+        'SELECT id, customer_id, order_date, delivery_confirmed_at FROM daily_orders WHERE id = ? LIMIT 1'
+    );
+    $orderStmt->execute([$dailyOrderId]);
+    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        throw new InvalidArgumentException('Daily order not found for recovery credit');
+    }
+    if ($customerId <= 0) {
+        $customerId = (int)$order['customer_id'];
+    }
+    if ($orderDate === '') {
+        $orderDate = (string)$order['order_date'];
+    }
+    $custStmt = $db->prepare('SELECT id, name FROM customers WHERE id = ? LIMIT 1');
+    $custStmt->execute([$customerId]);
+    $customer = $custStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$customer) {
+        throw new InvalidArgumentException('Customer not found for recovery credit');
+    }
+
+    $category = trim((string)($input['category'] ?? 'delivery_problem'));
+    $cats = bakery_delivery_issue_categories();
+    if (!isset($cats[$category])) {
+        $category = 'delivery_problem';
+    }
+    $description = trim((string)($input['description'] ?? ''));
+    if ($description === '') {
+        $reason = (string)($case['failure_reason'] ?? 'delivery_problem');
+        $note = trim((string)($input['manager_note'] ?? $case['manager_note'] ?? ''));
+        $description = 'Failed-stop recovery credit review (' . str_replace('_', ' ', $reason) . ')'
+            . ($note !== '' ? ': ' . $note : '');
+    }
+    if (strlen($description) > 2000) {
+        $description = substr($description, 0, 2000);
+    }
+
+    $stmt = $db->prepare(
+        'INSERT INTO customer_delivery_issues
+            (customer_id, daily_order_id, order_date, product_id, category,
+             ordered_quantity, driver_delivered_quantity, customer_reported_quantity,
+             description, status, credit_recommendation, credit_pieces)
+         VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?, ?, NULL)'
+    );
+    $stmt->execute([
+        $customerId,
+        $dailyOrderId,
+        $orderDate,
+        $category,
+        $description,
+        'submitted',
+        !empty($input['credit_requested']) ? 'requested' : 'requested',
+    ]);
+    $issueId = (int)$db->lastInsertId();
+
+    $summary = $customer['name'] . ' recovery credit queued (' . bakery_delivery_issue_category_label($category) . ')';
+    bakery_record_operational_event($db, BAKERY_OP_PORTAL_ISSUE_SUBMITTED, $summary, [
+        'actor_role' => function_exists('bakery_current_user')
+            ? (string)(bakery_current_user()['role_slug'] ?? 'manager')
+            : 'manager',
+        'customer_id' => $customerId,
+        'daily_order_id' => $dailyOrderId,
+        'operational_date' => $orderDate,
+        'metadata' => [
+            'issue_id' => $issueId,
+            'category' => $category,
+            'credit_recommendation' => 'requested',
+            'recovery_case_id' => (int)($case['id'] ?? 0) ?: null,
+            'source' => 'delivery_recovery',
+        ],
+    ]);
+
+    if (function_exists('bakery_delivery_issue_get_manager')) {
+        return bakery_delivery_issue_get_manager($db, $issueId);
+    }
+    return [
+        'id' => $issueId,
+        'customer_id' => $customerId,
+        'daily_order_id' => $dailyOrderId,
+        'order_date' => $orderDate,
+        'category' => $category,
+        'status' => 'submitted',
+        'credit_recommendation' => 'requested',
+    ];
+}
+
 /** Manager queue: open issues. */
 function bakery_delivery_issues_manager_queue(PDO $db, array $filters = []) {
     bakery_delivery_issues_ensure_schema($db);

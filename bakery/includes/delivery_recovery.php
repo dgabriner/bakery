@@ -125,6 +125,24 @@ function bakery_delivery_recovery_validate_input(string $action, array $input): 
             'billing_handoff' => $billing,
         ];
     }
+    if ($action === 'text_customer') {
+        // Note optional — template body is the message.
+        return $out + [
+            'communication_status' => 'contacted',
+            'communication_note' => bakery_delivery_recovery_note($input['communication_note'] ?? $note),
+        ];
+    }
+    if ($action === 'create_credit') {
+        $desc = trim((string)($input['description'] ?? ''));
+        if ($desc === '') {
+            $desc = $note !== '' ? $note : 'Failed-stop credit review';
+        }
+        return $out + [
+            'billing_handoff' => 'credit_requested',
+            'category' => strtolower(trim((string)($input['category'] ?? 'delivery_problem'))),
+            'description' => bakery_delivery_recovery_note($desc, true),
+        ];
+    }
     throw new InvalidArgumentException('Unknown recovery action');
 }
 
@@ -250,6 +268,13 @@ function bakery_delivery_recovery_apply(PDO $db, int $caseId, string $action, ar
     $case = bakery_delivery_recovery_case($db, $caseId);
     $from = (string)$case['workflow_state'];
 
+    if ($action === 'text_customer') {
+        return bakery_delivery_recovery_text_customer($db, $caseId, $input + $data);
+    }
+    if ($action === 'create_credit') {
+        return bakery_delivery_recovery_create_credit($db, $caseId, $input + $data);
+    }
+
     if ($action === 'update_handoffs') {
         $stmt = $db->prepare('UPDATE delivery_recovery_cases SET manager_note=?, customer_communication_status=?, customer_communication_note=?, billing_handoff=? WHERE id=?');
         $stmt->execute([$data['manager_note'], $data['communication_status'], $data['communication_note'], $data['billing_handoff'], $caseId]);
@@ -313,7 +338,14 @@ function bakery_delivery_recovery_cases_for_date(PDO $db, string $date): array
         return [];
     }
     $stmt = $db->prepare(
-        'SELECT rc.*, c.name AS customer_name, od.driver_id AS active_driver_id, d.name AS active_driver_name
+        'SELECT rc.*, od.customer_id,
+                c.name AS customer_name,
+                c.phone AS customer_phone,
+                c.portal_phone AS customer_portal_phone,
+                c.delivery_contact_phone AS customer_delivery_phone,
+                c.ordering_contact_phone AS customer_ordering_phone,
+                od.driver_id AS active_driver_id,
+                d.name AS active_driver_name
          FROM delivery_recovery_cases rc
          JOIN daily_orders od ON od.id = rc.daily_order_id
          JOIN customers c ON c.id = od.customer_id
@@ -324,6 +356,153 @@ function bakery_delivery_recovery_cases_for_date(PDO $db, string $date): array
     );
     $stmt->execute([$date]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** Best outbound phone for a recovery case row (enriched or raw). */
+function bakery_delivery_recovery_customer_phone(array $case): string
+{
+    foreach ([
+        'customer_delivery_phone',
+        'customer_portal_phone',
+        'customer_ordering_phone',
+        'customer_phone',
+        'phone',
+        'portal_phone',
+        'delivery_contact_phone',
+        'ordering_contact_phone',
+    ] as $key) {
+        $raw = trim((string)($case[$key] ?? ''));
+        if ($raw === '') {
+            continue;
+        }
+        if (function_exists('bakery_text_normalize_phone')) {
+            $norm = bakery_text_normalize_phone($raw);
+            if ($norm !== '') {
+                return $norm;
+            }
+        }
+        return $raw;
+    }
+    return '';
+}
+
+/** EN/ES body for recovery customer text. */
+function bakery_delivery_recovery_text_body(array $case): string
+{
+    $reasons = bakery_delivery_recovery_reason_codes();
+    $reason = $reasons[(string)($case['failure_reason'] ?? '')] ?? str_replace('_', ' ', (string)($case['failure_reason'] ?? 'delivery issue'));
+    $customer = trim((string)($case['customer_name'] ?? ''));
+    $vars = [
+        'reason' => $reason,
+        'customer' => $customer !== '' ? $customer : 'customer',
+        'date' => (string)($case['delivery_date'] ?? ''),
+    ];
+    if (function_exists('bakery_t')) {
+        return (string)bakery_t(
+            'exception_desk.recovery_text_body',
+            $vars,
+            'Sour Flour: We could not complete today\'s delivery (:reason). Please reply or call us so we can help.'
+        );
+    }
+    return 'Sour Flour: We could not complete today\'s delivery (' . $reason . '). Please reply or call us so we can help.';
+}
+
+/**
+ * Text the customer through bakery_text_send; mark communication contacted.
+ *
+ * @return array<string,mixed> Updated case (+ send result under _text_send)
+ */
+function bakery_delivery_recovery_text_customer(PDO $db, int $caseId, array $input = []): array
+{
+    if (!bakery_delivery_recovery_actor_may('text_customer')) {
+        throw new RuntimeException('Only managers can text from recovery');
+    }
+    bakery_require_role(['administrator', 'manager']);
+    $data = bakery_delivery_recovery_validate_input('text_customer', $input);
+    $case = bakery_delivery_recovery_case($db, $caseId);
+    $enriched = bakery_delivery_recovery_cases_for_date($db, (string)$case['delivery_date']);
+    foreach ($enriched as $row) {
+        if ((int)$row['id'] === $caseId) {
+            $case = array_merge($case, $row);
+            break;
+        }
+    }
+    if ((int)($case['customer_id'] ?? 0) <= 0) {
+        $oid = $db->prepare('SELECT customer_id FROM daily_orders WHERE id = ? LIMIT 1');
+        $oid->execute([(int)$case['daily_order_id']]);
+        $case['customer_id'] = (int)$oid->fetchColumn();
+    }
+    if (!function_exists('bakery_text_send')) {
+        require_once __DIR__ . '/text_comms.php';
+    }
+    $phone = bakery_delivery_recovery_customer_phone($case);
+    if ($phone === '') {
+        throw new RuntimeException('No customer phone on file for this stop');
+    }
+    $body = bakery_delivery_recovery_text_body($case);
+    $send = bakery_text_send($db, $phone, $body, [
+        'customer_id' => (int)($case['customer_id'] ?? 0) ?: null,
+        'staff_user_id' => (int)(bakery_current_user()['id'] ?? 0) ?: null,
+        'context_type' => 'recovery',
+        'context_id' => $caseId,
+        'operating_date' => (string)$case['delivery_date'],
+    ]);
+    if (empty($send['id'])) {
+        throw new RuntimeException('Could not record the customer text');
+    }
+    $note = $data['manager_note'] !== '' ? $data['manager_note'] : (string)($case['manager_note'] ?? '');
+    $commNote = $data['communication_note'] !== ''
+        ? $data['communication_note']
+        : ('Texted customer (message #' . (int)$send['id'] . ')');
+    $stmt = $db->prepare(
+        'UPDATE delivery_recovery_cases
+         SET manager_note=?, customer_communication_status=?, customer_communication_note=?
+         WHERE id=?'
+    );
+    $stmt->execute([$note, 'contacted', $commNote, $caseId]);
+    $updated = bakery_delivery_recovery_case($db, $caseId);
+    bakery_delivery_recovery_event($db, $updated, 'text_customer', [
+        'text_message_id' => (int)$send['id'],
+        'recorded_only' => !empty($send['recorded_only']),
+        'ok' => !empty($send['ok']),
+    ]);
+    $updated['_text_send'] = $send;
+    return $updated;
+}
+
+/**
+ * Queue a Service Issues credit review row from the recovery case (no invoice mutation).
+ *
+ * @return array<string,mixed> Updated case (+ issue under _credit_issue)
+ */
+function bakery_delivery_recovery_create_credit(PDO $db, int $caseId, array $input = []): array
+{
+    if (!bakery_delivery_recovery_actor_may('create_credit')) {
+        throw new RuntimeException('Only managers can create a credit handoff');
+    }
+    bakery_require_role(['administrator', 'manager']);
+    $data = bakery_delivery_recovery_validate_input('create_credit', $input);
+    $case = bakery_delivery_recovery_case($db, $caseId);
+    if (!function_exists('bakery_delivery_issue_submit_from_recovery')) {
+        require_once __DIR__ . '/customer_delivery_issues.php';
+    }
+    $issue = bakery_delivery_issue_submit_from_recovery($db, $case, [
+        'category' => $data['category'] ?? 'delivery_problem',
+        'description' => $data['description'],
+        'credit_requested' => true,
+        'manager_note' => $data['manager_note'],
+    ]);
+    $note = $data['manager_note'] !== '' ? $data['manager_note'] : (string)($case['manager_note'] ?? '');
+    $stmt = $db->prepare(
+        'UPDATE delivery_recovery_cases SET manager_note=?, billing_handoff=? WHERE id=?'
+    );
+    $stmt->execute([$note, 'credit_requested', $caseId]);
+    $updated = bakery_delivery_recovery_case($db, $caseId);
+    bakery_delivery_recovery_event($db, $updated, 'create_credit', [
+        'issue_id' => (int)($issue['id'] ?? 0),
+    ]);
+    $updated['_credit_issue'] = $issue;
+    return $updated;
 }
 
 /** Failed assignments that still need a manager recovery case. */

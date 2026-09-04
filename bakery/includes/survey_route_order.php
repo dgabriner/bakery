@@ -292,6 +292,104 @@ function bakery_survey_route_order_apply(PDO $db, int $driverId, string $deliver
 }
 
 /**
+ * Preview route-order changes without writing.
+ *
+ * @param list<int> $orderedDailyOrderIds
+ * @return array{ok:bool,error?:string,locked?:list,movable?:list,plan?:list,from_order?:list<int>,to_order?:list<int>}
+ */
+function bakery_survey_route_order_preview(PDO $db, int $driverId, string $deliveryDate, array $orderedDailyOrderIds): array
+{
+    if ($driverId <= 0) {
+        return ['ok' => false, 'error' => 'invalid_driver'];
+    }
+    $collectProbe = bakery_survey_route_order_data($db, $driverId, $deliveryDate);
+    $check = bakery_survey_route_order_collect($orderedDailyOrderIds, $collectProbe['movable']);
+    if (!$check['ok']) {
+        return ['ok' => false, 'error' => (string)($check['error'] ?? 'invalid_order')];
+    }
+    $locked = $collectProbe['locked'];
+    $movable = $collectProbe['movable'];
+    $fromOrder = [];
+    foreach ($movable as $row) {
+        $fromOrder[] = (int)($row['daily_order_id'] ?? 0);
+    }
+    $plan = bakery_survey_route_order_plan($locked, $movable, $check['ordered']);
+    return [
+        'ok' => true,
+        'locked' => $locked,
+        'movable' => $movable,
+        'plan' => $plan,
+        'from_order' => $fromOrder,
+        'to_order' => $check['ordered'],
+    ];
+}
+
+/**
+ * Confirm apply with operational_events. Requires confirm=true.
+ *
+ * @param list<int> $orderedDailyOrderIds
+ * @param array{confirm?:bool,survey_id?:int,staff_user_id?:int} $opts
+ * @return array{ok:bool,apply?:array,preview?:array,event_id?:int|null,error?:string}
+ */
+function bakery_survey_route_order_confirm_apply(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    array $orderedDailyOrderIds,
+    array $opts = []
+): array {
+    $preview = bakery_survey_route_order_preview($db, $driverId, $deliveryDate, $orderedDailyOrderIds);
+    if (empty($opts['confirm'])) {
+        return ['ok' => false, 'preview' => $preview, 'error' => 'confirm_required'];
+    }
+    if (empty($preview['ok'])) {
+        return ['ok' => false, 'preview' => $preview, 'error' => (string)($preview['error'] ?? 'invalid_order')];
+    }
+    $apply = bakery_survey_route_order_apply($db, $driverId, $deliveryDate, $orderedDailyOrderIds);
+    $eventId = null;
+    if (!empty($apply['ok'])) {
+        $eventId = bakery_survey_route_order_record_apply_event($db, $driverId, $deliveryDate, $apply, $opts);
+    }
+    return ['ok' => !empty($apply['ok']), 'apply' => $apply, 'preview' => $preview, 'event_id' => $eventId, 'error' => $apply['error'] ?? null];
+}
+
+/**
+ * @param array{survey_id?:int,staff_user_id?:int} $opts
+ */
+function bakery_survey_route_order_record_apply_event(
+    PDO $db,
+    int $driverId,
+    string $deliveryDate,
+    array $apply,
+    array $opts = []
+): ?int {
+    if (!function_exists('bakery_record_operational_event')) {
+        $timeline = __DIR__ . '/operational_timeline.php';
+        if (is_readable($timeline)) {
+            require_once $timeline;
+        }
+    }
+    if (!function_exists('bakery_record_operational_event')) {
+        return null;
+    }
+    $stopCount = count($apply['stops'] ?? []);
+    return bakery_record_operational_event(
+        $db,
+        'survey_route_order_applied',
+        'Survey route-order applied (' . $stopCount . ' stops)',
+        [
+            'operational_date' => $deliveryDate !== '' ? $deliveryDate : date('Y-m-d'),
+            'driver_id' => $driverId > 0 ? $driverId : null,
+            'actor_user_id' => isset($opts['staff_user_id']) ? ((int)$opts['staff_user_id'] ?: null) : null,
+            'metadata' => [
+                'survey_id' => (int)($opts['survey_id'] ?? 0) ?: null,
+                'stop_count' => $stopCount,
+            ],
+        ]
+    );
+}
+
+/**
  * @param array{
  *   survey_id?:int,
  *   driver_id:int,
@@ -312,6 +410,10 @@ function bakery_survey_route_order_submit(PDO $db, array $fields): array
     if (empty($apply['ok'])) {
         return ['ok' => false, 'apply' => $apply, 'error' => (string)($apply['error'] ?? 'apply_failed')];
     }
+    bakery_survey_route_order_record_apply_event($db, $driverId, $date, $apply, [
+        'survey_id' => (int)($fields['survey_id'] ?? 0),
+        'staff_user_id' => (int)($fields['staff_user_id'] ?? 0),
+    ]);
 
     $payload = [
         'driver_id' => $driverId,

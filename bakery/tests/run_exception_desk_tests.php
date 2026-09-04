@@ -205,6 +205,21 @@ $qtyStmt = $db->prepare('SELECT available_quantity FROM product_inventory_days W
     desk_assert($qtyAfter === $qtyBefore, 'baker flag does not change available_quantity');
 }
 
+$recoveryHtml = bakery_exception_desk_recovery_card([
+    'id' => 3,
+    'customer_name' => 'Cafe Luna',
+    'failure_reason' => 'access_issue',
+    'workflow_state' => 'open',
+    'active_driver_name' => 'Ana',
+    'manager_note' => '',
+    'customer_communication_status' => 'pending',
+    'billing_handoff' => 'review_needed',
+], [['id' => 2, 'name' => 'Ana']], '2099-08-17');
+desk_assert(strpos($recoveryHtml, 'value="text_customer"') !== false, 'recovery card offers Text customer');
+desk_assert(strpos($recoveryHtml, 'value="create_credit"') !== false, 'recovery card offers Create credit');
+desk_assert(strpos($managerPage, 'value="text_customer"') !== false, 'Manager Mode desktop recovery offers Text customer');
+desk_assert(strpos($managerPage, 'value="create_credit"') !== false, 'Manager Mode desktop recovery offers Create credit');
+
 $_SESSION['user_role_slug'] = 'driver';
 $_SESSION['user_driver_id'] = 1;
 $driverApplyBlocked = false;

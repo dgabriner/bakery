@@ -473,6 +473,10 @@ function bakery_exception_desk_recovery_card(array $case, array $drivers, string
                 <button class="exception-desk__btn" type="submit" name="recovery_action" value="retry"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.retry')); ?></button>
                 <button class="exception-desk__btn" type="submit" name="recovery_action" value="reassign"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.reassign')); ?></button>
             </div>
+            <div class="exception-desk__btn-row exception-desk__btn-row--writeback">
+                <button class="exception-desk__btn exception-desk__btn--primary" type="submit" name="recovery_action" value="text_customer"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.text_customer')); ?></button>
+                <button class="exception-desk__btn" type="submit" name="recovery_action" value="create_credit"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.create_credit')); ?></button>
+            </div>
             <details class="exception-desk__more">
                 <summary><?php echo bakery_exception_desk_h(bakery_t('exception_desk.retry_when')); ?></summary>
                 <label><?php echo bakery_exception_desk_h(bakery_t('exception_desk.retry_at')); ?>
