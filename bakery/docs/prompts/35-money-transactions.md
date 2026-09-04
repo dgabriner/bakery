@@ -26,3 +26,5 @@ Extend `run_invoice_send_tests.php`: SMTP failure → row `failed`, order still 
 ## Done when
 
 No path exists where mail is sent and the send row is missing, or the row says sent and no mail attempt happened.
+
+**Status: partial (this branch).** Shipped: outbox pattern in `bakery_billing_send_invoice()` (transaction {mark invoiced + queued send row} → commit → mail → row `sent|logged|failed` with `failure_reason`), failed-send chip on the invoice detail, bulk `failed` count, test seam `$GLOBALS['bakery_billing_mail_handler']`, failure-path assertions in `run_invoice_send_tests.php`. **Remaining:** audit `includes/square_invoices.php` create/publish/webhook writes for transactions.

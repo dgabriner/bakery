@@ -97,7 +97,8 @@ function bakery_agent_program_work_map(): array
             ['includes/billing.php', 'includes/square_invoices.php', 'billing_center.php'],
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_customer_billing_tests.php'],
             ['Never price historical invoices from live products.price', 'Billing Center marks invoiced; it does not invent amounts', 'A send row exists for every mail attempt; status never claims sent without an attempt'],
-            'docs/prompts/35-money-transactions.md'
+            'docs/prompts/35-money-transactions.md',
+            'partial'
         ),
         'js-safety-net' => $m(
             'Global browser error reporting and visible fetch failures',

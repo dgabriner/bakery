@@ -1110,7 +1110,101 @@ function bakery_billing_ensure_invoice_send_schema(PDO $db) {
         }
     }
 
+    // Outbox: a send row is opened as `queued` inside the invoicing transaction
+    // and closed as sent|logged|failed after the mail attempt. failure_reason
+    // holds the short operator-facing cause for failed rows.
+    if (table_exists($db, 'billing_invoice_sends') && !column_exists($db, 'billing_invoice_sends', 'failure_reason')) {
+        try {
+            $db->exec('ALTER TABLE billing_invoice_sends ADD COLUMN failure_reason VARCHAR(255) NULL DEFAULT NULL AFTER status');
+            if (function_exists('bakery_forget_column_exists')) {
+                bakery_forget_column_exists('billing_invoice_sends', 'failure_reason');
+            }
+        } catch (Throwable $e) {
+            // Parallel request may have added it.
+        }
+    }
+
     $done = true;
+}
+
+/**
+ * Open a `queued` outbox row. Call inside the same transaction that marks the
+ * order invoiced so status and intent commit together.
+ */
+function bakery_billing_open_invoice_send(PDO $db, array $data, $userId = null): int {
+    bakery_billing_ensure_invoice_send_schema($db);
+    if (!table_exists($db, 'billing_invoice_sends')) {
+        return 0;
+    }
+    $userId = $userId !== null && (int)$userId > 0 ? (int)$userId : null;
+    $ins = $db->prepare(
+        'INSERT INTO billing_invoice_sends
+            (daily_order_id, invoice_number, amount, sent_at, sent_by_user_id, sent_to_email, channel, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $ins->execute([
+        (int)$data['daily_order_id'],
+        (string)$data['invoice_number'],
+        (float)$data['amount'],
+        date('Y-m-d H:i:s'),
+        $userId,
+        $data['sent_to_email'] ?? null,
+        (string)($data['channel'] ?? 'log'),
+        'queued',
+    ]);
+    return (int)$db->lastInsertId();
+}
+
+/**
+ * Close an outbox row after the mail attempt. Only a successful attempt stamps
+ * daily_orders.invoice_sent_*; a failed row keeps the order invoiced and
+ * visible for resend.
+ */
+function bakery_billing_close_invoice_send(PDO $db, int $sendId, string $status, string $channel, ?string $failureReason, $userId = null): void {
+    $orderId = 0;
+    if ($sendId > 0 && table_exists($db, 'billing_invoice_sends')) {
+        $sentAt = date('Y-m-d H:i:s');
+        $upd = $db->prepare(
+            'UPDATE billing_invoice_sends SET status = ?, channel = ?, failure_reason = ?, sent_at = ? WHERE id = ?'
+        );
+        $upd->execute([$status, $channel, $failureReason !== null ? mb_substr($failureReason, 0, 255) : null, $sentAt, $sendId]);
+        $row = $db->prepare('SELECT daily_order_id, sent_to_email FROM billing_invoice_sends WHERE id = ?');
+        $row->execute([$sendId]);
+        $send = $row->fetch(PDO::FETCH_ASSOC) ?: [];
+        $orderId = (int)($send['daily_order_id'] ?? 0);
+        if ($status !== 'failed' && $orderId > 0 && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
+            $stamp = $db->prepare(
+                'UPDATE daily_orders
+                 SET invoice_sent_at = ?, invoice_sent_to_email = ?, invoice_sent_by_user_id = ?, invoice_send_channel = ?
+                 WHERE id = ?'
+            );
+            $stamp->execute([$sentAt, $send['sent_to_email'] ?? null, $userId !== null && (int)$userId > 0 ? (int)$userId : null, $channel, $orderId]);
+        }
+    }
+    if (function_exists('log_user_action') && $orderId > 0) {
+        $action = $status === 'failed' ? 'invoice_send_failed' : ($channel === 'smtp' ? 'invoice_sent' : 'invoice_send_recorded');
+        log_user_action($db, $action, 'daily_order', $orderId, json_encode(['send_id' => $sendId, 'status' => $status, 'channel' => $channel, 'reason' => $failureReason]), $userId);
+    }
+}
+
+/** Latest failed outbox row per order, for Billing Center resend chips. */
+function bakery_billing_failed_sends(PDO $db, array $orderIds): array {
+    $orderIds = array_values(array_filter(array_map('intval', $orderIds)));
+    if ($orderIds === [] || !table_exists($db, 'billing_invoice_sends') || !column_exists($db, 'billing_invoice_sends', 'failure_reason')) {
+        return [];
+    }
+    $in = implode(',', $orderIds);
+    $rows = $db->query(
+        "SELECT s.daily_order_id, s.failure_reason, s.sent_at
+         FROM billing_invoice_sends s
+         WHERE s.status = 'failed' AND s.daily_order_id IN ($in)
+           AND s.id = (SELECT MAX(id) FROM billing_invoice_sends WHERE daily_order_id = s.daily_order_id)"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $r) {
+        $out[(int)$r['daily_order_id']] = $r;
+    }
+    return $out;
 }
 
 function bakery_billing_invoice_send_schema_ready(PDO $db) {
@@ -1177,6 +1271,12 @@ function bakery_billing_append_mail_log($line) {
  */
 function bakery_billing_deliver_invoice_mail($toEmail, $toName, $subject, $html, $text, array $meta = []) {
     $GLOBALS['bakery_billing_smtp_attempted'] = false;
+    // Test seam (mirrors bakery_square_api_handler): a callable that returns the
+    // channel or throws, so suites can exercise the failed-send path without SMTP.
+    if (isset($GLOBALS['bakery_billing_mail_handler']) && is_callable($GLOBALS['bakery_billing_mail_handler'])) {
+        $GLOBALS['bakery_billing_smtp_attempted'] = true;
+        return (string)call_user_func($GLOBALS['bakery_billing_mail_handler'], $toEmail, $subject, $html, $meta);
+    }
     $toEmail = trim((string)$toEmail);
     if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('Customer has no billing email');
@@ -1308,16 +1408,44 @@ function bakery_billing_send_invoice(PDO $db, $orderId, $userId = null) {
         throw new RuntimeException('Order not found or delivery not confirmed');
     }
 
-    $markedInvoiced = false;
-    if ((string)$statusRow['status'] !== 'invoiced') {
-        bakery_billing_mark_invoiced($db, $orderId, $userId);
-        $markedInvoiced = true;
-    }
-
     $invoice = bakery_billing_load_canonical_invoice($db, $orderId);
     $amount = (float)$invoice['invoice_total'];
     $customer = $invoice['customer'] ?? [];
     $recipient = bakery_billing_customer_billing_email($customer);
+
+    // Outbox pattern: {mark invoiced, open queued send row} commit together
+    // before any SMTP happens. Mail can then fail without leaving a phantom
+    // "sent", and a DB failure here means no mail was attempted.
+    $markedInvoiced = false;
+    $sendId = 0;
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        if ((string)$statusRow['status'] !== 'invoiced') {
+            bakery_billing_mark_invoiced($db, $orderId, $userId);
+            $markedInvoiced = true;
+        }
+        if ($recipient !== '') {
+            $sendId = bakery_billing_open_invoice_send($db, [
+                'daily_order_id' => $orderId,
+                'invoice_number' => $invoice['invoice_number'],
+                'amount' => $amount,
+                'sent_to_email' => $recipient,
+                'channel' => (defined('MAIL_DRIVER') && strtolower((string)MAIL_DRIVER) === 'log') ? 'log' : 'smtp',
+            ], $userId);
+        }
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownsTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
     if ($recipient === '') {
         return [
             'ok' => false,
@@ -1339,28 +1467,40 @@ function bakery_billing_send_invoice(PDO $db, $orderId, $userId = null) {
         . ' total $' . number_format($amount, 2)
         . '. Amounts are from the delivery snapshot.';
 
-    $channel = bakery_billing_deliver_invoice_mail(
-        $recipient,
-        (string)($customer['name'] ?? ''),
-        $subject,
-        $html,
-        $text,
-        [
-            'invoice_number' => $invoice['invoice_number'],
-            'amount' => number_format($amount, 2, '.', ''),
+    try {
+        $channel = bakery_billing_deliver_invoice_mail(
+            $recipient,
+            (string)($customer['name'] ?? ''),
+            $subject,
+            $html,
+            $text,
+            [
+                'invoice_number' => $invoice['invoice_number'],
+                'amount' => number_format($amount, 2, '.', ''),
+                'daily_order_id' => $orderId,
+            ]
+        );
+    } catch (Throwable $e) {
+        error_log('billing send invoice ' . $invoice['invoice_number'] . ' failed: ' . $e->getMessage());
+        bakery_billing_close_invoice_send($db, $sendId, 'failed', 'smtp', $e->getMessage(), $userId);
+        return [
+            'ok' => false,
+            'skipped' => false,
+            'reason' => 'mail_failed',
             'daily_order_id' => $orderId,
-        ]
-    );
+            'invoice_number' => $invoice['invoice_number'],
+            'amount' => $amount,
+            'recipient' => $recipient,
+            'channel' => 'smtp',
+            'status' => 'failed',
+            'marked_invoiced' => $markedInvoiced,
+            'smtp_attempted' => !empty($GLOBALS['bakery_billing_smtp_attempted']),
+            'send_id' => $sendId,
+        ];
+    }
 
     $status = $channel === 'smtp' ? 'sent' : 'logged';
-    bakery_billing_record_invoice_send($db, [
-        'daily_order_id' => $orderId,
-        'invoice_number' => $invoice['invoice_number'],
-        'amount' => $amount,
-        'sent_to_email' => $recipient,
-        'channel' => $channel,
-        'status' => $status,
-    ], $userId);
+    bakery_billing_close_invoice_send($db, $sendId, $status, $channel, null, $userId);
 
     if (function_exists('bakery_customer_notify_invoice_available') || is_readable(__DIR__ . '/customer_notifications.php')) {
         require_once __DIR__ . '/customer_notifications.php';
@@ -1380,6 +1520,7 @@ function bakery_billing_send_invoice(PDO $db, $orderId, $userId = null) {
         'status' => $status,
         'marked_invoiced' => $markedInvoiced,
         'smtp_attempted' => !empty($GLOBALS['bakery_billing_smtp_attempted']),
+        'send_id' => $sendId,
         'html' => $html,
     ];
 }
@@ -1388,11 +1529,12 @@ function bakery_billing_send_invoice(PDO $db, $orderId, $userId = null) {
  * Bulk send. Only delivery-confirmed selected orders are included.
  *
  * @param int[] $orderIds
- * @return array{sent:int,skipped:int,results:array<int,array>}
+ * @return array{sent:int,skipped:int,failed:int,results:array<int,array>}
  */
 function bakery_billing_send_invoices(PDO $db, array $orderIds, $userId = null) {
     $sent = 0;
     $skipped = 0;
+    $failed = 0;
     $results = [];
     foreach ($orderIds as $rawId) {
         $orderId = (int)$rawId;
@@ -1404,6 +1546,8 @@ function bakery_billing_send_invoices(PDO $db, array $orderIds, $userId = null) 
             $results[] = $result;
             if (!empty($result['ok'])) {
                 $sent++;
+            } elseif (($result['reason'] ?? '') === 'mail_failed') {
+                $failed++;
             } else {
                 $skipped++;
             }
@@ -1421,6 +1565,7 @@ function bakery_billing_send_invoices(PDO $db, array $orderIds, $userId = null) 
     return [
         'sent' => $sent,
         'skipped' => $skipped,
+        'failed' => $failed,
         'results' => $results,
     ];
 }

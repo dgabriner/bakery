@@ -68,7 +68,9 @@ try {
             $result = bakery_billing_send_invoice($db, $orderId, $userId);
             if (empty($result['ok'])) {
                 $msg = 'Invoice marked invoiced but not sent: no billing email on file.';
-                if (($result['reason'] ?? '') !== 'no_email') {
+                if (($result['reason'] ?? '') === 'mail_failed') {
+                    $msg = 'Invoice ' . ($result['invoice_number'] ?? '') . ' is marked invoiced but the email failed; the failed send is recorded — fix mail settings and resend.';
+                } elseif (($result['reason'] ?? '') !== 'no_email') {
                     $msg = 'Invoice could not be sent.';
                 }
             } elseif (($result['channel'] ?? '') === 'log') {
@@ -86,7 +88,7 @@ try {
                 $orderIds = [$orderIds];
             }
             $batch = bakery_billing_send_invoices($db, $orderIds, $userId);
-            if ($batch['sent'] === 0 && $batch['skipped'] === 0) {
+            if ($batch['sent'] === 0 && $batch['skipped'] === 0 && ($batch['failed'] ?? 0) === 0) {
                 throw new RuntimeException('No deliveries selected');
             }
             $channel = bakery_billing_email_ready() ? 'smtp' : 'log';
@@ -97,6 +99,9 @@ try {
             }
             if ($batch['skipped'] > 0) {
                 $msg .= ' ' . $batch['skipped'] . ' skipped (not confirmed, not sendable, or no billing email).';
+            }
+            if (($batch['failed'] ?? 0) > 0) {
+                $msg .= ' ' . $batch['failed'] . ' email' . ($batch['failed'] === 1 ? '' : 's') . ' failed (marked invoiced, failed send recorded — resend after fixing mail).';
             }
             $sep = strpos($redirect, '?') !== false ? '&' : '?';
             safe_redirect(($redirect ?: 'billing_center.php?panel=invoices') . $sep . 'bulk_msg=' . urlencode($msg), 'invoice_sent');
