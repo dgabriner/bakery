@@ -2557,7 +2557,7 @@ function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId, $redirectUrl
     return ['configured' => true, 'url' => $checkout['url'], 'purchase_id' => $purchaseId];
 }
 
-/* ── Starter jar (physical kit: pickup $5 / ship $25) ─────────────────── */
+/* ── Starter jar (physical kit: pickup $5 / ship $30; First Loaf Kit $75) ─ */
 
 function bakery_sfb_starter_jar_ready(PDO $db) {
     return bakery_sfb_payments_ready($db) && table_exists($db, 'sfb_starter_jar_orders');

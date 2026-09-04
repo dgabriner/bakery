@@ -301,6 +301,79 @@ foreach ($cohort as $relative) {
     );
 }
 
+$partnerUrl = 'https://victoriasf.com/';
+$partnerPages = [
+    'index.html' => 'partner-panel',
+    'classes/classes.html' => 'hosted at our Mission District home inside',
+    'classes/corporate-workshops.html' => 'historic La Victoria SF',
+    'sell/wholesale.html' => 'baked overnight inside',
+    'sell/find-our-bread.html' => 'inside <a href="https://victoriasf.com/"',
+    'pan-dulce/index.html' => 'Calibrate against the real thing at',
+    'es/index.html' => 'dentro de <a href="https://victoriasf.com/"',
+];
+foreach ($partnerPages as $relative => $requiredText) {
+    $html = (string)file_get_contents($siteRoot . '/' . $relative);
+    breadeducation_static_assert(
+        strpos($html, $partnerUrl) !== false && strpos($html, $requiredText) !== false,
+        $relative . ' points visitors to La Victoria SF'
+    );
+}
+$homeHtml = (string)file_get_contents($siteRoot . '/index.html');
+$classesHtml = (string)file_get_contents($siteRoot . '/classes/classes.html');
+breadeducation_static_assert(strpos($classesHtml, '┬╖') === false, 'classes page has no mojibake separators');
+breadeducation_static_assert(strpos($classesHtml, 'Classes taught by people who bake every morning.') === false, 'classes page does not overclaim daily teachers');
+breadeducation_static_assert(strpos($classesHtml, 'bake with people who bake every day') === false, 'classes metadata does not overclaim daily teachers');
+breadeducation_static_assert(strpos($classesHtml, 'Classes taught at the bench, from a working bakery.') !== false, 'classes page uses grounded teaching copy');
+breadeducation_static_assert(strpos($homeHtml, 'bakers who bake every morning') === false, 'homepage does not overclaim daily class teachers');
+breadeducation_static_assert(strpos($homeHtml, 'Hands-on workshops taught at the bench') !== false, 'homepage uses grounded workshop copy');
+breadeducation_static_assert(
+    substr_count($homeHtml, $partnerUrl) >= 5,
+    'learning hub offers La Victoria SF in navigation, feature, card, and footer'
+);
+$llms = (string)file_get_contents($root . '/domain_root/llms.txt');
+breadeducation_static_assert(
+    strpos($llms, '[La Victoria SF](' . $partnerUrl . ')') !== false,
+    'AI-readable site map names La Victoria SF as a partner'
+);
+
+$ownerPhotoAssets = [
+    'assets/images/sour-flour-workshop-table.avif',
+    'assets/images/sour-flour-workshop-stretch.webp',
+    'assets/images/sour-flour-country-loaves.jpg',
+    'assets/images/sour-flour-loaves.jpg',
+    'assets/images/sour-flour-workshop-students.webp',
+    'assets/images/la-victoria-pastry-case.webp',
+    'assets/images/sour-flour-samples.jpg',
+    'assets/images/sour-flour-bagels.jpg',
+];
+foreach ($ownerPhotoAssets as $relative) {
+    breadeducation_static_assert(is_file($siteRoot . '/' . $relative), $relative . ' is published with the Bread Education site');
+}
+
+$ownerPhotoPlacements = [
+    'index.html' => [
+        'assets/images/sour-flour-workshop-table.avif',
+        'assets/images/sour-flour-loaves.jpg',
+        'assets/images/sour-flour-samples.jpg',
+        'assets/images/la-victoria-pastry-case.webp',
+    ],
+    'classes/classes.html' => [
+        'assets/images/sour-flour-workshop-stretch.webp',
+        'assets/images/sour-flour-workshop-students.webp',
+    ],
+    'breads/bagels.html' => ['assets/images/sour-flour-bagels.jpg'],
+    'sell/find-our-bread.html' => ['assets/images/sour-flour-country-loaves.jpg'],
+];
+foreach ($ownerPhotoPlacements as $relative => $assets) {
+    $html = (string)file_get_contents($siteRoot . '/' . $relative);
+    foreach ($assets as $asset) {
+        breadeducation_static_assert(
+            strpos($html, $asset) !== false,
+            $relative . ' presents ' . basename($asset)
+        );
+    }
+}
+
 $placeholderFiles = [];
 $templateHeroFiles = [];
 foreach ($publicFiles as $url => $relative) {

@@ -1,7 +1,7 @@
 <?php
 /**
  * Public door: buy a living Sour Flour starter jar.
- * Pickup $5 (Tue/Fri at the bakery) or ship $25.
+ * Pickup $5 (Tue/Fri at the bakery) or ship $30.
  * Non-customers create a portal account, pay via Square, leave fulfillment details.
  */
 define('ACCESS_ALLOWED', true);

@@ -845,6 +845,71 @@
     .finish-link-card h3 { color: var(--clay-dark); margin-bottom: .35rem; }
     .finish-link-card p { margin: 0; font-size: .9rem; color: var(--muted); }
 
+    /* Bakery partnership */
+    .partner-panel {
+      display: grid;
+      grid-template-columns: minmax(170px, 260px) 1fr;
+      gap: 2rem;
+      align-items: center;
+      padding: clamp(1.5rem, 4vw, 2.75rem);
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 4px);
+      background: var(--warm-white);
+      box-shadow: var(--shadow);
+    }
+
+    .partner-logo-link {
+      display: block;
+      padding: 1rem;
+      border-radius: var(--radius);
+      background: #fff;
+    }
+
+    .partner-logo {
+      width: 100%;
+      max-width: 240px;
+      margin: 0 auto;
+    }
+
+    .partner-copy h2 { margin-top: .35rem; }
+
+    /* Bakery photography */
+    .bakery-gallery {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .bakery-gallery figure {
+      min-width: 0;
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--warm-white);
+      box-shadow: 0 5px 18px rgba(70, 43, 28, .06);
+    }
+
+    .bakery-gallery img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+    }
+
+    .bakery-gallery figcaption {
+      padding: .85rem 1rem;
+      color: var(--muted);
+      font-size: .84rem;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 720px) {
+      .partner-panel { grid-template-columns: 1fr; }
+      .partner-logo-link { max-width: 240px; }
+      .bakery-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
     /* Footer */
     .site-footer {
       padding: 2.75rem 1.25rem;
@@ -883,7 +948,7 @@
     }
     .footer-links a:hover { color: var(--ochre); }
   </style>
-<!-- SEO: og mirrors title/description/canonical; bump modified_time on every edit. --><meta property="og:type" content="website"><meta property="og:site_name" content="Sour Flour Bread Education"><meta property="og:title" content="Sour Flour Learning Zone"><meta property="og:description" content="Learn to read your dough. Sour Flour&#39;s bread education zone — starter care, hydration, fermentation, baker&#39;s math, and the five factors that shape every loaf."><meta property="og:url" content="https://bakery.sourflour.org/breadeducation/"><meta property="og:image" content="https://bakery.sourflour.org/breadeducation/assets/logos/sour-flour-full.png"><meta property="article:published_time" content="2026-08-18"><meta property="article:modified_time" content="2026-08-24">
+<!-- SEO: og mirrors title/description/canonical; bump modified_time on every edit. --><meta property="og:type" content="website"><meta property="og:site_name" content="Sour Flour Bread Education"><meta property="og:title" content="Sour Flour Learning Zone"><meta property="og:description" content="Learn to read your dough. Sour Flour&#39;s bread education zone — starter care, hydration, fermentation, baker&#39;s math, and the five factors that shape every loaf."><meta property="og:url" content="https://bakery.sourflour.org/breadeducation/"><meta property="og:image" content="https://bakery.sourflour.org/breadeducation/assets/images/sour-flour-loaves.jpg"><meta property="article:published_time" content="2026-08-18"><meta property="article:modified_time" content="2026-09-03">
 <script type="application/ld+json">
 {
     "@context":  "https://schema.org",
@@ -910,6 +975,12 @@
                                       ]
                    },
                    {
+                       "@type":  "Bakery",
+                       "@id":  "https://victoriasf.com/#bakery",
+                       "name":  "La Victoria SF",
+                       "url":  "https://victoriasf.com/"
+                   },
+                   {
                        "@type":  "WebSite",
                        "@id":  "https://bakery.sourflour.org/breadeducation/#website",
                        "url":  "https://bakery.sourflour.org/breadeducation/",
@@ -929,7 +1000,10 @@
                                         "@id":  "https://bakery.sourflour.org/breadeducation/#website"
                                     },
                        "datePublished":  "2026-08-18",
-                       "dateModified":  "2026-08-24",
+                       "dateModified":  "2026-09-03",
+                       "mentions":  {
+                                        "@id":  "https://victoriasf.com/#bakery"
+                                    },
                        "inLanguage":  "en"
                    }
                ]
@@ -953,11 +1027,12 @@
           <li><a href="technique/yeasted.html">Yeasted</a></li>
           <li><a href="sourdough/fermentation.html">Fermentation</a></li>
           <li><a href="technique/formula.html">Formula</a></li>
-++ b/bakery/breadeducation/index.html          <li><a href="technique/bake.html">Shape &amp; bake</a></li>
+          <li><a href="technique/bake.html">Shape &amp; bake</a></li>
           <li><a href="technique/whole-grain.html">Whole grain</a></li>
           <li><a href="reference/troubleshooting.html">Troubleshooting</a></li>
           <li><a href="classes/classes.html">Classes</a></li><li><a href="https://bakery.sourflour.org/bake/sfb_offerings.php" target="_blank" rel="noopener">Shop</a></li>          <li><a href="journal/sf-baker.html">SF Baker</a></li>
           <li><a href="sell/find-our-bread.html">Where to buy</a></li>
+          <li><a href="https://victoriasf.com/" target="_blank" rel="noopener">La Victoria SF</a></li>
           <li><a class="btn btn-primary btn-sm" href="#curriculum">Choose a path</a></li>
         </ul>
       </nav>
@@ -1000,6 +1075,53 @@
             <a class="pill" href="reference/baking-glossary-printable.html">Glossary (printable)</a>
             <a class="pill" href="#guide">Experiment planner</a>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bakery partnership -->
+    <section class="section" id="la-victoria">
+      <div class="section-inner">
+        <div class="partner-panel">
+          <a class="partner-logo-link" href="https://victoriasf.com/" target="_blank" rel="noopener" aria-label="Visit La Victoria SF">
+            <img class="partner-logo" src="https://bakery.sourflour.org/bake/assets/logos/la-victoria.png" alt="La Victoria SF" width="520" height="206">
+          </a>
+          <div class="partner-copy">
+            <p class="section-label">Our Mission District bakery partner</p>
+            <h2>Sour Flour grows from La Victoria's ovens.</h2>
+            <p class="lead">We bake inside historic La Victoria Bakery, sharing a working home, production knowledge, and the daily rhythm that brings sourdough and pan dulce to San Francisco. Meet the bakery community behind our bench.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="https://victoriasf.com/" target="_blank" rel="noopener">Visit La Victoria SF</a>
+              <a class="btn btn-secondary" href="https://sourflour.org/la-victoria-bakery/" target="_blank" rel="noopener">Our story at La Victoria</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bakery in action -->
+    <section class="section bg-cream" id="bakery-in-action">
+      <div class="section-inner">
+        <p class="section-label">From the bakery</p>
+        <h2>Hands in the dough. Bread on the table.</h2>
+        <p class="lead">Sour Flour is built in a working bakery: students learn at the bench, loaves cool for the next market, and the day’s breads are shared while they are still fresh.</p>
+        <div class="bakery-gallery">
+          <figure>
+            <img src="assets/images/sour-flour-workshop-table.avif" alt="Sour Flour workshop guests working dough together at a bakery table" loading="lazy" decoding="async">
+            <figcaption>Workshop dough is meant to be touched, stretched, and understood together.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/images/sour-flour-loaves.jpg" alt="Fresh Sour Flour loaves set in front of a Sour Flour bakery bag" loading="lazy" decoding="async" width="687" height="380">
+            <figcaption>Every lesson points back to a loaf you can make and share.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/images/sour-flour-samples.jpg" alt="Sour Flour bread samples, a baguette, and bagels set out for tasting" loading="lazy" decoding="async" width="760" height="442">
+            <figcaption>Crumb, crust, and a good question make a fine tasting table.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/images/la-victoria-pastry-case.webp" alt="A La Victoria Bakery pastry case filled with bread and pan dulce" loading="lazy" decoding="async">
+            <figcaption>Our Mission District bakery home brings sourdough and pan dulce under one roof.</figcaption>
+          </figure>
         </div>
       </div>
     </section>
@@ -1691,7 +1813,7 @@
           </a>
           <a class="finish-link-card" href="classes/classes.html">
             <h3>Take a class</h3>
-            <p>Hands-on workshops taught by bakers who bake every morning — first loaf to deep dive.</p>
+            <p>Hands-on workshops taught at the bench — from first loaf to deep dive.</p>
           </a>
           <a class="finish-link-card" href="classes/corporate-workshops.html">
             <h3>Corporate team bakes</h3>
@@ -1708,6 +1830,10 @@
           <a class="finish-link-card" href="classes/visit-plan.html">
             <h3>Visiting San Francisco?</h3>
             <p>Turn a trip into a bread trip: class, market mornings, and free prep lessons.</p>
+          </a>
+          <a class="finish-link-card" href="https://victoriasf.com/" target="_blank" rel="noopener">
+            <h3>Meet La Victoria SF</h3>
+            <p>Visit the Mission District bakery partner whose ovens, people, and history are part of Sour Flour's daily work.</p>
           </a>
         </div>
       </div>
@@ -1731,12 +1857,13 @@
         <a href="#top" aria-label="Back to top">
           <img class="logo-img logo-footer" src="assets/logos/sour-flour-full.png" alt="Sour Flour" width="120" height="32">
         </a>
-        <p>© Sour Flour · Updated <time datetime="2026-08-24">August 24, 2026</time> · Bread education for every baker</p>
+        <p>© Sour Flour · Updated <time datetime="2026-09-03">September 3, 2026</time> · Bread education for every baker</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="classes/classes.html">Classes</a>
         <a href="journal/sf-baker.html">Become an SF Baker</a>
         <a href="sell/find-our-bread.html">Where to buy</a>
+        <a href="https://victoriasf.com/" target="_blank" rel="noopener">La Victoria SF</a>
         <a href="https://sourflour.org/workshops/bread-tips-and-resources" target="_blank" rel="noopener">Bread tips &amp; resources</a>
         <a href="https://sourflour.org/baking-courses" target="_blank" rel="noopener">Baking courses</a>
         <a href="https://sourflour.org/blog" target="_blank" rel="noopener">Blog</a>

@@ -14,8 +14,8 @@ INSERT IGNORE INTO sfb_offerings (title, description, price_cents, currency, kin
   ),
   (
     'Sourdough Starter — Shipped',
-    'A living Sour Flour starter jar shipped to you. $25 includes shipping.',
-    2500,
+    'A living Sour Flour starter jar shipped to you. $30 includes shipping.',
+    3000,
     'USD',
     'kit',
     11

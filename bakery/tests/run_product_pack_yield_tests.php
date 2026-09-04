@@ -202,6 +202,10 @@ $assert(($today['by_product'][$bolillo] ?? 0) === 240, '1 bolillo + 2 de bolillo
 $assert(($today['by_product'][$nuezId] ?? 0) === 80, '1 de nuez → 80');
 $puercoId = $productId($db, 'Puerco');
 $assert(($today['by_product'][$puercoId] ?? 0) === 48, '1. puerco → 1 gal');
+$spaceDecimal = bakery_pack_parse_kitchen_note($db, "1. 5 puerco\n1.5 de nuez");
+$assert(($spaceDecimal['unknown'] ?? []) === [], '1. 5 puerco is not unknown');
+$assert(($spaceDecimal['by_product'][$puercoId] ?? 0) === 72, '1. 5 puerco → 1.5 gal');
+$assert(($spaceDecimal['by_product'][$nuezId] ?? 0) === 120, '1.5 de nuez → 120');
 $assert(($today['by_product'][$barras] ?? 0) === 26, '20% of 130 barras kept whole');
 $assert(($today['by_product'][$rebanada] ?? 0) === 624, '104 barras → 624 rebanadas');
 $quequitos = $productId($db, 'Quequitos');

@@ -649,6 +649,8 @@ function bakery_pack_parse_kitchen_note(PDO $db, string $text): array
         if ($line === '') {
             continue;
         }
+        // "1. 5 puerco" (space after the decimal) → "1.5 puerco"
+        $line = preg_replace('/^(\d+)\.\s+(\d+)/u', '$1.$2', $line) ?? $line;
         $plain = bakery_pack_normalize_alias($line);
         if ($plain === '' || preg_match('/^(buenos|buenas|hola|good morning)/u', $plain)) {
             continue;

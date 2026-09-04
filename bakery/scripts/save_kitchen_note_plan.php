@@ -89,20 +89,19 @@ Buenos días ☀️
 3.0 de concha
 3.0 de fino
 
-130 barras
+120 barras
 25 cortadillos
 15 colchones
-20 queiquitos
+25 queiquitos
 10 pudin
-1 de nuez
+1.5 de nuez
 2 taco / gragea
-1. puerco
-2 de amarilla
-2 de rosada
-2 de chocolate
+1. 5 puerco
+1 de amarilla
+1 de rosada
+1 de chocolate
 
-1 bolillo
-2 de bolillo
+1 picón
 TXT;
 
 bakery_pack_ensure_defaults($stage);

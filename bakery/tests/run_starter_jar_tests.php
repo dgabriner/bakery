@@ -1,6 +1,6 @@
 <?php
 /**
- * Starter jar landing: pickup $5 / ship $25 via education purchase rails.
+ * Starter jar landing: pickup $5 / ship $30 via education purchase rails.
  * Runs against bakerysf_test only.
  */
 if (PHP_SAPI !== 'cli') {
@@ -66,7 +66,8 @@ $db->prepare('DELETE FROM customers WHERE name IN (?, ?, ?)')
     ->execute(['SFB Jar Customer', 'Starter Buyer', 'Baker 5550199']);
 $db->exec("DELETE FROM sfb_offerings WHERE title IN (
     'Sourdough Starter — Bakery Pickup',
-    'Sourdough Starter — Shipped'
+    'Sourdough Starter — Shipped',
+    'First Loaf Kit — Bakery Pickup'
 )");
 
 // Re-seed kits the way 070 does.
@@ -81,7 +82,7 @@ try {
     bakery_sfb_create_offering(
         $db,
         'Sourdough Starter — Shipped',
-        25.00,
+        30.00,
         'kit',
         'Shipped jar'
     );
@@ -92,7 +93,7 @@ try {
 $pickupOffering = bakery_sfb_starter_jar_offering($db, 'pickup');
 $shipOffering = bakery_sfb_starter_jar_offering($db, 'ship');
 $assert($pickupOffering && (int)$pickupOffering['price_cents'] === 500, 'pickup kit is $5');
-$assert($shipOffering && (int)$shipOffering['price_cents'] === 2500, 'ship kit is $25');
+$assert($shipOffering && (int)$shipOffering['price_cents'] === 3000, 'ship kit is $30');
 
 try {
     bakery_sfb_starter_jar_normalize_draft(['fulfillment' => 'pickup', 'contact_name' => 'A']);
@@ -161,7 +162,7 @@ $assert($buyShip['configured'] === true && strpos((string)$buyShip['url'], 'squa
 $shipOrder = bakery_sfb_starter_jar_for_purchase($db, $buyShip['purchase_id']);
 $assert($shipOrder && (string)$shipOrder['ship_city'] === 'San Francisco', 'ship address stored on jar order');
 $shipPurchase = bakery_sfb_purchase($db, $buyShip['purchase_id']);
-$assert((string)$shipPurchase['status'] === 'pending' && (int)$shipPurchase['price_cents_snapshot'] === 2500, 'ship pending at $25');
+$assert((string)$shipPurchase['status'] === 'pending' && (int)$shipPurchase['price_cents_snapshot'] === 3000, 'ship pending at $30');
 
 $name = $db->prepare('SELECT name FROM customers WHERE id = ?');
 $name->execute([$customerId]);
@@ -195,15 +196,21 @@ try {
     bakery_sfb_create_offering(
         $db,
         'First Loaf Kit — Bakery Pickup',
-        45.00,
+        75.00,
         'kit',
         'Pickup kit'
     );
 } catch (Throwable $e) {
     // Seeded by 072 or a prior run.
 }
+try {
+    $db->exec("UPDATE sfb_offerings SET price_cents = 3000 WHERE title = 'Sourdough Starter — Shipped'");
+    $db->exec("UPDATE sfb_offerings SET price_cents = 7500 WHERE title = 'First Loaf Kit — Bakery Pickup'");
+} catch (Throwable $e) {
+    // 073 catalog bump; leftover bakerysf_test rows from $25/$45 seeds.
+}
 $kitOffering = bakery_sfb_first_loaf_kit_offering($db);
-$assert($kitOffering && (int)$kitOffering['price_cents'] === 4500, 'first loaf kit is $45');
+$assert($kitOffering && (int)$kitOffering['price_cents'] === 7500, 'first loaf kit is $75');
 
 try {
     bakery_sfb_starter_jar_normalize_draft([
@@ -251,7 +258,7 @@ $assert($buyKit['configured'] === false && $buyKit['order_id'] > 0, 'kit buy rec
 $kitOrder = bakery_sfb_starter_jar_order($db, $buyKit['order_id']);
 $assert($kitOrder && (string)$kitOrder['pack_kind'] === 'first_loaf_kit', 'kit pack_kind stored');
 $kitPurchase = bakery_sfb_purchase($db, $buyKit['purchase_id']);
-$assert((int)$kitPurchase['price_cents_snapshot'] === 4500, 'kit price snapshot $45');
+$assert((int)$kitPurchase['price_cents_snapshot'] === 7500, 'kit price snapshot $75');
 
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

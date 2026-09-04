@@ -68,8 +68,11 @@ if (-not (Test-Path -LiteralPath $siteRoot)) {
     exit 1
 }
 
+$domainEnvPresent = Test-Path -LiteralPath $envPath
 Import-DomainRootSftpEnv -Path $envPath
-if (-not [Environment]::GetEnvironmentVariable('SFTP_REMOTE_ROOT', 'Process')) {
+if (-not $domainEnvPresent) {
+    # The shared fallback file is also used by the Bread Education uploader and
+    # may contain that site's subdirectory. Never inherit it for domain-root files.
     Import-DomainRootSftpEnv -Path $fallbackEnvPath
     [Environment]::SetEnvironmentVariable('SFTP_REMOTE_ROOT', 'bakery.sourflour.org', 'Process')
 }
