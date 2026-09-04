@@ -19,7 +19,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 40 `nav-catalog-roles` — catalog drives role allowlists | **shipped** | `run_navigation_tests`, `run_auth_tests`, `run_cashier_role_tests`, `run_i18n_tests` |
 | 42 `driver-fast-path` — Photo → Confirm → Next | **shipped** | `run_driver_photo_ui_tests`, `run_driver_workflow_tests` |
 | 43 `driver-offline-queue` — IndexedDB outbox + request ids | **shipped** | `078_delivery_client_request_id`, idempotency in `run_driver_workflow_tests`, outbox wiring in `run_driver_photo_ui_tests` |
-| 41, 44–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 44 `manager-phone-closeout` — close route from phone | **shipped** | `run_manager_phone_tests`, `run_route_manager_cash_tests` (van math by name) |
+| 41, 45–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -54,8 +55,8 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 
 ### Then mobile (Wave 2)
 5. ~~**40 `nav-catalog-roles`**~~ — **shipped** (catalog ∪ registry allowlists; manager More ≤ 8 + searchable sheet; cashier Add Product has nav).
-6. ~~**42 `driver-fast-path`**~~ — **shipped** (Confirm step + Adjust disclosure; GPS on today's route load). ~~**43 `driver-offline-queue`**~~ — **shipped** (`078_delivery_client_request_id` + IndexedDB outbox). Next free migration is **079**.
-7. **44 `manager-phone-closeout`**, **45 `kitchen-one-screen`**, **41 `touch-tokens`**, **46 `sfb-bottom-nav`**.
+6. ~~**42 `driver-fast-path`**~~ — **shipped**. ~~**43 `driver-offline-queue`**~~ — **shipped** (`078`; next free **079**).
+7. ~~**44 `manager-phone-closeout`**~~ — **shipped**. Then **45 `kitchen-one-screen`**, **41 `touch-tokens`**, **46 `sfb-bottom-nav`**.
 
 ### Then structure (Wave 3) — one page per PR
 8. **50 `extract-assets`** (`route_manager.php` first: 88% of the file is CSS+JS) → **51 `split-actions`** → **52 `one-mutation-path`** → **53 `hot-path-queries`** (verify index migration number) → **54 `gate-scaling`** (GitHub Actions; `.github/` does not exist yet) → **55 `product-boundaries`** (Homebase Decided + product context §8).
@@ -95,4 +96,4 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** Wave 2 continues: 44 → 45 → 41 → 46. Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **35–37, 40, 42, and 43 are shipped.** Staging and Live were not touched.
+8. **Next agent:** Wave 2 continues: 45 → 41 → 46. Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **35–37, 40, 42–44 are shipped.** Staging and Live were not touched.

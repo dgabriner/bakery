@@ -51,3 +51,16 @@ route_manager_cash_assert_same([
     'turn_in_total' => 12.5,
     'total_sold' => 12.5,
 ], $defaultCod, 'Missing payment_collection defaults to COD and cancelled stops are excluded from sold');
+
+$phone = (string)file_get_contents(dirname(__DIR__) . '/includes/manager_phone.php');
+$closeout = (string)file_get_contents(dirname(__DIR__) . '/route_closeout.php');
+route_manager_cash_assert_same(
+    true,
+    strpos($phone, 'bakery_inventory_reconcile_driver_load') === false
+        && strpos($phone, 'route_closeout.php') !== false
+        && strpos($closeout, 'bakery_inventory_reconcile_driver_load') !== false
+        && strpos($phone, 'data-van-math="loaded - delivered - credits - returned - wasted"') !== false,
+    'phone close reuses route_closeout reconcile helper and asserts van math by name'
+);
+
+echo "All route manager cash checks passed\n";

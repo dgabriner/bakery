@@ -162,7 +162,8 @@ function bakery_agent_program_work_map(): array
             ['includes/manager_phone.php', 'css/manager_phone.css', 'manager.php', 'route_manager.php', 'route_closeout.php'],
             ['tests/run_manager_phone_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php'],
             ['loaded = net delivered + van leftover + waste + door credits', 'Reuse bakery_inventory_reconcile_driver_load; no second closeout path'],
-            'docs/prompts/44-manager-phone-closeout.md'
+            'docs/prompts/44-manager-phone-closeout.md',
+            'shipped'
         ),
         'kitchen-one-screen' => $m(
             'Baker Today with Mix / Bake / Pack segments; Pack List phone mode',

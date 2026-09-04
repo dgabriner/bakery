@@ -65,6 +65,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lines,
                 trim((string)($_POST['notes'] ?? ''))
             );
+            $returnKey = trim((string)($_POST['return'] ?? $_GET['return'] ?? ''));
+            if ($returnKey === 'manager' && empty($_POST['stay'])) {
+                $dest = (defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes';
+                header('Location: ' . $dest);
+                exit;
+            }
             $notice = 'Route closed. Loaded units are reconciled as delivered, returned, waste, and door credits.';
             $focusDriverId = $postDriverId;
         } elseif ($action === 'reopen_route') {
@@ -116,7 +122,10 @@ $page_title = bakery_t('page.route_closeout');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
-<main class="closeout-page container">
+<p class="manager-desktop-only-hint"><?php bakery_te('manager_phone.desktop_use_manager'); ?>
+  <a href="<?php echo htmlspecialchars((defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.manager_today'); ?></a>
+</p>
+<main class="closeout-page container manager-desktop-only">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <div class="closeout-heading">
         <div>

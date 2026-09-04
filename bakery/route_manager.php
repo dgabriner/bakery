@@ -239,6 +239,9 @@ $page_title = bakery_t('page.route_manager');
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
+<p class="manager-desktop-only-hint"><?php bakery_te('manager_phone.desktop_use_manager'); ?>
+  <a href="<?php echo htmlspecialchars((defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode((string)($_GET['date'] ?? date('Y-m-d'))) . '&view=routes', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.manager_today'); ?></a>
+</p>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <?php
 
@@ -254,7 +257,7 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
 }
 ?>
 
-<div class="container">
+<div class="container manager-desktop-only">
     <div class="route-manager-header">
         <div>
             <h1>Route Manager</h1>
