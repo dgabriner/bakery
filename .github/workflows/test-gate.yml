@@ -83,6 +83,8 @@ jobs:
           SFB_AGENT_ADMIN_CODE=9099
           TWILIO_VALIDATE_WEBHOOK=1
           EOF
+          # Strip any YAML-inherited leading spaces from heredoc lines.
+          sed -i 's/^[[:space:]]\+//' .env
 
       - name: Assert fail-closed production target
         run: php tests/run_local_test_target_guard_tests.php

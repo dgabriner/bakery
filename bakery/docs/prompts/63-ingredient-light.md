@@ -24,4 +24,4 @@ Simple stock adjust on `ingredients` (on-hand grams/units, last counted) feeding
 
 Friday's shortage is on the screen where the plan is made, not in memory; planner suite green.
 
-**Status:** partial 2026-09-04 — step A shipped (`081_ingredient_purchase_notes`, ordered/received + note on planner, Production Center unmarked chip). Step B stock adjust still owner-gated. Staging and Live were not touched.
+**Status:** shipped 2026-09-04 — step A + **Decided:** no stock adjust this phase. `081_ingredient_purchase_notes`, ordered/received + note on planner, Production Center unmarked chip.

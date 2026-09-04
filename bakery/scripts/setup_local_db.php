@@ -43,11 +43,15 @@ if (!is_readable($envPath)) {
 }
 bakery_load_env_file($envPath);
 
-$host = $_ENV['DB_HOST'] ?? '';
-$port = $_ENV['DB_PORT'] ?? '3306';
-$name = $_ENV['DB_NAME'] ?? '';
-$user = $_ENV['DB_USER'] ?? '';
-$pass = $_ENV['DB_PASS'] ?? '';
+// Prefer $_ENV, then getenv — CI injects DB_* via process env; PHP may omit them from $_ENV.
+$host = (string)($_ENV['DB_HOST'] ?? (getenv('DB_HOST') !== false ? getenv('DB_HOST') : ''));
+$port = (string)($_ENV['DB_PORT'] ?? (getenv('DB_PORT') !== false ? getenv('DB_PORT') : '3306'));
+$name = (string)($_ENV['DB_NAME'] ?? (getenv('DB_NAME') !== false ? getenv('DB_NAME') : ''));
+$user = (string)($_ENV['DB_USER'] ?? (getenv('DB_USER') !== false ? getenv('DB_USER') : ''));
+$pass = (string)($_ENV['DB_PASS'] ?? (getenv('DB_PASS') !== false ? getenv('DB_PASS') : ''));
+if ($port === '') {
+    $port = '3306';
+}
 
 foreach ($argv as $arg) {
     if (strpos($arg, '--database=') === 0) {

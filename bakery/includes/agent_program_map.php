@@ -282,9 +282,9 @@ function bakery_agent_program_work_map(): array
             ['61-settlement-story', 'prompt-61', 'cod-turnin', 'money-phase-2'],
             ['billing_center.php', 'includes/billing.php', 'includes/billing_aging.php', 'includes/billing_panel_invoices.php', 'includes/cod_turnins.php', 'route_manager.php', 'includes/manager_phone.php'],
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_customer_billing_tests.php'],
-            ['Billing Center does not invent amounts', 'Ledger table only after an owner Decided'],
+            ['Billing Center does not invent amounts', 'Computed-only Decided — no AR ledger, no weekly rollup'],
             'docs/prompts/61-settlement-story.md',
-            'partial'
+            'shipped'
         ),
         'engagement-writeback' => $m(
             'Survey → Driver Assignment; failed stop → text + credit handoff',
@@ -300,18 +300,18 @@ function bakery_agent_program_work_map(): array
             ['63-ingredient-light', 'prompt-63', 'ingredient-notes'],
             ['ingredient_requirements.php', 'includes/ingredient_requirements.php', 'ingredients.php', 'includes/ingredient_purchase_notes.php'],
             ['tests/run_ingredient_planner_tests.php', 'tests/run_formula_units_tests.php'],
-            ['No PO, receiving, or lot tracking', 'Step B (stock adjust) only after owner confirms'],
+            ['No PO, receiving, or lot tracking', 'Stock adjust Decided no — notes only'],
             'docs/prompts/63-ingredient-light.md',
-            'partial'
+            'shipped'
         ),
         'retail-scope-decision' => $m(
-            'Owner decides retail cashier scope; agent records it',
+            'Retail sales out of scope; cashier stays photos + catalog',
             ['64-retail-scope-decision', 'prompt-64', 'retail-scope'],
             ['BAKERY_PRODUCT_CONTEXT.md', 'docs/prompts/64-retail-scope-decision.md'],
             ['tests/run_cashier_role_tests.php'],
-            ['Cashier stays photos + catalog until the owner decides otherwise'],
+            ['Cashier stays photos + catalog; Square POS owns retail sales'],
             'docs/prompts/64-retail-scope-decision.md',
-            'owner-decision'
+            'shipped'
         ),
     ];
 }

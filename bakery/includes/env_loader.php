@@ -65,6 +65,12 @@ function bakery_load_env_file($envPath, $override = false) {
         if (!$override) {
             $existing = getenv($name);
             if ($existing !== false && $existing !== '') {
+                // Process env wins, but still mirror into $_ENV/$_SERVER so
+                // callers that read $_ENV (e.g. setup_local_db.php, CI) see it.
+                if (!isset($_ENV[$name])) {
+                    $_ENV[$name] = $existing;
+                    $_SERVER[$name] = $existing;
+                }
                 continue;
             }
         }
