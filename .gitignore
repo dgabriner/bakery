@@ -37,3 +37,6 @@ bakery/update_customer_addresses_correct.sql
 bakery/update_customer_coordinates.sql
 bakery/update_final_customer_coordinates.sql
 bakery/update_missing_customer_coordinates.sql
+
+# Promotion export cache written beside the repo by includes/staging_live_approval.php
+.sourflour-promotion-export/
