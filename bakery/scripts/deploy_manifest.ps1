@@ -19,7 +19,7 @@ function Get-BakeryDeployRootFiles {
         'upload_driver_photo.php', 'upload_product_photo.php',
         'cashier_shop_photos.php', 'upload_shop_photo.php',
         'daily_run.php', 'daily_run_api.php', 'daily_brief.php',
-        'manager.php', 'billing_center.php', 'billing_api.php', 'billing_export.php', 'production_center.php', 'production_manager.php',
+        'manager.php', 'billing_center.php', 'billing_api.php', 'billing_export.php', 'production_center.php', 'production_center_api.php', 'production_manager.php',
         'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php', 'customer_portal_regular.php',
         'customer_portal_account.php', 'customer_portal_notifications.php',
         'customer_portal_delivery.php', 'customer_catalog.php', 'customer_upcoming_edit.php', 'customer_upcoming.php',
