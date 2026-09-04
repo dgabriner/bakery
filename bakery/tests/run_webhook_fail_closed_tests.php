@@ -55,12 +55,9 @@ function webhook_test_request(string $method, string $url, string $body = '', ar
 /** @return resource|null */
 function webhook_test_server(string $root, array $envOverrides, int $port)
 {
-    $env = [];
-    foreach ($_SERVER as $k => $v) {
-        if (is_string($v) && preg_match('/^[A-Z0-9_]+$/', (string)$k)) {
-            $env[$k] = $v;
-        }
-    }
+    // Minimal explicit environment: the server reads bakery/.env itself, and
+    // process env wins over .env for the keys we pin.
+    $env = ['PATH' => (string)getenv('PATH'), 'HOME' => (string)getenv('HOME')];
     $env['DB_NAME'] = 'bakerysf_test';
     $env['USE_PROD_DB'] = 'false';
     $env['APP_ENV'] = 'local';
@@ -166,7 +163,7 @@ if ($server === null) {
 }
 
 // ---- configured server: bad signature 403, good signature processed ----------
-$key = 'wh-test-key-' . bin2hex(random_bytes(4));
+$key = 'wh-test-key-abcd1234';
 $notificationUrl = 'http://127.0.0.1:8095/square_webhook.php';
 $server = webhook_test_server($root, [
     'SQUARE_WEBHOOK_SIGNATURE_KEY' => $key,
@@ -182,7 +179,7 @@ if ($server === null) {
 
     $sig = base64_encode(hash_hmac('sha256', $notificationUrl . $payload, $key, true));
     $good = webhook_test_request('POST', $notificationUrl, $payload, ['X-Square-HmacSha256-Signature: ' . $sig]);
-    $assert($good['status'] === 200, 'good signature → 200 (got ' . $good['status'] . ')');
+    $assert($good['status'] === 200, 'good signature → 200 (got ' . $good['status'] . ' ' . $good['body'] . ')');
     $recorded = (int)$db->query("SELECT COUNT(*) FROM square_webhook_events WHERE event_id = 'wh-fail-closed-2'")->fetchColumn();
     $assert($recorded === 1, 'good signature event is recorded exactly once');
     webhook_test_stop($server);
