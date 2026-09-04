@@ -72,11 +72,11 @@ try {
     $cleanupDates = $db->prepare(
         'DELETE doi FROM daily_order_items doi
          INNER JOIN daily_orders do ON do.id = doi.daily_order_id
-         WHERE do.customer_id IN (?, ?) AND do.order_date IN (?, ?, ?)'
+         WHERE do.customer_id IN (?, ?) AND do.order_date IN (?, ?, ?, ?)'
     );
-    $cleanupDates->execute([$invoiceCustomer, $codCustomer, '2099-09-11', '2099-09-12', '2099-09-13']);
-    $db->prepare('DELETE FROM daily_orders WHERE customer_id IN (?, ?) AND order_date IN (?, ?, ?)')
-        ->execute([$invoiceCustomer, $codCustomer, '2099-09-11', '2099-09-12', '2099-09-13']);
+    $cleanupDates->execute([$invoiceCustomer, $codCustomer, '2099-09-11', '2099-09-12', '2099-09-13', '2099-09-14']);
+    $db->prepare('DELETE FROM daily_orders WHERE customer_id IN (?, ?) AND order_date IN (?, ?, ?, ?)')
+        ->execute([$invoiceCustomer, $codCustomer, '2099-09-11', '2099-09-12', '2099-09-13', '2099-09-14']);
     $db->prepare("UPDATE customers SET payment_collection = 'signature', email = ? WHERE id = ?")
         ->execute(['zazie-test-' . $invoiceCustomer . '@example.invalid', $invoiceCustomer]);
     $db->prepare("UPDATE customers SET payment_collection = 'cod', email = ? WHERE id = ?")
@@ -247,6 +247,63 @@ try {
     $pay = bakery_billing_payment_status($paid + ['delivery_confirmed_at' => $date, 'status' => 'invoiced'], ['payment_collection' => 'signature']);
     $assert(($pay['key'] ?? '') === 'square_paid', 'Billing Center payment label uses Square PAID');
 
+    $stale = bakery_square_handle_webhook($db, [
+        'event_id' => 'evt-stale-unpaid',
+        'type' => 'invoice.updated',
+        'data' => ['object' => ['invoice' => [
+            'id' => 'SQI_TEST',
+            'status' => 'UNPAID',
+            'public_url' => 'https://squareup.com/pay/TEST',
+            'order_id' => 'SQO_TEST',
+        ]]],
+    ]);
+    $assert(($stale['square_status'] ?? '') === 'UNPAID' || ($stale['ok'] ?? false), 'stale webhook call returns');
+    $paidRow->execute([$orderInvoice]);
+    $stillPaid = $paidRow->fetch(PDO::FETCH_ASSOC);
+    $assert(($stillPaid['square_status'] ?? '') === 'PAID', 'webhook never regresses PAID to UNPAID');
+    $assert(!empty($stillPaid['square_paid_at']), 'square_paid_at survives a stale UNPAID webhook');
+
+    // Partial API failure: create invoice throws — OS must not half-write.
+    $db->prepare('UPDATE customers SET square_customer_id = NULL WHERE id = ?')->execute([$invoiceCustomer]);
+    $partialOrder = $insert($db, $invoiceCustomer, 4, 2.25, '2099-09-14');
+    $createdOrderIds[] = $partialOrder;
+    $GLOBALS['bakery_square_api_handler'] = static function ($method, $path, $body) {
+        if ($method === 'POST' && $path === '/v2/customers/search') {
+            return ['customers' => []];
+        }
+        if ($method === 'POST' && $path === '/v2/customers') {
+            return ['customer' => ['id' => 'SQC_PARTIAL']];
+        }
+        if ($method === 'POST' && $path === '/v2/orders') {
+            return ['order' => ['id' => 'SQO_PARTIAL']];
+        }
+        if ($method === 'POST' && $path === '/v2/invoices') {
+            throw new RuntimeException('simulated Square invoice create failure');
+        }
+        throw new RuntimeException('Unexpected Square call ' . $method . ' ' . $path);
+    };
+    $partialFailed = false;
+    try {
+        bakery_square_send_invoice($db, $partialOrder, ['user_id' => null]);
+    } catch (Throwable $e) {
+        $partialFailed = strpos($e->getMessage(), 'simulated Square invoice create failure') !== false;
+    }
+    $assert($partialFailed, 'API failure surfaces to the caller');
+    $partialRow = $db->prepare('SELECT status, square_invoice_id FROM daily_orders WHERE id = ?');
+    $partialRow->execute([$partialOrder]);
+    $partialStored = $partialRow->fetch(PDO::FETCH_ASSOC);
+    $assert(($partialStored['status'] ?? '') !== 'invoiced', 'API failure leaves order not invoiced');
+    $assert(empty($partialStored['square_invoice_id']), 'API failure leaves no square_invoice_id');
+    $custSq = $db->prepare('SELECT square_customer_id FROM customers WHERE id = ?');
+    $custSq->execute([$invoiceCustomer]);
+    $custSqVal = $custSq->fetchColumn();
+    $assert($custSqVal === null || $custSqVal === '' || $custSqVal === false,
+        'API failure before commit does not leave customers.square_customer_id');
+
+    $assert(strpos($src, 'beginTransaction') !== false, 'square helpers open DB transactions');
+    $assert(strpos($src, 'bakery_square_status_rank') !== false, 'never-regress status rank helper exists');
+    $assert(bakery_square_status_rank('PAID') > bakery_square_status_rank('UNPAID'), 'PAID ranks above UNPAID');
+
     $url = defined('BASE_URL') ? BASE_URL : '';
     $sigOk = bakery_square_webhook_valid('{"hi":1}', base64_encode(hash_hmac('sha256', 'https://example.test/square_webhook.php{"hi":1}', 'test-key', true)), 'https://example.test/square_webhook.php');
     // key empty in env -> function false unless we pass via define; just assert helper rejects empty key
@@ -263,7 +320,7 @@ try {
         $db->exec('DELETE FROM daily_order_items WHERE daily_order_id IN (' . $in . ')');
         $db->exec('DELETE FROM billing_invoice_sends WHERE daily_order_id IN (' . $in . ')');
         if (table_exists($db, 'square_webhook_events')) {
-            $db->exec("DELETE FROM square_webhook_events WHERE square_invoice_id = 'SQI_TEST'");
+            $db->exec("DELETE FROM square_webhook_events WHERE square_invoice_id IN ('SQI_TEST','SQI_PARTIAL') OR event_id LIKE 'evt-%'");
         }
         $db->exec('DELETE FROM daily_orders WHERE id IN (' . $in . ')');
     }
@@ -271,7 +328,7 @@ try {
         if (!is_array($row)) {
             continue;
         }
-        $db->prepare('UPDATE customers SET email = ?, payment_collection = ? WHERE id = ?')->execute([
+        $db->prepare('UPDATE customers SET email = ?, payment_collection = ?, square_customer_id = NULL WHERE id = ?')->execute([
             $row['email'],
             $row['payment_collection'] ?: 'cod',
             $cid,

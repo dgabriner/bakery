@@ -26,7 +26,6 @@ DESKTOP_ONLY_SUITES=(
   run_live_product_pack_yields_migration_tests
   run_product_pack_yield_tests
   run_sfb_studio_clock_tests
-  run_square_invoice_tests
   run_surface_hygiene_tests
   run_text_comms_media_tests
 )

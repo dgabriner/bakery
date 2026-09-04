@@ -103,6 +103,24 @@ function bakery_square_normalize_status($status): string
     return $status;
 }
 
+/**
+ * Rank for never-regress: webhooks/refreshes may advance status but must not
+ * overwrite a higher-ranked local square_status with a stale lower one.
+ */
+function bakery_square_status_rank(string $status): ?int
+{
+    $status = bakery_square_normalize_status($status);
+    $ranks = [
+        'DRAFT' => 10,
+        'UNPAID' => 20,
+        'PAYMENT_PENDING' => 25,
+        'PARTIALLY_PAID' => 30,
+        'PAID' => 40,
+        'CANCELED' => 40,
+    ];
+    return $ranks[$status] ?? null;
+}
+
 function bakery_square_cents($dollars): int
 {
     return (int)round(((float)$dollars) * 100);
@@ -253,33 +271,69 @@ function bakery_square_ensure_customer(array $orderRow, $email, $testOverride = 
 
 function bakery_square_apply_invoice_payload(PDO $db, $orderId, array $invoice, array $extra = []): array
 {
+    $orderId = (int)$orderId;
     $status = bakery_square_normalize_status($invoice['status'] ?? '');
     $publicUrl = (string)($invoice['public_url'] ?? $invoice['publicUrl'] ?? '');
     $now = date('Y-m-d H:i:s');
-    $fields = array_merge([
-        'square_invoice_id' => (string)($invoice['id'] ?? ''),
-        'square_order_id' => (string)($invoice['order_id'] ?? ''),
-        'square_public_url' => $publicUrl !== '' ? $publicUrl : ($extra['square_public_url'] ?? null),
-        'square_status' => $status !== '' ? $status : null,
-        'square_last_synced_at' => $now,
-    ], $extra);
-
-    if ($status === 'PAID' && empty($extra['keep_paid_at'])) {
-        $fields['square_paid_at'] = $extra['square_paid_at'] ?? $now;
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
     }
-
-    bakery_square_persist($db, $orderId, $fields);
-
-    if ($status === 'PAID') {
-        $st = $db->prepare('SELECT status, delivery_confirmed_at FROM daily_orders WHERE id = ?');
-        $st->execute([(int)$orderId]);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if ($row && (string)$row['status'] !== 'invoiced' && !empty($row['delivery_confirmed_at'])) {
-            bakery_billing_mark_invoiced($db, (int)$orderId, $extra['user_id'] ?? null);
+    try {
+        $currentStatus = '';
+        if (column_exists($db, 'daily_orders', 'square_status')) {
+            $cur = $db->prepare('SELECT square_status FROM daily_orders WHERE id = ? FOR UPDATE');
+            $cur->execute([$orderId]);
+            $currentStatus = bakery_square_normalize_status((string)($cur->fetchColumn() ?: ''));
         }
-    }
+        $incomingRank = bakery_square_status_rank($status);
+        $currentRank = bakery_square_status_rank($currentStatus);
+        $regress = $incomingRank !== null && $currentRank !== null && $incomingRank < $currentRank;
 
-    return $fields;
+        $fields = array_merge([
+            'square_invoice_id' => (string)($invoice['id'] ?? ''),
+            'square_order_id' => (string)($invoice['order_id'] ?? ''),
+            'square_public_url' => $publicUrl !== '' ? $publicUrl : ($extra['square_public_url'] ?? null),
+            'square_last_synced_at' => $now,
+        ], $extra);
+        unset($fields['user_id'], $fields['keep_paid_at']);
+
+        if ($regress) {
+            // Keep the higher local status; still refresh sync timestamp / URL / ids.
+            unset($fields['square_status'], $fields['square_paid_at']);
+        } else {
+            $fields['square_status'] = $status !== '' ? $status : null;
+            if ($status === 'PAID' && empty($extra['keep_paid_at'])) {
+                $fields['square_paid_at'] = $extra['square_paid_at'] ?? $now;
+            }
+        }
+
+        bakery_square_persist($db, $orderId, $fields);
+
+        $effectiveStatus = $regress ? $currentStatus : $status;
+        if ($effectiveStatus === 'PAID') {
+            $st = $db->prepare('SELECT status, delivery_confirmed_at FROM daily_orders WHERE id = ?');
+            $st->execute([$orderId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if ($row && (string)$row['status'] !== 'invoiced' && !empty($row['delivery_confirmed_at'])) {
+                bakery_billing_mark_invoiced($db, $orderId, $extra['user_id'] ?? null);
+            }
+        }
+
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+        if ($regress) {
+            $fields['square_status'] = $currentStatus;
+            $fields['status_preserved'] = true;
+        }
+        return $fields;
+    } catch (Throwable $e) {
+        if ($ownsTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
 }
 
 /**
@@ -290,15 +344,12 @@ function bakery_square_apply_invoice_payload(PDO $db, $orderId, array $invoice, 
  */
 function bakery_square_send_invoice(PDO $db, $orderId, array $opts = []): array
 {
-    if (!square_is_configured() && !isset($GLOBALS['bakery_square_api_handler'])) {
-        throw new RuntimeException('Square is not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID.');
-    }
-
     $orderId = (int)$orderId;
     $draftOnly = !empty($opts['draft_only']);
     $testRecipient = (string)($opts['test_recipient'] ?? '');
     $userId = isset($opts['user_id']) ? $opts['user_id'] : null;
 
+    // Business guards before credential checks so fixture suites get clear COD/email errors.
     $row = bakery_square_load_order_row($db, $orderId);
     if (empty($row['delivery_confirmed_at'])) {
         throw new RuntimeException('Order not found or delivery not confirmed');
@@ -308,6 +359,27 @@ function bakery_square_send_invoice(PDO $db, $orderId, array $opts = []): array
     }
 
     $existingId = trim((string)($row['square_invoice_id'] ?? ''));
+    if ($existingId === '' && $testRecipient === '') {
+        // Surface missing email before the credential gate so operators (and
+        // fixture suites) get a clear fix, not "Square is not configured".
+        $emailPeek = '';
+        if (function_exists('bakery_billing_customer_billing_email')) {
+            $emailPeek = bakery_billing_customer_billing_email([
+                'email' => $row['customer_email'] ?? '',
+                'id' => $row['customer_id'] ?? 0,
+            ]);
+        } else {
+            $emailPeek = trim((string)($row['customer_email'] ?? ''));
+        }
+        if ($emailPeek === '') {
+            throw new RuntimeException('Customer has no billing email. Add one on the customer record, or use the test recipient field.');
+        }
+    }
+
+    if (!square_is_configured() && !isset($GLOBALS['bakery_square_api_handler'])) {
+        throw new RuntimeException('Square is not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID.');
+    }
+
     if ($existingId !== '') {
         $got = square_api_request('GET', '/v2/invoices/' . rawurlencode($existingId));
         $invoice = $got['invoice'] ?? [];
@@ -341,13 +413,6 @@ function bakery_square_send_invoice(PDO $db, $orderId, array $opts = []): array
     $customer['payment_collection'] = $row['payment_collection'] ?? ($customer['payment_collection'] ?? 'signature');
     $recipient = bakery_square_resolve_recipient($customer, $testRecipient);
     $squareCustomerId = bakery_square_ensure_customer($row, $recipient['email'], $recipient['source'] === 'test_override');
-
-    if ($recipient['source'] !== 'test_override' && column_exists($db, 'customers', 'square_customer_id')) {
-        $db->prepare('UPDATE customers SET square_customer_id = ? WHERE id = ?')->execute([
-            $squareCustomerId,
-            (int)$row['customer_id'],
-        ]);
-    }
 
     $invoiceNumber = bakery_billing_invoice_number($orderId, $row['order_date']);
     $lineItems = bakery_square_order_line_items($invoiceDoc);
@@ -408,25 +473,49 @@ function bakery_square_send_invoice(PDO $db, $orderId, array $opts = []): array
         $publishedAt = date('Y-m-d H:i:s');
     }
 
-    if ((string)$row['status'] !== 'invoiced') {
-        bakery_billing_mark_invoiced($db, $orderId, $userId);
+    // Remote Square calls finished. Commit OS writes together so we never leave
+    // invoiced without square ids, or square cols without the customer link.
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
     }
+    try {
+        if ($recipient['source'] !== 'test_override' && column_exists($db, 'customers', 'square_customer_id')) {
+            $db->prepare('UPDATE customers SET square_customer_id = ? WHERE id = ?')->execute([
+                $squareCustomerId,
+                (int)$row['customer_id'],
+            ]);
+        }
 
-    bakery_square_apply_invoice_payload($db, $orderId, $invoice, [
-        'square_customer_id' => $squareCustomerId,
-        'square_recipient_email' => $recipient['email'],
-        'square_published_at' => $publishedAt,
-        'user_id' => $userId,
-    ]);
+        if ((string)$row['status'] !== 'invoiced') {
+            bakery_billing_mark_invoiced($db, $orderId, $userId);
+        }
 
-    if (function_exists('log_user_action')) {
-        log_user_action($db, 'square_invoice_sent', 'daily_order', $orderId, json_encode([
-            'square_invoice_id' => $squareInvoiceId,
-            'square_status' => $status,
-            'recipient' => $recipient['email'],
-            'draft_only' => $draftOnly,
-            'invoice_number' => $invoiceNumber,
-        ]), $userId);
+        bakery_square_apply_invoice_payload($db, $orderId, $invoice, [
+            'square_customer_id' => $squareCustomerId,
+            'square_recipient_email' => $recipient['email'],
+            'square_published_at' => $publishedAt,
+            'user_id' => $userId,
+        ]);
+
+        if (function_exists('log_user_action')) {
+            log_user_action($db, 'square_invoice_sent', 'daily_order', $orderId, json_encode([
+                'square_invoice_id' => $squareInvoiceId,
+                'square_status' => $status,
+                'recipient' => $recipient['email'],
+                'draft_only' => $draftOnly,
+                'invoice_number' => $invoiceNumber,
+            ]), $userId);
+        }
+
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownsTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
     }
 
     return [
@@ -495,39 +584,63 @@ function bakery_square_handle_webhook(PDO $db, array $payload): array
     }
     $squareInvoiceId = (string)($invoice['id'] ?? '');
 
-    if ($eventId !== '' && table_exists($db, 'square_webhook_events')) {
-        try {
-            $db->prepare(
-                'INSERT INTO square_webhook_events (event_id, event_type, square_invoice_id)
-                 VALUES (?, ?, ?)'
-            )->execute([$eventId, $type, $squareInvoiceId !== '' ? $squareInvoiceId : null]);
-        } catch (PDOException $e) {
-            return ['ok' => true, 'duplicate' => true, 'event_id' => $eventId];
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        if ($eventId !== '' && table_exists($db, 'square_webhook_events')) {
+            try {
+                $db->prepare(
+                    'INSERT INTO square_webhook_events (event_id, event_type, square_invoice_id)
+                     VALUES (?, ?, ?)'
+                )->execute([$eventId, $type, $squareInvoiceId !== '' ? $squareInvoiceId : null]);
+            } catch (PDOException $e) {
+                if ($ownsTransaction && $db->inTransaction()) {
+                    $db->rollBack();
+                }
+                return ['ok' => true, 'duplicate' => true, 'event_id' => $eventId];
+            }
         }
-    }
 
-    if ($squareInvoiceId === '' || !column_exists($db, 'daily_orders', 'square_invoice_id')) {
-        return ['ok' => true, 'ignored' => true];
-    }
+        if ($squareInvoiceId === '' || !column_exists($db, 'daily_orders', 'square_invoice_id')) {
+            if ($ownsTransaction) {
+                $db->commit();
+            }
+            return ['ok' => true, 'ignored' => true];
+        }
 
-    $find = $db->prepare('SELECT id FROM daily_orders WHERE square_invoice_id = ? LIMIT 1');
-    $find->execute([$squareInvoiceId]);
-    $orderId = (int)$find->fetchColumn();
-    if ($orderId <= 0) {
-        return ['ok' => true, 'unmatched' => true, 'square_invoice_id' => $squareInvoiceId];
-    }
+        $find = $db->prepare('SELECT id FROM daily_orders WHERE square_invoice_id = ? LIMIT 1 FOR UPDATE');
+        $find->execute([$squareInvoiceId]);
+        $orderId = (int)$find->fetchColumn();
+        if ($orderId <= 0) {
+            if ($ownsTransaction) {
+                $db->commit();
+            }
+            return ['ok' => true, 'unmatched' => true, 'square_invoice_id' => $squareInvoiceId];
+        }
 
-    bakery_square_apply_invoice_payload($db, $orderId, $invoice);
-    if (table_exists($db, 'square_webhook_events') && $eventId !== '') {
-        $db->prepare('UPDATE square_webhook_events SET daily_order_id = ? WHERE event_id = ?')
-            ->execute([$orderId, $eventId]);
-    }
+        bakery_square_apply_invoice_payload($db, $orderId, $invoice);
+        if (table_exists($db, 'square_webhook_events') && $eventId !== '') {
+            $db->prepare('UPDATE square_webhook_events SET daily_order_id = ? WHERE event_id = ?')
+                ->execute([$orderId, $eventId]);
+        }
 
-    return [
-        'ok' => true,
-        'daily_order_id' => $orderId,
-        'square_invoice_id' => $squareInvoiceId,
-        'square_status' => bakery_square_normalize_status($invoice['status'] ?? ''),
-        'event_type' => $type,
-    ];
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+
+        return [
+            'ok' => true,
+            'daily_order_id' => $orderId,
+            'square_invoice_id' => $squareInvoiceId,
+            'square_status' => bakery_square_normalize_status($invoice['status'] ?? ''),
+            'event_type' => $type,
+        ];
+    } catch (Throwable $e) {
+        if ($ownsTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
 }
