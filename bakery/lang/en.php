@@ -398,6 +398,8 @@ return [
     'nav.manager_missed' => 'Missed',
     'nav.manager_missed_short' => 'Missed',
     'nav.manager_all_tools' => 'All tools',
+    'nav.manager_tools_filter' => 'Filter tools',
+    'nav.manager_tools_filter_placeholder' => 'Search tools',
     'nav.manager_more_aria' => 'More manager tools',
     'nav.section.primary' => 'Primary work',
     'nav.section_desc.primary' => 'The work that keeps today moving.',

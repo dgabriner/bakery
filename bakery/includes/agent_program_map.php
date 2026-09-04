@@ -127,7 +127,8 @@ function bakery_agent_program_work_map(): array
             ['includes/navigation_catalog.php', 'includes/nav.php', 'includes/auth.php', 'includes/header.php', 'cashier_add_product.php', 'module_guide.php', 'docs/MODULE_ACCESS_GUIDE.md'],
             ['tests/run_navigation_tests.php', 'tests/run_auth_tests.php', 'tests/run_cashier_role_tests.php', 'tests/run_i18n_tests.php'],
             ['Server-side bakery_require_role; menu hiding is not security', 'Unlisted scripts default to administrator only'],
-            'docs/prompts/40-nav-catalog-roles.md'
+            'docs/prompts/40-nav-catalog-roles.md',
+            'shipped'
         ),
         'touch-tokens' => $m(
             '44px touch targets and one token set across staff, portal, SFB',

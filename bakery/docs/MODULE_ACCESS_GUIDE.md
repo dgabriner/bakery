@@ -8,7 +8,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | --- | --- |
 | Administrator | Every current module, user management, historical navigation, and administrator-only diagnostics. |
 | Manager | Same operational permissions as before (production, orders, customers, drivers, routes, products, insights). Phone home is a focused workspace on **Bakery Manager**: Today, Routes, Kitchen, Missed, plus More for the rest of the catalog. Cannot alter users or roles, and does not receive historical or diagnostic tools. |
-| Baker | **Daily Production** and **Pack List** only. |
+| Baker | **Daily Production**, **Mix Today**, and **Pack List** only. |
 | Driver | **My Route** and **Call HQ** only. Delivery completion, photos, and route-specific actions are contained within My Route. |
 
 ## Current manager and administrator modules
@@ -18,6 +18,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 | Workday | Bakery Manager | Phone home for the manager role (Today / Routes / Kitchen / Missed). Administrators still see the desktop command workspace. |
 | Workday | Operations Dashboard | Today’s order, production, and delivery snapshot. |
 | Production | Production Center | Weekly finished-goods planning based on orders and stock. |
+| Production | Mix Today | Starter feedings and dough batches to mix. Bakers can access this page. |
 | Production | Daily Production | Daily bake schedule and quantities. Bakers can access this page. |
 | Production | Pack List | Production-day packing checklist. Bakers can access this page. |
 | Production | Finished Goods | Finished-good availability by delivery date. |
@@ -52,7 +53,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 
 Only administrators see the **Administration** area. It contains **User Management** (staff identities, roles, and sign-in codes) and **Historical Navigation** (the full prior menu). Historical Navigation retains tools that are not part of the primary day-to-day workflow, including older order summaries, bread distribution, driver overview/list, route testing, and diagnostic-adjacent pages.
 
-Access is enforced server-side in `includes/auth.php`; hiding a menu item is never the only control.
+Access is enforced server-side in `includes/auth.php` from the navigation catalog (and the script registry escape hatch). Hiding a menu item is never the only control; an unlisted script defaults to administrator-only.
 
 ### Retained historical-only menu entries
 

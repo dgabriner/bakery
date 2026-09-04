@@ -232,15 +232,20 @@ if ($navSelectedDriverName === '' && $navUser) {
           <?php foreach ($navManagerPrimary as $item): ?>
             <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . $item['href'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
           <?php endforeach; ?>
-          <details class="bakery-nav__more-catalog">
-            <summary><?php bakery_te('nav.manager_all_tools'); ?></summary>
-            <?php foreach ($navManagerGroups as $group): ?>
-              <p class="bakery-nav__more-group"><?php echo htmlspecialchars((string)$group['label'], ENT_QUOTES, 'UTF-8'); ?></p>
-              <?php foreach ($group['items'] as $item): ?>
-                <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . ltrim((string)$item['href'], '/'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
+          <div class="bakery-nav__more-tools" data-nav-tools-sheet>
+            <p class="bakery-nav__more-group"><?php bakery_te('nav.manager_all_tools'); ?></p>
+            <label class="bakery-nav__tools-filter">
+              <span class="sf-sr-only"><?php bakery_te('nav.manager_tools_filter'); ?></span>
+              <input type="search" class="bakery-nav__tools-filter-input" data-nav-tools-filter placeholder="<?php bakery_te('nav.manager_tools_filter_placeholder'); ?>" autocomplete="off">
+            </label>
+            <div class="bakery-nav__tools-list" data-nav-tools-list>
+              <?php foreach ($navManagerGroups as $group): ?>
+                <?php foreach ($group['items'] as $item): ?>
+                  <a class="bakery-nav__more-link" data-nav-tool-label="<?php echo htmlspecialchars(mb_strtolower((string)$item['label'] . ' ' . (string)$group['label'], 'UTF-8'), ENT_QUOTES, 'UTF-8'); ?>" href="<?php echo htmlspecialchars(BASE_URL . ltrim((string)$item['href'], '/'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
+                <?php endforeach; ?>
               <?php endforeach; ?>
-            <?php endforeach; ?>
-          </details>
+            </div>
+          </div>
           <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
           <?php echo $navLogoutForm; ?>
         </div>
@@ -434,6 +439,24 @@ document.addEventListener('DOMContentLoaded', function () {
       if (window.innerWidth > breakpoint) {
         closeMenu();
       }
+    });
+  });
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('[data-nav-tools-sheet]').forEach(function (sheet) {
+    var input = sheet.querySelector('[data-nav-tools-filter]');
+    var links = Array.prototype.slice.call(sheet.querySelectorAll('[data-nav-tool-label]'));
+    if (!input || !links.length) {
+      return;
+    }
+    input.addEventListener('input', function () {
+      var q = String(input.value || '').trim().toLowerCase();
+      links.forEach(function (link) {
+        var hay = link.getAttribute('data-nav-tool-label') || '';
+        link.hidden = q !== '' && hay.indexOf(q) === -1;
+      });
     });
   });
 });

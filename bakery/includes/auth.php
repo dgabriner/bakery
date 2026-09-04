@@ -9,6 +9,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/login_audit.php';
+require_once __DIR__ . '/navigation_catalog.php';
 
 // Bakery work often spans invoicing, dispatch, and a later photo at the next stop.
 // Keep a signed-in session through that operational window instead of making a
@@ -100,37 +101,18 @@ function bakery_diagnostic_scripts() {
 
 /**
  * Driver-only pages (managers/admins also allowed).
+ * Source of truth: navigation catalog ∪ script registry.
  */
 function bakery_driver_scripts() {
-    return [
-        'index.php',
-        'driver.php',
-        'driver_stops.php',
-        'pack_list.php',
-        'driver_list.php',
-        'route_closeout.php',
-        'complete_delivery.php',
-        'driver_session_ping.php',
-        'upload_driver_photo.php',
-        'get_customer_order_details.php',
-        'get_driver_orders.php',
-        'global_gps_handler.php',
-        'call_headquarters.php',
-        'qr_login.php',
-    ];
+    return bakery_navigation_scripts_for_role('driver');
 }
 
 /**
  * Cashier-only pages (managers/admins also allowed).
+ * Source of truth: navigation catalog ∪ script registry.
  */
 function bakery_cashier_scripts() {
-    return [
-        'cashier_shop_photos.php',
-        'upload_shop_photo.php',
-        'product_photos.php',
-        'upload_product_photo.php',
-        'cashier_add_product.php',
-    ];
+    return bakery_navigation_scripts_for_role('cashier');
 }
 
 /** Roles that work a driver route (the assistant works their paired driver's route). */
@@ -195,15 +177,12 @@ function bakery_ops_index_bypass_home(string $role): ?string {
 
 /**
  * Baker pages (managers/admins also allowed). Bakers receive only the
- * day-of production schedule and the packing checklist; weekly planning and
- * inventory remain management workflows.
+ * day-of production schedule, Mix Today, and the packing checklist; weekly
+ * planning and inventory remain management workflows.
+ * Source of truth: navigation catalog ∪ script registry.
  */
 function bakery_baker_scripts() {
-    return [
-        'production.php',
-        'baker_mix.php',
-        'pack_list.php',
-    ];
+    return bakery_navigation_scripts_for_role('baker');
 }
 
 /**
@@ -1173,26 +1152,15 @@ function bakery_enforce_request_security(PDO $db = null) {
     }
 
     $isDiagnostic = in_array($script, bakery_diagnostic_scripts(), true);
-    $isDriverScript = in_array($script, bakery_driver_scripts(), true);
-    $isBakerScript = in_array($script, bakery_baker_scripts(), true);
-    $isCashierScript = function_exists('bakery_cashier_scripts')
-        ? in_array($script, bakery_cashier_scripts(), true)
-        : false;
-
     if ($isDiagnostic) {
         bakery_require_role(['administrator']);
-    } elseif ($isBakerScript && $isDriverScript) {
-        // Overlap (index.php): admins, managers, drivers, and bakers.
-        bakery_require_role(['administrator', 'manager', 'driver', 'baker']);
-    } elseif ($isBakerScript) {
-        bakery_require_role(['administrator', 'manager', 'baker']);
-    } elseif ($isDriverScript) {
-        bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
-    } elseif ($isCashierScript) {
-        bakery_require_role(['cashier', 'administrator', 'manager']);
     } else {
-        // Default ops UI: manager + administrator. Drivers/bakers stay on their scripts.
-        bakery_require_role(['administrator', 'manager']);
+        // Catalog ∪ registry is the allowlist. Unlisted scripts are administrator-only.
+        $allowedRoles = bakery_navigation_roles_for_script($script);
+        if ($allowedRoles === []) {
+            $allowedRoles = ['administrator'];
+        }
+        bakery_require_role($allowedRoles);
     }
 
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');

@@ -398,6 +398,8 @@ return [
     'nav.manager_missed' => 'Faltó',
     'nav.manager_missed_short' => 'Faltó',
     'nav.manager_all_tools' => 'Todas las herramientas',
+    'nav.manager_tools_filter' => 'Filtrar herramientas',
+    'nav.manager_tools_filter_placeholder' => 'Buscar herramientas',
     'nav.manager_more_aria' => 'Más herramientas de gerente',
     'nav.section.primary' => 'Trabajo principal',
     'nav.section_desc.primary' => 'El trabajo que mantiene en marcha el día.',

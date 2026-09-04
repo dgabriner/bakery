@@ -97,6 +97,12 @@ navigation_test_assert(strpos($managerNav, 'bakery-nav--manager') !== false, 'ma
 navigation_test_assert(strpos($managerNav, 'bakery-nav--focused') !== false, 'manager navigation is a focused workspace');
 navigation_test_assert(strpos($managerNav, 'bakery-nav__menu-toggle') === false, 'manager phone navigation has no hamburger');
 navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps extras in More');
+navigation_test_assert(strpos($managerNav, 'data-nav-tools-filter') !== false, 'manager More has a searchable All tools filter');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__more-catalog') === false, 'manager All tools is a flat searchable sheet, not nested details');
+$moreBeforeTools = strpos($managerNav, 'data-nav-tools-sheet');
+navigation_test_assert($moreBeforeTools !== false, 'manager More includes the All tools sheet');
+$primaryLinkCount = $moreBeforeTools === false ? 0 : substr_count(substr($managerNav, 0, $moreBeforeTools), 'bakery-nav__more-link');
+navigation_test_assert($primaryLinkCount === 8, 'manager More primary shortcuts stay at eight');
 navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager navigation includes Routes');
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
@@ -191,5 +197,36 @@ navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, '
 
 $driverHqNav = navigation_test_render_nav('driver', 'call_headquarters');
 navigation_test_assert(strpos($driverHqNav, 'routeDateNavToggle') === false, 'driver Call HQ navigation omits the route date toggle');
+
+echo "=== Catalog is the role allowlist ===\n";
+require_once dirname(__DIR__) . '/includes/customer_portal.php';
+require_once dirname(__DIR__) . '/includes/sf_baker.php';
+$rootDir = dirname(__DIR__);
+$exemptScripts = array_values(array_unique(array_merge(
+    bakery_public_scripts(),
+    bakery_diagnostic_scripts(),
+    bakery_customer_portal_scripts(),
+    bakery_sfb_portal_scripts(),
+    bakery_sfb_community_scripts()
+)));
+$unresolved = [];
+foreach (glob($rootDir . '/*.php') as $path) {
+    $script = basename($path);
+    if (in_array($script, $exemptScripts, true) || strpos($script, 'customer_portal_') === 0) {
+        continue;
+    }
+    if (bakery_navigation_roles_for_script($script) === []) {
+        $unresolved[] = $script;
+    }
+}
+navigation_test_assert($unresolved === [], 'every non-public/portal root page resolves to at least one catalog or registry role' . ($unresolved ? (': ' . implode(', ', $unresolved)) : ''));
+navigation_test_assert(bakery_navigation_roles_for_script('users.php') === ['administrator'], 'User Management stays administrator-only from the catalog');
+navigation_test_assert(in_array('baker_mix.php', bakery_navigation_scripts_for_role('baker'), true), 'catalog grants bakers Mix Today');
+navigation_test_assert(!in_array('daily_orders.php', bakery_navigation_scripts_for_role('driver'), true), 'catalog does not grant drivers Daily Orders');
+
+$moduleGuideSrc = file_get_contents($rootDir . '/module_guide.php');
+navigation_test_assert(strpos($moduleGuideSrc, 'Mix Today') !== false, 'module guide baker blurb includes Mix Today');
+$accessGuideSrc = file_get_contents($rootDir . '/docs/MODULE_ACCESS_GUIDE.md');
+navigation_test_assert(strpos($accessGuideSrc, 'Mix Today') !== false, 'MODULE_ACCESS_GUIDE documents Mix Today for bakers');
 
 exit($failed === 0 ? 0 : 1);
