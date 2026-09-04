@@ -23,7 +23,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 45 `kitchen-one-screen` — baker Today + Pack phone | **shipped** | `run_baker_mix_tests`, `run_pack_list_tests`, `run_navigation_tests` |
 | 41 `touch-tokens` — 44px chrome + portal tokens | **shipped** | `run_touch_target_tests` |
 | 46 `sfb-bottom-nav` — SF Baker bottom tabs + More | **shipped** | `run_sf_baker_tests`, `run_sfb_content_trust_tests` |
-| 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 50 `extract-assets` — six god-page CSS/JS extracted | **shipped** | `run_extract_assets_tests` + route manager suites |
+| 51–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -62,7 +63,7 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 7. ~~**44 `manager-phone-closeout`**~~ — **shipped**. ~~**45 `kitchen-one-screen`**~~ — **shipped**. ~~**41 `touch-tokens`**~~ — **shipped**. ~~**46 `sfb-bottom-nav`**~~ — **shipped**. Wave 2 complete.
 
 ### Then structure (Wave 3) — one page per PR
-8. **50 `extract-assets`** (`route_manager.php` first: 88% of the file is CSS+JS) → **51 `split-actions`** → **52 `one-mutation-path`** → **53 `hot-path-queries`** (verify index migration number) → **54 `gate-scaling`** (GitHub Actions; `.github/` does not exist yet) → **55 `product-boundaries`** (Homebase Decided + product context §8).
+8. ~~**50 `extract-assets`**~~ — **shipped** (six pages; shells still >400 where PHP logic remains). Then **51 `split-actions`** → **52 `one-mutation-path`** → **53 `hot-path-queries`** → **54 `gate-scaling`** → **55 `product-boundaries`**.
 
 ### Integration (Wave 4) — owner decisions first
 9. **60 `overnight-cron`** (agent builds staleness chip + runbook; owner installs crontab), **62 `engagement-writeback`** (no decision needed), **61 `settlement-story`** (step 1 needs no decision; ledger does), **63 `ingredient-light`** (step A only until owner confirms), **64 `retail-scope-decision`** (owner).
@@ -99,4 +100,4 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** Wave 3 starts: **50 `extract-assets`** → 51 → 52 → 53 → 54 → 55. Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **35–37, 40–46 are shipped.** Staging and Live were not touched.
+8. **Next agent:** Wave 3 continues: **51 `split-actions`** → 52 → 53 → 54 → 55. Then Wave 4 no-decision parts. **35–37, 40–46, 50 are shipped.** Staging and Live were not touched.
