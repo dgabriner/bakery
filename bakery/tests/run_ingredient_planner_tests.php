@@ -131,6 +131,28 @@ echo "\n=== Default source ===\n";
 assert_eq('plan', bakery_ingredient_requirements_resolve_source(null), 'default source is plan');
 assert_eq('plan', bakery_ingredient_requirements_resolve_source(''), 'empty resolves to plan');
 
+echo "\n=== Purchase notes (Mission 63A) ===\n";
+require_once $root . '/includes/ingredient_purchase_notes.php';
+$notesSrc = (string)file_get_contents($root . '/includes/ingredient_purchase_notes.php');
+assert_true(strpos($notesSrc, 'function bakery_ingredient_purchase_note_upsert') !== false, 'upsert helper exists');
+assert_true(is_file($root . '/database/schema/081_ingredient_purchase_notes.sql'), 'migration 081 exists');
+$unmarked = bakery_ingredient_purchase_notes_unmarked_needed(
+    [
+        ['ingredient_id' => 1, 'ingredient_name' => 'Flour', 'required_grams' => 1000, 'shortage_grams' => 500, 'suggested_purchase' => '1 × 25 kg'],
+        ['ingredient_id' => 2, 'ingredient_name' => 'Salt', 'required_grams' => 10, 'shortage_grams' => 0, 'suggested_purchase' => null],
+        ['ingredient_id' => 3, 'ingredient_name' => 'Water', 'required_grams' => 0, 'shortage_grams' => 0, 'suggested_purchase' => null],
+    ],
+    [
+        2 => ['ordered' => 1, 'received' => 0],
+    ]
+);
+assert_eq(1, count($unmarked), 'only unmarked needed ingredients surface');
+assert_eq(1, (int)$unmarked[0]['ingredient_id'], 'flour remains unmarked');
+$plannerPage = (string)file_get_contents($root . '/ingredient_requirements.php');
+assert_true(strpos($plannerPage, 'save_purchase_note') !== false, 'planner can save purchase notes');
+$pcPage = (string)file_get_contents($root . '/production_center.php');
+assert_true(strpos($pcPage, 'ingredient_unmarked_chip') !== false, 'Production Center shows unmarked ingredient chip');
+
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
 echo "Failed: {$GLOBALS['TEST_FAIL']}\n";

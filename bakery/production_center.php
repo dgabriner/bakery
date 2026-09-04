@@ -617,6 +617,25 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         'title' => bakery_t('production_workflow.title'),
         'lead' => bakery_t('production_workflow.lead_manager'),
     ]);
+    if (!function_exists('bakery_ingredient_requirements_build')) {
+        require_once __DIR__ . '/includes/ingredient_requirements.php';
+    }
+    if (!function_exists('bakery_ingredient_purchase_notes_unmarked_needed')) {
+        require_once __DIR__ . '/includes/ingredient_purchase_notes.php';
+    }
+    $ingredientPlanLite = bakery_ingredient_requirements_build($db, $selectedDate, 'plan');
+    $purchaseUnmarked = is_array($ingredientPlanLite['purchase_unmarked'] ?? null)
+        ? $ingredientPlanLite['purchase_unmarked']
+        : [];
+    if ($purchaseUnmarked !== []) {
+        $chipCount = count($purchaseUnmarked);
+        $plannerHref = (defined('BASE_URL') ? BASE_URL : '') . 'ingredient_requirements.php?date='
+            . rawurlencode($selectedDate) . '&source=plan';
+        echo '<p class="pc-ingredient-chip" role="status"><a href="'
+            . htmlspecialchars($plannerHref, ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars(bakery_t('production_center.ingredient_unmarked_chip', ['count' => $chipCount], ':count ingredients still need order/receive'), ENT_QUOTES, 'UTF-8')
+            . '</a></p>';
+    }
     ?>
 
     <?php if ($notice): ?><div class="pc-notice success"><?php echo htmlspecialchars($notice); ?></div><?php endif; ?>
