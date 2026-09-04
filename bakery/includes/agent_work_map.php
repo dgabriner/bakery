@@ -81,6 +81,7 @@ function bakery_agent_work_map(): array
                 'tests/run_production_confirm_tests.php',
                 'tests/run_product_pack_yield_tests.php',
                 'tests/run_product_manager_plan_tests.php',
+                'tests/run_production_manager_dashboard_tests.php',
             ],
             'invariants' => [
                 '§4 dated beats standing per customer',
@@ -622,13 +623,21 @@ function bakery_agent_work_map(): array
             'files' => [
                 'includes/auth.php',
                 'includes/google_analytics.php',
+                'includes/cashier_catalog.php',
                 'login.php',
+                'cashier_shop_photos.php',
+                'cashier_add_product.php',
+                'product_photos.php',
+                'database/schema/074_cashier_shop_photos.sql',
+                'database/schema/075_sarita_cashier_user.sql',
+                'database/schema/076_retail_store_shelf.sql',
             ],
             'tests' => [
                 'tests/run_auth_tests.php',
                 'tests/run_login_history_tests.php',
                 'tests/run_navigation_tests.php',
                 'tests/run_google_analytics_tests.php',
+                'tests/run_cashier_role_tests.php',
             ],
             'invariants' => [
                 'Menu hiding is never the only control',
