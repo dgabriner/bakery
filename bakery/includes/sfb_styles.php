@@ -43,7 +43,7 @@ if (!defined('ACCESS_ALLOWED')) {
     font-size: .78rem;
     font-weight: 650;
     letter-spacing: .025em;
-    min-height: 40px;
+    min-height: var(--sf-touch-min, 44px);
     padding: 10px 12px;
     text-align: center;
     text-decoration: none;

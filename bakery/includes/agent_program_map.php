@@ -133,10 +133,11 @@ function bakery_agent_program_work_map(): array
         'touch-tokens' => $m(
             '44px touch targets and one token set across staff, portal, SFB',
             ['41-touch-tokens', 'prompt-41', 'tap-targets', 'tokens'],
-            ['css/tokens.css', 'css/base.css', 'css/nav.css', 'css/manager_phone.css', 'includes/portal_styles.php', 'includes/sfb_styles.php', 'includes/sfb_tabs.php', 'tests/run_touch_target_tests.php'],
+            ['css/tokens.css', 'css/base.css', 'css/nav.css', 'css/manager_phone.css', 'css/driver.css', 'includes/portal_styles.php', 'includes/sfb_styles.php', 'includes/sfb_tabs.php', 'tests/run_touch_target_tests.php'],
             ['tests/run_touch_target_tests.php', 'tests/run_navigation_tests.php', 'tests/run_manager_phone_tests.php'],
             ['--sf-touch-min is the floor for every interactive control in shared chrome', 'Do not reintroduce viewport scroll listeners (mobile shake fix)'],
-            'docs/prompts/41-touch-tokens.md'
+            'docs/prompts/41-touch-tokens.md',
+            'shipped'
         ),
         'driver-fast-path' => $m(
             'Driver stop wizard: photo → confirm → next',

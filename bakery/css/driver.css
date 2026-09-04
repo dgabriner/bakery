@@ -8,6 +8,7 @@
     margin: 0 auto;
     padding: 10px;
     min-height: 100vh;
+    min-height: 100dvh;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
