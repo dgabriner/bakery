@@ -406,11 +406,23 @@ if ($inventoryReady) {
         $driverIds[(int)$driver['id']] = (string)$driver['name'];
     }
     // Drivers with work today even if later archived from the active list.
+    $missingDriverIds = [];
     foreach (array_keys($routeByDriver + $productsByDriver) as $driverId) {
         if (!isset($driverIds[$driverId])) {
-            $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ?');
-            $nameStmt->execute([$driverId]);
-            $driverIds[$driverId] = (string)($nameStmt->fetchColumn() ?: ('Driver #' . $driverId));
+            $missingDriverIds[] = (int)$driverId;
+        }
+    }
+    if ($missingDriverIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($missingDriverIds), '?'));
+        $nameStmt = $db->prepare("SELECT id, name FROM drivers WHERE id IN ($placeholders)");
+        $nameStmt->execute($missingDriverIds);
+        foreach ($nameStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $driverIds[(int)$row['id']] = (string)$row['name'];
+        }
+        foreach ($missingDriverIds as $driverId) {
+            if (!isset($driverIds[$driverId])) {
+                $driverIds[$driverId] = 'Driver #' . $driverId;
+            }
         }
     }
 

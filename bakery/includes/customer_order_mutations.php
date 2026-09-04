@@ -22,17 +22,34 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         : (((int)$dayOfWeek === 0) ? 7 : (int)$dayOfWeek);
     $qty = (int)$qty;
 
+    // Reuse prepared statements across a request (copy-week / bulk save hot paths).
+    static $boundDb = null;
+    static $upsertStmt = null;
+    static $deleteLegacySundayStmt = null;
+    static $deleteExactStmt = null;
+    if ($boundDb !== $db) {
+        $boundDb = $db;
+        $upsertStmt = null;
+        $deleteLegacySundayStmt = null;
+        $deleteExactStmt = null;
+    }
+
     if ($qty > 0) {
-        $stmt = $db->prepare(
-            'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE quantity = ?'
-        );
-        $stmt->execute([$customerId, $productId, $dayOfWeek, $qty, $qty]);
+        if ($upsertStmt === null) {
+            $upsertStmt = $db->prepare(
+                'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE quantity = ?'
+            );
+        }
+        $upsertStmt->execute([$customerId, $productId, $dayOfWeek, $qty, $qty]);
         if ($dayOfWeek === 7) {
-            $db->prepare(
-                'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = 0'
-            )->execute([$customerId, $productId]);
+            if ($deleteLegacySundayStmt === null) {
+                $deleteLegacySundayStmt = $db->prepare(
+                    'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = 0'
+                );
+            }
+            $deleteLegacySundayStmt->execute([$customerId, $productId]);
         }
         return;
     }
@@ -46,10 +63,68 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         return;
     }
 
-    $stmt = $db->prepare(
-        'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?'
+    if ($deleteExactStmt === null) {
+        $deleteExactStmt = $db->prepare(
+            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?'
+        );
+    }
+    $deleteExactStmt->execute([$customerId, $productId, $dayOfWeek]);
+}
+
+/**
+ * Batch find-or-create dated order shells for many customers on one date.
+ *
+ * @param list<int> $customerIds
+ * @return array<int, int> customer_id → daily_order_id
+ */
+function bakery_daily_orders_map_for_customers(PDO $db, string $date, array $customerIds): array
+{
+    $customerIds = array_values(array_unique(array_filter(array_map('intval', $customerIds), static fn($id) => $id > 0)));
+    if ($customerIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($customerIds), '?'));
+    $find = $db->prepare(
+        "SELECT id, customer_id FROM daily_orders WHERE order_date = ? AND customer_id IN ($placeholders)"
     );
-    $stmt->execute([$customerId, $productId, $dayOfWeek]);
+    $find->execute(array_merge([$date], $customerIds));
+    $map = [];
+    foreach ($find->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['customer_id']] = (int)$row['id'];
+    }
+
+    $missing = [];
+    foreach ($customerIds as $customerId) {
+        if (!isset($map[$customerId])) {
+            $missing[] = $customerId;
+        }
+    }
+    if ($missing !== []) {
+        $valueSql = [];
+        $params = [];
+        foreach ($missing as $customerId) {
+            $valueSql[] = "(?, ?, 'pending', 0)";
+            $params[] = $customerId;
+            $params[] = $date;
+        }
+        $insert = $db->prepare(
+            'INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount) VALUES '
+            . implode(', ', $valueSql)
+        );
+        $insert->execute($params);
+
+        $findMissing = $db->prepare(
+            'SELECT id, customer_id FROM daily_orders WHERE order_date = ? AND customer_id IN ('
+            . implode(',', array_fill(0, count($missing), '?')) . ')'
+        );
+        $findMissing->execute(array_merge([$date], $missing));
+        foreach ($findMissing->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(int)$row['customer_id']] = (int)$row['id'];
+        }
+    }
+
+    return $map;
 }
 
 /**

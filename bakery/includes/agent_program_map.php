@@ -216,10 +216,11 @@ function bakery_agent_program_work_map(): array
         'hot-path-queries' => $m(
             'Batch N+1 loops; standing_routes day index; shared PDO',
             ['53-hot-path-queries', 'prompt-53', 'n-plus-one', 'indexes'],
-            ['includes/driver_assignments.php', 'driver_load.php', 'production.php', 'database/schema/078_standing_routes_day_index.sql'],
+            ['includes/driver_assignments.php', 'driver_load.php', 'production.php', 'database/schema/079_standing_routes_day_index.sql'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_production_confirm_tests.php', 'tests/run_schema_compare_tests.php'],
             ['(driver_id, delivery_date, route_order) stays unique', 'Route build issues O(1) statements'],
-            'docs/prompts/53-hot-path-queries.md'
+            'docs/prompts/53-hot-path-queries.md',
+            'shipped'
         ),
         'gate-scaling' => $m(
             'Mapped-suite gate mode and CI without the laptop',

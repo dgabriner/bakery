@@ -23,3 +23,5 @@ Route build loops per stop (`includes/driver_assignments.php:404–446`: SELECT 
 ## Done when
 
 Route build for N stops issues O(1) statements; suites green; new index recorded in `schema_migrations`.
+
+**Status:** shipped 2026-09-04 on `cursor/sour-flour-agent-program-a061` (PR #20). Batch route-build map + reused assignment prepares; driver_load / production / standing upsert prepares batched; `079_standing_routes_day_index` + sargable day filter; bread_distribution uses shared `$db`. EXPLAIN evidence in agent artifacts. Staging and Live were not touched.

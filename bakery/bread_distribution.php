@@ -4,14 +4,6 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/customer_order_mutations.php';
 
-// Initialize database connection
-$db = new PDO(
-    "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
-    DB_USER,
-    DB_PASS,
-    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-);
-
 // Helper function to convert day number to day name
 function getDayName($dayNumber) {
     $days = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

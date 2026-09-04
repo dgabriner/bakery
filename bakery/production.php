@@ -449,24 +449,41 @@ try {
     
     // Collect all starter amounts needed across all dough types
     if (!empty($groupedData)) {
+        $doughTypeIds = [];
+        foreach ($groupedData as $data) {
+            if (!empty($data['formula']) && !empty($data['dough_type_id'])) {
+                $totalPct = (float)($data['formula']['total_percentage'] ?? 0);
+                if ($totalPct > 0) {
+                    $doughTypeIds[(int)$data['dough_type_id']] = true;
+                }
+            }
+        }
+        $starterByDoughType = [];
+        if ($doughTypeIds !== []) {
+            $ids = array_keys($doughTypeIds);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $starterStmt = $db->prepare("
+                SELECT
+                    fi.dough_type_id,
+                    fi.ingredient_id,
+                    i.name,
+                    fi.percentage
+                FROM formula_ingredients fi
+                JOIN ingredients i ON fi.ingredient_id = i.id
+                WHERE fi.dough_type_id IN ($placeholders) AND fi.ingredient_id IN (6, 13)
+            ");
+            $starterStmt->execute($ids);
+            foreach ($starterStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $starterByDoughType[(int)$row['dough_type_id']][] = $row;
+            }
+        }
         foreach ($groupedData as $doughType => $data) {
             if (!empty($data['formula']) && !empty($data['dough_type_id'])) {
                 $totalPct = (float)($data['formula']['total_percentage'] ?? 0);
                 if ($totalPct <= 0) {
                     continue;
                 }
-                // Get ingredients for this dough type with ingredient IDs
-                $starterStmt = $db->prepare("
-                    SELECT 
-                        fi.ingredient_id,
-                        i.name,
-                        fi.percentage
-                    FROM formula_ingredients fi
-                    JOIN ingredients i ON fi.ingredient_id = i.id
-                    WHERE fi.dough_type_id = ? AND fi.ingredient_id IN (6, 13)
-                ");
-                $starterStmt->execute([$data['dough_type_id']]);
-                $starterIngredients = $starterStmt->fetchAll(PDO::FETCH_ASSOC);
+                $starterIngredients = $starterByDoughType[(int)$data['dough_type_id']] ?? [];
                 
                 // Calculate total flour weight for this dough type
                 $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
