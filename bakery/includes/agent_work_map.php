@@ -50,6 +50,7 @@ function bakery_agent_work_map(): array
                 'production_center.php',
                 'production_manager.php',
                 'includes/production_manager_dashboard.php',
+                'baker_mix.php',
                 'production.php',
                 'pack_list.php',
                 'pan_dulce_quantities.php',
@@ -82,6 +83,7 @@ function bakery_agent_work_map(): array
                 'tests/run_product_pack_yield_tests.php',
                 'tests/run_product_manager_plan_tests.php',
                 'tests/run_production_manager_dashboard_tests.php',
+                'tests/run_baker_mix_tests.php',
             ],
             'invariants' => [
                 '§4 dated beats standing per customer',
@@ -138,6 +140,7 @@ function bakery_agent_work_map(): array
             'tests' => [
                 'tests/run_credit_return_tests.php',
                 'tests/run_golden_day_qa.php',
+                'tests/run_delivery_pan_dulce_price_tests.php',
             ],
             'invariants' => [
                 'Delivery confirmation creates the billable snapshot',
@@ -241,6 +244,9 @@ function bakery_agent_work_map(): array
                 'includes/text_comms_media.php',
                 'includes/surveys.php',
                 'includes/survey_store_verify.php',
+                'includes/survey_interactions.php',
+                'includes/survey_route_order.php',
+                'database/schema/073_survey_interactions.sql',
                 'text_comms.php',
                 'text_comms_api.php',
                 'text_media.php',
@@ -262,6 +268,8 @@ function bakery_agent_work_map(): array
                 'tests/run_text_comms_media_tests.php',
                 'tests/run_survey_tests.php',
                 'tests/run_survey_store_verify_tests.php',
+                'tests/run_survey_interactions_tests.php',
+                'tests/run_survey_route_order_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [
