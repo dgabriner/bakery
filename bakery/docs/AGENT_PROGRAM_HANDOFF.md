@@ -14,7 +14,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 33 `edge-entrypoints` — OAuth/setup scripts gated, ping sanitized, `*_api.php` JSON rule | **shipped** | `tests/run_edge_entrypoint_tests.php` (22 checks) |
 | 34 `error-boundary` — global handlers, no raw exception text, `safe_execute` throws | **shipped** | `tests/run_error_boundary_tests.php` (18 checks) |
 | 35 `money-transactions` — invoice send outbox (queued → sent/logged/failed) | **partial** (Square tx audit remains) | `tests/run_invoice_send_tests.php` failure-path block |
-| 36–37, 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 37 `characterize-core` — four god-page suites | **shipped** | `run_daily_orders_page_tests`, `run_standing_orders_manager_tests`, `run_production_center_tests`, `run_complete_delivery_tests` (all green twice) |
+| 36, 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -41,9 +42,9 @@ Homebase needs `bakerysf_stage_local` with the 044 schema; on a fresh cloud VM `
 Each item names the brief; the brief names files, tests, invariants, and done-when. Do them one mission per commit/PR.
 
 ### Do next (highest severity, smallest lanes)
-1. **37 `characterize-core`** — four suites for the four untested god-pages. Required before any Wave 3 refactor. Pure test work; cheap in review.
-2. **36 `js-safety-net`** — `unhandledrejection` beacon + driver fetch audit. `includes/error_boundary.php` already renders `{success:false,error:internal,error_id}` for `*_api.php`, so the client side can key on `error_id`.
-3. **35 remainder** — transaction audit of `includes/square_invoices.php` create/publish/webhook writes (the invoice-send outbox is done; reuse `$GLOBALS['bakery_billing_mail_handler']`-style seams).
+1. **36 `js-safety-net`** — `unhandledrejection` beacon + driver fetch audit. `includes/error_boundary.php` already renders `{success:false,error:internal,error_id}` for `*_api.php`, so the client side can key on `error_id`.
+2. **35 remainder** — transaction audit of `includes/square_invoices.php` create/publish/webhook writes (the invoice-send outbox is done; reuse `$GLOBALS['bakery_billing_mail_handler']`-style seams).
+3. ~~**37 `characterize-core`**~~ — **shipped** (four suites green twice).
 
 ### Then mobile (Wave 2)
 5. **40 `nav-catalog-roles`** — catalog drives the role allowlists (default-deny); manager More ≤ 8; `cashier_add_product.php` gets `nav.php`. Unlocks 45.

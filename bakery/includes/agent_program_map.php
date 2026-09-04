@@ -115,7 +115,8 @@ function bakery_agent_program_work_map(): array
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_complete_delivery_tests.php'],
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_complete_delivery_tests.php'],
             ['Dated beats standing per customer', 'Re-generation preserves dated edits unless overwrite_changed', 'Confirm is one transaction; door credits return once'],
-            'docs/prompts/37-characterize-core.md'
+            'docs/prompts/37-characterize-core.md',
+            'shipped'
         ),
 
         // ---------------------------------------------------------------- Wave 2
