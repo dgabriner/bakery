@@ -51,7 +51,7 @@ $assert(strpos($base, "min-height: 100vh;\n  min-height: 100dvh;") !== false
 $assert(strpos($base, '.sf-btn--sm') !== false && strpos($base, 'min-height: var(--sf-touch-min)') !== false, 'small buttons use touch-min');
 
 $sfb = (string)file_get_contents($root . '/includes/sfb_styles.php');
-$assert(preg_match('/\.sfb-tabs a\s*\{[^}]*min-height:\s*var\(--sf-touch-min/s', $sfb) === 1, 'SFB tabs use touch-min');
+$assert(preg_match('/\.sfb-tabs a(?:,\s*\.sfb-tabs__more)?\s*\{[^}]*min-height:\s*var\(--(?:sf-touch-min|nav-h)/s', $sfb) === 1, 'SFB tabs use touch-sized min-height');
 
 $chromeFiles = [
     'css/nav.css',

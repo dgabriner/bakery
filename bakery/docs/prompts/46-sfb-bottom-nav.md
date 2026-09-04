@@ -23,3 +23,5 @@ Origin badges and gating unchanged. No new page. EN + ES.
 ## Done when
 
 All eight destinations reachable in ≤2 taps at 320px; SFB suites green.
+
+**Status:** shipped 2026-09-04 — Home/Learn/Bake/Community bottom tabs + More sheet; portal_nav.js data-more variant; customer portal tabs suppressed on SFB shell. Staging and Live were not touched.

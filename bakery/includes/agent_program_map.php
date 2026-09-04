@@ -178,10 +178,11 @@ function bakery_agent_program_work_map(): array
         'sfb-bottom-nav' => $m(
             'SF Baker bottom tabs + More replacing the eight-tab strip',
             ['46-sfb-bottom-nav', 'prompt-46', 'sfb-nav'],
-            ['includes/sfb_tabs.php', 'includes/sfb_styles.php', 'includes/portal_nav.js'],
+            ['includes/sfb_tabs.php', 'includes/sfb_styles.php', 'includes/portal_nav.js', 'includes/portal_nav.php', 'sfb_ingredients.php'],
             ['tests/run_sf_baker_tests.php', 'tests/run_sfb_content_trust_tests.php'],
             ['Origin badges and gating unchanged'],
-            'docs/prompts/46-sfb-bottom-nav.md'
+            'docs/prompts/46-sfb-bottom-nav.md',
+            'shipped'
         ),
 
         // ---------------------------------------------------------------- Wave 3

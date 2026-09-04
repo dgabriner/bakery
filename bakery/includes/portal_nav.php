@@ -18,6 +18,8 @@ if (isset($db) && $db instanceof PDO) {
 function bakery_portal_tab_active($tab, $primary) {
     return $tab === $primary ? ' active' : '';
 }
+
+if (empty($sfbShellNav)):
 ?>
 <nav class="portal-tabs" aria-label="<?php bakery_te('portal.main_navigation'); ?>">
   <a href="customer_portal.php" class="<?php echo trim(bakery_portal_tab_active('home', $portalPrimaryTab)); ?>">
@@ -37,6 +39,7 @@ function bakery_portal_tab_active($tab, $primary) {
     <?php bakery_te('portal.nav_billing'); ?>
   </a>
 </nav>
+<?php endif; ?>
 
 <div class="portal-more-desktop" aria-label="<?php bakery_te('portal.more_options'); ?>">
   <?php if ($portalSfbEnabled): ?>

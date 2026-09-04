@@ -90,13 +90,7 @@ $portalCustomerName = $customer['name'];
   <?php require __DIR__ . '/includes/portal_header.php'; ?>
 
   <main class="container sfb-app">
-    <nav class="sfb-tabs" aria-label="SF Baker">
-      <a href="sfb_dashboard.php"><?php bakery_te('sfb.tab_dashboard'); ?></a>
-      <a href="sfb_starters.php"><?php bakery_te('sfb.tab_starters'); ?></a>
-      <a href="sfb_ingredients.php" class="active"><?php bakery_te('sfb.tab_ingredients'); ?></a>
-      <a href="sfb_formulas.php"><?php bakery_te('sfb.tab_formulas'); ?></a>
-      <a href="sfb_batches.php"><?php bakery_te('sfb.tab_batches'); ?></a>
-    </nav>
+    <?php $sfbActiveTab = 'ingredients'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
 
     <?php if ($notice !== ''): ?>
       <div class="notice notice--<?php echo $noticeKind === 'warn' ? 'warn' : 'info'; ?>"><?php echo htmlspecialchars($notice); ?></div>
