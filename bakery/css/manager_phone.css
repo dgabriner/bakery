@@ -390,3 +390,5 @@ body.workspace-manager {
     padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+.manager-phone__driver-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.65rem}.manager-phone__closeout-lines{list-style:none;margin:0;padding:0;display:grid;gap:.75rem}.manager-phone__closeout-lines li{display:grid;gap:.35rem;padding:.75rem;border:1px solid #d7e4df;border-radius:12px;background:#fff}.manager-phone__van-math{font-weight:750;color:#1f4f49}.manager-desktop-only-hint{display:none;margin:0.75rem 1rem;padding:0.85rem 1rem;border-radius:12px;background:#fff8e9;border:1px solid #f0d7a0;color:#5f4d2d;font-weight:650}@media (max-width:720px){.manager-desktop-only{display:none!important}.manager-desktop-only-hint{display:block}}

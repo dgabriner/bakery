@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $managerNotice = 'Live database migration ' . $migration['migration_id'] . ' queued. It will run separately after a fresh backup.';
             $liveQueuedKind = 'database';
-        } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip'], true)) {
+        } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip', 'phone_cod_turnin'], true)) {
             $managerNotice = bakery_manager_phone_handle_post($db, $selectedDate, $_POST);
         } elseif ($mutation === 'exception_work') {
             $workKey = (string)($_POST['work_key'] ?? '');
@@ -223,8 +223,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             bakery_delivery_recovery_report_failure($db, (int)($_POST['assignment_id'] ?? 0), $_POST);
             $managerNotice = 'Failed stop added to the recovery board.';
         } elseif ($mutation === 'recovery_action') {
-            bakery_delivery_recovery_apply($db, (int)($_POST['case_id'] ?? 0), (string)($_POST['recovery_action'] ?? ''), $_POST);
-            $managerNotice = 'Delivery recovery updated.';
+            $recoveryAction = (string)($_POST['recovery_action'] ?? '');
+            bakery_delivery_recovery_apply($db, (int)($_POST['case_id'] ?? 0), $recoveryAction, $_POST);
+            if ($recoveryAction === 'text_customer') {
+                $managerNotice = (string)bakery_t('exception_desk.text_customer_done', [], 'Customer text recorded through Command Center send.');
+            } elseif ($recoveryAction === 'create_credit') {
+                $managerNotice = (string)bakery_t('exception_desk.create_credit_done', [], 'Credit review queued in Service Issues.');
+            } else {
+                $managerNotice = 'Delivery recovery updated.';
+            }
         }
         if ($managerNotice !== null) {
             $redirectView = bakery_manager_phone_view((string)($_POST['view'] ?? $_GET['view'] ?? 'today'));
@@ -1388,7 +1395,7 @@ require_once 'includes/nav.php';
         <details class="manager-recovery-case"><summary><strong><?php echo htmlspecialchars((string)$case['customer_name']); ?></strong><span><?php echo htmlspecialchars(str_replace('_', ' ', (string)$case['workflow_state'])); ?></span><small><?php echo htmlspecialchars($reasonLabel); ?></small></summary>
           <div class="manager-recovery-case__body"><p>Original driver: <?php echo (int)$case['original_driver_id']; ?> · Active driver: <?php echo htmlspecialchars((string)($case['active_driver_name'] ?? '—')); ?></p>
             <form method="post" class="manager-work-form"><?php echo bakery_csrf_field(); ?><input type="hidden" name="manager_mutation" value="recovery_action"><input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>"><input type="hidden" name="recovery_action" value="update_handoffs"><label>Customer communication <select name="communication_status"><?php foreach (['not_needed','pending','contacted','unable_to_reach'] as $status): ?><option value="<?php echo $status; ?>" <?php echo $case['customer_communication_status'] === $status ? 'selected' : ''; ?>><?php echo htmlspecialchars(str_replace('_', ' ', $status)); ?></option><?php endforeach; ?></select></label><label>Billing / credit <select name="billing_handoff"><?php foreach (['not_needed','review_needed','credit_requested','credit_issued','not_billable'] as $status): ?><option value="<?php echo $status; ?>" <?php echo $case['billing_handoff'] === $status ? 'selected' : ''; ?>><?php echo htmlspecialchars(str_replace('_', ' ', $status)); ?></option><?php endforeach; ?></select></label><label>Manager note <textarea name="manager_note" rows="2" required><?php echo htmlspecialchars((string)$case['manager_note']); ?></textarea></label><label>Communication note <input name="communication_note" maxlength="2000" value="<?php echo htmlspecialchars((string)$case['customer_communication_note']); ?>"></label><button class="sf-btn sf-btn--outline sf-btn--sm" type="submit">Save handoffs</button></form>
-            <form method="post" class="manager-recovery-actions"><?php echo bakery_csrf_field(); ?><input type="hidden" name="manager_mutation" value="recovery_action"><input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>"><input name="manager_note" maxlength="2000" placeholder="Decision note" required><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="acknowledge">Acknowledge</button><label>Retry at <input type="datetime-local" name="retry_at"></label><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="retry">Schedule retry</button><select name="to_driver_id"><option value="">Reassign to…</option><?php foreach (($routePlan['drivers'] ?? []) as $driver): ?><option value="<?php echo (int)$driver['id']; ?>"><?php echo htmlspecialchars((string)$driver['name']); ?> · <?php echo (int)$driver['stop_count']; ?> stops</option><?php endforeach; ?></select><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="reassign">Reassign in Driver Assignment</button><button class="sf-btn sf-btn--primary sf-btn--sm" name="recovery_action" value="resolve">Resolve</button><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="close">Close</button></form>
+            <form method="post" class="manager-recovery-actions"><?php echo bakery_csrf_field(); ?><input type="hidden" name="manager_mutation" value="recovery_action"><input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>"><input name="manager_note" maxlength="2000" placeholder="Decision note" required><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="acknowledge">Acknowledge</button><label>Retry at <input type="datetime-local" name="retry_at"></label><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="retry">Schedule retry</button><select name="to_driver_id"><option value="">Reassign to…</option><?php foreach (($routePlan['drivers'] ?? []) as $driver): ?><option value="<?php echo (int)$driver['id']; ?>"><?php echo htmlspecialchars((string)$driver['name']); ?> · <?php echo (int)$driver['stop_count']; ?> stops</option><?php endforeach; ?></select><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="reassign">Reassign in Driver Assignment</button><button class="sf-btn sf-btn--primary sf-btn--sm" name="recovery_action" value="text_customer"><?php echo htmlspecialchars((string)bakery_t('exception_desk.text_customer', [], 'Text customer')); ?></button><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="create_credit"><?php echo htmlspecialchars((string)bakery_t('exception_desk.create_credit', [], 'Create credit')); ?></button><button class="sf-btn sf-btn--primary sf-btn--sm" name="recovery_action" value="resolve">Resolve</button><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="close">Close</button></form>
           </div>
         </details>
       <?php endforeach; ?></div>

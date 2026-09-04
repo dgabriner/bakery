@@ -9,6 +9,7 @@ require_once 'includes/daily_order_generation.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/production_plan.php';
 require_once 'includes/production_workflow_strip.php';
+require_once 'includes/kitchen_segments.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/formula_units.php';
@@ -448,24 +449,41 @@ try {
     
     // Collect all starter amounts needed across all dough types
     if (!empty($groupedData)) {
+        $doughTypeIds = [];
+        foreach ($groupedData as $data) {
+            if (!empty($data['formula']) && !empty($data['dough_type_id'])) {
+                $totalPct = (float)($data['formula']['total_percentage'] ?? 0);
+                if ($totalPct > 0) {
+                    $doughTypeIds[(int)$data['dough_type_id']] = true;
+                }
+            }
+        }
+        $starterByDoughType = [];
+        if ($doughTypeIds !== []) {
+            $ids = array_keys($doughTypeIds);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $starterStmt = $db->prepare("
+                SELECT
+                    fi.dough_type_id,
+                    fi.ingredient_id,
+                    i.name,
+                    fi.percentage
+                FROM formula_ingredients fi
+                JOIN ingredients i ON fi.ingredient_id = i.id
+                WHERE fi.dough_type_id IN ($placeholders) AND fi.ingredient_id IN (6, 13)
+            ");
+            $starterStmt->execute($ids);
+            foreach ($starterStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $starterByDoughType[(int)$row['dough_type_id']][] = $row;
+            }
+        }
         foreach ($groupedData as $doughType => $data) {
             if (!empty($data['formula']) && !empty($data['dough_type_id'])) {
                 $totalPct = (float)($data['formula']['total_percentage'] ?? 0);
                 if ($totalPct <= 0) {
                     continue;
                 }
-                // Get ingredients for this dough type with ingredient IDs
-                $starterStmt = $db->prepare("
-                    SELECT 
-                        fi.ingredient_id,
-                        i.name,
-                        fi.percentage
-                    FROM formula_ingredients fi
-                    JOIN ingredients i ON fi.ingredient_id = i.id
-                    WHERE fi.dough_type_id = ? AND fi.ingredient_id IN (6, 13)
-                ");
-                $starterStmt->execute([$data['dough_type_id']]);
-                $starterIngredients = $starterStmt->fetchAll(PDO::FETCH_ASSOC);
+                $starterIngredients = $starterByDoughType[(int)$data['dough_type_id']] ?? [];
                 
                 // Calculate total flour weight for this dough type
                 $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
@@ -628,6 +646,7 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
 <div class="bp-screen">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
+    <?php if ($isBaker) { bakery_kitchen_segments_render('bake', $selectedDate); } ?>
     <header class="bp-header">
         <div class="bp-header__top">
             <h1 class="bp-title"><?php echo $isBaker ? bakery_t('production.title_baker') : bakery_t('production.title_ops'); ?></h1>
@@ -635,9 +654,11 @@ $page_title = $isBaker ? bakery_t('page.production_baker') : bakery_t('page.prod
                 <?php if ($canOpenProductionCenter): ?>
                     <a class="bp-pack-link" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.open_production_center'); ?></a>
                 <?php endif; ?>
+                <?php if (!$isBaker): ?>
                 <a class="bp-pack-link<?php echo $allProductionComplete ? ' bp-pack-link--ready' : ''; ?>" href="<?php echo htmlspecialchars($packListHref, ENT_QUOTES, 'UTF-8'); ?>">
                     <?php bakery_te('nav.pack_list'); ?>
                 </a>
+                <?php endif; ?>
                 <?php if (!empty($groupedData)): ?>
                     <a class="bp-pack-link" href="#bp-mix-overview"><?php bakery_te('production.mix_overview_link'); ?></a>
                 <?php endif; ?>

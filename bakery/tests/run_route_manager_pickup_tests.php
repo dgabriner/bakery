@@ -336,7 +336,9 @@ if (!$rejected) {
 echo "PASS  pickup plans keep a fixed piece total and reject leaks\n";
 
 $srcManager = (string)file_get_contents($root . '/route_manager.php');
-if (strpos($srcManager, 'pickup-sheet-root') === false || strpos($srcManager, 'apply_plan') === false) {
+$srcManagerJs = (string)file_get_contents($root . '/includes/route_manager.js');
+$srcManagerAll = $srcManager . "\n" . $srcManagerJs;
+if (strpos($srcManager, 'pickup-sheet-root') === false || strpos($srcManagerAll, 'apply_plan') === false) {
     fwrite(STDERR, "FAIL  Route Manager must open an on-screen pickup sheet that saves a conserved plan\n");
     exit(1);
 }
@@ -352,7 +354,7 @@ if ((int)$hinted[0]['standing_qty'] !== 6 || (int)$hinted[0]['expected_qty'] !==
 }
 echo "PASS  pickup stores carry standing and today’s supposed quantity\n";
 
-if (strpos($srcManager, 'pickup-slider') === false || strpos($srcManager, 'pickup-chunk') === false) {
+if (strpos($srcManagerAll, 'pickup-slider') === false || strpos($srcManagerAll, 'pickup-chunk') === false) {
     fwrite(STDERR, "FAIL  pickup sheet must move by slider and chunk, not only ±1\n");
     exit(1);
 }
@@ -388,7 +390,7 @@ if ($vanA + $vanB !== 17 || $vanA < $vanB) {
 }
 echo "PASS  pickup allocate methods keep the pool and track supposed / little shops / vans\n";
 
-if (strpos($srcManager, 'data-method="supposed"') === false || strpos($srcManager, 'little_shop') === false) {
+if (strpos($srcManagerAll, 'data-method="supposed"') === false || strpos($srcManagerAll, 'little_shop') === false) {
     fwrite(STDERR, "FAIL  pickup sheet must expose one-click supposed balance and little-shop extras\n");
     exit(1);
 }
@@ -482,12 +484,22 @@ echo "PASS  pickup families and store-per-driver view keep SKUs separate\n";
 
 $srcInc = file_get_contents($root . '/includes/route_manager.php');
 if (strpos($srcInc, 'function route_manager_pickup_allocate_many') === false
-    || strpos($srcManager, 'allocate-scope') === false
-    || strpos($srcManager, 'sku-bump') === false) {
+    || strpos($srcManagerAll, 'allocate-scope') === false
+    || strpos($srcManagerAll, 'sku-bump') === false) {
     fwrite(STDERR, "FAIL  family allocate and store/product view must be wired\n");
     exit(1);
 }
 echo "PASS  family-wide allocate and store view are wired on Route Manager\n";
+$assertNoInline = strpos($srcManager, '<style>') === false
+    && (bool)preg_match('/window\.__ROUTE_MANAGER__/', $srcManager)
+    && (bool)preg_match('/css\/route_manager\.css/', $srcManager)
+    && (bool)preg_match('/includes\/route_manager\.js/', $srcManager);
+if (!$assertNoInline) {
+    fwrite(STDERR, "FAIL  Route Manager must load extracted css/route_manager.css and includes/route_manager.js\n");
+    exit(1);
+}
+echo "PASS  Route Manager assets are extracted (no inline style; JS via bakery_asset_href)\n";
+echo "NOTE  route_manager.php shell lines=" . substr_count($srcManager, "\n") . "\n";
 
 $cleanupRebalance($db, $rebalanceDate);
 

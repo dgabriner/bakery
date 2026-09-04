@@ -136,6 +136,16 @@ try {
     assert_true(abs(bakery_billing_order_outstanding($loadOrder($db, $ordA1)) - 60.00) < 0.001, 'Per-order outstanding subtracts COD collected');
     assert_true(abs(bakery_billing_order_outstanding($loadOrder($db, $ordA2)) - 50.00) < 0.001, 'Null amount_collected counts full snapshot total');
 
+    $settleA1 = bakery_billing_settlement_row($loadOrder($db, $ordA1));
+    assert_true(
+        abs((float)$settleA1['snapshot_total'] - (float)$loadOrder($db, $ordA1)['delivery_order_total']) < 0.001
+            && abs((float)$settleA1['cod_collected'] - 40.00) < 0.001
+            && abs((float)$settleA1['open_balance'] - 60.00) < 0.001,
+        'Settlement row exposes snapshot · COD · open balance from existing fields'
+    );
+    assert_true(bakery_billing_square_status_failed('CANCELED'), 'Canceled Square counts as failed for filters');
+    assert_true(!bakery_billing_square_status_failed('UNPAID'), 'Unpaid Square is not a failed filter');
+
     if ($squareColReady) {
         assert_true(bakery_billing_order_outstanding($loadOrder($db, $ordB1)) === 0.0, 'Square PAID delivery settles fully');
         assert_true(abs(bakery_billing_order_outstanding($loadOrder($db, $ordB4)) - 20.00) < 0.001, 'Invoiced-but-unpaid stays outstanding');
@@ -210,6 +220,10 @@ $agingKeys = [
     'billing.balances_chip_all',
     'billing.balances_chip_outstanding',
     'billing.balances_chip_aging30',
+    'billing.balances_chip_unpaid14',
+    'billing.balances_chip_cod_turnin',
+    'billing.balances_chip_square_failed',
+    'billing.settlement_row',
     'billing.balances_summary',
     'billing.balances_none',
     'hub.balance_label',
@@ -237,6 +251,14 @@ assert_true(
         && strpos((string)$agingEs['hub.balance_due'], ':total') !== false
         && strpos((string)$agingEs['hub.balance_due'], ':days') !== false,
     'Hub balance-due key carries :total/:days params in both languages'
+);
+$panelSrc = (string)file_get_contents($root . '/includes/billing_panel_invoices.php');
+assert_true(strpos($panelSrc, 'bakery_billing_settlement_row') !== false, 'Billing Center list renders settlement rows');
+assert_true(
+    strpos($panelSrc, 'unpaid14') !== false
+        && strpos($panelSrc, 'cod_not_turned_in') !== false
+        && strpos($panelSrc, 'square_failed') !== false,
+    'Settlement filters are wired'
 );
 
 // Find two customers with confirmed deliveries if possible.

@@ -9,6 +9,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/ingredient_requirements.php';
+require_once 'includes/ingredient_purchase_notes.php';
 require_once 'includes/operational_exceptions.php';
 
 $page_title = bakery_t('page.ingredient_requirements');
@@ -24,16 +25,42 @@ $days = [
 ];
 
 $selectedDate = bakery_ingredient_requirements_resolve_date(
-    isset($_GET['date']) ? (string)$_GET['date'] : null
+    isset($_GET['date']) ? (string)$_GET['date'] : (isset($_POST['date']) ? (string)$_POST['date'] : null)
 );
 $selectedSource = bakery_ingredient_requirements_resolve_source(
-    isset($_GET['source']) ? (string)$_GET['source'] : null
+    isset($_GET['source']) ? (string)$_GET['source'] : (isset($_POST['source']) ? (string)$_POST['source'] : null)
 );
 $sources = bakery_ingredient_requirements_sources();
 $exportCsv = isset($_GET['export']) && (string)$_GET['export'] === 'csv';
 $attentionExceptions = (string)($_GET['attention'] ?? '') === 'exceptions';
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $attentionLabel = $attentionExceptions ? 'Showing configuration exceptions' : '';
+$plannerNotice = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'save_purchase_note') {
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    bakery_require_role(['administrator', 'manager', 'baker']);
+    try {
+        bakery_ingredient_purchase_note_upsert(
+            $db,
+            (int)($_POST['ingredient_id'] ?? 0),
+            $selectedDate,
+            [
+                'ordered' => !empty($_POST['ordered']),
+                'received' => !empty($_POST['received']),
+                'note' => (string)($_POST['note'] ?? ''),
+            ],
+            (int)(bakery_current_user()['id'] ?? 0)
+        );
+        $plannerNotice = (string)bakery_t('ingredient_planner.note_saved', [], 'Purchase note saved.');
+    } catch (Throwable $e) {
+        $plannerNotice = function_exists('bakery_error_message_for_user')
+            ? bakery_error_message_for_user($e)
+            : 'Could not save purchase note.';
+    }
+}
 
 $plan = bakery_ingredient_requirements_build($db, $selectedDate, $selectedSource);
 
@@ -85,6 +112,9 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
 
 <div class="ipl-page">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
+    <?php if ($plannerNotice !== ''): ?>
+        <div class="ipl-notice ipl-notice--info" role="status"><?php echo htmlspecialchars($plannerNotice, ENT_QUOTES, 'UTF-8'); ?></div>
+    <?php endif; ?>
     <header class="ipl-header">
         <div>
             <p class="ipl-eyebrow">Production · materials planning</p>
@@ -307,6 +337,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                 <th>Reported on hand</th>
                                 <th>Shortage / surplus</th>
                                 <th>Suggested purchase</th>
+                                <th>Ordered / received</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -363,6 +394,30 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                         <?php endif; ?>
                                     <?php else: ?>
                                         <span class="ipl-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="ipl-purchase-note no-print">
+                                    <?php
+                                      $pn = is_array($row['purchase_note'] ?? null) ? $row['purchase_note'] : [];
+                                      $pnOrdered = !empty($pn['ordered']);
+                                      $pnReceived = !empty($pn['received']);
+                                      $pnNote = (string)($pn['note'] ?? '');
+                                      $pnWho = trim((string)($pn['updated_by_name'] ?? ''));
+                                      $pnWhen = (string)($pn['updated_at'] ?? '');
+                                    ?>
+                                    <form method="post" class="ipl-note-form">
+                                        <?php echo bakery_csrf_field(); ?>
+                                        <input type="hidden" name="action" value="save_purchase_note">
+                                        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="source" value="<?php echo htmlspecialchars($selectedSource, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="ingredient_id" value="<?php echo (int)$row['ingredient_id']; ?>">
+                                        <label><input type="checkbox" name="ordered" value="1" <?php echo $pnOrdered ? 'checked' : ''; ?>> <?php echo htmlspecialchars(bakery_t('ingredient_planner.ordered', [], 'Ordered'), ENT_QUOTES, 'UTF-8'); ?></label>
+                                        <label><input type="checkbox" name="received" value="1" <?php echo $pnReceived ? 'checked' : ''; ?>> <?php echo htmlspecialchars(bakery_t('ingredient_planner.received', [], 'Received'), ENT_QUOTES, 'UTF-8'); ?></label>
+                                        <input type="text" name="note" maxlength="500" value="<?php echo htmlspecialchars($pnNote, ENT_QUOTES, 'UTF-8'); ?>" placeholder="<?php echo htmlspecialchars(bakery_t('ingredient_planner.note_ph', [], 'Note'), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <button type="submit" class="btn btn-outline btn-sm"><?php echo htmlspecialchars(bakery_t('common.save', [], 'Save'), ENT_QUOTES, 'UTF-8'); ?></button>
+                                    </form>
+                                    <?php if ($pnWho !== '' || $pnWhen !== ''): ?>
+                                        <small class="ipl-muted"><?php echo htmlspecialchars(trim($pnWho . ($pnWhen !== '' ? ' · ' . $pnWhen : '')), ENT_QUOTES, 'UTF-8'); ?></small>
                                     <?php endif; ?>
                                 </td>
                             </tr>

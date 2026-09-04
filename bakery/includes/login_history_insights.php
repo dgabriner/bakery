@@ -113,6 +113,7 @@ function bakery_login_history_noise_pages(): array
 {
     return [
         'login_audit_api',
+        'client_error_api',
         'driver_session_ping',
         'get_driver_orders',
         'get_customer_order_details',
@@ -2065,6 +2066,7 @@ function bakery_login_history_empty_payload(array $filters, array $ready): array
         'workflows' => [],
         'session_paths' => [],
         'failures' => [],
+        'browser_errors' => [],
         'roles' => [],
         'comparison' => null,
         'briefing' => [],
@@ -2154,6 +2156,7 @@ function bakery_login_history_load(PDO $db, array $filters, array $ready): array
             $recordFilters['page'] = 1;
             $data['recent'] = bakery_login_history_load_sessions($db, $filters, $ready, 6, 'recent');
             $data['failures'] = bakery_login_history_load_failures($db, $filters, $ready);
+            $data['browser_errors'] = bakery_client_errors_recent($db, 12);
         } else {
             $data['records'] = bakery_login_history_load_records($db, $recordFilters, $ready, 50);
         }

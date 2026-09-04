@@ -69,7 +69,7 @@ require_once __DIR__ . '/includes/nav.php';
   <section class="module-guide__roles" aria-label="Role access summary">
     <article class="module-guide__role"><h2>Administrator</h2><p>Full access to every current module, user management, and the preserved historical navigation.</p></article>
     <article class="module-guide__role"><h2>Manager</h2><p>All current operational modules: production, orders, customers, drivers, routes, products, and insights.</p></article>
-    <article class="module-guide__role"><h2>Baker</h2><p>Daily Production and Pack List only. Weekly planning, inventory, orders, and dispatch stay with management.</p></article>
+    <article class="module-guide__role"><h2>Baker</h2><p>Today workspace with Mix / Bake / Pack segments across Mix Today, Daily Production, and Pack List. Weekly planning, inventory, orders, and dispatch stay with management.</p></article>
     <article class="module-guide__role"><h2>Driver</h2><p>My Route and Call HQ only. Delivery completion and proof-of-delivery actions remain available inside My Route.</p></article>
   </section>
 

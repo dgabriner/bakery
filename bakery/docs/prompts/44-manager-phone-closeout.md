@@ -29,3 +29,5 @@ Extend `run_manager_phone_tests.php` (renders, links, sheet markup) and `run_rou
 ## Done when
 
 A manager on a 375px phone closes a route in two taps and never lands on `route_manager.php`.
+
+**Status:** shipped 2026-09-04 — Routes Close route sheet posts to `route_closeout.php` (same `bakery_inventory_reconcile_driver_load`); desktop pages hide dense UI ≤720px with Manager Mode pointer. Staging and Live were not touched.

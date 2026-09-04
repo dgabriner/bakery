@@ -213,24 +213,33 @@
     }
 
     state.sessionRefreshPromise = (async function () {
-      var response = await fetch('driver_session_ping.php', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' }
-      });
-      if (response.redirected && /login\.php(?:[?#]|$)/i.test(response.url || '')) {
-        var redirectError = new Error(i18n('session_expired'));
-        redirectError.isSessionError = true;
-        throw redirectError;
+      try {
+        var response = await fetch('driver_session_ping.php', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' }
+        });
+        if (response.redirected && /login\.php(?:[?#]|$)/i.test(response.url || '')) {
+          var redirectError = new Error(i18n('session_expired'));
+          redirectError.isSessionError = true;
+          throw redirectError;
+        }
+        var data = await readJsonResponse(response, i18n('session_expired'));
+        if (!data || !data.success || !data.csrf_token) {
+          var sessionError = new Error(i18n('session_expired'));
+          sessionError.isSessionError = true;
+          throw sessionError;
+        }
+        applyCsrfToken(data.csrf_token);
+        return { ok: true };
+      } catch (err) {
+        if (err && err.isSessionError) {
+          throw err;
+        }
+        var networkError = new Error((err && err.message) || i18n('session_expired'));
+        networkError.isSessionError = true;
+        throw networkError;
       }
-      var data = await readJsonResponse(response, i18n('session_expired'));
-      if (!data || !data.success || !data.csrf_token) {
-        var sessionError = new Error(i18n('session_expired'));
-        sessionError.isSessionError = true;
-        throw sessionError;
-      }
-      applyCsrfToken(data.csrf_token);
-      return true;
     })();
 
     try {
@@ -514,6 +523,7 @@
     if (step === 'delivery') {
       if (title) title.textContent = i18n('confirm_delivery');
       if (eyebrow) eyebrow.textContent = i18n('confirm');
+      ensureAdjustOpenForRequiredFields();
     } else if (step === 'invoice') {
       if (title) title.textContent = i18n('delivery_invoice');
       if (eyebrow) eyebrow.textContent = i18n('confirm');
@@ -555,17 +565,12 @@
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
     if (reviewBtn) {
-      reviewBtn.hidden = step !== 'delivery' || usesCompactCapture();
+      reviewBtn.hidden = step !== 'delivery';
       reviewBtn.disabled = state.submitting;
     }
 
     if (step === 'delivery') {
-      var piecesInput = $('deliveryPiecesInput');
-      if (piecesInput && !state.submitting && !usesCompactCapture()) {
-        setTimeout(function () {
-          piecesInput.focus({ preventScroll: true });
-        }, 80);
-      }
+      // Prefill is the happy path — do not steal focus into Adjust steppers.
     }
 
     if (step === 'invoice') {
@@ -580,6 +585,28 @@
     var primaryBtn = $('deliveryWizardPrimaryBtn');
     if (!primaryBtn || state.currentStep !== 'photo') return;
     primaryBtn.classList.remove('has-saved-photo');
+  }
+
+  function openDeliveryAdjust() {
+    var details = $('deliveryAdjustDetails');
+    if (details) details.open = true;
+  }
+
+  function ensureAdjustOpenForRequiredFields() {
+    var needsAdjust = false;
+    if (state.pricingMissing && canEditPricing()) {
+      needsAdjust = true;
+    }
+    if (state.paymentCollection === 'cod') {
+      needsAdjust = true;
+    }
+    var pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
+    if (state.orderedPieces > 0 && Number.isInteger(pieces) && pieces !== state.orderedPieces) {
+      needsAdjust = true;
+    }
+    if (needsAdjust) {
+      openDeliveryAdjust();
+    }
   }
 
   function showReviewCameraControls() {
@@ -916,25 +943,35 @@
       '&photo_id=' +
       encodeURIComponent(String(photoId));
 
-    await refreshRouteSession();
-    var response = await fetch('upload_driver_photo.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    });
+    try {
+      await refreshRouteSession();
+      var response = await fetch('upload_driver_photo.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body,
+        credentials: 'same-origin'
+      });
       var data = await readJsonResponse(response, i18n('could_not_remove_photo'));
-    if (!data || !data.success) {
-      throw new Error((data && data.error) || i18n('could_not_remove_photo'));
-    }
+      if (!data || !data.success) {
+        throw new Error((data && data.error) || i18n('could_not_remove_photo'));
+      }
 
-    state.photos = state.photos.filter(function (p) {
-      return Number(p.id) !== Number(photoId);
-    });
-    renderPhotos();
-    updatePhotoWorkflowUi(true);
+      state.photos = state.photos.filter(function (p) {
+        return Number(p.id) !== Number(photoId);
+      });
+      renderPhotos();
+      updatePhotoWorkflowUi(true);
 
-    if (!options.silent) {
-      setStatus(i18n('photo_removed'), 'success');
+      if (!options.silent) {
+        setStatus(i18n('photo_removed'), 'success');
+      }
+      return { ok: true };
+    } catch (err) {
+      var message = (err && err.message) || i18n('could_not_remove_photo');
+      if (!options.silent) {
+        setStatus(message, 'error');
+      }
+      return { ok: false, error: message };
     }
   }
 
@@ -985,13 +1022,9 @@
     if (!window.confirm(i18n('confirm_remove_photo').replace(':label', label))) {
       return;
     }
-    try {
-      await deletePhoto(photoId);
-      if (state.viewingPhotoId === Number(photoId)) {
-        closeViewer();
-      }
-    } catch (err) {
-      setStatus(err.message || i18n('could_not_remove_photo'), 'error');
+    var result = await deletePhoto(photoId);
+    if (result && result.ok && state.viewingPhotoId === Number(photoId)) {
+      closeViewer();
     }
   }
 
@@ -1128,29 +1161,63 @@
 
     try {
       await refreshRouteSession();
-      var formData = new FormData();
-      formData.append('action', 'upload');
-      formData.append('photo', blob, filename || 'capture.jpg');
-      formData.append('driver_id', String(state.driverId));
-      formData.append('customer_id', String(state.customerId));
-      formData.append('daily_order_id', String(state.dailyOrderId));
-      formData.append('date', state.date);
       var photoType = ($('deliveryPhotoType') && $('deliveryPhotoType').value) || 'Before';
-      formData.append('photo_type', photoType);
-      formData.append('notes', ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '');
-      // Do not hold a proof photo behind an iPhone location prompt. Route GPS
-      // tracking and the final delivery event capture location independently.
-      formData.append('latitude', '');
-      formData.append('longitude', '');
+      var outbox = window.BakeryDriverOutbox;
+      var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('photo') : '';
+      var payload = {
+        driver_id: String(state.driverId),
+        customer_id: String(state.customerId),
+        daily_order_id: String(state.dailyOrderId),
+        date: state.date,
+        photo_type: photoType,
+        notes: ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '',
+        latitude: '',
+        longitude: ''
+      };
 
       if (fill) fill.style.width = '70%';
 
-      var response = await fetch('upload_driver_photo.php', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData
-      });
-      var data = await readJsonResponse(response, i18n('photo_upload_failed'));
+      var data = null;
+      var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline && outbox && typeof outbox.enqueuePhoto === 'function') {
+        await outbox.enqueuePhoto({
+          id: requestId,
+          dailyOrderId: state.dailyOrderId,
+          payload: payload,
+          photoBlob: blob,
+          filename: filename || 'capture.jpg'
+        });
+        data = { success: true, queued: true, client_request_id: requestId };
+      } else {
+        var formData = new FormData();
+        formData.append('action', 'upload');
+        formData.append('photo', blob, filename || 'capture.jpg');
+        Object.keys(payload).forEach(function (key) {
+          formData.append(key, payload[key]);
+        });
+        if (requestId) formData.append('client_request_id', requestId);
+        try {
+          var response = await fetch('upload_driver_photo.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+          });
+          data = await readJsonResponse(response, i18n('photo_upload_failed'));
+        } catch (networkErr) {
+          if (outbox && typeof outbox.enqueuePhoto === 'function') {
+            await outbox.enqueuePhoto({
+              id: requestId,
+              dailyOrderId: state.dailyOrderId,
+              payload: payload,
+              photoBlob: blob,
+              filename: filename || 'capture.jpg'
+            });
+            data = { success: true, queued: true, client_request_id: requestId };
+          } else {
+            throw networkErr;
+          }
+        }
+      }
       if (fill) fill.style.width = '100%';
 
       if (!data || !data.success) {
@@ -1159,7 +1226,7 @@
 
       var replacedPhotoId = state.retakePhotoId;
       state.retakePhotoId = null;
-      if (replacedPhotoId) {
+      if (replacedPhotoId && !data.queued) {
         try {
           await deletePhoto(replacedPhotoId, { silent: true });
         } catch (deleteErr) {
@@ -1171,26 +1238,28 @@
 
       if ($('deliveryPhotoNotes')) $('deliveryPhotoNotes').value = '';
       stopCamera();
-      await loadPhotos();
+      if (!data.queued) {
+        await loadPhotos();
+      }
       if (state.photoMode === 'review') {
         state.photoReturnStep = null;
         setStatus(
-          photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved'),
+          data.queued ? i18n('outbox_queued') : (photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved')),
           'success'
         );
         goToStep('invoice');
       } else if (state.photoReturnStep === 'complete') {
         state.photoReturnStep = null;
-        setStatus(i18n('departure_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
         finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
       } else if (photoType === 'Before') {
         // Arrival proof is enough to move directly to quantity confirmation.
         state.photoReturnStep = null;
-        setStatus(i18n('arrival_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('arrival_saved'), 'success');
         goToStep('delivery');
       } else {
         // Extra photos outside the guided flow return to delivery confirmation.
-        setStatus(i18n('departure_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
         goToStep('delivery');
       }
     } catch (err) {
@@ -1682,6 +1751,7 @@
       if (!ack || !ack.checked) {
         var alertEl = $('deliveryVarianceAlert');
         if (alertEl) alertEl.hidden = false;
+        openDeliveryAdjust();
         setStatus(i18n('variance_ack_needed'), 'error');
         if (ack) ack.focus();
         return;
@@ -1693,6 +1763,7 @@
       var cashInput = $('deliveryCashCollectedInput');
       var cashAmount = cashInput ? parseFloat(cashInput.value) : NaN;
       if (!Number.isFinite(cashAmount) || cashAmount < 0) {
+        openDeliveryAdjust();
         setStatus(i18n('cash_required'), 'error');
         return;
       }
@@ -1701,6 +1772,7 @@
     if (state.pricingMissing && canEditPricing()) {
       var pricePerPiece = readPricePerPieceInput();
       if (!pricePerPiece) {
+        openDeliveryAdjust();
         setStatus(i18n('price_required'), 'error');
         return;
       }
@@ -1713,6 +1785,8 @@
     try {
       var coords = await getCoords({ timeout: 1500, maximumAge: 120000 });
       await refreshRouteSession();
+      var outbox = window.BakeryDriverOutbox;
+      var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('confirm') : '';
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
         '&delivered_pieces=' + encodeURIComponent(String(pieces)) +
         '&credits_taken_back=' + encodeURIComponent(String(credits));
@@ -1723,12 +1797,44 @@
         body += '&amount_collected=' + encodeURIComponent(String(parseFloat($('deliveryCashCollectedInput').value)));
       }
       body = appendGpsParams(body, coords);
-      var response = await fetch('complete_delivery.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
-      });
-      var data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+      if (requestId) {
+        body += '&client_request_id=' + encodeURIComponent(requestId);
+      }
+
+      var data = null;
+      var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline && outbox && typeof outbox.enqueueConfirm === 'function') {
+        await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
+        data = {
+          success: true,
+          queued: true,
+          message: i18n('outbox_queued'),
+          total: state.orderTotal || 0,
+          payment_collection: state.paymentCollection
+        };
+      } else {
+        try {
+          var response = await fetch('complete_delivery.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+          });
+          data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+        } catch (networkErr) {
+          if (outbox && typeof outbox.enqueueConfirm === 'function') {
+            await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
+            data = {
+              success: true,
+              queued: true,
+              message: i18n('outbox_queued'),
+              total: state.orderTotal || 0,
+              payment_collection: state.paymentCollection
+            };
+          } else {
+            throw networkErr;
+          }
+        }
+      }
       if (!data || !data.success) {
         throw new Error((data && data.error) || i18n('could_not_complete_delivery'));
       }
@@ -2058,6 +2164,7 @@
     if (reviewBtn) {
       reviewBtn.addEventListener('click', function () {
         if (state.submitting) return;
+        openDeliveryAdjust();
         populateInvoicePreview();
       });
     }

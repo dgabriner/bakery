@@ -79,6 +79,14 @@ $assert(strpos($packSrc, 'backfill_day') !== false && strpos($packSrc, 'mark_day
 $assert(strpos($packSrc, 'backfill_production') !== false, 'Pack List has per-product mark produced');
 $assert(strpos($packSrc, 'match_supposed') !== false && strpos($packSrc, 'set_on_hand') !== false, 'Pack List has packer count actions');
 $assert(strpos($packSrc, 'seed_driver_loads') !== false && strpos($packSrc, 'pack-count-board') !== false, 'Pack List has driver-load seed board');
+$assert(strpos($packSrc, 'bakery_kitchen_segments_render') !== false, 'Pack List renders kitchen segments for bakers');
+$assert(strpos($packSrc, 'pack-page--baker') !== false, 'Pack List marks baker phone mode');
+$assert(strpos($packSrc, 'bakery_pack_phone_focus_nav_html') !== false, 'Pack List renders phone focus chrome');
+$assert(function_exists('bakery_pack_phone_focus_keys'), 'phone focus keys helper exists');
+$assert(bakery_pack_phone_focus_keys('product', [['product_id' => 9], ['product_id' => 3]], [], []) === [9, 3], 'product focus keys');
+$assert(bakery_pack_phone_focus_keys('route', [], [], [['driver_id' => 0], ['driver_id' => 4]]) === [0, 4], 'route focus keys include unassigned');
+$focus = bakery_pack_phone_focus_state([9, 3, 7], 3);
+$assert($focus['current'] === 3 && $focus['prev'] === 9 && $focus['next'] === 7, 'phone focus prev/next around middle');
 $assert(strpos($loadSrc, 'backfill_day') !== false && strpos($loadSrc, 'mark_produced_qty') !== false, 'Load board can mark missing production');
 
 if (bakery_inventory_ready($db)) {

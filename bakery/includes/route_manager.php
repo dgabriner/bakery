@@ -178,7 +178,17 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
     }
 
     foreach ($driversData as $driverId => $driverData) {
-        $driversData[$driverId]['cash_summary'] = route_manager_compute_cash_summary($driverData['deliveries']);
+        $turnedIn = null;
+        if (function_exists('bakery_cod_turnin_get')) {
+            $turnedIn = bakery_cod_turnin_get($db, (int)$driverId, $date);
+        } elseif (is_readable(__DIR__ . '/cod_turnins.php')) {
+            require_once __DIR__ . '/cod_turnins.php';
+            $turnedIn = bakery_cod_turnin_get($db, (int)$driverId, $date);
+        }
+        $driversData[$driverId]['cash_summary'] = route_manager_compute_cash_summary(
+            $driverData['deliveries'],
+            $turnedIn
+        );
     }
 
     $manifestDriverIds = $driverIds ?: array_map('intval', array_keys($driversData));

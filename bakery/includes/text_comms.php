@@ -85,7 +85,7 @@ function bakery_text_lane(array $row): string
 function bakery_text_normalize_context_type(string $raw): string
 {
     $raw = strtolower(trim($raw));
-    $allowed = ['manual', 'test', 'general', 'order', 'inbound', 'driver'];
+    $allowed = ['manual', 'test', 'general', 'order', 'inbound', 'driver', 'recovery'];
     return in_array($raw, $allowed, true) ? $raw : 'manual';
 }
 

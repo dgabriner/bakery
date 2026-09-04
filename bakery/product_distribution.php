@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes ($db + auth gate come from database.php)
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/customer_order_mutations.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/demand_review.php';
 
@@ -156,17 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $dayOfWeek = (int)$_POST['day_of_week'];
                 $quantity = (int)$_POST['quantity'];
                 
-                if ($quantity > 0) {
-                    $stmt = $db->prepare("
-                        INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                        VALUES (?, ?, ?, ?)
-                        ON DUPLICATE KEY UPDATE quantity = ?
-                    ");
-                    $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-                } else {
-                    $stmt = $db->prepare("DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?");
-                    $stmt->execute([$customerId, $productId, $dayOfWeek]);
-                }
+                bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
                 
                 echo json_encode(['success' => true]);
                 break;

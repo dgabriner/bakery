@@ -26,3 +26,5 @@ Three SQL patterns are copy-pasted: standing-order upsert (`INSERT … ON DUPLIC
 ## Done when
 
 `rg "INSERT INTO standing_orders" *.php includes/*.php` returns only `includes/customer_order_mutations.php`.
+
+**Status:** shipped 2026-09-04 on `cursor/sour-flour-agent-program-a061` (PR #20). `bakery_standing_order_upsert`, `bakery_daily_order_find_or_create`, `bakery_daily_order_recompute_total` own the three SQL patterns; integrity grep-assert green. Staging and Live were not touched.

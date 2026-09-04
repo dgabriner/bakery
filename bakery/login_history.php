@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/navigation_catalog.php';
 require_once __DIR__ . '/includes/login_history_insights.php';
+require_once __DIR__ . '/includes/client_errors.php';
 
 bakery_require_role(['administrator']);
 bakery_ensure_login_audit_schema($db);
@@ -608,6 +609,35 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
       </div>
       <?php if (!$data['recent']): ?><div class="login-history-empty"><?php echo $ready['audit'] ? bakery_t('login_history.no_records') : bakery_t('login_history.no_storage'); ?></div><?php endif; ?>
       <?php foreach ($data['recent'] as $row) { bakery_login_history_render_session($row); } ?>
+    </section>
+
+    <section class="login-history-panel" id="browser-errors" aria-labelledby="browser-errors-title">
+      <div class="login-history-panel__head">
+        <div>
+          <h2 id="browser-errors-title"><?php bakery_te('login_history.browser_errors'); ?></h2>
+          <p class="login-history-panel__lead"><?php bakery_te('login_history.browser_errors_lead'); ?></p>
+        </div>
+        <?php if (!empty($data['browser_errors'])): ?>
+          <span class="login-history-chip is-count"><?php echo (int)count($data['browser_errors']); ?></span>
+        <?php endif; ?>
+      </div>
+      <?php if (empty($data['browser_errors'])): ?>
+        <div class="login-history-empty"><?php bakery_te('login_history.browser_errors_empty'); ?></div>
+      <?php else: ?>
+        <ul class="login-history-browser-errors">
+          <?php foreach ($data['browser_errors'] as $errRow): ?>
+            <li>
+              <span class="login-history-chip is-flow"><?php echo htmlspecialchars((string)($errRow['kind'] ?? 'error')); ?></span>
+              <strong><?php echo htmlspecialchars((string)($errRow['display_name'] ?? bakery_t('login_history.unknown_device'))); ?></strong>
+              <span><?php echo htmlspecialchars(bakery_login_history_ago((string)($errRow['created_at'] ?? ''))); ?></span>
+              <p><?php echo htmlspecialchars((string)($errRow['message'] ?? '')); ?></p>
+              <?php if (!empty($errRow['page_path'])): ?>
+                <p><?php echo htmlspecialchars((string)$errRow['page_path']); ?><?php if (!empty($errRow['build_id'])): ?> · <?php echo htmlspecialchars((string)$errRow['build_id']); ?><?php endif; ?></p>
+              <?php endif; ?>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
     </section>
 
   <?php elseif ($view === 'time'):

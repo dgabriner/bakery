@@ -416,6 +416,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . '&done=' . rawurlencode($done)
             );
         }
+        if ($action === 'apply_store_verify_routes') {
+            bakery_require_role(['administrator', 'manager']);
+            $responseId = (int)($_POST['response_id'] ?? 0);
+            $confirm = !empty($_POST['confirm']);
+            $stmt = $db->prepare(
+                'SELECT id, survey_id, action, response FROM survey_responses WHERE id = ? AND survey_id = ? LIMIT 1'
+            );
+            $stmt->execute([$responseId, (int)$survey['id']]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row || (string)$row['action'] !== 'store_verify') {
+                throw new RuntimeException((string)bakery_t('survey.apply_missing', [], 'That survey result is gone.'));
+            }
+            $payload = json_decode((string)$row['response'], true);
+            if (!is_array($payload)) {
+                throw new RuntimeException((string)bakery_t('survey.apply_bad_payload', [], 'That survey result cannot be applied.'));
+            }
+            $payload['delivery_date'] = (string)($payload['delivery_date'] ?? $verifyDate);
+            $result = bakery_survey_store_verify_confirm_apply($db, $payload, [
+                'confirm' => $confirm,
+                'survey_id' => (int)$survey['id'],
+                'staff_user_id' => (int)($user['id'] ?? 0),
+            ]);
+            if (!$confirm) {
+                safe_redirect(
+                    'survey.php?t=' . rawurlencode($token)
+                    . '&date=' . rawurlencode($verifyDate)
+                    . '&apply_preview=' . $responseId
+                    . '&err=' . rawurlencode((string)bakery_t('survey.apply_confirm_needed', [], 'Confirm Apply to route to write Driver Assignment.'))
+                );
+            }
+            $route = $result['route'] ?? [];
+            $touched = ((int)($route['assigned'] ?? 0) + (int)($route['removed'] ?? 0) + (int)($route['moved'] ?? 0)) > 0;
+            $done = $touched
+                ? (string)bakery_t('survey.apply_done', [], 'Applied to dated routes. Driver Assignment updated.')
+                : (string)bakery_t('survey.apply_noop', [], 'Confirmed — dated routes already matched the survey.');
+            safe_redirect(
+                'survey.php?t=' . rawurlencode($token)
+                . '&date=' . rawurlencode($verifyDate)
+                . '&done=' . rawurlencode($done)
+            );
+        }
+        if ($action === 'apply_route_order') {
+            bakery_require_role(['administrator', 'manager']);
+            $responseId = (int)($_POST['response_id'] ?? 0);
+            $confirm = !empty($_POST['confirm']);
+            $stmt = $db->prepare(
+                'SELECT id, survey_id, action, response FROM survey_responses WHERE id = ? AND survey_id = ? LIMIT 1'
+            );
+            $stmt->execute([$responseId, (int)$survey['id']]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row || (string)$row['action'] !== 'route_order') {
+                throw new RuntimeException((string)bakery_t('survey.apply_missing', [], 'That survey result is gone.'));
+            }
+            $payload = json_decode((string)$row['response'], true);
+            if (!is_array($payload)) {
+                throw new RuntimeException((string)bakery_t('survey.apply_bad_payload', [], 'That survey result cannot be applied.'));
+            }
+            $orderDriverId = (int)($payload['driver_id'] ?? 0);
+            $orderDate = (string)($payload['delivery_date'] ?? $verifyDate);
+            $ordered = array_map('intval', (array)($payload['ordered_daily_order_ids'] ?? []));
+            $result = bakery_survey_route_order_confirm_apply($db, $orderDriverId, $orderDate, $ordered, [
+                'confirm' => $confirm,
+                'survey_id' => (int)$survey['id'],
+                'staff_user_id' => (int)($user['id'] ?? 0),
+            ]);
+            if (!$confirm) {
+                safe_redirect(
+                    'survey.php?t=' . rawurlencode($token)
+                    . '&date=' . rawurlencode($verifyDate)
+                    . '&apply_preview=' . $responseId
+                    . '&err=' . rawurlencode((string)bakery_t('survey.apply_confirm_needed', [], 'Confirm Apply to route to write Driver Assignment.'))
+                );
+            }
+            if (empty($result['ok'])) {
+                throw new RuntimeException((string)bakery_t('survey.route_order_err', [], 'Could not save that order.'));
+            }
+            safe_redirect(
+                'survey.php?t=' . rawurlencode($token)
+                . '&date=' . rawurlencode($verifyDate)
+                . '&done=' . rawurlencode((string)bakery_t('survey.apply_route_order_done', [], 'Route order applied to Driver Assignment.'))
+            );
+        }
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate) . '&err=' . rawurlencode('unknown_action'));
     } catch (RuntimeException $e) {
         safe_redirect('survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate) . '&err=' . rawurlencode($e->getMessage()));
@@ -985,18 +1067,72 @@ if ($showStoreVerify || $isHqStoreVerify) {
   <div class="card">
     <div class="meta"><?php echo $esc(bakery_survey_text('survey.responses_so_far', [], 'Answers so far')); ?></div>
     <?php foreach ($responses as $r): ?>
-      <div class="stop">
+      <?php
+        $respAction = (string)$r['action'];
+        $rawResponse = trim((string)$r['response']);
+        $decoded = json_decode($rawResponse, true);
+        $isApplyable = $isManager && is_array($decoded)
+            && in_array($respAction, ['store_verify', 'route_order'], true);
+        $previewLines = [];
+        if ($isApplyable && $respAction === 'store_verify') {
+            $groups = bakery_survey_store_verify_groups_from_payload($decoded);
+            $preview = bakery_survey_store_verify_preview_routes(
+                $db,
+                (string)($decoded['delivery_date'] ?? $verifyDate),
+                $groups
+            );
+            $previewLines[] = bakery_survey_text(
+                'survey.apply_preview_summary',
+                [
+                    'assign' => (int)$preview['assign_count'],
+                    'remove' => (int)$preview['unassign_count'],
+                    'blocked' => (int)$preview['blocked_count'],
+                ],
+                'Diff: +:assign add · -:remove drop · :blocked blocked'
+            );
+        } elseif ($isApplyable && $respAction === 'route_order') {
+            $preview = bakery_survey_route_order_preview(
+                $db,
+                (int)($decoded['driver_id'] ?? 0),
+                (string)($decoded['delivery_date'] ?? $verifyDate),
+                array_map('intval', (array)($decoded['ordered_daily_order_ids'] ?? []))
+            );
+            if (!empty($preview['ok'])) {
+                $previewLines[] = bakery_survey_text(
+                    'survey.apply_route_order_preview',
+                    ['count' => count($preview['to_order'] ?? [])],
+                    'Reorder :count movable stops'
+                );
+            } else {
+                $previewLines[] = (string)($preview['error'] ?? 'invalid_order');
+            }
+        }
+      ?>
+      <div class="stop survey-response" data-response-id="<?php echo (int)$r['id']; ?>">
         <span class="meta"><?php
-          $labelKey = $actionLabels[(string)$r['action']] ?? '';
-          echo $esc($labelKey !== '' ? bakery_survey_text($labelKey, [], (string)$r['action']) : (string)$r['action']);
+          $labelKey = $actionLabels[$respAction] ?? '';
+          echo $esc($labelKey !== '' ? bakery_survey_text($labelKey, [], $respAction) : $respAction);
         ?></span>
         <span class="meta"><?php
-          $txt = trim((string)$r['response']);
-          if (($r['respondent'] ?? '') !== '') {
-              $txt = $r['respondent'] . ($txt !== '' ? ': ' . $txt : '');
+          if ($previewLines !== []) {
+              echo $esc(implode(' · ', $previewLines));
+          } else {
+              $txt = $rawResponse;
+              if (($r['respondent'] ?? '') !== '') {
+                  $txt = $r['respondent'] . ($txt !== '' ? ': ' . $txt : '');
+              }
+              echo $esc(mb_substr($txt, 0, 140));
           }
-          echo $esc(mb_substr($txt, 0, 140));
         ?></span>
+        <?php if ($isApplyable): ?>
+        <form method="post" action="survey.php?t=<?php echo $esc($token); ?>&amp;date=<?php echo $esc($verifyDate); ?>" class="survey-apply-route" onsubmit="return confirm(<?php echo htmlspecialchars(json_encode((string)bakery_survey_text('survey.apply_confirm_js', [], 'Apply this survey result to Driver Assignment?')), ENT_QUOTES); ?>);">
+          <input type="hidden" name="csrf_token" value="<?php echo $esc(bakery_csrf_token()); ?>">
+          <input type="hidden" name="action" value="<?php echo $respAction === 'route_order' ? 'apply_route_order' : 'apply_store_verify_routes'; ?>">
+          <input type="hidden" name="response_id" value="<?php echo (int)$r['id']; ?>">
+          <input type="hidden" name="confirm" value="1">
+          <button type="submit" class="btn primary"><?php echo $esc(bakery_survey_text('survey.apply_to_route', [], 'Apply to route')); ?></button>
+        </form>
+        <?php endif; ?>
       </div>
     <?php endforeach; ?>
   </div>

@@ -346,3 +346,171 @@ function bakery_historical_navigation_catalog() {
         ],
     ];
 }
+
+/**
+ * Extra script→roles registrations for JSON/handlers not shown in the menu.
+ * Catalog item roles still win for menu pages; this is the escape hatch.
+ *
+ * @return array<string, list<string>>
+ */
+function &bakery_navigation_script_registry(): array
+{
+    static $registry = null;
+    if ($registry === null) {
+        $registry = [];
+        $boot = static function (array &$registry, string $script, array $roles): void {
+            $script = basename(strtolower(trim($script)));
+            if ($script === '' || !str_ends_with($script, '.php')) {
+                return;
+            }
+            $existing = $registry[$script] ?? [];
+            foreach ($roles as $role) {
+                $role = strtolower(trim((string)$role));
+                if ($role !== '' && !in_array($role, $existing, true)) {
+                    $existing[] = $role;
+                }
+            }
+            $registry[$script] = $existing;
+        };
+        // Bootstrap: preserve today's non-catalog allowlists under default-deny.
+        $driverRoles = ['driver', 'driver_assistant', 'administrator', 'manager'];
+        foreach ([
+            'index.php', 'driver.php', 'driver_stops.php', 'pack_list.php', 'driver_list.php',
+            'route_closeout.php', 'complete_delivery.php', 'driver_session_ping.php',
+            'upload_driver_photo.php', 'get_customer_order_details.php', 'get_driver_orders.php',
+            'global_gps_handler.php', 'call_headquarters.php', 'qr_login.php',
+        ] as $script) {
+            $boot($registry, $script, $driverRoles);
+        }
+        $cashierRoles = ['cashier', 'administrator', 'manager'];
+        foreach ([
+            'cashier_shop_photos.php', 'upload_shop_photo.php', 'product_photos.php',
+            'upload_product_photo.php', 'cashier_add_product.php',
+        ] as $script) {
+            $boot($registry, $script, $cashierRoles);
+        }
+        $bakerRoles = ['baker', 'administrator', 'manager'];
+        foreach (['production.php', 'baker_mix.php', 'pack_list.php'] as $script) {
+            $boot($registry, $script, $bakerRoles);
+        }
+        $managerApiRoles = ['administrator', 'manager'];
+        foreach ([
+            'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'text_comms_api.php', 'service_issues_api.php',
+            'staff_alerts_api.php', 'auto_push_api.php', 'ping.php',
+            'billing_export.php', 'generate_invoice.php', 'invoice_center.php',
+            'text_media.php', 'ai_photo_text.php', 'customer_statement.php',
+        ] as $script) {
+            $boot($registry, $script, $managerApiRoles);
+        }
+        $boot($registry, 'baker.php', ['baker', 'administrator', 'manager']);
+        $adminOnly = ['administrator'];
+        foreach ([
+            'standing_orders.php', 'bread_distribution.php', 'orders.php', 'driver_overview.php',
+            'driver_pages_probe.php', 'trace_driver_list.php',
+            'build_id.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
+            'health_deploy.php', 'health_driver.php', 'health_prod.php',
+            'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php',
+            'sfb_admin_studio_baker.php',
+        ] as $script) {
+            $boot($registry, $script, $adminOnly);
+        }
+    }
+    return $registry;
+}
+
+/**
+ * Escape hatch for JSON/handlers not shown in the navigation catalog.
+ *
+ * @param list<string> $roles
+ */
+function bakery_navigation_register_script(string $script, array $roles): void
+{
+    $script = basename(strtolower(trim($script)));
+    if ($script === '' || !str_ends_with($script, '.php')) {
+        return;
+    }
+    $registry = &bakery_navigation_script_registry();
+    $existing = $registry[$script] ?? [];
+    foreach ($roles as $role) {
+        $role = strtolower(trim((string)$role));
+        if ($role !== '' && !in_array($role, $existing, true)) {
+            $existing[] = $role;
+        }
+    }
+    $registry[$script] = $existing;
+}
+
+/**
+ * Basename of a catalog href (strips query string).
+ */
+function bakery_navigation_script_basename(string $href): string
+{
+    $path = parse_url($href, PHP_URL_PATH);
+    if (!is_string($path) || $path === '') {
+        $path = $href;
+    }
+    return basename(strtolower($path));
+}
+
+/**
+ * Roles allowed to open a script: catalog item roles ∪ registry, else empty
+ * (caller treats empty as administrator-only default-deny).
+ *
+ * @return list<string>
+ */
+function bakery_navigation_roles_for_script(string $script): array
+{
+    $script = bakery_navigation_script_basename($script);
+    $roles = [];
+    foreach (bakery_navigation_catalog() as $group) {
+        foreach ($group['items'] as $item) {
+            if (bakery_navigation_script_basename((string)($item['href'] ?? '')) !== $script) {
+                continue;
+            }
+            foreach (($item['roles'] ?? []) as $role) {
+                $role = strtolower(trim((string)$role));
+                if ($role !== '' && !in_array($role, $roles, true)) {
+                    $roles[] = $role;
+                }
+            }
+        }
+    }
+    foreach (bakery_navigation_script_registry()[$script] ?? [] as $role) {
+        $role = strtolower(trim((string)$role));
+        if ($role !== '' && !in_array($role, $roles, true)) {
+            $roles[] = $role;
+        }
+    }
+    return $roles;
+}
+
+/**
+ * Allowlist of script basenames a role may open (catalog ∪ registry).
+ *
+ * @return list<string>
+ */
+function bakery_navigation_scripts_for_role(string $role): array
+{
+    $role = strtolower(trim($role));
+    $lookupRole = $role === 'driver_assistant' ? 'driver' : $role;
+    $scripts = [];
+    foreach (bakery_navigation_catalog() as $group) {
+        foreach ($group['items'] as $item) {
+            if (!bakery_navigation_item_available($item, $lookupRole)) {
+                continue;
+            }
+            $base = bakery_navigation_script_basename((string)($item['href'] ?? ''));
+            if ($base !== '' && str_ends_with($base, '.php')) {
+                $scripts[$base] = true;
+            }
+        }
+    }
+    foreach (bakery_navigation_script_registry() as $script => $roles) {
+        if (in_array($lookupRole, $roles, true) || ($role === 'driver_assistant' && in_array('driver_assistant', $roles, true))) {
+            $scripts[$script] = true;
+        }
+    }
+    $out = array_keys($scripts);
+    sort($out);
+    return $out;
+}

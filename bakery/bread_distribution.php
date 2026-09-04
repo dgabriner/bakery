@@ -2,14 +2,7 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
-
-// Initialize database connection
-$db = new PDO(
-    "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
-    DB_USER,
-    DB_PASS,
-    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-);
+require_once 'includes/customer_order_mutations.php';
 
 // Helper function to convert day number to day name
 function getDayName($dayNumber) {
@@ -200,17 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             $dayOfWeek = bakery_normalize_standing_day((int)$update['day_of_week']);
                             $quantity = (int)$update['quantity'];
                             
-                            if ($quantity > 0) {
-                                $stmt = $db->prepare("
-                                    INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                                    VALUES (?, ?, ?, ?)
-                                    ON DUPLICATE KEY UPDATE quantity = ?
-                                ");
-                                $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-                            } else {
-                                $stmt = $db->prepare("DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?");
-                                $stmt->execute([$customerId, $productId, $dayOfWeek]);
-                            }
+                            bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
                         }
                         
                         $db->commit();

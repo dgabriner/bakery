@@ -26,3 +26,5 @@ Register all four in `includes/agent_work_map.php` (the map test fails on unmapp
 ## Done when
 
 All four green twice; each asserts at least one §4 invariant by name in its output.
+
+**Status:** shipped (2026-09-04). Four suites on `bakerysf_test` via page helpers (not HTTP controllers): generate/edit/one-time, standing upsert/copy/pause, production save/commit/drift/assign, delivery confirm transaction + credit delta. Registered under `characterize-core` in `includes/agent_program_map.php`. Staging and Live were not touched.

@@ -1,0 +1,105 @@
+name: Bakery test gate
+
+# Mission 54 — CI runs suites without the owner's laptop.
+# Never deploys. Never SFTP. Never touches Staging or Live.
+
+on:
+  pull_request:
+    paths:
+      - 'bakery/**'
+      - '.github/workflows/test-gate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'bakery/**'
+      - '.github/workflows/test-gate.yml'
+
+defaults:
+  run:
+    working-directory: bakery
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: bakerysf_test
+      DB_USER: root
+      DB_PASS: root
+      APP_ENV: local
+      USE_PROD_DB: 'false'
+      LOCAL_ADMIN_CODE: '9741'
+      SFB_AGENT_ADMIN_CODE: '9099'
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bakerysf_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, json
+          coverage: none
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            if php -r '$m=@new PDO("mysql:host=127.0.0.1;port=3306","root","root"); exit($m?0:1);'; then
+              echo "MariaDB ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MariaDB did not become ready"; exit 1
+
+      - name: Write bakery/.env for the gate
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=local
+          USE_PROD_DB=false
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_NAME=bakerysf_test
+          DB_USER=root
+          DB_PASS=root
+          LOCAL_ADMIN_EMAIL=danny@sourflour.org
+          LOCAL_ADMIN_NAME=Danny
+          LOCAL_ADMIN_CODE=9741
+          SFB_AGENT_ADMIN_CODE=9099
+          TWILIO_VALIDATE_WEBHOOK=1
+          EOF
+          # Strip any YAML-inherited leading spaces from heredoc lines.
+          sed -i 's/^[[:space:]]\+//' .env
+
+      - name: Assert fail-closed production target
+        run: php tests/run_local_test_target_guard_tests.php
+
+      - name: Provision bakerysf_test
+        run: php scripts/setup_local_db.php --reset --force-reset --database=bakerysf_test
+
+      - name: PR gate (mapped suites vs origin/main)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main --depth=1 || true
+          bash scripts/run_test_gate.sh --changed-since=origin/main --no-reset --report=json
+
+      - name: Main gate (full suite)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: bash scripts/run_test_gate.sh --no-reset --report=json

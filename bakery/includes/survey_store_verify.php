@@ -841,6 +841,10 @@ function bakery_survey_store_verify_submit(PDO $db, array $fields): array
         (string)($payload['delivery_date'] ?? ''),
         $routeGroups
     );
+    bakery_survey_store_verify_record_apply_event($db, (string)($payload['delivery_date'] ?? ''), $route, [
+        'survey_id' => $surveyId,
+        'staff_user_id' => (int)($fields['staff_user_id'] ?? 0),
+    ]);
 
     $body = bakery_survey_store_verify_sms_body($payload);
     $routeLine = bakery_survey_store_verify_sms_route_line($route);
@@ -1307,4 +1311,154 @@ function bakery_survey_store_verify_apply_routes(PDO $db, string $deliveryDate, 
     }
 
     return $result;
+}
+
+/**
+ * Diff preview for dated-route apply (no writes).
+ *
+ * @param list<array{driver_id?:int,driver_name?:string,on?:list}> $groups
+ * @return array{
+ *   ok:bool,
+ *   delivery_date:string,
+ *   drivers:list<array{driver_id:int,driver_name:string,assign:list<int>,unassign:list<array>,blocked:list<array>}>,
+ *   assign_count:int,
+ *   unassign_count:int,
+ *   blocked_count:int,
+ *   skipped?:string,
+ *   errors:list<string>
+ * }
+ */
+function bakery_survey_store_verify_preview_routes(PDO $db, string $deliveryDate, array $groups): array
+{
+    $out = [
+        'ok' => true,
+        'delivery_date' => $deliveryDate,
+        'drivers' => [],
+        'assign_count' => 0,
+        'unassign_count' => 0,
+        'blocked_count' => 0,
+        'errors' => [],
+    ];
+    try {
+        $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+        $out['delivery_date'] = $deliveryDate;
+    } catch (RuntimeException $e) {
+        $out['ok'] = false;
+        $out['skipped'] = 'invalid_date';
+        $out['errors'][] = $e->getMessage();
+        return $out;
+    }
+    foreach ($groups as $group) {
+        $driverId = (int)($group['driver_id'] ?? 0);
+        if ($driverId <= 0) {
+            continue;
+        }
+        $desiredIds = [];
+        foreach ($group['on'] ?? [] as $store) {
+            $id = (int)($store['id'] ?? $store);
+            if ($id > 0) {
+                $desiredIds[] = $id;
+            }
+        }
+        $current = bakery_survey_store_verify_driver_dated_stops($db, $driverId, $deliveryDate);
+        $plan = bakery_survey_store_verify_route_reconcile($desiredIds, $current);
+        $out['drivers'][] = [
+            'driver_id' => $driverId,
+            'driver_name' => (string)($group['driver_name'] ?? ''),
+            'assign' => $plan['assign'],
+            'unassign' => $plan['unassign'],
+            'blocked' => $plan['blocked'],
+        ];
+        $out['assign_count'] += count($plan['assign']);
+        $out['unassign_count'] += count($plan['unassign']);
+        $out['blocked_count'] += count($plan['blocked']);
+    }
+    return $out;
+}
+
+/**
+ * @param array{drivers?:list,driver_id?:int,driver_name?:string,on?:list,delivery_date?:string} $payload
+ * @return list<array{driver_id:int,driver_name:string,on:list}>
+ */
+function bakery_survey_store_verify_groups_from_payload(array $payload): array
+{
+    $groups = [];
+    if (isset($payload['drivers']) && is_array($payload['drivers'])) {
+        foreach ($payload['drivers'] as $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+            $driverId = (int)($group['driver_id'] ?? 0);
+            if ($driverId <= 0) {
+                continue;
+            }
+            $groups[] = [
+                'driver_id' => $driverId,
+                'driver_name' => (string)($group['driver_name'] ?? ''),
+                'on' => $group['on'] ?? [],
+            ];
+        }
+    }
+    if ($groups === [] && (int)($payload['driver_id'] ?? 0) > 0) {
+        $groups[] = [
+            'driver_id' => (int)$payload['driver_id'],
+            'driver_name' => (string)($payload['driver_name'] ?? ''),
+            'on' => $payload['on'] ?? [],
+        ];
+    }
+    return $groups;
+}
+
+/**
+ * Confirm apply from a stored survey payload + operational_events row.
+ *
+ * @param array{drivers?:list,driver_id?:int,on?:list,delivery_date?:string} $payload
+ * @return array{ok:bool,route:array,preview:array,event_id?:int|null}
+ */
+function bakery_survey_store_verify_confirm_apply(PDO $db, array $payload, array $opts = []): array
+{
+    $deliveryDate = (string)($payload['delivery_date'] ?? $opts['delivery_date'] ?? '');
+    $groups = bakery_survey_store_verify_groups_from_payload($payload);
+    $preview = bakery_survey_store_verify_preview_routes($db, $deliveryDate, $groups);
+    if (empty($opts['confirm'])) {
+        return ['ok' => false, 'route' => [], 'preview' => $preview, 'error' => 'confirm_required'];
+    }
+    $route = bakery_survey_store_verify_apply_routes($db, $deliveryDate, $groups);
+    $eventId = bakery_survey_store_verify_record_apply_event($db, $deliveryDate, $route, $opts);
+    return ['ok' => !empty($route['ok']), 'route' => $route, 'preview' => $preview, 'event_id' => $eventId];
+}
+
+/**
+ * @param array{survey_id?:int,staff_user_id?:int} $opts
+ */
+function bakery_survey_store_verify_record_apply_event(PDO $db, string $deliveryDate, array $route, array $opts = []): ?int
+{
+    if (!function_exists('bakery_record_operational_event')) {
+        $timeline = __DIR__ . '/operational_timeline.php';
+        if (is_readable($timeline)) {
+            require_once $timeline;
+        }
+    }
+    if (!function_exists('bakery_record_operational_event')) {
+        return null;
+    }
+    $touched = (int)($route['assigned'] ?? 0) + (int)($route['removed'] ?? 0) + (int)($route['moved'] ?? 0);
+    $summary = $touched > 0
+        ? 'Survey store-verify applied to dated routes (+'
+            . (int)($route['assigned'] ?? 0) . ' / -' . (int)($route['removed'] ?? 0)
+            . ' / moved ' . (int)($route['moved'] ?? 0) . ')'
+        : 'Survey store-verify apply confirmed (no dated-route changes)';
+    return bakery_record_operational_event($db, 'survey_store_verify_route_applied', $summary, [
+        'operational_date' => $deliveryDate !== '' ? $deliveryDate : date('Y-m-d'),
+        'actor_user_id' => isset($opts['staff_user_id']) ? ((int)$opts['staff_user_id'] ?: null) : null,
+        'metadata' => [
+            'survey_id' => (int)($opts['survey_id'] ?? 0) ?: null,
+            'assigned' => (int)($route['assigned'] ?? 0),
+            'removed' => (int)($route['removed'] ?? 0),
+            'moved' => (int)($route['moved'] ?? 0),
+            'blocked' => (int)($route['blocked'] ?? 0),
+            'ok' => !empty($route['ok']),
+            'errors' => array_slice($route['errors'] ?? [], 0, 10),
+        ],
+    ]);
 }

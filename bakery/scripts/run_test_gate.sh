@@ -8,7 +8,7 @@
 #   bash scripts/run_test_gate.sh --files=a.php,b.php   # suites mapped by includes/agent_work_map.php
 #   bash scripts/run_test_gate.sh --suites=run_auth_tests,run_navigation_tests
 #   bash scripts/run_test_gate.sh --changed-since=origin/main   # suites for files changed vs a ref
-#   flags: --no-lint  --no-reset  --include-desktop-only
+#   flags: --no-lint  --no-reset  --include-desktop-only  --report=json
 #
 # Reset source: a verified production snapshot under storage/dumps/nightly when
 # present (desktop), otherwise database/schema + database/fixtures (cloud).
@@ -26,7 +26,6 @@ DESKTOP_ONLY_SUITES=(
   run_live_product_pack_yields_migration_tests
   run_product_pack_yield_tests
   run_sfb_studio_clock_tests
-  run_square_invoice_tests
   run_surface_hygiene_tests
   run_text_comms_media_tests
 )
@@ -34,6 +33,7 @@ DESKTOP_ONLY_SUITES=(
 LINT=1
 RESET=1
 INCLUDE_DESKTOP_ONLY=0
+REPORT=""
 FILES=""
 SUITES=""
 CHANGED_SINCE=""
@@ -42,6 +42,7 @@ for arg in "$@"; do
     --no-lint) LINT=0 ;;
     --no-reset) RESET=0 ;;
     --include-desktop-only) INCLUDE_DESKTOP_ONLY=1 ;;
+    --report=json) REPORT=json ;;
     --files=*) FILES="${arg#--files=}" ;;
     --suites=*) SUITES="${arg#--suites=}" ;;
     --changed-since=*) CHANGED_SINCE="${arg#--changed-since=}" ;;
@@ -59,10 +60,28 @@ if [ ! -f "$ROOT/.env" ]; then
   exit 1
 fi
 
+# Fail closed if someone exported a production target into this shell.
+if [ "${USE_PROD_DB:-false}" = "true" ] || [ "${USE_PROD_DB:-0}" = "1" ]; then
+  echo "FAIL  USE_PROD_DB must be false for the test gate" >&2
+  exit 1
+fi
+
+REPO_ROOT="$ROOT"
+if ! git -C "$ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+  REPO_ROOT="$(cd "$ROOT/.." && pwd)"
+fi
+
 if [ -n "$CHANGED_SINCE" ]; then
-  changed="$(git -C "$ROOT" diff --name-only "$CHANGED_SINCE" -- . | sed 's#^bakery/##' | paste -sd, -)"
+  if [ "$REPO_ROOT" != "$ROOT" ]; then
+    changed="$(git -C "$REPO_ROOT" diff --name-only "$CHANGED_SINCE" -- bakery/ | sed 's#^bakery/##' | paste -sd, -)"
+  else
+    changed="$(git -C "$ROOT" diff --name-only "$CHANGED_SINCE" -- . | sed 's#^bakery/##' | paste -sd, -)"
+  fi
   if [ -z "$changed" ]; then
     echo "NOTE  no files changed since $CHANGED_SINCE; nothing to map"
+    if [ "$REPORT" = "json" ]; then
+      printf '%s\n' '{"passed":0,"failed":0,"skipped":0,"suites":[],"ok":true,"note":"no changes"}'
+    fi
     exit 0
   fi
   FILES="${FILES:+$FILES,}$changed"
@@ -122,31 +141,48 @@ is_desktop_only() {
 
 pass=0; fail=0; skipped=0
 failed_list=()
+declare -a report_suites=()
 echo "== suites (${#run_list[@]})"
 for t in "${run_list[@]}"; do
   name="$(basename "$t" .php)"
   if [ ! -f "$t" ]; then
     if [ -n "$SUITES" ]; then
       echo "FAIL  missing suite $t"; fail=$((fail+1)); failed_list+=("$t")
+      report_suites+=("{\"name\":\"$name\",\"status\":\"fail\",\"reason\":\"missing\"}")
     else
       echo "SKIP  $name (mapped in agent_work_map but not written yet)"; skipped=$((skipped+1))
+      report_suites+=("{\"name\":\"$name\",\"status\":\"skip\",\"reason\":\"not_written\"}")
     fi
     continue
   fi
   if [ "$INCLUDE_DESKTOP_ONLY" -eq 0 ] && is_desktop_only "$name" && [ -z "$SUITES" ]; then
     echo "SKIP  $name (desktop-only: needs production snapshot data or quarantine files)"
-    skipped=$((skipped+1)); continue
+    skipped=$((skipped+1))
+    report_suites+=("{\"name\":\"$name\",\"status\":\"skip\",\"reason\":\"desktop_only\"}")
+    continue
   fi
+  start_ts=$(date +%s)
   if out="$(timeout 600 php "$t" 2>&1)"; then
+    elapsed=$(( $(date +%s) - start_ts ))
     pass=$((pass+1)); echo "PASS  $name"
+    report_suites+=("{\"name\":\"$name\",\"status\":\"pass\",\"seconds\":$elapsed}")
   else
+    elapsed=$(( $(date +%s) - start_ts ))
     fail=$((fail+1)); failed_list+=("$t")
     echo "FAIL  $name"
     echo "$out" | grep -E "FAIL|Fatal|Refusing|rror" | head -5 | sed 's/^/      /'
+    report_suites+=("{\"name\":\"$name\",\"status\":\"fail\",\"seconds\":$elapsed}")
   fi
 done
 
 echo "== gate: passed=$pass failed=$fail skipped=$skipped"
+if [ "$REPORT" = "json" ]; then
+  suites_json=$(printf '%s,' "${report_suites[@]:-}" | sed 's/,$//')
+  ok_json=true
+  [ "$fail" -eq 0 ] || ok_json=false
+  printf '{"passed":%s,"failed":%s,"skipped":%s,"ok":%s,"suites":[%s]}\n' \
+    "$pass" "$fail" "$skipped" "$ok_json" "$suites_json"
+fi
 if [ "$fail" -ne 0 ]; then
   printf '      %s\n' "${failed_list[@]}"
   exit 1

@@ -27,3 +27,5 @@ Extend `run_navigation_tests.php`: every root page is either public, portal, or 
 ## Done when
 
 Deleting a filename from a `*_scripts()` array is no longer a way to grant or revoke access — the catalog is.
+
+**Status:** shipped 2026-09-04 — catalog ∪ registry drive `bakery_*_scripts()` and default-deny enforcement; manager More is eight primaries + searchable All tools sheet; `cashier_add_product.php` includes `nav.php`; MODULE_ACCESS_GUIDE + module guide baker blurb include Mix Today. Staging and Live were not touched.

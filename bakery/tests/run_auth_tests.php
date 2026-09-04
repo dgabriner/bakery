@@ -220,6 +220,12 @@ t_assert(in_array('pack_list.php', bakery_baker_scripts(), true), 'pack_list is 
 t_assert(!in_array('index.php', bakery_baker_scripts(), true), 'index is not baker-accessible');
 t_assert(!in_array('production_center.php', bakery_baker_scripts(), true), 'production center is not baker-accessible');
 t_assert(!in_array('production_manager.php', bakery_baker_scripts(), true), 'production manager dashboard is not baker-accessible');
+t_assert(bakery_navigation_roles_for_script('zz_unlisted_nav_probe.php') === [], 'unlisted scripts have no catalog roles');
+t_assert(!in_array('driver', bakery_navigation_roles_for_script('zz_unlisted_nav_probe.php') ?: ['administrator'], true), 'unlisted scripts are refused for drivers (admin-only default-deny)');
+t_assert(!in_array('baker', bakery_navigation_roles_for_script('zz_unlisted_nav_probe.php') ?: ['administrator'], true), 'unlisted scripts are refused for bakers (admin-only default-deny)');
+t_assert(!in_array('cashier', bakery_navigation_roles_for_script('zz_unlisted_nav_probe.php') ?: ['administrator'], true), 'unlisted scripts are refused for cashiers (admin-only default-deny)');
+t_assert(!in_array('users.php', bakery_driver_scripts(), true), 'drivers cannot reach User Management via catalog allowlist');
+t_assert(!in_array('daily_orders.php', bakery_cashier_scripts(), true), 'cashiers cannot reach Daily Orders via catalog allowlist');
 
 echo "=== Baker role ===\n";
 bakery_logout();

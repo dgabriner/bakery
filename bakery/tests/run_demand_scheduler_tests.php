@@ -138,5 +138,17 @@ $assert(strpos($runSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Run fill
 $assert(strpos($ordersSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Orders fills the horizon');
 $assert(strpos($prodSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Production fills the horizon');
 
+$schedSrc = (string)file_get_contents($root . '/scripts/demand_scheduler.php');
+$assert(strpos($schedSrc, 'bakery_cron_record_run') !== false, 'demand_scheduler records cron_run stamps');
+$healthSrc = (string)file_get_contents($root . '/health_deploy.php');
+$assert(strpos($healthSrc, 'cron.demand_scheduler.age_hours') !== false, 'health_deploy reports demand_scheduler age_hours');
+$dashCc = (string)file_get_contents($root . '/includes/dashboard_command_center.php');
+$assert(strpos($dashCc, 'cron_overnight_stale') !== false, 'dashboard warns when overnight cron is stale');
+require_once $root . '/includes/cron_run.php';
+$stamp = bakery_cron_record_run(null, 'demand_scheduler_test', 'ok', ['probe' => 1]);
+$assert(($stamp['outcome'] ?? '') === 'ok', 'cron stamp writes outcome');
+$assert(bakery_cron_age_hours('demand_scheduler_test') !== null, 'cron age_hours readable after stamp');
+@unlink($root . '/storage/cron/demand_scheduler_test.json');
+
 echo "\nPassed: $pass\nFailed: $fail\n";
 exit($fail > 0 ? 1 : 0);

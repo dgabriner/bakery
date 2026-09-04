@@ -15,11 +15,23 @@ import sys
 import time
 from pathlib import Path
 
-try:
-    import paramiko
-except ImportError:
-    print("paramiko is required. Install with: py -m pip install paramiko", file=sys.stderr)
-    sys.exit(2)
+# paramiko is only required for real SFTP/SSH work. --check-target is a pure
+# env-guard used by CI and must run without the SSH dependency installed.
+paramiko = None  # type: ignore[assignment]
+
+
+def require_paramiko():
+    """Import paramiko lazily so target-guard checks stay dependency-free."""
+    global paramiko
+    if paramiko is not None:
+        return paramiko
+    try:
+        import paramiko as paramiko_mod
+    except ImportError:
+        print("paramiko is required. Install with: py -m pip install paramiko", file=sys.stderr)
+        sys.exit(2)
+    paramiko = paramiko_mod
+    return paramiko
 
 
 LIVE_REMOTE_ROOTS = ("bakery.sourflour.org/bake",)
@@ -125,6 +137,8 @@ def main() -> int:
     if args.check_target:
         print(f"SFTP target OK  user={user}  root={remote_root}  target={target or '(unset)'}")
         return 0
+
+    require_paramiko()
 
     local_root = Path(args.local_root).resolve()
     single = None

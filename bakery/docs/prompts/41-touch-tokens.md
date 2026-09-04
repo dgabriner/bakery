@@ -26,3 +26,5 @@ Scope to shared chrome + role shells. Do not restyle the 60 pages with inline CS
 ## Done when
 
 The touch-target suite is green; a 320px viewport shows no shared control narrower than 44px in DevTools.
+
+**Status:** shipped 2026-09-04 — `--sf-touch-min` on nav/portal/SFB chrome; `--sf-portal-*` tokens; body/driver shells use `100dvh` with `100vh` fallback; `tests/run_touch_target_tests.php`. Staging and Live were not touched.

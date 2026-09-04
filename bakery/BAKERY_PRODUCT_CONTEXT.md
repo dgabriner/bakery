@@ -202,8 +202,10 @@ Violating these breaks operations even if the code "works."
 11. **Billing Center marks and sends; it doesn't invent amounts.** "Generate invoice" = set
     `status='invoiced'` on a confirmed delivery. Staff send emails (or records, when
     `MAIL_DRIVER=log`) the same portal document (`customer_invoice.php`) using snapshot
-    totals. Amounts are read-only there. No AR/payments ledger exists; COD cash is tracked
-    on the order and summarized per driver in Route Manager.
+    totals. Amounts are read-only there. **Decided (2026-09-04):** settlement stays
+    **computed-only** (Billing Center settlement row + COD turn-in via `cod_turnins`);
+    no AR/payments ledger table and no weekly rollup invoices in this phase. COD cash is
+    tracked on the order, turned in per driver/day, and summarized in Route Manager.
 12. **Pricing tiers:** zone pricing (Pan Dulce), per-customer overrides (`customer_pricing.php`,
     tier `custom`), per-customer default Pan Dulce price. Snapshot at delivery time wins forever.
 13. **Weekday encoding:** Sunday = `7` (legacy `0` readable via compat helpers). Use
@@ -239,7 +241,8 @@ Compact map — entry points only, not every file.
 | Daily Production | `production.php` | Baker's bake list by dough; confirms good output + waste to FG ledger; shares the kitchen strip; loud when uncommitted |
 | Pack List | `pack_list.php` | Packing checklist by product / customer / route; shared check-offs; FG shortage uses on-hand + loaded; made units + kitchen strip |
 | Finished Goods | `inventory.php`, `includes/product_inventory.php` | Counts, availability, movement ledger |
-| Ingredient Planner | `ingredient_requirements.php`, `includes/ingredient_requirements.php` | Plan/demand → formula grams, batches, purchase *hints* (no PO) |
+| Ingredient Planner | `ingredient_requirements.php`, `includes/ingredient_requirements.php`, `includes/ingredient_purchase_notes.php` | Plan/demand → formula grams, batches, purchase *hints* + ordered/received notes (no PO). **Decided:** no on-hand stock adjust this phase. |
+| Cashier | `cashier_shop_photos.php`, `cashier_add_product.php`, `includes/cashier_catalog.php` | Photos + catalog only. **Decided:** retail Square sales stay out of scope — sales live in Square POS outside Sour Flour OS. |
 | Driver Assignment | `driver_assignment.php`, `includes/driver_assignments.php` | Canonical route board: prepare demand + build from standing, drag, transfer, unassign without deleting demand |
 | Route tools (overlapping) | `standing_routes.php`, `route_manager.php` (also COD cash), `route_summary.php` (photo-first day review), `daily_route.php`, `drivers.php`, `map.php`, `zones.php` | Template routes, live monitoring, views |
 | Driver app | `driver.php`, `complete_delivery.php`, `upload_driver_photo.php`, `includes/driver_route_map.js` | Stops, remaining-stop map + reorder, confirm wizard, photos, GPS |
@@ -298,7 +301,9 @@ Compact map — entry points only, not every file.
    `customer_invoice.php` document (snapshot totals) to the customer billing email, or
    record the send when `MAIL_DRIVER=log`. Non-COD Ready deliveries can be sent as a Square
    Invoice (card, Cash App Pay, bank ACH) from Billing Center; COD stays on Route Manager.
-   Still deferred: AR aging, weekly rollup invoices, full QuickBooks sync.
+   AR aging + settlement row + COD turn-in shipped (computed-only). **Decided:** no
+   AR/payments ledger table and no weekly rollup invoices this phase. Still deferred:
+   full QuickBooks sync.
 5. **Customer fragmentation.** Contact, lifecycle, standing, schedule, pricing, billing, and
    issues still live on specialized screens; `customer_record.php` is now the staff hub
    (nav + search + jump links). Editing still happens on the specialized screens — do not
@@ -343,8 +348,8 @@ a later item.
    invoice send + webhook/poll status is in Billing Center. *Money visibility phase 1
    shipped 2026-08-23: computed per-customer balances + AR aging (`includes/billing_aging.php`,
    snapshot totals − COD collected − Square-PAID settlements) as Billing Center balance chips
-   and a Customer Hub chip — read-only, no ledger; full AR/payments ledger, weekly rollup
-   invoices, and QuickBooks sync stay deferred.*
+   and a Customer Hub chip — read-only. **Decided:** stay computed-only (no AR/payments
+   ledger table, no weekly rollup). QuickBooks sync stays deferred.*
 5. **Customer hub + findability** — `customer_record.php` is the staff hub (nav item
     "Customer Hub"); `customers.php` has name/phone/email/zone/address search with Enter-to-
     open; high-frequency name surfaces link to the hub. Sections remain summaries + deep
@@ -383,6 +388,12 @@ offline-capable driver confirm.
 - **Deployable-surface hygiene:** don't add new top-level page scripts when an existing
   screen or an `includes/` helper + small endpoint will do; legacy variants live in
   quarantine/historical nav — don't resurrect them.
+- **Product schema boundaries (Decided):** New product surfaces add **prefixed tables**
+  (for example `sfb_*`, `square_*`, `text_*`, `survey*`) with foreign keys to `customers`.
+  They do **not** add columns to `customers`, `daily_orders`, `daily_order_items`, or
+  `standing_orders` without an owner-approved exception noted in the migration file
+  header as `-- owner-approved-core-column`. `customers` remains the identity hub;
+  product families grow beside it, not inside the core commercial tables.
 
 ## 9. Intentionally deferred topics
 
@@ -391,6 +402,10 @@ backup strategy, staging environments, production deployment process, local/prod
 database isolation, CI/CD, containerization/hosting, framework migration, generalized
 database redesign or normalization, comprehensive security hardening, generalized test
 architecture, broad technical-debt cleanup.
+
+**Wave 4 wrap Decideds (2026-09-04):** AR/payments ledger = no (computed-only);
+weekly rollup invoices = no; ingredient stock adjust = no (notes + PC chip enough);
+retail cashier = out of scope (photos + catalog only; Square POS owns retail sales).
 
 Mention one only if it directly blocks a feature you're changing — then flag it in your
 handoff and move on. Never let these become your deliverable.

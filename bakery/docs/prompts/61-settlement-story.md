@@ -29,3 +29,5 @@ AR/payments ledger table (yes / computed-only), weekly rollup invoices (yes / no
 ## Done when
 
 A manager answers "what is still owed on Tuesday's deliveries and where is the cash" from one screen.
+
+**Status:** shipped 2026-09-04 — steps 1–3 + **Decided:** computed-only (no AR/payments ledger table, no weekly rollup invoices). Settlement row, `080_cod_turnins` + `bakery_cod_turnin_record`, unpaid>14d / COD not turned in / Square failed filters.

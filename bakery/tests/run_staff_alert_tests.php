@@ -106,6 +106,12 @@ $assert(strpos($digestSource, 'bakery_customer_notification_send_email_message')
 $assert(strpos($digestSource, 'bakery_billing_append_mail_log') !== false, 'MAIL_DRIVER=log digests record to logs/mail.log via the canonical appender');
 $assert(strpos($digestSource, 'bakery_staff_alerts_collect') !== false, 'Digest collects through bakery_staff_alerts_collect');
 $assert(strpos($digestSource, "r.slug IN ('administrator', 'manager')") !== false, 'Digest recipients mirror the alert-eligible roles');
+$assert(strpos($digestSource, 'bakery_cron_record_run') !== false, 'Digest records cron_run even when clean');
+$healthSrc = (string)file_get_contents($root . '/health_deploy.php');
+$assert(strpos($healthSrc, 'cron.staff_alert_digest.age_hours') !== false, 'health_deploy reports staff_alert_digest age_hours');
+$kit = (string)file_get_contents($root . '/docs/CRON_KIT.md');
+$assert(strpos($kit, 'cron.demand_scheduler.age_hours') !== false, 'CRON_KIT verifies via health_deploy age_hours');
+$assert(strpos($kit, 'Staging and Live') !== false || strpos($kit, 'Do not claim Staging') !== false, 'CRON_KIT says owner installs crontab');
 
 foreach (['staff_alerts.digest_subject', 'staff_alerts.digest_heading', 'staff_alerts.digest_footer'] as $digestKey) {
     $assert(isset($en[$digestKey], $es[$digestKey]), "Digest key {$digestKey} exists in en.php + es.php");
@@ -148,13 +154,22 @@ $issueId = 0;
 $hadIssueTable = table_exists($db, 'customer_delivery_issues');
 if ($hadIssueTable) {
     $custId = (int)$db->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
-    $orderId = (int)$db->query('SELECT COALESCE(MAX(id), 1) FROM daily_orders')->fetchColumn();
-    if ($custId > 0) {
-    $insertIssue = $db->prepare(
-        'INSERT INTO customer_delivery_issues (customer_id, daily_order_id, order_date, category, description, status)
-         VALUES (?, ?, ?, \'other\', \'Staff alert test issue\', \'submitted\')'
-    );
-        $insertIssue->execute([$custId, max(1, $orderId), $today]);
+    $orderId = (int)$db->query('SELECT id FROM daily_orders ORDER BY id DESC LIMIT 1')->fetchColumn();
+    if ($custId > 0 && $orderId <= 0) {
+        // Fixture DBs may have customers but no dated orders; invent a shell
+        // so the FK on customer_delivery_issues.daily_order_id is satisfiable.
+        $db->prepare(
+            "INSERT INTO daily_orders (customer_id, order_date, status, total_amount)
+             VALUES (?, ?, 'pending', 0)"
+        )->execute([$custId, $today]);
+        $orderId = (int)$db->lastInsertId();
+    }
+    if ($custId > 0 && $orderId > 0) {
+        $insertIssue = $db->prepare(
+            'INSERT INTO customer_delivery_issues (customer_id, daily_order_id, order_date, category, description, status)
+             VALUES (?, ?, ?, \'other\', \'Staff alert test issue\', \'submitted\')'
+        );
+        $insertIssue->execute([$custId, $orderId, $today]);
         $issueId = (int)$db->lastInsertId();
     }
 }

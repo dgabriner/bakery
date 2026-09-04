@@ -10,6 +10,7 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/product_pack_yields.php';
 require_once 'includes/pack_list.php';
 require_once 'includes/production_plan.php';
+require_once 'includes/kitchen_segments.php';
 
 $page_title = bakery_t('page.pack_list');
 
@@ -744,6 +745,19 @@ $orderSourceLabel = $hasDailyOrders ? bakery_t('pack_list.daily_orders') : baker
 $dateLabel = $days[$selectedDay] . ', ' . date('M j, Y', strtotime($selectedDate));
 $queryBase = http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
 $productionHref = 'production.php?' . http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
+$packPhoneFocusKeys = $isBaker
+    ? bakery_pack_phone_focus_keys($viewMode, $byProduct, $byCustomer, $byRouteList)
+    : [];
+$packPhoneFocus = $isBaker
+    ? bakery_pack_phone_focus_state($packPhoneFocusKeys, $_GET['focus'] ?? null)
+    : ['current' => null, 'index' => -1, 'prev' => null, 'next' => null, 'total' => 0];
+$packPhoneExtraQuery = [];
+if ($pageReturnKey) {
+    $packPhoneExtraQuery['return'] = $pageReturnKey;
+}
+if ($attentionShortfall) {
+    $packPhoneExtraQuery['attention'] = 'shortfall';
+}
 $canOpenProductionCenter = !$isBaker && !$isDriver
     && function_exists('bakery_user_has_role')
     && bakery_user_has_role(['administrator', 'manager']);
@@ -1516,8 +1530,14 @@ require_once 'includes/nav.php';
 }
 </style>
 
-<main class="pack-page" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
+<main class="pack-page<?php echo $isBaker ? ' pack-page--baker' : ''; ?>" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
+    <?php if ($isBaker) { bakery_kitchen_segments_render('pack', $selectedDate); } ?>
+    <?php
+    if ($isBaker && (int)($packPhoneFocus['total'] ?? 0) > 0) {
+        echo bakery_pack_phone_focus_nav_html($packPhoneFocus, $selectedDate, $viewMode, $packPhoneExtraQuery);
+    }
+    ?>
     <?php if ($error): ?>
         <div class="pack-error" role="alert"><?php echo $error; ?></div>
     <?php endif; ?>
@@ -1536,7 +1556,7 @@ require_once 'includes/nav.php';
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.production_center'); ?></a>
                 <?php endif; ?>
                 <?php if ($isBaker): ?>
-                    <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
+                    <?php /* Mix / Bake / Pack segments replace peer Daily Production link for bakers */ ?>
                 <?php elseif (!$isDriver): ?>
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
                     <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.driver_loads'); ?></a>
@@ -1885,8 +1905,9 @@ require_once 'includes/nav.php';
                 $available = $inventoryReady ? (($availableByProduct[$pid] ?? 0) + ($loadedByProduct[$pid] ?? 0)) : null;
                 $short = ($available !== null && $available < $required) ? ($required - $available) : 0;
                 $missingQty = (int)($missingProductionTargets[$pid] ?? 0);
+                $phoneFocusClass = ($isBaker && $packPhoneFocus['current'] !== null && (int)$packPhoneFocus['current'] === $pid) ? ' is-phone-focus' : '';
             ?>
-                <section class="pack-section<?php echo !$isBaker && $short > 0 ? ' ops-attention-row' : ''; ?>" id="pack-product-<?php echo $pid; ?>">
+                <section class="pack-section<?php echo !$isBaker && $short > 0 ? ' ops-attention-row' : ''; ?><?php echo $phoneFocusClass; ?>" id="pack-product-<?php echo $pid; ?>">
                     <header class="pack-section__header">
                         <div>
                             <h2 class="pack-section__title"><?php echo htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
@@ -1961,8 +1982,11 @@ require_once 'includes/nav.php';
                 </section>
             <?php endforeach; ?>
         <?php elseif ($viewMode === 'customer'): ?>
-            <?php foreach ($byCustomer as $customer): ?>
-                <section class="pack-section" id="pack-customer-<?php echo (int)$customer['customer_id']; ?>">
+            <?php foreach ($byCustomer as $customer):
+                $customerFocusId = (int)$customer['customer_id'];
+                $phoneFocusClass = ($isBaker && $packPhoneFocus['current'] !== null && (int)$packPhoneFocus['current'] === $customerFocusId) ? ' is-phone-focus' : '';
+            ?>
+                <section class="pack-section<?php echo $phoneFocusClass; ?>" id="pack-customer-<?php echo $customerFocusId; ?>">
                     <header class="pack-section__header pack-section__header--customer">
                         <div>
                             <h2 class="pack-section__title">
@@ -2005,8 +2029,10 @@ require_once 'includes/nav.php';
             <?php foreach ($byRouteList as $route):
                 $isUnassigned = ((int)$route['driver_id'] === 0);
                 $stopCount = count($route['customers']);
+                $routeFocusId = (int)$route['driver_id'];
+                $phoneFocusClass = ($isBaker && $packPhoneFocus['current'] !== null && (int)$packPhoneFocus['current'] === $routeFocusId) ? ' is-phone-focus' : '';
             ?>
-                <section class="pack-section">
+                <section class="pack-section<?php echo $phoneFocusClass; ?>">
                     <header class="pack-section__header <?php echo $isUnassigned ? 'pack-section__header--unassigned' : 'pack-section__header--route'; ?>">
                         <div>
                             <h2 class="pack-section__title"><?php echo htmlspecialchars($route['driver_name'], ENT_QUOTES, 'UTF-8'); ?></h2>

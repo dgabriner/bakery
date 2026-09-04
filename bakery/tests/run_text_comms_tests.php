@@ -281,6 +281,8 @@ try {
     $cleanupMessageIds[] = $generalId;
     $assert(bakery_text_lane(['context_type' => 'test', 'customer_id' => 9]) === 'test', 'test context wins over customer id');
     $assert(bakery_text_lane(['context_type' => 'manual', 'customer_id' => null]) === 'general', 'unlinked manual texts are general');
+    $assert(bakery_text_normalize_context_type('recovery') === 'recovery', 'recovery context_type is allowed for failed-stop writeback');
+    $assert(bakery_text_normalize_context_type('nope') === 'manual', 'unknown context types fall back to manual');
 
     $convos2 = bakery_text_conversations($db, 30)['conversations'];
     $testConvo = null;

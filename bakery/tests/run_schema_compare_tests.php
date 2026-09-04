@@ -341,11 +341,47 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 77, 'next unused schema number is 077');
-$assert(bakery_schema_next_migration_id('demo_feature') === '077_demo_feature', 'next id is 077_ plus slug');
+$assert(bakery_schema_next_migration_number() === 82, 'next unused schema number is 082');
+$assert(bakery_schema_next_migration_id('demo_feature') === '082_demo_feature', 'next id is 082_ plus slug');
 $third062 = bakery_schema_migration_ids_from_dir();
 $third062[] = '062_another_collision';
 $assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');
+
+echo "\n=== Product boundaries: no unapproved core columns in 077+ ===\n";
+$coreTables = ['customers', 'daily_orders', 'daily_order_items', 'standing_orders'];
+$coreColumnViolations = [];
+foreach (glob($root . '/database/schema/[0-9][0-9][0-9]_*.sql') ?: [] as $migrationPath) {
+    $file = basename($migrationPath);
+    $number = (int)substr($file, 0, 3);
+    if ($number < 77) {
+        continue;
+    }
+    $sql = (string)file_get_contents($migrationPath);
+    if (preg_match('/--\s*owner-approved-core-column\b/i', $sql)) {
+        continue;
+    }
+    foreach ($coreTables as $table) {
+        if (preg_match('/alter\s+table\s+`?' . preg_quote($table, '/') . '`?\s+add\s+column\b/i', $sql)) {
+            $coreColumnViolations[] = $file . ' → ' . $table;
+        }
+    }
+}
+$assert(
+    $coreColumnViolations === [],
+    '077+ migrations do not ADD COLUMN on core commercial tables without -- owner-approved-core-column (' . implode(', ', $coreColumnViolations) . ')'
+);
+
+$tmpCore = sys_get_temp_dir() . '/sf-core-col-' . bin2hex(random_bytes(3)) . '.sql';
+file_put_contents($tmpCore, "ALTER TABLE customers ADD COLUMN niche_flag TINYINT NOT NULL DEFAULT 0;\n");
+$tmpSql = (string)file_get_contents($tmpCore);
+$wouldFail = !preg_match('/--\s*owner-approved-core-column\b/i', $tmpSql)
+    && (bool)preg_match('/alter\s+table\s+`?customers`?\s+add\s+column\b/i', $tmpSql);
+$assert($wouldFail, 'fixture ALTER customers ADD COLUMN is rejected without owner approval marker');
+file_put_contents($tmpCore, "-- owner-approved-core-column\nALTER TABLE customers ADD COLUMN niche_flag TINYINT NOT NULL DEFAULT 0;\n");
+$tmpSql = (string)file_get_contents($tmpCore);
+$wouldPass = (bool)preg_match('/--\s*owner-approved-core-column\b/i', $tmpSql);
+$assert($wouldPass, 'owner-approved-core-column header exempts a core-column migration');
+@unlink($tmpCore);
 
 $assert(strpos($managerSource, "if (\$schemaState === 'unknown'):") === false, 'refresh compare is not hidden on Match or Stop');
 $assert(strpos($managerSource, 'manager-live-board') !== false, 'Manager shows the Staging to Live board');

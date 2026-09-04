@@ -1,5 +1,6 @@
 // Driver GPS Tracking Script
-// Continuous tracking starts only after the first delivery photo is taken.
+// Continuous tracking starts when today's dated route view loads (permission /
+// localStorage gate respected). First delivery photo also enables tracking.
 
 (function() {
     'use strict';
@@ -18,7 +19,15 @@
         if (params.get('date')) {
             return params.get('date');
         }
-        return new Date().toISOString().slice(0, 10);
+        return localToday();
+    }
+
+    function localToday() {
+        var now = new Date();
+        var y = now.getFullYear();
+        var m = String(now.getMonth() + 1).padStart(2, '0');
+        var d = String(now.getDate()).padStart(2, '0');
+        return y + '-' + m + '-' + d;
     }
 
     function isTrackingActive() {
@@ -185,7 +194,19 @@
     };
 
     function initDriverTracking() {
-        if (!isDriverTabletPage() || !isTrackingActive()) {
+        if (!isDriverTabletPage()) {
+            return;
+        }
+        var root = document.getElementById('driverRouteRoot');
+        if (root) {
+            var routeDate = root.getAttribute('data-date') || '';
+            var driverId = parseInt(root.getAttribute('data-driver-id') || '0', 10);
+            if (driverId > 0 && routeDate && routeDate === localToday()) {
+                window.bakeryEnableGpsTracking(driverId, routeDate);
+                return;
+            }
+        }
+        if (!isTrackingActive()) {
             return;
         }
         startTrackingListeners();

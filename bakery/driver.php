@@ -297,6 +297,7 @@ function bakery_render_driver_stop_item(
                 </div>
             </div>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
+            <span class="driver-outbox-chip driver-outbox-chip--stop" data-outbox-chip hidden></span>
         </div>
         <div class="contact-actions">
             <?php if (!$isDone && $mapsHref): ?>
@@ -577,6 +578,7 @@ $progressPct = $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 1
 <link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
+<script src="<?php echo bakery_asset_href('includes/driver_offline_outbox.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_delivery.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_map.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_prep.js'); ?>" defer></script>
@@ -627,6 +629,7 @@ document.body.classList.add('driver-route-prep');
             <div class="route-identity">
                 <span class="route-live-dot" aria-hidden="true"></span>
                 <div class="route-driver-label"><?php echo htmlspecialchars($driver['name']); ?></div>
+                <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
             </div>
             <?php if (!$isAuthenticatedDriver): ?>
             <a class="route-change-link" href="?change_driver=1&amp;date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('driver.change_driver'); ?></a>
@@ -1120,7 +1123,7 @@ document.body.classList.add('driver-route-prep');
             </button>
             <button type="button" class="delivery-wizard-step" data-step="invoice" id="deliveryWizardStepInvoice">
                 <span class="delivery-wizard-step-num">3</span>
-                <span class="delivery-wizard-step-label"><?php bakery_te('driver.leave'); ?></span>
+                <span class="delivery-wizard-step-label"><?php bakery_te('driver.next'); ?></span>
             </button>
         </nav>
 
@@ -1196,40 +1199,46 @@ document.body.classList.add('driver-route-prep');
                         </label>
                     </div>
                     <div class="delivery-ordered-ref" id="deliveryOrderedRef" aria-live="polite"></div>
-                    <div class="delivery-confirmation-fields">
-                        <label class="delivery-qty-label"><?php bakery_te('driver.pieces_delivered'); ?>
-                            <div class="quantity-stepper quantity-stepper--large">
-                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_pieces')); ?>">−</button>
-                                <input type="number" id="deliveryPiecesInput" min="0" step="1" inputmode="numeric" pattern="[0-9]*">
-                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
-                            </div>
-                        </label>
-                        <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
-                            <div class="quantity-stepper quantity-stepper--large">
-                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
-                                <input type="number" id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric" pattern="[0-9]*">
-                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_credits')); ?>">+</button>
-                            </div>
-                        </label>
-                    </div>
-                    <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
-                    <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
-                    <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
-                        <div class="delivery-pricing-alert" role="alert">
-                            <strong><?php bakery_te('driver.no_price_title'); ?></strong>
-                            <span><?php bakery_te('driver.no_price_hint'); ?></span>
-                        </div>
-                        <label><?php bakery_te('driver.price_per_piece'); ?>
-                            <input type="number" id="deliveryPricePerPieceInput" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">
-                        </label>
-                    </div>
-                    <div class="delivery-cod-row" id="deliveryCodRow" hidden>
-                        <label><?php bakery_te('driver.cash_collected'); ?>
-                            <input type="number" id="deliveryCashCollectedInput" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
-                        </label>
-                        <p class="delivery-cod-hint"><?php bakery_te('driver.cod_hint'); ?></p>
-                    </div>
                     <p class="delivery-confirmation-breakdown" id="deliveryConfirmationBreakdown" aria-live="polite"></p>
+                    <details class="delivery-adjust" id="deliveryAdjustDetails">
+                        <summary class="delivery-adjust-summary"><?php bakery_te('driver.adjust_delivery'); ?></summary>
+                        <div class="delivery-adjust-body">
+                            <div class="delivery-confirmation-fields">
+                                <label class="delivery-qty-label"><?php bakery_te('driver.pieces_delivered'); ?>
+                                    <div class="quantity-stepper quantity-stepper--large">
+                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_pieces')); ?>">−</button>
+                                        <input type="number" id="deliveryPiecesInput" min="0" step="1" inputmode="numeric" pattern="[0-9]*">
+                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
+                                    </div>
+                                </label>
+                                <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
+                                    <div class="quantity-stepper quantity-stepper--large">
+                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
+                                        <input type="number" id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric" pattern="[0-9]*">
+                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_credits')); ?>">+</button>
+                                    </div>
+                                </label>
+                            </div>
+                            <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
+                            <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
+                            <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
+                                <div class="delivery-pricing-alert" role="alert">
+                                    <strong><?php bakery_te('driver.no_price_title'); ?></strong>
+                                    <span><?php bakery_te('driver.no_price_hint'); ?></span>
+                                </div>
+                                <label><?php bakery_te('driver.price_per_piece'); ?>
+                                    <input type="number" id="deliveryPricePerPieceInput" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">
+                                </label>
+                            </div>
+                            <div class="delivery-cod-row" id="deliveryCodRow" hidden>
+                                <label><?php bakery_te('driver.cash_collected'); ?>
+                                    <input type="number" id="deliveryCashCollectedInput" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                                </label>
+                                <p class="delivery-cod-hint"><?php bakery_te('driver.cod_hint'); ?></p>
+                            </div>
+                            <button type="button" class="btn btn-outline delivery-adjust-invoice-btn" id="deliveryWizardReviewBtn"><?php bakery_te('driver.review_invoice'); ?></button>
+                        </div>
+                    </details>
                 </section>
             </div>
 
@@ -1263,8 +1272,7 @@ document.body.classList.add('driver-route-prep');
                 <button type="button" class="btn btn-outline delivery-wizard-back" id="deliveryWizardBackBtn" hidden><?php bakery_te('driver.back'); ?></button>
                 <button type="button" class="btn btn-outline delivery-wizard-skip" id="deliveryWizardSkipBtn"><?php bakery_te('driver.skip_photo'); ?></button>
                 <button type="button" class="btn btn-outline fail-stop-btn" id="deliveryWizardFailBtn"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
-                <button type="button" class="btn btn-outline delivery-wizard-review" id="deliveryWizardReviewBtn" hidden><?php bakery_te('driver.review_invoice'); ?></button>
-                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.save_delivery'); ?></button>
+                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.save_and_leave_photo'); ?></button>
             </div>
 
             <div class="delivery-invoice-footer-actions" id="deliveryInvoiceFooterActions" hidden>
@@ -1374,6 +1382,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'review_invoice' => bakery_t('driver.review_invoice'),
     'save_delivery' => bakery_t('driver.save_delivery'),
     'save_and_leave_photo' => bakery_t('driver.save_and_leave_photo'),
+    'outbox_queued' => bakery_t('driver.outbox_queued'),
+    'outbox_synced' => bakery_t('driver.outbox_synced'),
+    'outbox_failed' => bakery_t('driver.outbox_failed'),
     'phone_camera' => bakery_t('driver.phone_camera'),
     'skip_photo' => bakery_t('driver.skip_photo'),
     'skip_departure_photo' => bakery_t('driver.skip_departure_photo'),

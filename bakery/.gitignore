@@ -103,6 +103,10 @@ storage/demo-recordings/**
 !storage/demo-recordings/.gitkeep
 tools/demo-recorder/.venv/
 
+# --- Overnight cron run stamps (Mission 60) ---
+storage/cron/**
+!storage/cron/.gitkeep
+
 # --- Quarantine / legacy variants (see docs/QUARANTINE_INVENTORY.md) ---
 storage/quarantine/
 blah*.php

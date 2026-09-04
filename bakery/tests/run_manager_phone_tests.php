@@ -44,6 +44,7 @@ function manager_phone_assert(bool $condition, string $message): void
 manager_phone_assert(bakery_manager_phone_view('routes') === 'routes', 'routes view is accepted');
 manager_phone_assert(bakery_manager_phone_view('nope') === 'today', 'unknown view falls back to today');
 manager_phone_assert(bakery_manager_phone_sheet('qty') === 'qty', 'qty sheet is accepted');
+manager_phone_assert(bakery_manager_phone_sheet('close') === 'close', 'close sheet is accepted');
 manager_phone_assert(bakery_manager_phone_sheet('bulk') === '', 'unknown sheet is ignored');
 manager_phone_assert(
     strpos(bakery_manager_phone_href('2099-08-20', 'missed'), 'view=missed') !== false,
@@ -82,9 +83,25 @@ manager_phone_assert(strpos($phone, 'bakery_production_plan_state') !== false, '
 manager_phone_assert(strpos($phone, 'manager_phone.plan_committed_at') !== false, 'committed kitchen state shows the commit time label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_not_committed') !== false, 'uncommitted kitchen state is loud with its own label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_drift_count') !== false, 'post-commit drift count renders on the kitchen tab');
+manager_phone_assert(strpos($phone, "sheet' => 'close'") !== false || strpos($phone, "['sheet' => 'close'") !== false, 'routes tab offers Close route sheet');
+manager_phone_assert(strpos($phone, 'manager_phone.close_route') !== false, 'close route copy is wired');
+manager_phone_assert(strpos($phone, 'bakery_inventory_closeout_lines') !== false, 'close sheet loads closeout lines');
+manager_phone_assert(strpos($phone, 'action="') !== false && strpos($phone, 'route_closeout.php') !== false, 'close sheet posts to route_closeout.php');
+manager_phone_assert(strpos($phone, 'close_route') !== false, 'close sheet submits close_route action');
+manager_phone_assert(strpos($phone, 'data-van-math=') !== false, 'close sheet asserts van math by name');
+manager_phone_assert(strpos($phone, 'bakery_inventory_reconcile_driver_load') === false, 'phone does not duplicate reconcile helper');
+
+$closeoutPage = (string)file_get_contents($root . '/route_closeout.php');
+manager_phone_assert(strpos($closeoutPage, 'manager-desktop-only') !== false, 'route_closeout marks dense UI desktop-only');
+manager_phone_assert(strpos($closeoutPage, "returnKey === 'manager'") !== false, 'route_closeout redirects phone closes back to Manager Mode');
+$routeManagerPage = (string)file_get_contents($root . '/route_manager.php');
+manager_phone_assert(strpos($routeManagerPage, 'manager-desktop-only') !== false, 'route_manager marks dense UI desktop-only');
+manager_phone_assert(strpos($routeManagerPage, 'manager-desktop-only-hint') !== false, 'route_manager points phones to Manager Mode');
 
 $phoneCss = (string)file_get_contents($root . '/css/manager_phone.css');
 manager_phone_assert(strpos($phoneCss, '.manager-phone__chip--loud') !== false, 'loud chip tone exists in manager phone css');
+manager_phone_assert(strpos($phoneCss, '.manager-desktop-only-hint') !== false, 'desktop-only hint styles exist');
+manager_phone_assert(strpos($phoneCss, 'max-width:720px') !== false, 'desktop-only hide kicks in at 720px');
 
 $productionSheet = (string)file_get_contents($root . '/production.php');
 manager_phone_assert(strpos($productionSheet, 'production_sheet.commit_diff_title') !== false, 'bake sheet renders the re-commit diff title');
@@ -140,6 +157,10 @@ $requiredKeys = [
     'manager_phone.plan_committed_at',
     'manager_phone.plan_not_committed',
     'manager_phone.plan_drift_count',
+    'manager_phone.close_route',
+    'manager_phone.confirm_close_route',
+    'manager_phone.closeout_van_math',
+    'manager_phone.desktop_use_manager',
     'production_sheet.commit_diff_title',
     'production_sheet.commit_diff_chip',
     'nav.manager_today',

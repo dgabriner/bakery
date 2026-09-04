@@ -25,3 +25,5 @@ The decision as a Homebase **Decided**, the product-context paragraph, and — i
 ## Done when
 
 An agent can read one paragraph and know whether retail sales are its problem.
+
+**Status:** shipped 2026-09-04 — **Decided: Option A (out of scope).** Retail sales stay in Square POS. Cashier workspace remains photos + catalog. Recorded in `BAKERY_PRODUCT_CONTEXT.md` §5 and §9.

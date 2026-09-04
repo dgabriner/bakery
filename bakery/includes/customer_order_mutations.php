@@ -9,6 +9,186 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+/**
+ * Single write path for standing_orders rows. Quantity ≤ 0 deletes the row.
+ * Normalizes Sunday (0 → 7) and clears a legacy day-0 duplicate when writing day 7.
+ */
+function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, int $dayOfWeek, int $qty): void
+{
+    $customerId = (int)$customerId;
+    $productId = (int)$productId;
+    $dayOfWeek = function_exists('bakery_normalize_standing_day')
+        ? bakery_normalize_standing_day($dayOfWeek)
+        : (((int)$dayOfWeek === 0) ? 7 : (int)$dayOfWeek);
+    $qty = (int)$qty;
+
+    // Reuse prepared statements across a request (copy-week / bulk save hot paths).
+    static $boundDb = null;
+    static $upsertStmt = null;
+    static $deleteLegacySundayStmt = null;
+    static $deleteExactStmt = null;
+    if ($boundDb !== $db) {
+        $boundDb = $db;
+        $upsertStmt = null;
+        $deleteLegacySundayStmt = null;
+        $deleteExactStmt = null;
+    }
+
+    if ($qty > 0) {
+        if ($upsertStmt === null) {
+            $upsertStmt = $db->prepare(
+                'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE quantity = ?'
+            );
+        }
+        $upsertStmt->execute([$customerId, $productId, $dayOfWeek, $qty, $qty]);
+        if ($dayOfWeek === 7) {
+            if ($deleteLegacySundayStmt === null) {
+                $deleteLegacySundayStmt = $db->prepare(
+                    'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = 0'
+                );
+            }
+            $deleteLegacySundayStmt->execute([$customerId, $productId]);
+        }
+        return;
+    }
+
+    if (function_exists('bakery_standing_day_in_clause')) {
+        $clause = bakery_standing_day_in_clause($dayOfWeek);
+        $stmt = $db->prepare(
+            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $clause['sql']
+        );
+        $stmt->execute(array_merge([$customerId, $productId], $clause['values']));
+        return;
+    }
+
+    if ($deleteExactStmt === null) {
+        $deleteExactStmt = $db->prepare(
+            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?'
+        );
+    }
+    $deleteExactStmt->execute([$customerId, $productId, $dayOfWeek]);
+}
+
+/**
+ * Batch find-or-create dated order shells for many customers on one date.
+ *
+ * @param list<int> $customerIds
+ * @return array<int, int> customer_id → daily_order_id
+ */
+function bakery_daily_orders_map_for_customers(PDO $db, string $date, array $customerIds): array
+{
+    $customerIds = array_values(array_unique(array_filter(array_map('intval', $customerIds), static fn($id) => $id > 0)));
+    if ($customerIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($customerIds), '?'));
+    $find = $db->prepare(
+        "SELECT id, customer_id FROM daily_orders WHERE order_date = ? AND customer_id IN ($placeholders)"
+    );
+    $find->execute(array_merge([$date], $customerIds));
+    $map = [];
+    foreach ($find->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['customer_id']] = (int)$row['id'];
+    }
+
+    $missing = [];
+    foreach ($customerIds as $customerId) {
+        if (!isset($map[$customerId])) {
+            $missing[] = $customerId;
+        }
+    }
+    if ($missing !== []) {
+        $valueSql = [];
+        $params = [];
+        foreach ($missing as $customerId) {
+            $valueSql[] = "(?, ?, 'pending', 0)";
+            $params[] = $customerId;
+            $params[] = $date;
+        }
+        $insert = $db->prepare(
+            'INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount) VALUES '
+            . implode(', ', $valueSql)
+        );
+        $insert->execute($params);
+
+        $findMissing = $db->prepare(
+            'SELECT id, customer_id FROM daily_orders WHERE order_date = ? AND customer_id IN ('
+            . implode(',', array_fill(0, count($missing), '?')) . ')'
+        );
+        $findMissing->execute(array_merge([$date], $missing));
+        foreach ($findMissing->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(int)$row['customer_id']] = (int)$row['id'];
+        }
+    }
+
+    return $map;
+}
+
+/**
+ * Find a dated daily_orders row or create an empty pending shell.
+ *
+ * @param array{status?:string,created?:bool} $opts Pass created by reference via $opts['created'] after call is not supported;
+ *        set $opts['track_created']=true and read $opts['was_created'] afterward.
+ */
+function bakery_daily_order_find_or_create(PDO $db, int $customerId, string $date, array $opts = []): int
+{
+    $customerId = (int)$customerId;
+    $status = (string)($opts['status'] ?? 'pending');
+    if ($status === '') {
+        $status = 'pending';
+    }
+
+    $find = $db->prepare(
+        'SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ? LIMIT 1'
+    );
+    $find->execute([$customerId, $date]);
+    $existingId = (int)$find->fetchColumn();
+    if ($existingId > 0) {
+        if (!empty($opts['track_created'])) {
+            // Caller may inspect via a second select; keep signature stable.
+        }
+        return $existingId;
+    }
+
+    $insert = $db->prepare(
+        'INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
+         VALUES (?, ?, ?, 0)'
+    );
+    $insert->execute([$customerId, $date, $status]);
+
+    $find->execute([$customerId, $date]);
+    $orderId = (int)$find->fetchColumn();
+    if ($orderId <= 0) {
+        throw new RuntimeException('Could not create daily order');
+    }
+
+    return $orderId;
+}
+
+/**
+ * Recompute daily_orders.total_amount from line items; returns the new total.
+ */
+function bakery_daily_order_recompute_total(PDO $db, int $orderId): float
+{
+    $orderId = (int)$orderId;
+    $stmt = $db->prepare(
+        'UPDATE daily_orders
+         SET total_amount = (
+             SELECT COALESCE(SUM(line_total), 0) FROM daily_order_items WHERE daily_order_id = ?
+         )
+         WHERE id = ?'
+    );
+    $stmt->execute([$orderId, $orderId]);
+
+    $get = $db->prepare('SELECT COALESCE(total_amount, 0) FROM daily_orders WHERE id = ? LIMIT 1');
+    $get->execute([$orderId]);
+
+    return (float)$get->fetchColumn();
+}
+
 require_once __DIR__ . '/customer_portal.php';
 require_once __DIR__ . '/demand_review.php';
 require_once __DIR__ . '/operational_timeline.php';
@@ -243,14 +423,7 @@ function bakery_customer_delivery_state(PDO $db, $customerId, $date) {
 }
 
 function bakery_customer_update_daily_total(PDO $db, $dailyOrderId) {
-    $stmt = $db->prepare(
-        'UPDATE daily_orders
-         SET total_amount = (
-             SELECT COALESCE(SUM(line_total), 0) FROM daily_order_items WHERE daily_order_id = ?
-         )
-         WHERE id = ?'
-    );
-    $stmt->execute([(int)$dailyOrderId, (int)$dailyOrderId]);
+    bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
 }
 
 function bakery_customer_product_row(PDO $db, $productId) {
@@ -273,12 +446,7 @@ function bakery_customer_ensure_daily_order(PDO $db, array $customer, $date) {
         return (int)$existing['id'];
     }
 
-    $stmt = $db->prepare(
-        'INSERT INTO daily_orders (customer_id, order_date, status, total_amount)
-         VALUES (?, ?, \'pending\', 0)'
-    );
-    $stmt->execute([$customerId, $date]);
-    $dailyOrderId = (int)$db->lastInsertId();
+    $dailyOrderId = bakery_daily_order_find_or_create($db, $customerId, (string)$date);
 
     $dayOfWeek = bakery_standing_day_from_date($date);
     $standingLines = bakery_customer_standing_lines($db, $customerId, $dayOfWeek);
@@ -652,19 +820,7 @@ function bakery_customer_save_standing_line(PDO $db, array $customer, $productId
     $product = bakery_customer_product_row($db, $productId);
     $fullLabels = bakery_standing_day_full_labels();
 
-    if ($quantity > 0) {
-        $stmt = $db->prepare(
-            'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE quantity = ?'
-        );
-        $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-    } else {
-        $stmt = $db->prepare(
-            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?'
-        );
-        $stmt->execute([$customerId, $productId, $dayOfWeek]);
-    }
+    bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
 
     if ($oldQty !== $quantity) {
         $dayLabel = $fullLabels[$dayOfWeek] ?? 'Day ' . $dayOfWeek;

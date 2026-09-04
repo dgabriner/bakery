@@ -203,6 +203,9 @@ c_assert($user && $user['display_name'] === 'Sarita', 'session display name is S
 c_assert(bakery_user_has_role(['cashier']), 'bakery_user_has_role recognizes cashier');
 c_assert(bakery_user_has_permission($db, 'ops.manage'), 'cashier has ops.manage');
 
+$addProductSrc = file_get_contents($root . '/cashier_add_product.php');
+c_assert(strpos($addProductSrc, "includes/nav.php") !== false, 'cashier Add Product includes nav.php like its siblings');
+
 bakery_logout();
 $_SESSION = [];
 

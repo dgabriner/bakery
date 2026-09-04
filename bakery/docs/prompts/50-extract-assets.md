@@ -25,3 +25,5 @@ The page's mapped suites + `run_surface_hygiene_tests.php` (desktop) + `run_depl
 ## Done when
 
 The six pages have no inline `<style>` and no inline `<script>` longer than the JSON bootstrap block.
+
+**Status:** shipped 2026-09-04 — all six pages extracted to `css/<page>.css` + `includes/<page>.js` with `window.__…__` bootstraps. Shell line counts: route_manager 551, standing_orders_manager 1225, driver_overview 619, driver_assignment 1077, customer_schedule 504, standing_routes 355 (PHP logic still on-page; assets only). `tests/run_extract_assets_tests.php`. Staging and Live were not touched.

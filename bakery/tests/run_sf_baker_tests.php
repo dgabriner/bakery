@@ -369,4 +369,22 @@ try {
     assert_eq(0, $leftover, 'fixture cleanup cascades (batches removed)');
 }
 
+$tabsSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/sfb_tabs.php');
+assert_true(strpos($tabsSrc, 'sfb.nav_home') !== false, 'SFB bottom nav has Home');
+assert_true(strpos($tabsSrc, 'sfb.nav_learn') !== false, 'SFB bottom nav has Learn');
+assert_true(strpos($tabsSrc, 'sfb.nav_bake') !== false, 'SFB bottom nav has Bake');
+assert_true(strpos($tabsSrc, 'sfb.nav_community') !== false, 'SFB bottom nav has Community');
+assert_true(strpos($tabsSrc, 'sfbMoreBtn') !== false, 'SFB bottom nav has More sheet control');
+assert_true(strpos($tabsSrc, 'aria-current') !== false, 'SFB tabs mark aria-current');
+assert_true(strpos($tabsSrc, 'sfb_starters.php') !== false && strpos($tabsSrc, 'sfb_formulas.php') !== false, 'More sheet lists Starters and Formulas');
+assert_true(strpos($tabsSrc, 'sfb_ingredients.php') !== false && strpos($tabsSrc, 'sfb_offerings.php') !== false, 'More sheet lists Ingredients and Offerings');
+$navJs = (string)file_get_contents(dirname(__DIR__) . '/includes/portal_nav.js');
+assert_true(strpos($navJs, 'data-more-btn') !== false, 'portal_nav.js supports SFB More data attributes');
+$en = include dirname(__DIR__) . '/lang/en.php';
+$es = include dirname(__DIR__) . '/lang/es.php';
+foreach (['sfb.nav_home', 'sfb.nav_learn', 'sfb.nav_bake', 'sfb.nav_community', 'sfb.more_title'] as $key) {
+    assert_true(isset($en[$key]) && $en[$key] !== '', "en has $key");
+    assert_true(isset($es[$key]) && $es[$key] !== '', "es has $key");
+}
+
 $finish();

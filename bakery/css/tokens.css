@@ -85,4 +85,14 @@
   --sf-nav-text: #f4fbf9;
   --sf-nav-text-muted: #d7ebe6;
   --sf-nav-drawer: #102f2c;
+
+  /* Customer portal accents (portal_styles.php aliases these) */
+  --sf-portal-ink: #33251f;
+  --sf-portal-cream: #fffdf8;
+  --sf-portal-terracotta: #b75c3f;
+  --sf-portal-muted: #7a6a5c;
+  --sf-portal-border: #e8ddd2;
+  --sf-portal-green: #2d6a4f;
+  --sf-portal-amber: #b8860b;
+  --sf-portal-sand: #faf6f1;
 }

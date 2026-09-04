@@ -554,6 +554,68 @@ if ($noStandingCustomerId > 0 && $standardProducts !== []) {
     assert_true(true, 'snapshot has no customer without weekday standing plus Pan Dulce standards; skip 1x fill check');
 }
 
+echo "\n=== client_request_id idempotency ===\n";
+require_once $root . '/complete_delivery.php';
+require_once $root . '/includes/client_request_id.php';
+require_once $root . '/includes/product_inventory.php';
+$idempDate = '2099-11-11';
+$db->prepare('DELETE FROM inventory_movements WHERE delivery_date = ?')->execute([$idempDate]);
+$wipeOrders = $db->prepare('SELECT id FROM daily_orders WHERE order_date = ?');
+$wipeOrders->execute([$idempDate]);
+foreach ($wipeOrders->fetchAll(PDO::FETCH_COLUMN) as $oid) {
+    $oid = (int)$oid;
+    $db->exec('DELETE FROM inventory_movements WHERE daily_order_id = ' . $oid);
+    $db->exec('DELETE FROM daily_order_assignments WHERE daily_order_id = ' . $oid);
+    $db->exec('DELETE FROM daily_order_items WHERE daily_order_id = ' . $oid);
+    $db->exec('DELETE FROM daily_orders WHERE id = ' . $oid);
+}
+$productId = (int)$db->query('SELECT id FROM products WHERE price > 0 ORDER BY id LIMIT 1')->fetchColumn();
+$price = (float)$db->query('SELECT price FROM products WHERE id = ' . $productId)->fetchColumn();
+$custId = (int)$db->query('SELECT id FROM customers WHERE is_active = 1 ORDER BY id LIMIT 1')->fetchColumn();
+$drvId = (int)$db->query('SELECT id FROM drivers ORDER BY id LIMIT 1')->fetchColumn();
+assert_true($productId > 0 && $custId > 0 && $drvId > 0, 'idempotency fixture rows exist');
+if (function_exists('bakery_inventory_record_production')) {
+    bakery_inventory_record_production($db, $idempDate, $productId, 12, 'idempotency bake');
+    bakery_inventory_save_driver_load($db, $idempDate, $drvId, [$productId => 12], 'idempotency load');
+}
+$db->prepare(
+    'INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, ?, ?)'
+)->execute([$custId, $idempDate, 'confirmed', round(10 * $price, 2)]);
+$idemOrderId = (int)$db->lastInsertId();
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)'
+)->execute([$idemOrderId, $productId, 10, $price]);
+$db->prepare(
+    'INSERT INTO daily_order_assignments (daily_order_id, driver_id, delivery_date, route_order, delivery_status)
+     VALUES (?, ?, ?, 1, ?)'
+)->execute([$idemOrderId, $drvId, $idempDate, 'pending']);
+$requestId = 'test-confirm-' . bin2hex(random_bytes(6));
+$first = bakery_confirm_delivery($db, $idemOrderId, 10, 2, [
+    'client_request_id' => $requestId,
+    'amount_collected' => 0,
+    'price_per_piece' => $price,
+]);
+$second = bakery_confirm_delivery($db, $idemOrderId, 10, 2, [
+    'client_request_id' => $requestId,
+    'amount_collected' => 0,
+    'price_per_piece' => $price,
+]);
+assert_true(!empty($first['success']), 'first confirm with client_request_id succeeds');
+assert_true(!empty($second['duplicate']), 'repeat client_request_id returns duplicate');
+assert_eq((int)$first['credits_taken_back'], (int)$second['credits_taken_back'], 'duplicate returns original credits');
+$movements = $db->prepare('SELECT COUNT(*) FROM inventory_movements WHERE daily_order_id = ?');
+$movements->execute([$idemOrderId]);
+$movementCount = (int)$movements->fetchColumn();
+assert_true($movementCount > 0, 'confirm posted inventory movements once');
+$second = bakery_confirm_delivery($db, $idemOrderId, 10, 2, [
+    'client_request_id' => $requestId,
+    'amount_collected' => 0,
+    'price_per_piece' => $price,
+]);
+$movements->execute([$idemOrderId]);
+assert_eq($movementCount, (int)$movements->fetchColumn(), 'duplicate confirm does not add inventory movements');
+assert_true(!empty($second['duplicate']), 'third identical client_request_id stays duplicate');
+
 $_SESSION['user_id'] = 1;
 $_SESSION['user_email'] = 'driver-workflow@example.test';
 $_SESSION['user_display_name'] = 'Driver Workflow Test';

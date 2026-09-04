@@ -342,6 +342,26 @@ try {
 }
 assert_true(bakery_zones_catalog_ready($db), 'real zones table visible again after temporary fixture dropped');
 
+echo "\n=== One mutation path: standing_orders INSERT only in customer_order_mutations ===\n";
+$standingInsertFiles = [];
+foreach (array_merge(
+    glob($root . '/*.php') ?: [],
+    glob($root . '/includes/*.php') ?: []
+) as $phpFile) {
+    $rel = str_replace('\\', '/', substr($phpFile, strlen($root) + 1));
+    if ($rel === 'includes/customer_order_mutations.php') {
+        continue;
+    }
+    $src = (string)file_get_contents($phpFile);
+    if (preg_match('/INSERT\s+INTO\s+standing_orders\b/i', $src)) {
+        $standingInsertFiles[] = $rel;
+    }
+}
+assert_true(
+    $standingInsertFiles === [],
+    'no root/includes INSERT INTO standing_orders outside customer_order_mutations.php (' . implode(', ', $standingInsertFiles) . ')'
+);
+
 echo "\n=== Summary ===\n";
 echo "Passed: {$GLOBALS['TEST_PASS']}\n";
 echo "Failed: {$GLOBALS['TEST_FAIL']}\n";

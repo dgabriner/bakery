@@ -3,14 +3,19 @@
 Two scripts are designed to run unattended on DreamHost. Page loads already fill the
 demand horizon lazily, so cron makes the system proactive instead of reactive.
 
+**Owner installs the crontab on DreamHost.** Agents ship the runbook + in-app
+staleness check only — Staging and Live cron installs are not performed from GitHub.
+
 ## Jobs
 
 | Script | What it does | Suggested cadence |
 |---|---|---|
-| `scripts/demand_scheduler.php` | Materializes dated orders from standing orders over the rolling horizon; records events; prepares route demand | Nightly, early morning (PT) |
-| `scripts/staff_alert_digest.php` | Emails one digest of critical/warning alerts to active administrators/managers. **Silent when clean.** | Morning, before the manager's first coffee (PT) |
+| `scripts/demand_scheduler.php` | Materializes dated orders from standing orders over the rolling horizon; records `cron_run` + `storage/cron/demand_scheduler.json` | Nightly, early morning (PT) |
+| `scripts/staff_alert_digest.php` | Emails one digest of critical/warning alerts to active administrators/managers. **Silent when clean** but still stamps `cron_run`. | Morning, before the manager's first coffee (PT) |
 
 ## Install (DreamHost panel → Cron Jobs)
+
+Exact lines (replace `YOUR_USER`):
 
 ```cron
 # Demand horizon fill — 02:30 America/Los_Angeles server time
@@ -20,29 +25,35 @@ demand horizon lazily, so cron makes the system proactive instead of reactive.
 0 6 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/YOUR_USER/cron_digest.log 2>&1
 ```
 
-Replace `YOUR_USER` with the shell user that hosts `bakery.sourflour.org`. Both scripts
-refuse to run against local/test targets unless forced — on DreamHost they run as-is.
+Log paths on the shell host:
+- `/home/YOUR_USER/cron_demand.log`
+- `/home/YOUR_USER/cron_digest.log`
+- App stamps: `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`
+
+Both scripts refuse to run against local/test targets unless `--force` — on DreamHost they run as-is.
 
 ## Verify after installing
 
 1. **Local dress rehearsal** (safe, uses `MAIL_DRIVER=log`):
-   ```powershell
-   $env:DB_NAME='bakerysf_test'; $env:USE_PROD_DB='false'
-   php scripts\staff_alert_digest.php --force --to=danny@sourflour.org --json
-   Get-Content logs\mail.log -Tail 3     # expect a staff_alert_digest line
+   ```bash
+   cd bakery
+   DB_NAME=bakerysf_test USE_PROD_DB=false php scripts/demand_scheduler.php --force --json
+   DB_NAME=bakerysf_test USE_PROD_DB=false php scripts/staff_alert_digest.php --force --to=you@example.org --json
+   cat storage/cron/demand_scheduler.json
+   cat storage/cron/staff_alert_digest.json
    ```
-2. **On production**, after the first scheduled run:
-   - Digest: query `operational_events` for `staff_alert_digest_sent` (one row per delivered
-     digest; no row means the day was clean — that is success too).
-   - Demand: Daily Run stage 1 should already be ready each morning without anyone opening
-     the page first.
-3. Email transport follows `.env`: real SMTP/Gmail OAuth in production, log-only on
-   local/staging (`MAIL_DRIVER=log` appends to `logs/mail.log`).
+2. **From the app** open `health_deploy.php` and confirm:
+   - `cron.demand_scheduler.age_hours=<number under 26>`
+   - `cron.staff_alert_digest.age_hours=<number under 26>`
+   - `null` means that job has never stamped a run on this host.
+3. **Dashboard / staff bell:** if demand age > 26h, Command Center shows
+   “Overnight generation stale (Nh)” as a warning fact (same queue as other staff alerts).
+4. Digest delivery still also writes `operational_events.staff_alert_digest_sent` when email goes out;
+   clean nights only write `cron_run` (that is still success).
 
 ## Notes
 
-- The digest is pull-free for recipients but still needs cron to push. Without cron,
-  the nav bell remains the fallback surface on every staff page.
-- Test delivery without touching recipient lists: add `--to=danny@sourflour.org`.
-- Both scripts exit 0 and print quiet JSON under `--json`; non-zero exits mean
-  misconfiguration (bad target, zero eligible recipients) and land in the cron log.
+- Without cron, page loads keep filling demand lazily and the nav bell remains the fallback.
+- Test delivery without touching recipient lists: `--to=you@example.org`.
+- Both scripts exit 0 on success; non-zero exits mean misconfiguration and land in the cron log.
+- **Do not claim Staging/Live cron install from a GitHub-only agent run.**

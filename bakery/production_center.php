@@ -13,13 +13,7 @@ require_once 'includes/production_workflow_strip.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/product_pack_yields.php';
 require_once 'includes/schema_sql.php';
-
-function production_center_week_start(string $value): string {
-    $date = DateTime::createFromFormat('!Y-m-d', $value);
-    if (!$date || $date->format('Y-m-d') !== $value) $date = new DateTime('monday this week');
-    $date->modify('monday this week');
-    return $date->format('Y-m-d');
-}
+require_once 'includes/production_center_actions.php';
 
 /**
  * Status flags for a product/day row. Arithmetic helpers stay next to the row builder.
@@ -132,6 +126,65 @@ $kitchenParse = null;
 $kitchenNote = trim((string)($_POST['kitchen_note'] ?? ''));
 $routeCapacity = [];
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $wantsJson = function_exists('bakery_wants_json') && bakery_wants_json();
+    // Autosave / drawer endpoints always return JSON; form save_plan stays HTML unless Accept asks for JSON.
+    $jsonActions = [
+        'product_formula', 'store_demand', 'save_store_demand',
+        'assign_preview', 'assign_apply', 'cut_preview', 'cut_apply',
+    ];
+    if (!$wantsJson && in_array((string)$_POST['action'], $jsonActions, true)) {
+        $wantsJson = true;
+    }
+    try {
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        $result = bakery_production_center_dispatch($db, $_POST, $user, ['wants_json' => $wantsJson]);
+        $response = (string)($result['response'] ?? 'page');
+        if ($response === 'json') {
+            if (isset($result['http_status'])) {
+                http_response_code((int)$result['http_status']);
+            }
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode($result['payload'] ?? []);
+            exit;
+        }
+        if ($response === 'redirect') {
+            header('Location: ' . ($result['redirect'] ?? 'production_center.php'));
+            exit;
+        }
+        if (!empty($result['notice'])) {
+            $notice = (string)$result['notice'];
+        }
+        if (!empty($result['error'])) {
+            $error = (string)$result['error'];
+        }
+        if (isset($result['kitchen_parse'])) {
+            $kitchenParse = $result['kitchen_parse'];
+        }
+        if (isset($result['route_capacity'])) {
+            $routeCapacity = $result['route_capacity'];
+        }
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        $formatted = bakery_production_center_format_dispatch_error($e, $wantsJson);
+        if ($formatted['response'] === 'json') {
+            if (isset($formatted['http_status'])) {
+                http_response_code((int)$formatted['http_status']);
+            }
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode($formatted['payload'] ?? ['ok' => false, 'error' => bakery_error_message_for_user($e)]);
+            exit;
+        }
+        $error = (string)($formatted['error'] ?? bakery_error_message_for_user($e));
+    }
+}
+
+$page_title = bakery_t('page.production_center');
+require_once 'includes/header.php';
+require_once 'includes/nav.php';
+
 // Same product-line visibility rules as Daily Production (managers see all).
 $bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
 $productClause = '';
@@ -151,333 +204,6 @@ $productStmt->execute($bakerProductIds ?? []);
 $products = $productStmt->fetchAll();
 $productIds = array_map(static fn($product) => (int)$product['id'], $products);
 $allowedProductIds = array_fill_keys($productIds, true);
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_plan') {
-    $wantsJson = function_exists('bakery_wants_json') && bakery_wants_json();
-    try {
-        if (!$planTableReady) throw new RuntimeException('Saved production plans are not installed yet. Run scripts/run_migrations.php first.');
-        $planned = $_POST['planned'] ?? [];
-        if (!is_array($planned) || $planned === []) {
-            throw new InvalidArgumentException('No changed targets to save. Edit a quantity, then save.');
-        }
-        foreach (array_keys($planned) as $postedDate) {
-            if ($postedDate !== $selectedDate) {
-                throw new InvalidArgumentException('A submitted plan item is outside the selected day.');
-            }
-        }
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $userId = isset($user['id']) ? (int)$user['id'] : null;
-        if ($wantsJson) {
-            if (count($planned) !== 1) throw new InvalidArgumentException('Autosave accepts one target at a time.');
-            $postedDate = (string)array_key_first($planned);
-            $postedProducts = $planned[$postedDate];
-            if (!is_array($postedProducts) || count($postedProducts) !== 1) throw new InvalidArgumentException('Autosave accepts one target at a time.');
-            $productId = (int)array_key_first($postedProducts);
-            $quantity = filter_var($postedProducts[$productId], FILTER_VALIDATE_INT);
-            $expectedQuantity = filter_var($_POST['expected_quantity'] ?? null, FILTER_VALIDATE_INT);
-            $expectedHasPlan = (string)($_POST['expected_has_plan'] ?? '') === '1';
-            if ($quantity === false || $expectedQuantity === false) throw new InvalidArgumentException('Batch targets must be whole numbers of zero or more.');
-            $result = bakery_production_plan_save_target_cas($db, $postedDate, $productId, (int)$quantity, $allowedProductIds, $userId, $expectedHasPlan, (int)$expectedQuantity);
-            $saved = $result['saved'];
-        } else {
-            $saved = bakery_production_plan_save_targets($db, $planned, $allowedProductIds, $userId);
-        }
-        bakery_record_operational_event($db, BAKERY_OP_PRODUCTION_PLAN_SAVED,
-            'Saved ' . $saved . ' production target' . ($saved === 1 ? '' : 's') . ' for ' . date('D, M j', strtotime($selectedDate)), [
-            'operational_date' => $selectedDate,
-            'metadata' => ['targets_saved' => $saved, 'delivery_date' => $selectedDate],
-        ]);
-        $notice = bakery_t('production_center.autosave_notice', ['count' => $saved]);
-        $notice .= ' ' . bakery_t('production_center.save_is_not_commit');
-        if ($wantsJson) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode([
-                'ok' => true,
-                'saved' => $saved,
-                'notice' => $notice,
-                'batch_label' => bakery_pack_batch_label($db, $productId, (int)$quantity),
-                'planned_quantity' => (int)$quantity,
-            ]);
-            exit;
-        }
-    } catch (Throwable $e) {
-        if ($db->inTransaction()) $db->rollBack();
-        $error = bakery_error_message_for_user($e);
-        if ($wantsJson) {
-            $isConflict = str_starts_with($error, 'production_plan_conflict:');
-            http_response_code($isConflict ? 409 : 400);
-            header('Content-Type: application/json; charset=utf-8');
-            if ($isConflict) {
-                $current = substr($error, strlen('production_plan_conflict:'));
-                echo json_encode([
-                    'ok' => false,
-                    'conflict' => true,
-                    'current_has_plan' => $current !== 'none',
-                    'current_quantity' => $current === 'none' ? 0 : (int)$current,
-                    'error' => bakery_t('production_center.autosave_conflict'),
-                ]);
-            } else {
-                echo json_encode(['ok' => false, 'error' => $error]);
-            }
-            exit;
-        }
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['product_formula', 'store_demand', 'save_store_demand'], true)) {
-    header('Content-Type: application/json; charset=utf-8');
-    try {
-        bakery_require_csrf();
-        $action = (string)$_POST['action'];
-        $productId = (int)($_POST['product_id'] ?? 0);
-        if ($productId <= 0 || empty($allowedProductIds[$productId])) {
-            throw new InvalidArgumentException('Unknown product.');
-        }
-        if ($action === 'product_formula') {
-            $pieces = max(0, (int)($_POST['pieces'] ?? 0));
-            echo json_encode(['ok' => true, 'formula' => bakery_pack_formula_sheet($db, $productId, $pieces)]);
-            exit;
-        }
-        $pool = max(0, (int)($_POST['pool'] ?? 0));
-        if ($pool <= 0 && table_exists($db, 'production_plan_items')) {
-            $poolStmt = $db->prepare(
-                'SELECT planned_quantity FROM production_plan_items WHERE delivery_date = ? AND product_id = ? LIMIT 1'
-            );
-            $poolStmt->execute([$selectedDate, $productId]);
-            $pool = max(0, (int)$poolStmt->fetchColumn());
-        }
-        if ($action === 'store_demand') {
-            $customers = bakery_production_store_demand_rows($db, $selectedDate, $productId, $pool);
-            $nameStmt = $db->prepare('SELECT name FROM products WHERE id = ? LIMIT 1');
-            $nameStmt->execute([$productId]);
-            echo json_encode([
-                'ok' => true,
-                'date' => $selectedDate,
-                'product_id' => $productId,
-                'product_name' => (string)$nameStmt->fetchColumn(),
-                'customers' => $customers,
-            ]);
-            exit;
-        }
-        $customerId = (int)($_POST['customer_id'] ?? 0);
-        $quantity = filter_var($_POST['quantity'] ?? null, FILTER_VALIDATE_INT);
-        if ($customerId <= 0 || $quantity === false || $quantity < 0) {
-            throw new InvalidArgumentException('Store quantity must be a whole number of zero or more.');
-        }
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $userId = isset($user['id']) ? (int)$user['id'] : null;
-        $saved = bakery_production_store_demand_save(
-            $db,
-            $selectedDate,
-            $productId,
-            $customerId,
-            (int)$quantity,
-            $userId,
-            $pool
-        );
-        echo json_encode([
-            'ok' => true,
-            'customers' => $saved['customers'],
-            'saved_quantity' => $saved['quantity'],
-            'demand_total' => $saved['demand_total'],
-            'customer_id' => $customerId,
-            'product_id' => $productId,
-            'notice' => bakery_t('production_center.store_demand_saved'),
-        ]);
-        exit;
-    } catch (Throwable $e) {
-        http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => bakery_error_message_for_user($e)]);
-        exit;
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['parse_kitchen_note', 'apply_kitchen_note'], true)) {
-    try {
-        if (!bakery_pack_yields_ready($db)) {
-            throw new RuntimeException(bakery_t('pan_dulce.err_pack_not_ready'));
-        }
-        if ($kitchenNote === '') {
-            throw new InvalidArgumentException(bakery_t('production_center.kitchen_empty'));
-        }
-        $kitchenParse = bakery_pack_parse_kitchen_note($db, $kitchenNote);
-        $routeCapacity = bakery_production_route_desired_vs_bake($db, $selectedDate, $kitchenParse['by_product']);
-        if (($_POST['action'] ?? '') === 'apply_kitchen_note') {
-            if ($kitchenParse['by_product'] === []) {
-                throw new InvalidArgumentException(bakery_t('production_center.kitchen_empty'));
-            }
-            if (!$planTableReady) {
-                throw new RuntimeException('Saved production plans are not installed yet. Run scripts/run_migrations.php first.');
-            }
-            $planQtys = $kitchenParse['by_product'];
-            foreach (bakery_pack_kitchen_managed_ids($db) as $pid) {
-                if (!isset($planQtys[$pid]) && !empty($allowedProductIds[$pid])) {
-                    $planQtys[$pid] = 0;
-                }
-            }
-            $planned = [$selectedDate => $planQtys];
-            $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-            $userId = isset($user['id']) ? (int)$user['id'] : null;
-            $saved = bakery_production_plan_save_targets($db, $planned, $allowedProductIds, $userId);
-            bakery_record_operational_event($db, BAKERY_OP_PRODUCTION_PLAN_SAVED,
-                'Saved kitchen-note production targets for ' . date('D, M j', strtotime($selectedDate)), [
-                'operational_date' => $selectedDate,
-                'metadata' => [
-                    'targets_saved' => $saved,
-                    'delivery_date' => $selectedDate,
-                    'source' => 'kitchen_note',
-                    'unknown' => $kitchenParse['unknown'],
-                ],
-            ]);
-            $notice = bakery_t('production_center.kitchen_saved', ['count' => $saved]);
-            $notice .= ' ' . bakery_t('production_center.save_is_not_commit');
-            header('Location: production_center.php?date=' . rawurlencode($selectedDate) . '&from_kitchen=1');
-            exit;
-        }
-    } catch (Throwable $e) {
-        $error = bakery_error_message_for_user($e);
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'cut_apply_all') {
-    try {
-        $cutDate = trim((string)($_POST['delivery_date'] ?? $_POST['date'] ?? $selectedDate));
-        if ($cutDate !== $selectedDate) {
-            throw new InvalidArgumentException('Cut the day you are viewing.');
-        }
-        if ($cutDate < date('Y-m-d')) {
-            throw new InvalidArgumentException('Cannot cut past deliveries');
-        }
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $userId = isset($user['id']) ? (int)$user['id'] : null;
-        $result = bakery_production_cut_apply_all_recommended($db, $cutDate, $allowedProductIds, $userId);
-        if ((int)$result['updated'] === 0) {
-            $notice = bakery_t('production_center.cut_apply_all_none');
-        } else {
-            $notice = bakery_t('production_center.cut_apply_all_saved', [
-                'products' => (int)$result['products'],
-                'count' => (int)$result['updated'],
-                'skipped' => (int)$result['skipped'],
-            ]);
-        }
-    } catch (Throwable $e) {
-        if ($db->inTransaction()) {
-            $db->rollBack();
-        }
-        $error = bakery_error_message_for_user($e);
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['assign_preview', 'assign_apply', 'cut_preview', 'cut_apply'], true)) {
-    $wantsJson = true;
-    $assignAction = (string)($_POST['action'] ?? '');
-    header('Content-Type: application/json; charset=utf-8');
-    try {
-        $productId = (int)($_POST['product_id'] ?? 0);
-        if ($productId <= 0 || empty($allowedProductIds[$productId])) {
-            throw new InvalidArgumentException('Unknown product.');
-        }
-        $assignDate = trim((string)($_POST['delivery_date'] ?? $_POST['date'] ?? $selectedDate));
-        if ($assignDate !== $selectedDate) {
-            throw new InvalidArgumentException($assignAction === 'cut_preview' || $assignAction === 'cut_apply' ? 'Cut the day you are viewing.' : 'Assign the day you are viewing.');
-        }
-        $pool = max(0, (int)($_POST['pool'] ?? 0));
-        if ($assignAction === 'assign_preview' || $assignAction === 'cut_preview') {
-            $customers = $assignAction === 'cut_preview'
-                ? bakery_production_cut_preview($db, $assignDate, $productId, $pool)
-                : bakery_production_assign_preview($db, $assignDate, $productId, $pool);
-            $demand = 0;
-            foreach ($customers as $row) {
-                $demand += (int)$row['quantity'];
-            }
-            echo json_encode([
-                'ok' => true,
-                'date' => $assignDate,
-                'product_id' => $productId,
-                'pool' => $pool,
-                'demand' => $demand,
-                'customers' => $customers,
-            ]);
-            exit;
-        }
-
-        $raw = $_POST['assignments'] ?? [];
-        if (is_string($raw)) {
-            $decoded = json_decode($raw, true);
-            $raw = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($raw) || $raw === []) {
-            throw new InvalidArgumentException($assignAction === 'cut_apply' ? 'No customer quantities to cut.' : 'No customer quantities to assign.');
-        }
-        $assignments = [];
-        foreach ($raw as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $assignments[] = [
-                'customer_id' => (int)($row['customer_id'] ?? $row['id'] ?? 0),
-                'quantity' => (int)($row['quantity'] ?? 0),
-            ];
-        }
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $userId = isset($user['id']) ? (int)$user['id'] : null;
-        if ($assignAction === 'cut_apply') {
-            $result = bakery_production_cut_apply($db, $assignDate, $productId, $assignments, $userId);
-            $notice = bakery_t('production_center.cut_saved', [
-                'count' => (int)$result['updated'],
-                'skipped' => (int)$result['skipped'],
-            ]);
-        } else {
-            $scope = (string)($_POST['scope'] ?? 'standing');
-            $result = bakery_production_assign_apply(
-                $db,
-                $assignDate,
-                $productId,
-                $assignments,
-                $scope,
-                $userId
-            );
-            $notice = bakery_t('production_center.assign_saved', [
-                'count' => (int)$result['updated'],
-                'skipped' => (int)$result['skipped'],
-            ]);
-        }
-        echo json_encode([
-            'ok' => true,
-            'result' => $result,
-            'notice' => $notice,
-        ]);
-        exit;
-    } catch (Throwable $e) {
-        if ($db->inTransaction()) {
-            $db->rollBack();
-        }
-        http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => bakery_error_message_for_user($e)]);
-        exit;
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'commit_plan') {
-    try {
-        if (production_center_week_start((string)($_POST['week'] ?? '')) !== $weekStart) {
-            throw new InvalidArgumentException('The production week changed. Reload the page and try again.');
-        }
-        $commitDate = trim((string)($_POST['delivery_date'] ?? ''));
-        if ($commitDate !== $selectedDate) {
-            throw new InvalidArgumentException('Commit the day you are viewing.');
-        }
-        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-        $result = bakery_production_plan_commit($db, $commitDate, isset($user['id']) ? (int)$user['id'] : null);
-        $notice = bakery_t('production_center.commit_notice', [
-            'date' => date('l, M j', strtotime($commitDate)),
-            'products' => (int)$result['products_count'],
-            'units' => number_format((int)$result['units_count']),
-        ]);
-    } catch (Throwable $e) {
-        $error = bakery_error_message_for_user($e);
-    }
-}
 
 if (($_GET['from_kitchen'] ?? '') === '1' && $notice === '') {
     $notice = bakery_t('production_center.kitchen_landed');
@@ -859,9 +585,6 @@ $loadHref = function_exists('bakery_ops_link_driver_load')
     ? bakery_ops_link_driver_load($selectedDate, [], $pageReturnKey ?: 'production_center')
     : ('driver_load.php?date=' . rawurlencode($selectedDate));
 
-$page_title = bakery_t('page.production_center');
-require_once 'includes/header.php';
-require_once 'includes/nav.php';
 
 $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strtotime($weekEnd));
 ?>
@@ -894,6 +617,25 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         'title' => bakery_t('production_workflow.title'),
         'lead' => bakery_t('production_workflow.lead_manager'),
     ]);
+    if (!function_exists('bakery_ingredient_requirements_build')) {
+        require_once __DIR__ . '/includes/ingredient_requirements.php';
+    }
+    if (!function_exists('bakery_ingredient_purchase_notes_unmarked_needed')) {
+        require_once __DIR__ . '/includes/ingredient_purchase_notes.php';
+    }
+    $ingredientPlanLite = bakery_ingredient_requirements_build($db, $selectedDate, 'plan');
+    $purchaseUnmarked = is_array($ingredientPlanLite['purchase_unmarked'] ?? null)
+        ? $ingredientPlanLite['purchase_unmarked']
+        : [];
+    if ($purchaseUnmarked !== []) {
+        $chipCount = count($purchaseUnmarked);
+        $plannerHref = (defined('BASE_URL') ? BASE_URL : '') . 'ingredient_requirements.php?date='
+            . rawurlencode($selectedDate) . '&source=plan';
+        echo '<p class="pc-ingredient-chip" role="status"><a href="'
+            . htmlspecialchars($plannerHref, ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars(bakery_t('production_center.ingredient_unmarked_chip', ['count' => $chipCount], ':count ingredients still need order/receive'), ENT_QUOTES, 'UTF-8')
+            . '</a></p>';
+    }
     ?>
 
     <?php if ($notice): ?><div class="pc-notice success"><?php echo htmlspecialchars($notice); ?></div><?php endif; ?>

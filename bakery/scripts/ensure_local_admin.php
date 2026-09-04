@@ -67,6 +67,15 @@ if ($envCode !== '') {
     }
 }
 
+// CI / cloud fixture resets may only set LOCAL_ADMIN_CODE. Match .env.example
+// so bakerysf_test always gets an administrator for suites that own alerts.
+if ($email === '') {
+    $email = 'danny@sourflour.org';
+}
+if ($name === '') {
+    $name = 'Danny';
+}
+
 $code = bakery_normalize_login_code($code);
 if ($code === '') {
     fwrite(STDERR, "Set LOCAL_ADMIN_CODE (4 digits) in .env or pass --code=\n");

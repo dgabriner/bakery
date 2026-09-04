@@ -9,6 +9,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/daily_order_generation.php';
 require_once 'includes/baker_mix.php';
+require_once 'includes/kitchen_segments.php';
 
 bakery_require_role(['baker', 'manager', 'administrator']);
 
@@ -65,13 +66,16 @@ $page_title = bakery_t('page.baker_mix');
 ?>
 
 <div class="bm-screen">
+    <?php if ($isBaker) { bakery_kitchen_segments_render('mix', $selectedDate); } ?>
     <header class="bm-header">
         <div class="bm-header__top">
             <h1 class="bm-title"><?php bakery_te('baker_mix.title'); ?></h1>
+            <?php if (!$isBaker): ?>
             <div class="bm-header__links">
                 <a class="bm-link" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('baker_mix.open_production'); ?></a>
                 <a class="bm-link" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.pack_list'); ?></a>
             </div>
+            <?php endif; ?>
         </div>
         <p class="bm-lead"><?php bakery_te('baker_mix.lead'); ?></p>
         <form method="get" action="baker_mix.php" class="bm-date-form">

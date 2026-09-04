@@ -31,6 +31,7 @@ require_once $root . '/includes/staff_alerts.php';
 require_once $root . '/includes/customer_notifications.php';
 require_once $root . '/includes/billing.php';
 require_once $root . '/includes/operational_timeline.php';
+require_once $root . '/includes/cron_run.php';
 
 $force = in_array('--force', $argv, true);
 $json = in_array('--json', $argv, true);
@@ -96,6 +97,7 @@ try {
     }
 
     if ($emailable === []) {
+        bakery_cron_record_run($db, 'staff_alert_digest', 'ok', ['status' => 'clean', 'alerts' => 0]);
         if ($json) {
             echo json_encode(['status' => 'clean', 'alerts' => 0, 'emailed' => false]) . "\n";
         } else {
@@ -175,6 +177,7 @@ try {
     }
 
     if ($sentTo === []) {
+        bakery_cron_record_run($db, 'staff_alert_digest', 'failed', ['status' => 'delivery_failed']);
         fwrite(STDERR, "Digest delivery failed for every recipient\n");
         exit(1);
     }
@@ -191,6 +194,11 @@ try {
         ),
         ['operational_date' => $today]
     );
+    bakery_cron_record_run($db, 'staff_alert_digest', 'ok', [
+        'status' => 'sent',
+        'alerts' => count($emailable),
+        'channel' => $channel,
+    ]);
 
     $result = [
         'status' => 'sent',
@@ -216,6 +224,15 @@ try {
     }
     exit(0);
 } catch (Throwable $e) {
+    if (isset($db) && $db instanceof PDO && function_exists('bakery_cron_record_run')) {
+        bakery_cron_record_run($db, 'staff_alert_digest', 'failed', [
+            'error' => substr($e->getMessage(), 0, 200),
+        ]);
+    } elseif (function_exists('bakery_cron_record_run')) {
+        bakery_cron_record_run(null, 'staff_alert_digest', 'failed', [
+            'error' => substr($e->getMessage(), 0, 200),
+        ]);
+    }
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
 }

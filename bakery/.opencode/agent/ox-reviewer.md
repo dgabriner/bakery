@@ -28,5 +28,6 @@ Review checklist, in order:
 4. Mobile and accessibility at the level the mission's surfaces demand: 320px reflow, 44px primary targets, semantic inputs, errors near fields, EN and ES both genuine.
 5. Tests: run only the suites the packet names, with `$env:DB_NAME='bakerysf_test'; $env:USE_PROD_DB='false'`. Never point anything else at any database. Report exact pass/fail counts.
 6. Truthfulness: no claimed evidence that was not witnessed. Verify handoff claims against actual diffs and suite output.
+7. Product schema boundaries: new product surfaces add prefixed tables with FKs to `customers`. Flag any `077+` migration that `ALTER TABLE` adds columns to `customers`, `daily_orders`, `daily_order_items`, or `standing_orders` unless the file header contains `-- owner-approved-core-column`.
 
 Write findings as markdown to `tmp/ox/reports/<mission-id>-review.md`: verdict (approve / fix-first), blocking issues with file:line, non-blocking notes, and the exact commands you ran with results.

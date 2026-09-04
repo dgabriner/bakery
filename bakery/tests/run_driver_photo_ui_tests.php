@@ -154,7 +154,7 @@ driver_photo_assert(
     strpos($handler, "'image/heic', 'image/heif'") !== false
 );
 
-foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo', 'driver.skip_departure_photo', 'driver.save_and_leave_photo'] as $key) {
+foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo', 'driver.skip_departure_photo', 'driver.save_and_leave_photo', 'driver.adjust_delivery', 'driver.next', 'driver.confirm_delivery_hint'] as $key) {
     driver_photo_assert(
         "photo workflow translation exists in English and Spanish: {$key}",
         isset($english[$key], $spanish[$key])
@@ -351,9 +351,37 @@ driver_photo_assert(
     'happy-path confirm saves quantities then prompts for a leaving photo',
     strpos($page, 'id="deliveryWizardReviewBtn"') !== false
         && strpos($page, 'id="deliveryVarianceAck"') !== false
+        && strpos($page, 'id="deliveryAdjustDetails"') !== false
         && strpos($script, "primaryBtn.textContent = i18n('save_and_leave_photo')") !== false
         && strpos($script, "state.photoReturnStep = 'complete'") !== false
         && strpos($script, 'function promptDeparturePhoto()') !== false
+);
+driver_photo_assert(
+    'confirm step collapses quantity edits under Adjust and keeps billable = pieces - credits',
+    strpos($page, 'id="deliveryAdjustDetails"') !== false
+        && strpos($script, 'var billable = Math.max(0, pieces - credits)') !== false
+        && strpos($script, "action=confirm_delivery") !== false
+        && strpos($script, 'delivered_pieces=') !== false
+        && strpos($script, 'credits_taken_back=') !== false
+);
+$tracking = (string)file_get_contents($root . '/includes/global_tracking.js');
+driver_photo_assert(
+    'GPS tracking starts when today\'s dated route view loads',
+    strpos($tracking, 'function localToday') !== false
+        && strpos($tracking, "routeDate === localToday()") !== false
+        && strpos($tracking, 'bakeryEnableGpsTracking(driverId, routeDate)') !== false
+);
+$outbox = (string)file_get_contents($root . '/includes/driver_offline_outbox.js');
+driver_photo_assert(
+    'offline outbox queues photo and confirm with client_request_id',
+    strpos($page, 'driver_offline_outbox.js') !== false
+        && strpos($outbox, 'indexedDB') !== false
+        && strpos($outbox, 'enqueuePhoto') !== false
+        && strpos($outbox, 'enqueueConfirm') !== false
+        && strpos($outbox, 'client_request_id') !== false
+        && strpos($script, 'BakeryDriverOutbox') !== false
+        && strpos($script, 'client_request_id') !== false
+        && strpos($page, 'id="driverOutboxChip"') !== false
 );
 driver_photo_assert(
     'failed stops update live and include HQ contact links',
@@ -361,6 +389,50 @@ driver_photo_assert(
         && strpos($page, 'id="failStopWaLink"') !== false
         && strpos($page, 'function updateFailHqLinks()') !== false
         && strpos($page, "setTimeout(function () { window.location.reload(); }, 700);") === false
+);
+
+$shell = (string)file_get_contents($root . '/includes/shell.js');
+$clientErrorApi = (string)file_get_contents($root . '/client_error_api.php');
+$clientErrorsHelper = (string)file_get_contents($root . '/includes/client_errors.php');
+driver_photo_assert(
+    'shell listens for unhandledrejection and error and beacons client_error_api',
+    strpos($shell, "addEventListener('unhandledrejection'") !== false
+        && strpos($shell, "addEventListener('error'") !== false
+        && strpos($shell, 'sendBeacon') !== false
+        && strpos($shell, 'client_error_api.php') !== false
+        && strpos($shell, 'something_failed') !== false
+);
+driver_photo_assert(
+    'photo delete await fetch is inside try/catch and returns {ok,error}',
+    strpos($script, 'async function deletePhoto') !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), 'try {') !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), "return { ok: false, error:") !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), 'credentials: \'same-origin\'') !== false
+);
+driver_photo_assert(
+    'route prep post() catches fetch failures and returns {ok,error}',
+    strpos($prepScript, 'async function post(') !== false
+        && strpos(driver_photo_section($prepScript, 'async function post(', 'function movableStops'), 'try {') !== false
+        && strpos(driver_photo_section($prepScript, 'async function post(', 'function movableStops'), 'ok: false') !== false
+);
+driver_photo_assert(
+    'client_error_api is login-gated, CSRF-exempt, and rate-limited',
+    strpos($clientErrorApi, "BAKERY_SKIP_REQUEST_SECURITY', true)") !== false
+        || strpos($clientErrorApi, 'BAKERY_SKIP_REQUEST_SECURITY') !== false
+);
+driver_photo_assert(
+    'client_error_api requires a session and rate-limits beacons',
+    strpos($clientErrorApi, 'bakery_current_user()') !== false
+        && strpos($clientErrorApi, 'bakery_client_error_rate_limit') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_error_rate_limit') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_error_record') !== false
+);
+driver_photo_assert(
+    'EN/ES something_failed strings exist for the shell toast',
+    isset($english['error.something_failed'])
+        && isset($spanish['error.something_failed'])
+        && $english['error.something_failed'] !== ''
+        && $spanish['error.something_failed'] !== ''
 );
 
 exit($failures > 0 ? 1 : 0);

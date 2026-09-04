@@ -25,3 +25,5 @@ Install the crontab on DreamHost; confirm `health_deploy.php` shows both ages < 
 ## Done when
 
 The dashboard tells the truth about whether the night ran, and the runbook needs no owner interpretation.
+
+**Status:** shipped 2026-09-04 (agent parts) — `bakery_cron_record_run` + `storage/cron/*.json`, health_deploy `cron.*.age_hours`, dashboard stale >26h warning, CRON_KIT runbook. Owner still installs DreamHost crontab. Staging and Live were not touched.

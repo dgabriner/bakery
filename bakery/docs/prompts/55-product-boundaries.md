@@ -21,3 +21,5 @@ Core ops, the customer portal, SF Baker, Bread Education, cashier/retail, Square
 ## Done when
 
 The rule is in the product context, the reviewer checklist, and a test — not only in chat.
+
+**Status:** shipped 2026-09-04 on `cursor/sour-flour-agent-program-a061` (PR #20). Decided pinned on Homebase whiteboard; rule in `BAKERY_PRODUCT_CONTEXT.md` §8, `ARCHITECTURE.md` growth rules, ox-reviewer checklist, and `run_schema_compare_tests.php` (077+). Staging and Live were not touched.

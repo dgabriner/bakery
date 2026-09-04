@@ -27,3 +27,5 @@ Do not change credit allocation, snapshot pricing, or COD math. Do not remove th
 ## Done when
 
 Happy path is 3 taps from "Arrived" to next stop; both driver suites green; §4.9 billable math unchanged (assert in tests).
+
+**Status:** shipped 2026-09-04 — Photo → Confirm → Next with Adjust disclosure for quantities/COD/invoice; GPS starts on today's route load; writes still through `bakery_confirm_delivery`. Staging and Live were not touched.

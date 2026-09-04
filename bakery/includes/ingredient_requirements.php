@@ -1094,5 +1094,24 @@ function bakery_ingredient_requirements_build(PDO $db, string $date, string $sou
     $result['purchase_suggestions'] = $purchaseSuggestions;
     $result['on_hand_trustworthy'] = $inventoryReady && $trustworthyCount > 0;
 
+    if (!function_exists('bakery_ingredient_purchase_notes_for_date')) {
+        $notesFile = __DIR__ . '/ingredient_purchase_notes.php';
+        if (is_readable($notesFile)) {
+            require_once $notesFile;
+        }
+    }
+    $notesById = function_exists('bakery_ingredient_purchase_notes_for_date')
+        ? bakery_ingredient_purchase_notes_for_date($db, $date)
+        : [];
+    foreach ($result['ingredients'] as &$ingredientRow) {
+        $iid = (int)($ingredientRow['ingredient_id'] ?? 0);
+        $ingredientRow['purchase_note'] = $notesById[$iid] ?? null;
+    }
+    unset($ingredientRow);
+    $result['purchase_notes'] = $notesById;
+    $result['purchase_unmarked'] = function_exists('bakery_ingredient_purchase_notes_unmarked_needed')
+        ? bakery_ingredient_purchase_notes_unmarked_needed($result['ingredients'], $notesById)
+        : [];
+
     return $result;
 }

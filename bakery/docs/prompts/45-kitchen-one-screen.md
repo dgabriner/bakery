@@ -25,3 +25,5 @@ Do not change inventory math or pack check-off semantics. Bakers never see Produ
 ## Done when
 
 A baker lands on Today and reaches any of Mix/Bake/Pack in one tap; pack check-offs on a phone need no horizontal scroll at 320px; suites green.
+
+**Status:** shipped 2026-09-04 — baker bottom nav is one Today entry; sticky Mix/Bake/Pack via `includes/kitchen_segments.php` + `css/kitchen.css`; Pack List baker phone focus (prev/next, 56px checks). Staging and Live were not touched.

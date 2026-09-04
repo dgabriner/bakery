@@ -31,14 +31,14 @@ if (!defined('ACCESS_ALLOWED')) {
 <script defer src="<?php echo bakery_asset_href('includes/login_audit.js'); ?>"></script>
 <style>
   :root {
-    --ink: #33251f;
-    --cream: #fffdf8;
-    --terracotta: #b75c3f;
-    --muted: #7a6a5c;
-    --border: #e8ddd2;
-    --green: #2d6a4f;
-    --amber: #b8860b;
-    --sand: #faf6f1;
+    --ink: var(--sf-portal-ink, #33251f);
+    --cream: var(--sf-portal-cream, #fffdf8);
+    --terracotta: var(--sf-portal-terracotta, #b75c3f);
+    --muted: var(--sf-portal-muted, #7a6a5c);
+    --border: var(--sf-portal-border, #e8ddd2);
+    --green: var(--sf-portal-green, #2d6a4f);
+    --amber: var(--sf-portal-amber, #b8860b);
+    --sand: var(--sf-portal-sand, #faf6f1);
     --nav-h: 64px;
     --top-h: 52px;
     --safe-b: env(safe-area-inset-bottom, 0px);
@@ -105,8 +105,8 @@ if (!defined('ACCESS_ALLOWED')) {
     flex-shrink: 0;
     font-size: .82rem;
     line-height: 1;
-    min-height: 36px;
-    min-width: 36px;
+    min-height: var(--sf-touch-min, 44px);
+    min-width: var(--sf-touch-min, 44px);
     padding: 8px 12px;
   }
   .portal-top__more[aria-expanded="true"] {
@@ -421,7 +421,7 @@ if (!defined('ACCESS_ALLOWED')) {
   .filter-row label { display: flex; flex-direction: column; font-size: .78rem; gap: 4px; width: 100%; }
   .filter-row input { border: 1px solid var(--border); border-radius: 10px; font-size: 1rem; min-height: 48px; padding: 10px 12px; width: 100%; }
   .preset-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-  .preset-links a { border: 1px solid var(--border); border-radius: 999px; color: var(--ink); font-size: .85rem; min-height: 40px; padding: 8px 14px; text-decoration: none; }
+  .preset-links a { border: 1px solid var(--border); border-radius: 999px; color: var(--ink); font-size: .85rem; min-height: var(--sf-touch-min, 44px); padding: 8px 14px; text-decoration: none; }
   .preset-links a.active { background: var(--sand); border-color: var(--terracotta); color: var(--terracotta); font-weight: 600; }
   .metrics { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
   .metric { background: var(--sand); border-radius: 10px; padding: 14px; }
@@ -496,8 +496,8 @@ if (!defined('ACCESS_ALLOWED')) {
     display: inline-flex;
     flex-shrink: 0;
     justify-content: center;
-    min-height: 36px;
-    min-width: 36px;
+    min-height: var(--sf-touch-min, 44px);
+    min-width: var(--sf-touch-min, 44px);
     padding: 6px;
     position: relative;
     text-decoration: none;
@@ -519,7 +519,7 @@ if (!defined('ACCESS_ALLOWED')) {
   .page-intro { color: var(--muted); font-size: .92rem; line-height: 1.5; margin: 0 0 14px; }
   .notify-toolbar { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; margin-bottom: 12px; }
   .notify-toolbar .page-intro { flex: 1; margin: 0; min-width: 200px; }
-  .btn-sm { font-size: .82rem; min-height: 40px; padding: 8px 14px; width: auto; }
+  .btn-sm { font-size: .82rem; min-height: var(--sf-touch-min, 44px); padding: 8px 14px; width: auto; }
   .notify-list { list-style: none; margin: 0 0 16px; padding: 0; }
   .notify-item {
     background: #fff;

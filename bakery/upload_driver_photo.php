@@ -9,6 +9,7 @@ require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/photo_handler.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
+require_once __DIR__ . '/includes/client_request_id.php';
 
 header('Content-Type: application/json');
 error_reporting(0);
@@ -112,6 +113,7 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     $notes = isset($_POST['notes']) ? trim((string)$_POST['notes']) : '';
     $latitude = isset($_POST['latitude']) && $_POST['latitude'] !== '' ? (float)$_POST['latitude'] : null;
     $longitude = isset($_POST['longitude']) && $_POST['longitude'] !== '' ? (float)$_POST['longitude'] : null;
+    $clientRequestId = bakery_normalize_client_request_id($_POST['client_request_id'] ?? '');
 
     if ($driverId <= 0 || $customerId <= 0 || $dailyOrderId <= 0) {
         throw new Exception('driver_id, customer_id, and daily_order_id are required');
@@ -126,13 +128,41 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
         $photoType = 'After';
     }
 
-    if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
-        throw new Exception('Photo file is required');
-    }
-
     $assignment = $photoHandler->verifyDeliveryAssignment($db, $driverId, $customerId, $dailyOrderId, $date);
     if (!$assignment) {
         throw new Exception('No delivery assignment found for this stop on the selected date');
+    }
+
+    if ($clientRequestId !== '' && bakery_driver_photos_client_request_id_ready($db)) {
+        $dup = $db->prepare(
+            'SELECT id, file_path, notes, created_at, photo_type
+             FROM driver_photos WHERE client_request_id = ? LIMIT 1'
+        );
+        $dup->execute([$clientRequestId]);
+        $existing = $dup->fetch(PDO::FETCH_ASSOC);
+        if ($existing) {
+            $photoId = (int)$existing['id'];
+            $urls = $photoHandler->getPhotoUrlWithFallback((string)$existing['file_path']);
+            $response = $photoHandler->buildUploadSuccessResponse($assignment, [
+                'filename' => basename((string)$existing['file_path']),
+                'file_path' => (string)$existing['file_path'],
+                'photo_type' => (string)$existing['photo_type'],
+                'daily_order_id' => $dailyOrderId,
+                'delivery_date' => $date,
+            ], $photoId);
+            $response['photo']['id'] = $photoId;
+            $response['photo']['url'] = $urls['primary'];
+            $response['photo']['fallback_url'] = $urls['fallback'];
+            $response['photo']['notes'] = (string)($existing['notes'] ?? '');
+            $response['photo']['created_at'] = (string)($existing['created_at'] ?? '');
+            $response['duplicate'] = true;
+            $response['client_request_id'] = $clientRequestId;
+            return $response;
+        }
+    }
+
+    if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
+        throw new Exception('Photo file is required');
     }
 
     $uploadResult = $photoHandler->processUpload(
@@ -152,9 +182,40 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     $photoData = $uploadResult['data'];
     $photoData['delivery_date'] = $date;
     $photoData['daily_order_id'] = $dailyOrderId;
+    if ($clientRequestId !== '') {
+        $photoData['client_request_id'] = $clientRequestId;
+    }
 
-    $saveResult = $photoHandler->saveToDatabase($db, $driverId, $customerId, $photoData);
+    try {
+        $saveResult = $photoHandler->saveToDatabase($db, $driverId, $customerId, $photoData);
+    } catch (Throwable $e) {
+        $saveResult = ['success' => false, 'error' => $e->getMessage()];
+    }
     if (empty($saveResult['success'])) {
+        if ($clientRequestId !== '' && bakery_driver_photos_client_request_id_ready($db)) {
+            $dup = $db->prepare('SELECT id, file_path, notes, created_at, photo_type FROM driver_photos WHERE client_request_id = ? LIMIT 1');
+            $dup->execute([$clientRequestId]);
+            $existing = $dup->fetch(PDO::FETCH_ASSOC);
+            if ($existing) {
+                $photoId = (int)$existing['id'];
+                $urls = $photoHandler->getPhotoUrlWithFallback((string)$existing['file_path']);
+                $response = $photoHandler->buildUploadSuccessResponse($assignment, [
+                    'filename' => basename((string)$existing['file_path']),
+                    'file_path' => (string)$existing['file_path'],
+                    'photo_type' => (string)$existing['photo_type'],
+                    'daily_order_id' => $dailyOrderId,
+                    'delivery_date' => $date,
+                ], $photoId);
+                $response['photo']['id'] = $photoId;
+                $response['photo']['url'] = $urls['primary'];
+                $response['photo']['fallback_url'] = $urls['fallback'];
+                $response['photo']['notes'] = (string)($existing['notes'] ?? '');
+                $response['photo']['created_at'] = (string)($existing['created_at'] ?? '');
+                $response['duplicate'] = true;
+                $response['client_request_id'] = $clientRequestId;
+                return $response;
+            }
+        }
         throw new Exception($saveResult['error'] ?? 'Failed to save photo metadata');
     }
 
@@ -165,5 +226,8 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     $response['photo']['fallback_url'] = $urls['fallback'];
     $response['photo']['notes'] = $notes;
     $response['photo']['created_at'] = date('Y-m-d H:i:s');
+    if ($clientRequestId !== '') {
+        $response['client_request_id'] = $clientRequestId;
+    }
     return $response;
 }

@@ -30,8 +30,18 @@ function bakery_agent_program_common_invariants(): array
 function bakery_agent_program_work_map(): array
 {
     $common = bakery_agent_program_common_invariants();
-    $m = function (string $title, array $aliases, array $files, array $tests, array $invariants, string $prompt, string $status = 'open', array $bugs = []) use ($common): array {
-        return [
+    $m = function (
+        string $title,
+        array $aliases,
+        array $files,
+        array $tests,
+        array $invariants,
+        string $prompt,
+        string $status = 'open',
+        array $bugs = [],
+        ?int $expectedSuitesSeconds = null
+    ) use ($common): array {
+        $row = [
             'title' => $title,
             'aliases' => $aliases,
             'files' => $files,
@@ -41,6 +51,10 @@ function bakery_agent_program_work_map(): array
             'prompt' => $prompt,
             'prompt_status' => $status,
         ];
+        if ($expectedSuitesSeconds !== null) {
+            $row['expected_suites_seconds'] = $expectedSuitesSeconds;
+        }
+        return $row;
     };
 
     return [
@@ -99,15 +113,18 @@ function bakery_agent_program_work_map(): array
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_customer_billing_tests.php'],
             ['Never price historical invoices from live products.price', 'Billing Center marks invoiced; it does not invent amounts', 'A send row exists for every mail attempt; status never claims sent without an attempt'],
             'docs/prompts/35-money-transactions.md',
-            'partial'
+            'shipped',
+            [],
+            120
         ),
         'js-safety-net' => $m(
             'Global browser error reporting and visible fetch failures',
             ['36-js-safety-net', 'prompt-36', 'unhandledrejection', 'client-errors'],
-            ['includes/shell.js', 'client_error_api.php', 'includes/driver_delivery.js', 'includes/driver_route_prep.js', 'includes/global_tracking.js', 'includes/portal_orders.js', 'login_history.php'],
-            ['tests/run_driver_photo_ui_tests.php', 'tests/run_driver_workflow_tests.php', 'tests/run_login_history_tests.php', 'tests/run_i18n_tests.php'],
+            ['includes/shell.js', 'client_error_api.php', 'includes/client_errors.php', 'includes/driver_delivery.js', 'includes/driver_route_prep.js', 'login_history.php', 'database/schema/077_client_errors.sql', 'lang/en.php', 'lang/es.php'],
+            ['tests/run_driver_photo_ui_tests.php', 'tests/run_driver_workflow_tests.php', 'tests/run_login_history_tests.php', 'tests/run_client_error_api_tests.php', 'tests/run_i18n_tests.php'],
             ['Every await fetch has a catch and a visible status', 'Beacon endpoint is login-gated and rate-limited'],
-            'docs/prompts/36-js-safety-net.md'
+            'docs/prompts/36-js-safety-net.md',
+            'shipped'
         ),
         'characterize-core' => $m(
             'Characterization suites for daily orders, standing orders, production center, delivery confirm',
@@ -115,7 +132,10 @@ function bakery_agent_program_work_map(): array
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_complete_delivery_tests.php'],
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_complete_delivery_tests.php'],
             ['Dated beats standing per customer', 'Re-generation preserves dated edits unless overwrite_changed', 'Confirm is one transaction; door credits return once'],
-            'docs/prompts/37-characterize-core.md'
+            'docs/prompts/37-characterize-core.md',
+            'shipped',
+            [],
+            90
         ),
 
         // ---------------------------------------------------------------- Wave 2
@@ -125,15 +145,17 @@ function bakery_agent_program_work_map(): array
             ['includes/navigation_catalog.php', 'includes/nav.php', 'includes/auth.php', 'includes/header.php', 'cashier_add_product.php', 'module_guide.php', 'docs/MODULE_ACCESS_GUIDE.md'],
             ['tests/run_navigation_tests.php', 'tests/run_auth_tests.php', 'tests/run_cashier_role_tests.php', 'tests/run_i18n_tests.php'],
             ['Server-side bakery_require_role; menu hiding is not security', 'Unlisted scripts default to administrator only'],
-            'docs/prompts/40-nav-catalog-roles.md'
+            'docs/prompts/40-nav-catalog-roles.md',
+            'shipped'
         ),
         'touch-tokens' => $m(
             '44px touch targets and one token set across staff, portal, SFB',
             ['41-touch-tokens', 'prompt-41', 'tap-targets', 'tokens'],
-            ['css/tokens.css', 'css/base.css', 'css/nav.css', 'css/manager_phone.css', 'includes/portal_styles.php', 'includes/sfb_styles.php', 'includes/sfb_tabs.php', 'tests/run_touch_target_tests.php'],
+            ['css/tokens.css', 'css/base.css', 'css/nav.css', 'css/manager_phone.css', 'css/driver.css', 'includes/portal_styles.php', 'includes/sfb_styles.php', 'includes/sfb_tabs.php', 'tests/run_touch_target_tests.php'],
             ['tests/run_touch_target_tests.php', 'tests/run_navigation_tests.php', 'tests/run_manager_phone_tests.php'],
             ['--sf-touch-min is the floor for every interactive control in shared chrome', 'Do not reintroduce viewport scroll listeners (mobile shake fix)'],
-            'docs/prompts/41-touch-tokens.md'
+            'docs/prompts/41-touch-tokens.md',
+            'shipped'
         ),
         'driver-fast-path' => $m(
             'Driver stop wizard: photo → confirm → next',
@@ -141,15 +163,19 @@ function bakery_agent_program_work_map(): array
             ['driver.php', 'includes/driver_delivery.js', 'css/driver.css', 'includes/global_tracking.js'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php'],
             ['Every write through bakery_confirm_delivery', 'billable_pieces = delivered_pieces - credits_taken_back', 'Driver UX is the reference implementation — change it surgically'],
-            'docs/prompts/42-driver-fast-path.md'
+            'docs/prompts/42-driver-fast-path.md',
+            'shipped'
         ),
         'driver-offline-queue' => $m(
             'IndexedDB outbox with idempotent photo/confirm endpoints',
             ['43-driver-offline-queue', 'prompt-43', 'offline-driver', 'outbox'],
-            ['includes/driver_offline_outbox.js', 'includes/driver_delivery.js', 'upload_driver_photo.php', 'complete_delivery.php', 'database/schema/077_delivery_client_request_id.sql'],
+            ['includes/driver_offline_outbox.js', 'includes/driver_delivery.js', 'upload_driver_photo.php', 'complete_delivery.php', 'database/schema/078_delivery_client_request_id.sql'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php', 'tests/run_schema_compare_tests.php'],
             ['Same client_request_id twice → one confirmation, one set of movements', 'No service-worker page caching'],
-            'docs/prompts/43-driver-offline-queue.md'
+            'docs/prompts/43-driver-offline-queue.md',
+            'shipped',
+            [],
+            60
         ),
         'manager-phone-closeout' => $m(
             'Manager phone Routes / Closeout cards; route_manager.php desktop-only',
@@ -157,7 +183,8 @@ function bakery_agent_program_work_map(): array
             ['includes/manager_phone.php', 'css/manager_phone.css', 'manager.php', 'route_manager.php', 'route_closeout.php'],
             ['tests/run_manager_phone_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php'],
             ['loaded = net delivered + van leftover + waste + door credits', 'Reuse bakery_inventory_reconcile_driver_load; no second closeout path'],
-            'docs/prompts/44-manager-phone-closeout.md'
+            'docs/prompts/44-manager-phone-closeout.md',
+            'shipped'
         ),
         'kitchen-one-screen' => $m(
             'Baker Today with Mix / Bake / Pack segments; Pack List phone mode',
@@ -165,15 +192,17 @@ function bakery_agent_program_work_map(): array
             ['includes/kitchen_segments.php', 'includes/nav.php', 'baker_mix.php', 'production.php', 'pack_list.php', 'includes/pack_list.php'],
             ['tests/run_baker_mix_tests.php', 'tests/run_production_confirm_tests.php', 'tests/run_pack_list_tests.php'],
             ['Bakers never open Production Center', 'Pack check-off semantics and inventory math unchanged'],
-            'docs/prompts/45-kitchen-one-screen.md'
+            'docs/prompts/45-kitchen-one-screen.md',
+            'shipped'
         ),
         'sfb-bottom-nav' => $m(
             'SF Baker bottom tabs + More replacing the eight-tab strip',
             ['46-sfb-bottom-nav', 'prompt-46', 'sfb-nav'],
-            ['includes/sfb_tabs.php', 'includes/sfb_styles.php', 'includes/portal_nav.js'],
+            ['includes/sfb_tabs.php', 'includes/sfb_styles.php', 'includes/portal_nav.js', 'includes/portal_nav.php', 'sfb_ingredients.php'],
             ['tests/run_sf_baker_tests.php', 'tests/run_sfb_content_trust_tests.php'],
             ['Origin badges and gating unchanged'],
-            'docs/prompts/46-sfb-bottom-nav.md'
+            'docs/prompts/46-sfb-bottom-nav.md',
+            'shipped'
         ),
 
         // ---------------------------------------------------------------- Wave 3
@@ -181,17 +210,19 @@ function bakery_agent_program_work_map(): array
             'Move inline CSS/JS out of the six largest pages',
             ['50-extract-assets', 'prompt-50', 'inline-css', 'god-pages'],
             ['route_manager.php', 'standing_orders_manager.php', 'driver_overview.php', 'driver_assignment.php', 'customer_schedule.php', 'standing_routes.php', 'css/route_manager.css', 'css/standing_orders_manager.css', 'css/driver_overview.css', 'css/driver_assignment.css', 'css/customer_schedule.css', 'css/standing_routes.css', 'includes/route_manager.js', 'includes/standing_orders_manager.js', 'includes/driver_overview.js', 'includes/driver_assignment.js', 'includes/customer_schedule.js', 'includes/standing_routes.js', 'scripts/deploy_manifest.ps1'],
-            ['tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php'],
+            ['tests/run_extract_assets_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_standing_orders_manager_tests.php'],
             ['Zero behavior change per extraction', 'New assets listed in scripts/deploy_manifest.ps1'],
-            'docs/prompts/50-extract-assets.md'
+            'docs/prompts/50-extract-assets.md',
+            'shipped'
         ),
         'split-actions' => $m(
             'Action handlers become includes/<page>_actions.php + thin *_api.php',
             ['51-split-actions', 'prompt-51', 'actions-split'],
-            ['includes/daily_orders_actions.php', 'includes/standing_orders_manager_actions.php', 'includes/driver_assignment_actions.php', 'includes/production_center_actions.php', 'daily_orders_api.php', 'standing_orders_api.php', 'driver_assignment_api.php', 'production_center_api.php'],
+            ['includes/daily_orders_actions.php', 'includes/standing_orders_manager_actions.php', 'includes/driver_assignment_actions.php', 'includes/production_center_actions.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php'],
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_deploy_surface_tests.php'],
             ['Pages authorize, validate, call includes/, render', 'Characterization suites stay green unchanged'],
-            'docs/prompts/51-split-actions.md'
+            'docs/prompts/51-split-actions.md',
+            'shipped'
         ),
         'one-mutation-path' => $m(
             'Single helpers for standing upsert, daily find-or-create, recompute total',
@@ -199,15 +230,21 @@ function bakery_agent_program_work_map(): array
             ['includes/customer_order_mutations.php', 'includes/daily_order_generation.php', 'standing_orders.php', 'bread_distribution.php', 'product_distribution.php', 'includes/customer_portal.php', 'includes/driver_assignments.php', 'includes/production_assign.php', 'includes/pan_dulce_standards.php', 'includes/survey_store_verify.php'],
             ['tests/run_operating_demand_tests.php', 'tests/run_customer_order_power_tests.php', 'tests/run_golden_day_qa.php', 'tests/run_tomorrow_confirmed_tests.php', 'tests/run_integrity_tests.php'],
             ['Dated beats standing per customer', 'Standing edits never rewrite past dated orders; dated edits never write standing'],
-            'docs/prompts/52-one-mutation-path.md'
+            'docs/prompts/52-one-mutation-path.md',
+            'shipped',
+            [],
+            90
         ),
         'hot-path-queries' => $m(
             'Batch N+1 loops; standing_routes day index; shared PDO',
             ['53-hot-path-queries', 'prompt-53', 'n-plus-one', 'indexes'],
-            ['includes/driver_assignments.php', 'driver_load.php', 'production.php', 'database/schema/078_standing_routes_day_index.sql'],
+            ['includes/driver_assignments.php', 'driver_load.php', 'production.php', 'database/schema/079_standing_routes_day_index.sql'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_production_confirm_tests.php', 'tests/run_schema_compare_tests.php'],
             ['(driver_id, delivery_date, route_order) stays unique', 'Route build issues O(1) statements'],
-            'docs/prompts/53-hot-path-queries.md'
+            'docs/prompts/53-hot-path-queries.md',
+            'shipped',
+            [],
+            60
         ),
         'gate-scaling' => $m(
             'Mapped-suite gate mode and CI without the laptop',
@@ -215,7 +252,10 @@ function bakery_agent_program_work_map(): array
             ['scripts/run_test_gate.sh', '.github/workflows/test-gate.yml', 'includes/agent_work_map.php', 'docs/GROK_AND_CLOUD_AGENT_DEPLOY.md'],
             ['tests/run_agent_work_map_tests.php', 'tests/run_local_test_target_guard_tests.php'],
             ['CI never deploys, never holds SFTP secrets', 'CI green ≠ Staging ≠ Live'],
-            'docs/prompts/54-gate-scaling.md'
+            'docs/prompts/54-gate-scaling.md',
+            'shipped',
+            [],
+            45
         ),
         'product-boundaries' => $m(
             'Prefixed tables with FKs to customers; no new core columns without owner approval',
@@ -223,7 +263,8 @@ function bakery_agent_program_work_map(): array
             ['BAKERY_PRODUCT_CONTEXT.md', 'ARCHITECTURE.md', '.opencode/agent/ox-reviewer.md', 'tests/run_schema_compare_tests.php', 'includes/schema_migration_numbers.php'],
             ['tests/run_schema_compare_tests.php', 'tests/run_agent_work_map_tests.php'],
             ['customers is the identity hub; product families add sfb_*/square_*/text_* style tables'],
-            'docs/prompts/55-product-boundaries.md'
+            'docs/prompts/55-product-boundaries.md',
+            'shipped'
         ),
 
         // ---------------------------------------------------------------- Wave 4
@@ -233,16 +274,17 @@ function bakery_agent_program_work_map(): array
             ['scripts/demand_scheduler.php', 'scripts/staff_alert_digest.php', 'health_deploy.php', 'includes/dashboard_command_center.php', 'includes/staff_alerts.php', 'docs/CRON_KIT.md'],
             ['tests/run_demand_scheduler_tests.php', 'tests/run_staff_alert_tests.php', 'tests/run_tomorrow_confirmed_tests.php'],
             ['Page load still fills the horizon without the cron', 'Dashboard is honest about stale overnight runs'],
-            'docs/prompts/60-overnight-cron.md'
+            'docs/prompts/60-overnight-cron.md',
+            'shipped'
         ),
         'settlement-story' => $m(
             'One settlement row per delivery; COD turn-in recorded',
             ['61-settlement-story', 'prompt-61', 'cod-turnin', 'money-phase-2'],
             ['billing_center.php', 'includes/billing.php', 'includes/billing_aging.php', 'includes/billing_panel_invoices.php', 'includes/cod_turnins.php', 'route_manager.php', 'includes/manager_phone.php'],
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_customer_billing_tests.php'],
-            ['Billing Center does not invent amounts', 'Ledger table only after an owner Decided'],
+            ['Billing Center does not invent amounts', 'Computed-only Decided — no AR ledger, no weekly rollup'],
             'docs/prompts/61-settlement-story.md',
-            'owner-decision'
+            'shipped'
         ),
         'engagement-writeback' => $m(
             'Survey → Driver Assignment; failed stop → text + credit handoff',
@@ -250,25 +292,26 @@ function bakery_agent_program_work_map(): array
             ['includes/survey_store_verify.php', 'includes/surveys.php', 'survey.php', 'includes/driver_assignments.php', 'includes/delivery_recovery.php', 'includes/exception_desk.php', 'includes/text_comms.php', 'includes/customer_delivery_issues.php'],
             ['tests/run_survey_store_verify_tests.php', 'tests/run_survey_route_order_tests.php', 'tests/run_failed_stop_recovery_tests.php', 'tests/run_text_comms_tests.php', 'tests/run_exception_desk_tests.php'],
             ['Failed-stop rules in docs/FAILED_STOP_RECOVERY_MODEL.md are law', 'Texts send only through the Command Center send path', 'No invoice/credit mutation from the desk'],
-            'docs/prompts/62-engagement-writeback.md'
+            'docs/prompts/62-engagement-writeback.md',
+            'shipped'
         ),
         'ingredient-light' => $m(
             'Ordered / received notes and light stock adjust for ingredients',
             ['63-ingredient-light', 'prompt-63', 'ingredient-notes'],
             ['ingredient_requirements.php', 'includes/ingredient_requirements.php', 'ingredients.php', 'includes/ingredient_purchase_notes.php'],
             ['tests/run_ingredient_planner_tests.php', 'tests/run_formula_units_tests.php'],
-            ['No PO, receiving, or lot tracking', 'Step B (stock adjust) only after owner confirms'],
+            ['No PO, receiving, or lot tracking', 'Stock adjust Decided no — notes only'],
             'docs/prompts/63-ingredient-light.md',
-            'owner-decision'
+            'shipped'
         ),
         'retail-scope-decision' => $m(
-            'Owner decides retail cashier scope; agent records it',
+            'Retail sales out of scope; cashier stays photos + catalog',
             ['64-retail-scope-decision', 'prompt-64', 'retail-scope'],
             ['BAKERY_PRODUCT_CONTEXT.md', 'docs/prompts/64-retail-scope-decision.md'],
             ['tests/run_cashier_role_tests.php'],
-            ['Cashier stays photos + catalog until the owner decides otherwise'],
+            ['Cashier stays photos + catalog; Square POS owns retail sales'],
             'docs/prompts/64-retail-scope-decision.md',
-            'owner-decision'
+            'shipped'
         ),
     ];
 }

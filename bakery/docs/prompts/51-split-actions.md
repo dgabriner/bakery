@@ -25,3 +25,5 @@ The Prompt 37 characterization suite for that page must stay green unchanged —
 ## Done when
 
 The four pages have no SQL above `require header.php`; each action is a named function with a test.
+
+**Status:** shipped 2026-09-04 on `cursor/sour-flour-agent-program-a061` (PR #20). Four pages → `includes/*_actions.php` + thin `*_api.php`; characterization suites green; deploy + nav catalog registered. Staging and Live were not touched.

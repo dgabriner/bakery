@@ -6,6 +6,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/customer_order_mutations.php';
+
 /**
  * Pan Dulce products with configured standard quantities.
  *
@@ -80,12 +82,6 @@ function bakery_apply_pan_dulce_standing_standard(PDO $db, $customerId, $multipl
         throw new InvalidArgumentException('No Pan Dulce products with standard quantities configured');
     }
 
-    $upsert = $db->prepare('
-        INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)
-    ');
-
     $updated = 0;
     $multiplier = max(0.1, (float)$multiplier);
     foreach ($routeDays as $day) {
@@ -95,7 +91,7 @@ function bakery_apply_pan_dulce_standing_standard(PDO $db, $customerId, $multipl
                 continue;
             }
             $qty = max(1, (int)round($standard * $multiplier));
-            $upsert->execute([$customerId, (int)$product['id'], $day, $qty]);
+            bakery_standing_order_upsert($db, (int)$customerId, (int)$product['id'], (int)$day, $qty);
             $updated++;
         }
     }

@@ -133,5 +133,34 @@ $handoff = bakery_delivery_recovery_validate_input('update_handoffs', [
 recovery_assert($handoff['communication_status'] === 'contacted', 'communication status is normalized');
 recovery_assert($handoff['billing_handoff'] === 'review_needed', 'billing handoff remains a review state');
 
+$textCustomer = bakery_delivery_recovery_validate_input('text_customer', [
+    'manager_note' => 'Called after failed stop',
+]);
+recovery_assert($textCustomer['communication_status'] === 'contacted', 'text customer marks communication contacted');
+
+$credit = bakery_delivery_recovery_validate_input('create_credit', [
+    'manager_note' => 'Needs billing review for missed delivery',
+]);
+recovery_assert($credit['billing_handoff'] === 'credit_requested', 'create credit requests billing handoff');
+recovery_assert($credit['description'] !== '', 'create credit carries a description for Service Issues');
+
+$src = (string)file_get_contents(dirname(__DIR__) . '/includes/delivery_recovery.php');
+recovery_assert(strpos($src, 'function bakery_delivery_recovery_text_customer') !== false, 'text customer helper exists');
+recovery_assert(strpos($src, 'bakery_text_send') !== false, 'recovery text uses bakery_text_send');
+recovery_assert(strpos($src, 'function bakery_delivery_recovery_create_credit') !== false, 'create credit helper exists');
+recovery_assert(strpos($src, 'bakery_delivery_issue_submit_from_recovery') !== false, 'credit queues via delivery issues helper');
+
+$issueSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/customer_delivery_issues.php');
+recovery_assert(
+    strpos($issueSrc, 'function bakery_delivery_issue_submit_from_recovery') !== false,
+    'staff recovery submit path exists beside portal submit'
+);
+$issueFnStart = strpos($issueSrc, 'function bakery_delivery_issue_submit_from_recovery');
+$issueFnSlice = $issueFnStart === false ? '' : substr($issueSrc, $issueFnStart, 1800);
+recovery_assert(
+    strpos($issueFnSlice, 'issue.error_not_delivered') === false,
+    'recovery submit does not require delivery_confirmed_at'
+);
+
 echo "\nFailed-stop recovery tests: {$passed} passed, {$failed} failed\n";
 exit($failed === 0 ? 0 : 1);

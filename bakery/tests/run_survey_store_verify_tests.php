@@ -298,6 +298,9 @@ $assert(
 );
 $helperSrc = (string)file_get_contents($root . '/includes/survey_store_verify.php');
 $assert(strpos($helperSrc, 'bakery_survey_store_verify_apply_routes') !== false, 'submit path can apply dated routes');
+$assert(strpos($helperSrc, 'bakery_survey_store_verify_preview_routes') !== false, 'preview helper exists for Apply to route');
+$assert(strpos($helperSrc, 'bakery_survey_store_verify_confirm_apply') !== false, 'confirm apply requires confirm flag');
+$assert(strpos($helperSrc, 'survey_store_verify_route_applied') !== false, 'apply records operational_events');
 $assert(strpos($helperSrc, 'bakery_survey_store_verify_assign_customer') !== false, 'survey can assign a customer onto a dated route');
 $assert(strpos($helperSrc, 'bakery_survey_store_verify_unassign_customer') !== false, 'survey can remove a pending dated stop');
 $assert(strpos($helperSrc, 'standing_routes') === false || strpos($helperSrc, 'Does not rewrite standing_routes') !== false, 'apply docs that standing routes stay unchanged');
@@ -313,6 +316,8 @@ $commsSrc = (string)file_get_contents($root . '/text_comms.php');
 $assert(strpos($commsSrc, 'surveyComposerDate') !== false, 'Text Comms survey date defaults to next delivery day');
 $assert(strpos($helperSrc, 'bakery_text_send') !== false, 'SMS still goes through bakery_text_send');
 $assert(strpos($surveyPhp, 'store_verify_done_route') !== false, 'survey confirms when dated route was updated');
+$assert(strpos($surveyPhp, 'apply_store_verify_routes') !== false, 'survey offers Apply to route for store-verify results');
+$assert(strpos($surveyPhp, 'Apply to route') !== false || strpos($surveyPhp, 'apply_to_route') !== false, 'Apply to route label is wired');
 $assert(strpos($surveyPhp, "\$surveyKind === 'question'") !== false, 'question form is gated off store-verify');
 $assert(strpos($helperSrc, 'standing_routes') !== false && strpos($helperSrc, 'standing_orders') !== false, 'other stores require a delivery relationship');
 $assert(strpos($surveyPhp, 'bakery_survey_store_verify_hq_data') !== false, 'HQ combined page loads every driver');
