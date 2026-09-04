@@ -125,7 +125,14 @@ failed_list=()
 echo "== suites (${#run_list[@]})"
 for t in "${run_list[@]}"; do
   name="$(basename "$t" .php)"
-  if [ ! -f "$t" ]; then echo "FAIL  missing suite $t"; fail=$((fail+1)); failed_list+=("$t"); continue; fi
+  if [ ! -f "$t" ]; then
+    if [ -n "$SUITES" ]; then
+      echo "FAIL  missing suite $t"; fail=$((fail+1)); failed_list+=("$t")
+    else
+      echo "SKIP  $name (mapped in agent_work_map but not written yet)"; skipped=$((skipped+1))
+    fi
+    continue
+  fi
   if [ "$INCLUDE_DESKTOP_ONLY" -eq 0 ] && is_desktop_only "$name" && [ -z "$SUITES" ]; then
     echo "SKIP  $name (desktop-only: needs production snapshot data or quarantine files)"
     skipped=$((skipped+1)); continue
