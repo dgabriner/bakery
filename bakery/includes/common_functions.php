@@ -145,11 +145,12 @@ function generate_crud_handlers($table, $fields) {
                 $values[] = sanitize_db_input($data[$field] ?? null, $fields[$field]['type'] ?? 'string');
             }
             
-            $stmt = safe_execute($db, $query, $values);
-            if ($stmt) {
+            try {
+                safe_execute($db, $query, $values);
                 return ['success' => true, 'id' => $db->lastInsertId()];
+            } catch (Throwable $e) {
+                return ['success' => false, 'error' => function_exists('bakery_error_message_for_user') ? bakery_error_message_for_user($e, 'crud_create') : 'Failed to create record'];
             }
-            return ['success' => false, 'error' => 'Failed to create record'];
         },
         
         'update' => function($db, $data) use ($table, $fields) {
@@ -168,11 +169,12 @@ function generate_crud_handlers($table, $fields) {
             }
             $values[] = (int)$data['id'];
             
-            $stmt = safe_execute($db, $query, $values);
-            if ($stmt) {
+            try {
+                safe_execute($db, $query, $values);
                 return ['success' => true];
+            } catch (Throwable $e) {
+                return ['success' => false, 'error' => function_exists('bakery_error_message_for_user') ? bakery_error_message_for_user($e, 'crud_update') : 'Failed to update record'];
             }
-            return ['success' => false, 'error' => 'Failed to update record'];
         },
         
         'delete' => function($db, $data) use ($table) {
@@ -180,11 +182,12 @@ function generate_crud_handlers($table, $fields) {
                 return ['success' => false, 'error' => 'ID required for deletion'];
             }
             
-            $stmt = safe_execute($db, "DELETE FROM `$table` WHERE id = ?", [(int)$data['id']]);
-            if ($stmt) {
+            try {
+                safe_execute($db, "DELETE FROM `$table` WHERE id = ?", [(int)$data['id']]);
                 return ['success' => true];
+            } catch (Throwable $e) {
+                return ['success' => false, 'error' => function_exists('bakery_error_message_for_user') ? bakery_error_message_for_user($e, 'crud_delete') : 'Failed to delete record'];
             }
-            return ['success' => false, 'error' => 'Failed to delete record'];
         }
     ];
 }

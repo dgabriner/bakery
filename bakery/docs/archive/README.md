@@ -22,5 +22,7 @@ Stub files remain at the original paths so old links still resolve. They point h
 | `NEXT_STEPS_TODO.md` | Aug 7 P0 list |
 | `P0_LOCAL_IMPLEMENTATION_2026-08-12.md` | Aug 12 local P0 notes |
 | `agent-briefs/` | Checkpoint 0D/0E parallel-agent wave (`bakerysf_local`-only assumptions) |
+| `CODE_REVIEW_REPORT.md` | Early cleanup report; described `common_functions.php` helpers and a `route_tester.php` that no longer exist as described |
+| `ideas-for-development.md` | Generic feature wishlist from before the product thesis; superseded by `BAKERY_PRODUCT_CONTEXT.md` §7 and `docs/prompts/` |
 
 Live mission prompts stay in `docs/prompts/`. Confirm each loop against product context §6–7 and Homebase bugs before treating a prompt as still-open work.

@@ -1,10 +1,13 @@
 <?php
 /**
- * Directory Setup Script for Photo Functionality
+ * Directory Setup Script for Photo Functionality (administrator only)
  * 
  * Run this script once to create the required directory structure
  * for driver photo uploads.
  */
+define('ACCESS_ALLOWED', true);
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/database.php';
 
 echo "<h1>🗂️ Setting up Photo Upload Directories</h1>";
 

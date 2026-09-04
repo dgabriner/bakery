@@ -562,6 +562,38 @@ try {
         echo "Skip 024_customer_order_power_tools (already applied)\n";
     }
 
+    // 025 — customer account preferences (parallel 025; file was previously only
+    // applied at runtime by includes/customer_account.php, which left fresh
+    // databases without columns that text_comms.php queries unguarded).
+    if (!bakery_migration_applied($db, '025_customer_account_preferences')) {
+        echo "Applying migration 025_customer_account_preferences...\n";
+        if (!table_exists($db, 'customers')) {
+            echo "  Note: customers table missing — skipping account preference columns\n";
+        } else {
+            $accountColumns = [
+                'delivery_instructions' => "ALTER TABLE customers ADD COLUMN delivery_instructions TEXT NULL COMMENT 'Customer-facing delivery/receiving notes for drivers'",
+                'ordering_contact_name' => 'ALTER TABLE customers ADD COLUMN ordering_contact_name VARCHAR(100) NULL DEFAULT NULL',
+                'ordering_contact_phone' => 'ALTER TABLE customers ADD COLUMN ordering_contact_phone VARCHAR(20) NULL DEFAULT NULL',
+                'ordering_contact_email' => 'ALTER TABLE customers ADD COLUMN ordering_contact_email VARCHAR(100) NULL DEFAULT NULL',
+                'delivery_contact_name' => "ALTER TABLE customers ADD COLUMN delivery_contact_name VARCHAR(100) NULL DEFAULT NULL COMMENT 'Day-of-delivery contact'",
+                'delivery_contact_phone' => "ALTER TABLE customers ADD COLUMN delivery_contact_phone VARCHAR(20) NULL DEFAULT NULL COMMENT 'Day-of-delivery phone'",
+                'billing_contact_name' => "ALTER TABLE customers ADD COLUMN billing_contact_name VARCHAR(100) NULL DEFAULT NULL COMMENT 'Accounts payable contact'",
+                'billing_contact_email' => 'ALTER TABLE customers ADD COLUMN billing_contact_email VARCHAR(100) NULL DEFAULT NULL',
+                'billing_contact_phone' => 'ALTER TABLE customers ADD COLUMN billing_contact_phone VARCHAR(20) NULL DEFAULT NULL',
+            ];
+            foreach ($accountColumns as $col => $sql) {
+                if (!bakery_column_exists($db, 'customers', $col)) {
+                    $db->exec($sql);
+                    echo "  Added customers.{$col}\n";
+                }
+            }
+        }
+        bakery_mark_migration($db, '025_customer_account_preferences');
+        echo "  OK\n";
+    } else {
+        echo "Skip 025_customer_account_preferences (already applied)\n";
+    }
+
     // 025 — customer notifications
     if (!bakery_migration_applied($db, '025_customer_notifications')) {
         echo "Applying migration 025_customer_notifications...\n";

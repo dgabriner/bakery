@@ -5,25 +5,10 @@
  */
 header('Content-Type: text/plain; charset=utf-8');
 echo "ping ok\n";
-echo 'PHP ' . PHP_VERSION . "\n";
-echo 'dir ' . __DIR__ . "\n";
 echo 'time ' . date('c') . "\n";
 
-$watch = [
-    'driver_list.php', 'index.php', 'pack_list.php',
-    'includes/demand_review.php', 'includes/dashboard_command_center.php',
-    'includes/customer_order_mutations.php', 'includes/customer_notifications.php',
-    'includes/pan_dulce_standards.php', 'includes/daily_brief.php',
-];
-foreach ($watch as $rel) {
-    $target = __DIR__ . '/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
-    if (is_file($target)) {
-        echo $rel . ' bytes ' . filesize($target) . "\n";
-    } else {
-        echo $rel . " MISSING\n";
-    }
-}
-
+// Path, PHP version, and file inventory are debugging detail — only for a
+// signed-in administrator (the ?probe=1 branch below bootstraps the auth gate).
 if (!isset($_GET['probe'])) {
     return;
 }
@@ -47,7 +32,14 @@ register_shutdown_function(static function (): void {
 try {
     require_once __DIR__ . '/includes/config.php';
     require_once __DIR__ . '/includes/database.php';
+    bakery_require_role(['administrator']);
     echo "bootstrap ok\n";
+    echo 'PHP ' . PHP_VERSION . "\n";
+    echo 'dir ' . __DIR__ . "\n";
+    foreach (['driver_list.php', 'index.php', 'pack_list.php', 'includes/demand_review.php', 'includes/dashboard_command_center.php'] as $rel) {
+        $target = __DIR__ . '/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+        echo $rel . (is_file($target) ? ' bytes ' . filesize($target) : ' MISSING') . "\n";
+    }
 
     $date = date('Y-m-d', strtotime('+1 day'));
     require_once __DIR__ . '/includes/demand_review.php';

@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     error_log('Error generating orders: ' . $e->getMessage());
                     echo json_encode([
                         'success' => false,
-                        'error' => 'Failed to generate orders: ' . $e->getMessage(),
+                        'error' => 'Failed to generate orders: ' . bakery_error_message_for_user($e),
                     ]);
                 }
                 break;
@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     error_log('Error generating week orders: ' . $e->getMessage());
                     echo json_encode([
                         'success' => false,
-                        'error' => 'Failed to generate week: ' . $e->getMessage(),
+                        'error' => 'Failed to generate week: ' . bakery_error_message_for_user($e),
                     ]);
                 }
                 break;
@@ -368,7 +368,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     } catch (Exception $e) {
         http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => bakery_error_message_for_user($e)]);
     }
     exit;
 }
@@ -594,7 +594,7 @@ try {
     }
     
 } catch (Exception $e) {
-    echo '<div class="alert alert-danger">Error loading daily orders: ' . htmlspecialchars($e->getMessage()) . '</div>';
+    echo '<div class="alert alert-danger">Error loading daily orders: ' . htmlspecialchars(bakery_error_message_for_user($e)) . '</div>';
     exit;
 }
 

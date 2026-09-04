@@ -28,6 +28,9 @@ if ($twilioValidateRaw === '') {
     $twilioValidateWebhook = !in_array($twilioValidateRaw, ['0', 'false', 'no', 'off'], true);
 }
 define('TWILIO_VALIDATE_WEBHOOK', $twilioValidateWebhook);
+// True only when an operator wrote TWILIO_VALIDATE_WEBHOOK=0|false|no|off — the
+// sole way an unsigned inbound POST may be processed (local curl experiments).
+define('TWILIO_WEBHOOK_VALIDATION_EXPLICITLY_OFF', $twilioValidateRaw !== '' && !$twilioValidateWebhook);
 
 define('TWILIO_API_BASE', 'https://api.twilio.com');
 

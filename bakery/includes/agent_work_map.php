@@ -7,6 +7,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/agent_program_map.php';
+
 function bakery_agent_doc_trust_order(): array
 {
     return [
@@ -41,6 +43,11 @@ function bakery_agent_work_map_normalize(string $raw): string
  * }>
  */
 function bakery_agent_work_map(): array
+{
+    return bakery_agent_work_map_core() + bakery_agent_program_work_map();
+}
+
+function bakery_agent_work_map_core(): array
 {
     return [
         'production-plan' => [

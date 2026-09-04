@@ -202,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         }
     } catch (Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
-        $error = $e->getMessage();
+        $error = bakery_error_message_for_user($e);
         if ($wantsJson) {
             $isConflict = str_starts_with($error, 'production_plan_conflict:');
             http_response_code($isConflict ? 409 : 400);
@@ -287,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
         exit;
     } catch (Throwable $e) {
         http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        echo json_encode(['ok' => false, 'error' => bakery_error_message_for_user($e)]);
         exit;
     }
 }
@@ -335,7 +335,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             exit;
         }
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = bakery_error_message_for_user($e);
     }
 }
 
@@ -364,7 +364,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
         if ($db->inTransaction()) {
             $db->rollBack();
         }
-        $error = $e->getMessage();
+        $error = bakery_error_message_for_user($e);
     }
 }
 
@@ -453,7 +453,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             $db->rollBack();
         }
         http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        echo json_encode(['ok' => false, 'error' => bakery_error_message_for_user($e)]);
         exit;
     }
 }
@@ -475,7 +475,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'commi
             'units' => number_format((int)$result['units_count']),
         ]);
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = bakery_error_message_for_user($e);
     }
 }
 
@@ -570,7 +570,7 @@ try {
         }
     }
 } catch (Throwable $e) {
-    $error = $error ?: ('Unable to load the production center: ' . $e->getMessage());
+    $error = $error ?: ('Unable to load the production center: ' . bakery_error_message_for_user($e));
 }
 
 $days = [];

@@ -83,5 +83,31 @@ map_assert('product and craft manuals are not map holes', $manuals['unmapped_fil
 $invoice = bakery_agent_work_map_packet('invoice-send');
 map_assert('invoice prompt is shipped', ($invoice['prompt_status'] ?? '') === 'shipped');
 
+// Agent program 2026-09 (docs/prompts/30–64) merged from includes/agent_program_map.php.
+$program = bakery_agent_program_work_map();
+$core = bakery_agent_work_map_core();
+map_assert('program map has 26 missions', count($program) === 26);
+map_assert('program slugs do not collide with core slugs', array_intersect_key($program, $core) === []);
+map_assert('resolve numbered program prompt', bakery_agent_work_map_resolve('30-agent-env') === 'agent-env');
+map_assert('resolve program alias', bakery_agent_work_map_resolve('prompt-44') === 'manager-phone-closeout');
+map_assert('program slug beats core family prefix', bakery_agent_work_map_resolve('driver-fast-path') === 'driver-fast-path');
+map_assert('manager-phone-closeout does not fold into manager-phone', bakery_agent_work_map_resolve('manager-phone-closeout') === 'manager-phone-closeout');
+$programPromptsOk = true;
+$programInvariantsOk = true;
+foreach ($program as $slug => $mission) {
+    if (!is_readable($root . '/' . $mission['prompt'])) {
+        $programPromptsOk = false;
+        echo "NOTE  missing prompt for $slug: {$mission['prompt']}\n";
+    }
+    if (!in_array('Close loops; do not add modules or new staff home pages', $mission['invariants'], true)) {
+        $programInvariantsOk = false;
+    }
+}
+map_assert('every program mission has a readable prompt file', $programPromptsOk);
+map_assert('every program mission carries the common invariants', $programInvariantsOk);
+$agentEnv = bakery_agent_work_map_packet('agent-env');
+map_assert('agent-env is shipped', ($agentEnv['prompt_status'] ?? '') === 'shipped');
+map_assert('gate files map to agent-env', in_array('agent-env', bakery_agent_work_map_for_files(['scripts/run_test_gate.sh'])['missions'], true));
+
 echo $failures === 0 ? "\nAll work-map checks passed\n" : "\n$failures failed\n";
 exit($failures > 0 ? 1 : 0);

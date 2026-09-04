@@ -401,6 +401,9 @@ if (PHP_SAPI !== 'cli') {
     bakery_handle_locale_request();
 }
 
+require_once __DIR__ . '/error_boundary.php';
+bakery_error_boundary_register();
+
 define('MAX_UPLOAD_SIZE', 5 * 1024 * 1024);
 define('ALLOWED_UPLOAD_TYPES', ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx']);
 define('DEFAULT_PAGE_SIZE', 25);

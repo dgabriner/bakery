@@ -51,7 +51,8 @@ manager_phone_assert(
 );
 
 $login = (string)file_get_contents($root . '/login.php');
-manager_phone_assert(strpos($login, "'manager.php'") !== false, 'manager login lands on manager.php');
+manager_phone_assert(strpos($login, 'bakery_role_home(') !== false, 'login.php resolves the landing page through bakery_role_home');
+manager_phone_assert(bakery_role_home('manager') === 'manager.php', 'manager login lands on manager.php');
 
 $header = (string)file_get_contents($root . '/includes/header.php');
 manager_phone_assert(strpos($header, 'workspace-manager') !== false, 'header sets workspace-manager');

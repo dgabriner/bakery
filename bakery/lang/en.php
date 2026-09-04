@@ -2573,6 +2573,8 @@ return [
     'billing.recorded_not_emailed' => 'Recorded, not emailed (MAIL_DRIVER=log or SMTP missing). The customer destination was not replaced with a test inbox.',
     'billing.email_not_configured' => 'Invoice email is not configured (MAIL_DRIVER=log or SMTP missing). Send records the portal document without SMTP.',
     'billing.sent_logged' => 'Recorded (not emailed)',
+    'error.internal' => 'Something went wrong. Please try again; if it keeps happening, tell the office and quote the error ID.',
+    'billing.send_failed_note' => 'Last email attempt failed. The invoice stays marked invoiced; fix mail settings and resend.',
     'billing.sent_smtp' => 'Emailed',
     'billing.no_billing_email' => 'No billing email on file',
     'billing.snapshot_note' => 'Line prices are from the delivery billing snapshot at the time of confirmation — not current catalog pricing.',

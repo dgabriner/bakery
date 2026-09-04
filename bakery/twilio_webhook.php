@@ -31,6 +31,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $params = $_POST;
 
+// Fail closed: without an auth token there is nothing to validate against, so
+// an unsigned POST could plant inbound rows. Only an operator who explicitly
+// set TWILIO_VALIDATE_WEBHOOK=0 (local curl experiments) may proceed unsigned.
+if (!TWILIO_VALIDATE_WEBHOOK && TWILIO_AUTH_TOKEN === '' && !TWILIO_WEBHOOK_VALIDATION_EXPLICITLY_OFF) {
+    error_log('twilio webhook: refused — no TWILIO_AUTH_TOKEN configured for signature validation');
+    http_response_code(503);
+    bakery_twiml();
+}
+
 // Signature validation against the public URL Twilio called.
 if (TWILIO_VALIDATE_WEBHOOK) {
     $signature = (string)($_SERVER['HTTP_X_TWILIO_SIGNATURE'] ?? '');

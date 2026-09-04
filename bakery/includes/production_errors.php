@@ -29,6 +29,12 @@ function bakery_register_production_error_probe(): void
         if (!in_array($err['type'], $fatalTypes, true)) {
             return;
         }
+        if (!(defined('IS_LOCAL') && IS_LOCAL)) {
+            // Never print file paths or messages on a shared host; the error
+            // boundary already logged an error_id and rendered the generic page.
+            error_log('BAKERY_SHOW_ERRORS is set on a non-local host; detail suppressed.');
+            return;
+        }
         if (!headers_sent()) {
             header('Content-Type: text/plain; charset=utf-8');
             http_response_code(500);

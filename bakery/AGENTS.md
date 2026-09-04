@@ -2,6 +2,8 @@
 
 This is a flat PHP + MariaDB bakery operations app. Canonical product manual: `BAKERY_PRODUCT_CONTEXT.md`. Development craft: `docs/AGENT_DEVELOPMENT_MANUAL.md`.
 
+**Program handoff (2026-09):** `docs/AGENT_PROGRAM_HANDOFF.md` — remaining build order for missions 30–64.
+
 **Doc trust:** product context → Homebase **Decided** / bugs → development manual → data-environment plan → `docs/prompts/` for ownership → `docs/archive/` is historical.
 
 ```text

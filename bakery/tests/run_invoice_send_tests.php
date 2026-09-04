@@ -233,6 +233,36 @@ try {
         'SELECT COUNT(*) FROM billing_invoice_sends WHERE daily_order_id = ' . (int)$orderA
     )->fetchColumn();
     $assert($sendCount >= 2, 're-send writes another outbox row');
+
+    // ---- Mission 35: outbox pattern — mail failure never fakes a sent row -------
+    $stampBefore = $db->query('SELECT invoice_sent_at FROM daily_orders WHERE id = ' . (int)$orderA)->fetchColumn();
+    $GLOBALS['bakery_billing_mail_handler'] = static function () {
+        throw new RuntimeException('SMTP connect() failed (test)');
+    };
+    $failedSend = bakery_billing_send_invoice($db, $orderA, null);
+    unset($GLOBALS['bakery_billing_mail_handler']);
+    $assert(empty($failedSend['ok']) && ($failedSend['reason'] ?? '') === 'mail_failed', 'SMTP failure returns ok=false reason=mail_failed instead of throwing');
+    $failedRow = $db->query('SELECT status, channel, failure_reason FROM billing_invoice_sends WHERE daily_order_id = ' . (int)$orderA . ' ORDER BY id DESC LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+    $assert($failedRow && $failedRow['status'] === 'failed', 'failed attempt leaves an honest failed outbox row');
+    $assert($failedRow && strpos((string)$failedRow['failure_reason'], 'SMTP connect') !== false, 'failed row records the reason');
+    $stampAfter = $db->query('SELECT invoice_sent_at FROM daily_orders WHERE id = ' . (int)$orderA)->fetchColumn();
+    $assert((string)$stampAfter === (string)$stampBefore, 'failed attempt does not stamp daily_orders.invoice_sent_at');
+    $statusAfterFail = $db->query('SELECT status FROM daily_orders WHERE id = ' . (int)$orderA)->fetchColumn();
+    $assert($statusAfterFail === 'invoiced', 'order stays invoiced after a failed email (resend allowed)');
+    $failedMap = bakery_billing_failed_sends($db, [$orderA, $orderB]);
+    $assert(isset($failedMap[$orderA]) && !isset($failedMap[$orderB]), 'failed-send lookup names only the order whose latest send failed');
+    $queuedLeft = (int)$db->query("SELECT COUNT(*) FROM billing_invoice_sends WHERE status = 'queued' AND daily_order_id IN (" . (int)$orderA . ',' . (int)$orderB . ')')->fetchColumn();
+    $assert($queuedLeft === 0, 'no outbox row is left queued after attempts complete');
+    $GLOBALS['bakery_billing_mail_handler'] = static function () { return 'smtp'; };
+    $recovered = bakery_billing_send_invoice($db, $orderA, null);
+    unset($GLOBALS['bakery_billing_mail_handler']);
+    $assert(!empty($recovered['ok']) && ($recovered['status'] ?? '') === 'sent', 'resend after fixing mail records sent');
+    $assert(bakery_billing_failed_sends($db, [$orderA]) === [], 'successful resend clears the failed chip');
+    $batchFail = null;
+    $GLOBALS['bakery_billing_mail_handler'] = static function () { throw new RuntimeException('boom'); };
+    $batchFail = bakery_billing_send_invoices($db, [$orderA], null);
+    unset($GLOBALS['bakery_billing_mail_handler']);
+    $assert(($batchFail['failed'] ?? 0) === 1 && $batchFail['sent'] === 0, 'bulk send counts mail failures separately from skips');
 } catch (Throwable $e) {
     echo 'FAIL  fixture/runtime: ' . $e->getMessage() . "\n";
     $fail++;

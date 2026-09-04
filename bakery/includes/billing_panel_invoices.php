@@ -622,6 +622,19 @@ $formAction = 'billing_center.php?panel=invoices';
                             echo ' · ' . htmlspecialchars((string)$selectedInvoice['invoice_sent_at']);
                         ?></p>
                     <?php endif; ?>
+                    <?php
+                    $failedSend = function_exists('bakery_billing_failed_sends')
+                        ? (bakery_billing_failed_sends($db, [(int)$selectedInvoice['id']])[(int)$selectedInvoice['id']] ?? null)
+                        : null;
+                    if ($failedSend && (empty($selectedInvoice['invoice_sent_at']) || (string)$failedSend['sent_at'] > (string)$selectedInvoice['invoice_sent_at'])): ?>
+                        <p class="ic-note ic-note--warn" role="status" style="color:#b45309;font-weight:600"><?php
+                            echo htmlspecialchars(bakery_t('billing.send_failed_note'));
+                            echo ' · ' . htmlspecialchars((string)$failedSend['sent_at']);
+                            if (!empty($failedSend['failure_reason'])) {
+                                echo ' · ' . htmlspecialchars((string)$failedSend['failure_reason']);
+                            }
+                        ?></p>
+                    <?php endif; ?>
                     <p class="ic-note"><?php echo htmlspecialchars(bakery_t('billing.snapshot_note')); ?></p>
                 </article>
             <?php else: ?>

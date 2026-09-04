@@ -25,6 +25,10 @@ define('SQUARE_ACCESS_TOKEN', (string)($_ENV['SQUARE_ACCESS_TOKEN'] ?? getenv('S
 define('SQUARE_APPLICATION_ID', (string)($_ENV['SQUARE_APPLICATION_ID'] ?? getenv('SQUARE_APPLICATION_ID') ?: ''));
 define('SQUARE_LOCATION_ID', (string)($_ENV['SQUARE_LOCATION_ID'] ?? getenv('SQUARE_LOCATION_ID') ?: ''));
 define('SQUARE_WEBHOOK_SIGNATURE_KEY', (string)($_ENV['SQUARE_WEBHOOK_SIGNATURE_KEY'] ?? getenv('SQUARE_WEBHOOK_SIGNATURE_KEY') ?: ''));
+// Exact notification URL registered in the Square dashboard. Square signs
+// url + body, so hosts behind a proxy or path prefix must pin this instead of
+// trusting what PHP reconstructs from HTTP_HOST / BASE_URL.
+define('SQUARE_WEBHOOK_NOTIFICATION_URL', (string)($_ENV['SQUARE_WEBHOOK_NOTIFICATION_URL'] ?? getenv('SQUARE_WEBHOOK_NOTIFICATION_URL') ?: ''));
 
 define(
     'SQUARE_API_BASE',
