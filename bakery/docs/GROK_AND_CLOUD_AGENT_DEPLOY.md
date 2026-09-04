@@ -90,7 +90,7 @@ Edit → test if you can → commit → push branch to GitHub
 
 1. Clone or open **`dgabriner/bakery` on `main`** (bakery app lives under the repo’s `bakery/` tree). Do not use `SheepMiner/Bakery`.
 2. Make the smallest change that closes the loop (see product context: close loops, do not add modules).
-3. Run whatever tests you can in your environment. Prefer named suites under `tests/run_*.php` when PHP + `bakerysf_test` exist; never point tests at Live or the nightly mirror.
+3. Run the tests. Cloud VMs boot from `.cursor/environment.json` (repo root), which runs `bakery/scripts/cloud_agent_install.sh`: PHP 8.3 + MariaDB, a loopback `bakerysf_test` built from `database/schema` + `database/fixtures`, and a local-only `bakery/.env`. Then use the Linux gate — `bash scripts/run_test_gate.sh --files=a.php,b.php` (work-map suites) or no flags for lint + reset + every suite. Eight suites need production-snapshot data or gitignored quarantine files and are skipped on fixture databases (listed in the script as `DESKTOP_ONLY_SUITES`); say so in the handoff. Never point tests at Live or the nightly mirror.
 4. Commit and **push** to an additive branch on `origin`.
 5. **Stage yourself** with `scripts/cloud_agent_stage.py` (injected staging SFTP). New `050+` SQL must be hosted-gate portable: `INSERT IGNORE`, `CREATE TABLE IF NOT EXISTS`, additive `ALTER TABLE … ADD`. `ON DUPLICATE KEY UPDATE` fails the hosted gate.
 6. If the owner says **Stage and live**, that is Live authorization. Queue migration first, then files (`--queue-live`). Poll `migration_status.php` / `deploy_status.php`. Do not run `push_sftp.ps1` or upload to `/bake`.
@@ -144,6 +144,8 @@ python3 scripts/cloud_agent_stage.py --queue-live --migration-id NNN_slug.sql
 python3 scripts/cloud_agent_stage.py --queue-live --files-live
 php scripts/agent_homebase.php brief|start|pin|bug|handoff --json
 php tests/run_<suite>_tests.php
+bash scripts/run_test_gate.sh [--files=a.php,b.php | --suites=run_x_tests | --changed-since=origin/main]
+bash scripts/cloud_agent_install.sh          # re-provision PHP/MariaDB/bakerysf_test if the VM lacks them
 ```
 
 Do **not** run:

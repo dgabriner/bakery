@@ -94,7 +94,7 @@ $assert(strpos($pushStage, 'login page did not name bakerysoftware') !== false, 
 
 $python = $root . '/scripts/sftp_upload.py';
 $pythonBin = null;
-foreach (['py -3', 'py', 'python'] as $candidate) {
+foreach (['py -3', 'py', 'python', 'python3'] as $candidate) {
     $probe = [];
     $probeCode = 1;
     exec($candidate . ' --version 2>&1', $probe, $probeCode);

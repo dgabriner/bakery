@@ -1,0 +1,6 @@
+{
+  "name": "Sour Flour OS (bakery/) — PHP 8.3 + MariaDB test gate",
+  "install": "bash bakery/scripts/cloud_agent_install.sh",
+  "start": "bash bakery/scripts/cloud_agent_start.sh",
+  "terminals": []
+}

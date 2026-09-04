@@ -47,4 +47,22 @@ Refreshes `bakerysf_test` from the verified production snapshot, lints PHP, runs
 .\scripts\run_local_test_gate.ps1
 ```
 
+## Linux / cloud gate
+
+Cloud VMs have no production snapshot. `.cursor/environment.json` runs
+`scripts/cloud_agent_install.sh` (PHP 8.3, MariaDB, `bakerysf_test` from
+schema + fixtures, local-only `.env`). Then:
+
+```bash
+bash scripts/run_test_gate.sh --files=billing_center.php,lang/en.php   # work-map suites
+bash scripts/run_test_gate.sh --changed-since=origin/main               # suites for your diff
+bash scripts/run_test_gate.sh                                           # lint + reset + all
+```
+
+Suites in the script's `DESKTOP_ONLY_SUITES` list need snapshot data or
+gitignored quarantine files; they are skipped on fixture databases and must
+be named as "not run here" in handoff field 6. Suites that call
+`bakery_reset_isolated_test_db()` fall back to a fixture reset when no
+snapshot exists — still `bakerysf_test` only.
+
 Do not run this against `bakerysf_local`. Do not invent PHPUnit. Do not deploy.

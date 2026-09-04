@@ -15,8 +15,17 @@ function bakery_reset_isolated_test_db($root) {
     $snapshots = glob($nightly . DIRECTORY_SEPARATOR . 'live_*.sql.gz') ?: [];
     rsort($snapshots, SORT_STRING);
     if (!$snapshots) {
-        fwrite(STDERR, "No verified production snapshot found under storage/dumps/nightly.\n");
-        exit(1);
+        // Cloud / Linux agents have no production snapshot. Fall back to the
+        // sanitized schema + demo fixtures — still strictly bakerysf_test.
+        fwrite(STDERR, "NOTE  No production snapshot under storage/dumps/nightly; resetting bakerysf_test from schema + fixtures.\n");
+        $cmd = '"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/setup_local_db.php')
+            . ' --reset --force-reset --database=bakerysf_test';
+        passthru($cmd, $code);
+        if ($code !== 0) {
+            fwrite(STDERR, "Isolated test database fixture reset failed\n");
+            exit(1);
+        }
+        return;
     }
     $cmd = '"' . PHP_BINARY . '" ' . escapeshellarg($root . '/scripts/refresh_local_from_snapshot.php')
         . ' --snapshot=' . escapeshellarg($snapshots[0]) . ' --target=bakerysf_test';
