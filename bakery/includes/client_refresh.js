@@ -1,6 +1,14 @@
 /**
  * After a production update, reload once so this tab picks up fresh HTML/JS/CSS.
  * Does not clear cookies or localStorage.
+ *
+ * Mobile notes:
+ * - Never hard-reload solely because the page was restored from bfcache
+ *   (app switch / lock screen). That felt like the screen was refreshing
+ *   and shaking while trying to work.
+ * - Persist a reload latch in sessionStorage before reloading so a blocked
+ *   or flaky storage environment cannot loop reloads.
+ * - Cooldown between automatic reloads so rapid deploy stamps cannot thrash.
  */
 (function () {
   if (document.querySelector('meta[name="app-skip-client-refresh"]')) {
@@ -8,6 +16,8 @@
   }
   var BUILD_KEY = 'bakery-client-build';
   var RELOAD_KEY = 'bakery-client-build-reloaded';
+  var RELOAD_AT_KEY = 'bakery-client-build-reloaded-at';
+  var RELOAD_COOLDOWN_MS = 60 * 1000;
   var meta = document.querySelector('meta[name="app-build"]');
   var build = meta ? String(meta.getAttribute('content') || '') : '';
   if (!build) {
@@ -31,17 +41,30 @@
   function write(key, value) {
     try {
       window.sessionStorage.setItem(key, value);
+      return read(key) === String(value);
     } catch (error) {
-      // Private-mode or blocked storage: skip persistence, still reload below.
+      return false;
     }
   }
 
+  function withinCooldown() {
+    var raw = read(RELOAD_AT_KEY);
+    var at = raw ? parseInt(raw, 10) : 0;
+    if (!at || isNaN(at)) {
+      return false;
+    }
+    return (Date.now() - at) < RELOAD_COOLDOWN_MS;
+  }
+
   function reloadForBuild(nextBuild) {
-    if (!nextBuild || read(RELOAD_KEY) === nextBuild) {
+    if (!nextBuild || read(RELOAD_KEY) === nextBuild || withinCooldown()) {
       return;
     }
-    write(RELOAD_KEY, nextBuild);
-    write(BUILD_KEY, nextBuild);
+    // Require a durable latch. If storage is blocked, skip auto-reload rather
+    // than risk an infinite refresh loop on mobile.
+    if (!write(RELOAD_KEY, nextBuild) || !write(BUILD_KEY, nextBuild) || !write(RELOAD_AT_KEY, String(Date.now()))) {
+      return;
+    }
     window.location.reload();
   }
 
@@ -51,12 +74,6 @@
     return;
   }
   write(BUILD_KEY, build);
-
-  window.addEventListener('pageshow', function (event) {
-    if (event.persisted) {
-      window.location.reload();
-    }
-  });
 
   function checkRemoteBuild() {
     if (typeof window.fetch !== 'function') {
@@ -76,6 +93,14 @@
       // Offline or blocked: keep the current page.
     });
   }
+
+  // On bfcache restore, re-check the deploy stamp quietly. Do not reload just
+  // because the page was frozen while the phone was locked or another app was open.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+      checkRemoteBuild();
+    }
+  });
 
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
