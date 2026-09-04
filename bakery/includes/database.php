@@ -242,7 +242,12 @@ function safe_execute($db, $query, $params = []) {
         return $stmt;
     } catch (Exception $e) {
         error_log("Database execution error: " . $e->getMessage() . " Query: " . $query);
-        return false;
+        // Returning false let CRUD callers report "saved" after a failed write.
+        throw new RuntimeException(
+            (defined('IS_LOCAL') && IS_LOCAL) ? 'Database write failed: ' . $e->getMessage() : 'database_write_failed',
+            0,
+            $e
+        );
     }
 }
 

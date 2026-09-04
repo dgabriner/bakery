@@ -89,7 +89,8 @@ function bakery_agent_program_work_map(): array
             ['includes/error_boundary.php', 'includes/config.php', 'includes/production_errors.php', 'includes/database.php', 'includes/common_functions.php', 'customers.php', 'daily_orders.php', 'production_center.php', 'complete_delivery.php'],
             ['tests/run_error_boundary_tests.php', 'tests/run_i18n_tests.php', 'tests/run_integrity_tests.php'],
             ['PDO messages are logged with an error_id, never shown', 'safe_execute cannot return false on a failed write', 'BAKERY_SHOW_ERRORS only when IS_LOCAL'],
-            'docs/prompts/34-error-boundary.md'
+            'docs/prompts/34-error-boundary.md',
+            'shipped'
         ),
         'money-transactions' => $m(
             'Invoice send and Square writes are transactional (outbox pattern)',

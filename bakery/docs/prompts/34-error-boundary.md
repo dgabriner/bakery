@@ -28,3 +28,5 @@ New `tests/run_error_boundary_tests.php` (register in the work map): PDO message
 ## Done when
 
 A forced PDO error on `daily_orders.php` in non-local mode shows a generic message with an `error_id`, and `logs/error.log` has the detail.
+
+**Status: shipped (this branch).** `includes/error_boundary.php` registered from `config.php`; `bakery_error_message_for_user()` used in the four pages and CRUD handlers; `safe_execute()` throws; `BAKERY_SHOW_ERRORS` detail only when `IS_LOCAL`. Suite: `tests/run_error_boundary_tests.php` (18 checks). Not done: a loopback HTTP fatal in non-local mode cannot be exercised over plain http (HTTPS is forced) — renderer is tested at function level.

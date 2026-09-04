@@ -2442,6 +2442,7 @@ return [
     'billing.recorded_not_emailed' => 'Registrado, no enviado por correo (MAIL_DRIVER=log o falta SMTP). El destino del cliente no se reemplazó con un buzón de prueba.',
     'billing.email_not_configured' => 'El correo de facturas no está configurado (MAIL_DRIVER=log o falta SMTP). Enviar registra el documento del portal sin SMTP.',
     'billing.sent_logged' => 'Registrado (no enviado)',
+    'error.internal' => 'Algo salió mal. Inténtalo de nuevo; si sigue pasando, avisa a la oficina y menciona el ID de error.',
     'billing.send_failed_note' => 'El último intento de correo falló. La factura sigue marcada como facturada; corrige la configuración de correo y reenvía.',
     'billing.sent_smtp' => 'Enviado por correo',
     'billing.no_billing_email' => 'No hay correo de facturación',

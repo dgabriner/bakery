@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     exit;
                 } catch (Exception $e) {
-                    $error = "Failed to create customer: " . $e->getMessage();
+                    $error = "Failed to create customer: " . bakery_error_message_for_user($e);
                 }
                 break;
 
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     header("Location: customers.php?success=updated");
                     exit;
                 } catch (Exception $e) {
-                    $error = "Failed to update customer: " . $e->getMessage();
+                    $error = "Failed to update customer: " . bakery_error_message_for_user($e);
                 }
                 break;
 
@@ -91,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     header("Location: customers.php?success=deleted");
                     exit;
                 } catch (Exception $e) {
-                    $error = "Failed to delete customer: " . $e->getMessage();
+                    $error = "Failed to delete customer: " . bakery_error_message_for_user($e);
                 }
                 break;
 
@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     header("Location: customers.php?success=bulk_created");
                     exit;
                 } catch (Exception $e) {
-                    $error = "Failed to create customers: " . $e->getMessage();
+                    $error = "Failed to create customers: " . bakery_error_message_for_user($e);
                 }
                 break;
 
@@ -139,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     echo json_encode(['success' => true]);
                     exit;
                 } catch (Exception $e) {
-                    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                    echo json_encode(['success' => false, 'error' => bakery_error_message_for_user($e)]);
                     exit;
                 }
                 break;
@@ -467,7 +467,7 @@ $zones = array_column($zonesCatalog, 'name');
                 <?php
                     endforeach;
                 } catch (Exception $e) {
-                    echo '<tr><td colspan="8" class="error">Error loading customers: ' . htmlspecialchars($e->getMessage()) . '</td></tr>';
+                    echo '<tr><td colspan="8" class="error">Error loading customers: ' . htmlspecialchars(bakery_error_message_for_user($e)) . '</td></tr>';
                 }
                 ?>
             </tbody>

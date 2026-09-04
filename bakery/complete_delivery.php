@@ -973,7 +973,7 @@ try {
     }
     echo json_encode([
         'success' => false,
-        'error' => $e->getMessage()
+        'error' => bakery_error_message_for_user($e)
     ]);
 }
 }
