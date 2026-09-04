@@ -34,6 +34,16 @@ foreach (['deploy_status.php', 'migration_status.php', 'schema_status.php'] as $
         exit(1);
     }
 }
+foreach (['staging_update.php', 'oven_light.php', 'proof_window.php'] as $tourPage) {
+    if (!bakery_staging_live_skip_name($tourPage)) {
+        fwrite(STDERR, "FAIL\n - hosted Live skip missing: {$tourPage}\n");
+        exit(1);
+    }
+    if (in_array($tourPage, $paths, true)) {
+        fwrite(STDERR, "FAIL\n - tour page included in Live snapshot: {$tourPage}\n");
+        exit(1);
+    }
+}
 $again = bakery_staging_live_snapshot_files();
 if (array_column($files, 'sha256') !== array_column($again, 'sha256')) {
     fwrite(STDERR, "FAIL\n - hash cache changed snapshot hashes\n");

@@ -60,6 +60,8 @@ function Get-BakeryDeployExcludeNamePatterns {
         'driver_pages_probe.php', 'trace_driver_list.php', 'ping.php',
         'run_sql_setup.php', 'db_test.php', 'setup_directories.php', 'oauth_setup.php',
         'auto_push_api.php', 'sourflour.html',
+        # Staging-only night-shift tour (PR #1). Never send to Live.
+        'staging_update.php', 'oven_light.php', 'proof_window.php',
         'tmp_*.php', 'tmp_*.js', 'tmp_*.txt'
     )
 }
@@ -112,6 +114,7 @@ function Get-BakeryDeployFileList {
     # Test-Path here also catches whitelisted entries that Get-ChildItem cannot see.
     # Add-DeployPath de-duplicates everything the sweep above already covered.
     foreach ($file in (Get-BakeryDeployRootFiles)) {
+        if (Test-BakeryDeploySkipFile $file) { continue }
         $src = Join-Path $BakeryRoot $file
         if (Test-Path $src) { Add-DeployPath $file }
     }
