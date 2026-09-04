@@ -4,7 +4,7 @@
  *
  * schema_migrations is keyed by the full id (filename without .sql), so two
  * files can share 062 and both apply. Competing agents already did that
- * (010, 021, 025, 062). Those historical pairs stay; new files take 068+.
+ * (010, 021, 025, 062, 073). Those historical pairs stay; new files take 074+.
  * Never rename an applied file — Live and Staging already recorded the old ids.
  */
 if (!defined('ACCESS_ALLOWED')) {
@@ -19,6 +19,7 @@ function bakery_schema_historical_duplicate_prefixes(): array
         '021' => ['021_operating_day_closeout', '021_operational_events'],
         '025' => ['025_customer_account_preferences', '025_customer_notifications'],
         '062' => ['062_bread_education', '062_surveys_custom'],
+        '073' => ['073_starter_price_upgrade', '073_survey_interactions'],
     ];
 }
 

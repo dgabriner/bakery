@@ -340,9 +340,9 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 ], '067_bread_education_offerings_v2.sql');
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
-$assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 73, 'next unused schema number is 073');
-$assert(bakery_schema_next_migration_id('demo_feature') === '073_demo_feature', 'next id is 073_ plus slug');
+$assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
+$assert(bakery_schema_next_migration_number() === 74, 'next unused schema number is 074');
+$assert(bakery_schema_next_migration_id('demo_feature') === '074_demo_feature', 'next id is 074_ plus slug');
 $third062 = bakery_schema_migration_ids_from_dir();
 $third062[] = '062_another_collision';
 $assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');
