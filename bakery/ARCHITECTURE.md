@@ -64,7 +64,7 @@ GitHub is code truth; Staging via SFTP (desktop auto-push or `scripts/cloud_agen
 1. Shrink page controllers by moving SQL and business rules into `includes/` libraries, and inline `<style>`/`<script>` into `css/` and `includes/*.js` (`bakery_asset_href()` cache-busts by mtime).
 2. Split `$_POST['action']` switches into `includes/<page>_actions.php` functions behind thin `*_api.php` endpoints.
 3. One helper per business mutation; pages never write the same SQL twice.
-4. New product surfaces add prefixed tables with FKs to `customers`, not new columns on `customers` / `daily_orders`.
+4. New product surfaces add prefixed tables with FKs to `customers`. They do not add columns to `customers`, `daily_orders`, `daily_order_items`, or `standing_orders` unless the migration header contains `-- owner-approved-core-column` (owner Decided exception). Enforced in `tests/run_schema_compare_tests.php` for schema files `077+`.
 5. Every new suite is registered in `includes/agent_work_map.php`; every mission names its suites.
 
 What we are not doing: MVC/framework rewrite, Composer/PHPUnit migration, per-product databases, new staff home pages.

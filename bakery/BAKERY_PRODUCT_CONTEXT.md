@@ -383,6 +383,12 @@ offline-capable driver confirm.
 - **Deployable-surface hygiene:** don't add new top-level page scripts when an existing
   screen or an `includes/` helper + small endpoint will do; legacy variants live in
   quarantine/historical nav — don't resurrect them.
+- **Product schema boundaries (Decided):** New product surfaces add **prefixed tables**
+  (for example `sfb_*`, `square_*`, `text_*`, `survey*`) with foreign keys to `customers`.
+  They do **not** add columns to `customers`, `daily_orders`, `daily_order_items`, or
+  `standing_orders` without an owner-approved exception noted in the migration file
+  header as `-- owner-approved-core-column`. `customers` remains the identity hub;
+  product families grow beside it, not inside the core commercial tables.
 
 ## 9. Intentionally deferred topics
 

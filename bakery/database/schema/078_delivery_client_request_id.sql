@@ -1,5 +1,6 @@
 -- Idempotent client request ids for offline driver outbox (photo upload + confirm).
 -- Hosted-gate portable: ADD COLUMN IF NOT EXISTS + unique indexes IF NOT EXISTS.
+-- owner-approved-core-column: Mission 43 driver-offline-queue (program Decided) — confirm_request_id on daily_orders for outbox idempotency.
 
 ALTER TABLE daily_orders
   ADD COLUMN IF NOT EXISTS confirm_request_id VARCHAR(64) NULL DEFAULT NULL;
