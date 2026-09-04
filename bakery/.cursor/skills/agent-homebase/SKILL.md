@@ -34,7 +34,8 @@ Admin UI: `agent_homebase.php` (Craft tab has the poem).
 - Dated beats standing **per customer**.
 - Never price historical invoices from live `products.price`.
 - Completing exception *work* never hides a still-true operational fact.
-- Staging auto-push must never target `bakery.sourflour.org/bake`.
+- Staging auto-push / cloud SFTP must never target `bakery.sourflour.org/bake`.
+  “Stage and live” uses `scripts/cloud_agent_stage.py --queue-live` (hosted workers).
 - i18n: `lang/en.php` and `lang/es.php`.
 
 ## Commands

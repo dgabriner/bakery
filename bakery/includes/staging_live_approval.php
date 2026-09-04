@@ -7,10 +7,21 @@
  * are deliberately not part of the promotion gate.
  */
 
-function bakery_staging_live_approval_available(): bool {
-    return defined('IS_STAGING') && IS_STAGING
+function bakery_hosted_live_queue_authorized(): bool {
+    if (defined('IS_STAGING') && IS_STAGING
         && function_exists('bakery_user_has_role')
-        && bakery_user_has_role(['administrator']);
+        && bakery_user_has_role(['administrator'])) {
+        return true;
+    }
+    return PHP_SAPI === 'cli'
+        && defined('BAKERY_HOSTED_LIVE_QUEUE')
+        && BAKERY_HOSTED_LIVE_QUEUE === true
+        && defined('IS_STAGING')
+        && IS_STAGING;
+}
+
+function bakery_staging_live_approval_available(): bool {
+    return bakery_hosted_live_queue_authorized();
 }
 
 function bakery_staging_live_approval_path(): string {

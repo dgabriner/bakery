@@ -2,7 +2,7 @@
 /**
  * Authentication, authorization, and CSRF (Checkpoint 0D).
  *
- * Roles: administrator, manager, driver, driver_assistant, baker (extensible via permissions tables).
+ * Roles: administrator, manager, driver, driver_assistant, baker, cashier (extensible via permissions tables).
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -118,6 +118,19 @@ function bakery_driver_scripts() {
     ];
 }
 
+/**
+ * Cashier-only pages (managers/admins also allowed).
+ */
+function bakery_cashier_scripts() {
+    return [
+        'cashier_shop_photos.php',
+        'upload_shop_photo.php',
+        'product_photos.php',
+        'upload_product_photo.php',
+        'cashier_add_product.php',
+    ];
+}
+
 /** Roles that work a driver route (the assistant works their paired driver's route). */
 function bakery_driver_route_roles(): array {
     return ['driver', 'driver_assistant'];
@@ -125,6 +138,57 @@ function bakery_driver_route_roles(): array {
 
 function bakery_is_driver_route_role($role): bool {
     return in_array((string)$role, bakery_driver_route_roles(), true);
+}
+
+/**
+ * Staff types that User Management may assign. The cashier role exists in
+ * `roles` after migration 074; omitting it here makes the profile form show
+ * Cashier from the database then reject Save with "Invalid user type."
+ */
+function bakery_assignable_role_labels(): array {
+    return [
+        'administrator' => 'Administrator',
+        'manager' => 'Manager',
+        'baker' => 'Baker',
+        'cashier' => 'Cashier',
+        'driver' => 'Driver',
+        'driver_assistant' => 'Driver Assistant',
+    ];
+}
+
+/**
+ * Landing page after login for each staff role.
+ * Administrators keep the requested URL (usually the ops dashboard).
+ */
+function bakery_role_home(string $role): string {
+    if (bakery_is_driver_route_role($role)) {
+        return 'driver.php';
+    }
+    switch ($role) {
+        case 'baker':
+            return 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
+        case 'manager':
+            return 'manager.php';
+        case 'cashier':
+            return 'product_photos.php';
+        default:
+            return 'index.php';
+    }
+}
+
+function bakery_role_uses_dedicated_home(string $role): bool {
+    return bakery_role_home($role) !== 'index.php';
+}
+
+/**
+ * Roles that are 403 on index.php unless redirected first.
+ * Drivers are allowed on index and redirected by the page itself.
+ */
+function bakery_ops_index_bypass_home(string $role): ?string {
+    if ($role === 'cashier') {
+        return bakery_role_home($role);
+    }
+    return null;
 }
 
 /**
@@ -372,7 +436,54 @@ function bakery_baker_product_ids(PDO $db) {
 }
 
 /**
- * Ensure primary staff code logins (admin, baker, drivers).
+ * Ensure cashier role exists and has catalog permissions.
+ * Idempotent — safe on every environment after the cashier role migration.
+ */
+function bakery_ensure_cashier_role(PDO $db) {
+    $db->exec(
+        "INSERT INTO roles (slug, name, description) VALUES
+         ('cashier', 'Cashier', 'Shop photos, catalog photos, and add product')
+         ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)"
+    );
+
+    $permStmt = $db->prepare('SELECT id FROM permissions WHERE slug = ? LIMIT 1');
+    $permStmt->execute(['ops.manage']);
+    $permId = $permStmt->fetchColumn();
+    if ($permId) {
+        $roleStmt = $db->prepare('SELECT id FROM roles WHERE slug = ? LIMIT 1');
+        $roleStmt->execute(['cashier']);
+        $roleId = $roleStmt->fetchColumn();
+        if ($roleId) {
+            $link = $db->prepare(
+                'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE role_id = role_id'
+            );
+            $link->execute([(int)$roleId, (int)$permId]);
+        }
+    }
+    return true;
+}
+
+/**
+ * Ensure Sarita cashier login (code 8989) exists.
+ */
+function bakery_ensure_sarita_cashier(PDO $db) {
+    if (!table_exists($db, 'users') || !table_exists($db, 'roles')) {
+        return false;
+    }
+    bakery_ensure_login_code_column($db);
+    bakery_ensure_cashier_role($db);
+    return bakery_upsert_code_user($db, [
+        'email' => 'sarita@sourflour.local',
+        'display_name' => 'Sarita',
+        'role' => 'cashier',
+        'code' => '8989',
+        'driver_id' => null,
+    ]);
+}
+
+/**
+ * Ensure primary staff code logins (admin, baker, drivers, cashier).
  */
 function bakery_ensure_staff_code_users(PDO $db) {
     if (!IS_LOCAL) {
@@ -380,6 +491,7 @@ function bakery_ensure_staff_code_users(PDO $db) {
     }
     bakery_ensure_login_code_column($db);
     bakery_ensure_baker_user($db);
+    bakery_ensure_sarita_cashier($db);
 
     if (BAKERY_ADMIN_EMAIL !== '' && BAKERY_ADMIN_CODE !== '') {
         bakery_upsert_code_user($db, [
@@ -1046,9 +1158,19 @@ function bakery_enforce_request_security(PDO $db = null) {
 
     bakery_require_login();
 
+    $currentRole = (string)(bakery_current_user()['role_slug'] ?? '');
+    $indexHome = bakery_ops_index_bypass_home($currentRole);
+    if ($script === 'index.php' && $indexHome !== null) {
+        header('Location: ' . BASE_URL . $indexHome);
+        exit;
+    }
+
     $isDiagnostic = in_array($script, bakery_diagnostic_scripts(), true);
     $isDriverScript = in_array($script, bakery_driver_scripts(), true);
     $isBakerScript = in_array($script, bakery_baker_scripts(), true);
+    $isCashierScript = function_exists('bakery_cashier_scripts')
+        ? in_array($script, bakery_cashier_scripts(), true)
+        : false;
 
     if ($isDiagnostic) {
         bakery_require_role(['administrator']);
@@ -1059,6 +1181,8 @@ function bakery_enforce_request_security(PDO $db = null) {
         bakery_require_role(['administrator', 'manager', 'baker']);
     } elseif ($isDriverScript) {
         bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+    } elseif ($isCashierScript) {
+        bakery_require_role(['cashier', 'administrator', 'manager']);
     } else {
         // Default ops UI: manager + administrator. Drivers/bakers stay on their scripts.
         bakery_require_role(['administrator', 'manager']);

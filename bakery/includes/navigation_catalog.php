@@ -66,6 +66,8 @@ function bakery_navigation_catalog() {
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'cashier_shop_photos.php', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'cashier_add_product.php', 'nav_key' => 'cashier_add_product', 'label' => 'Add Product', 'description' => 'Quickly add a bakery or store item and take its photo.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
             ],
         ],
         [
@@ -135,7 +137,7 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator', 'manager'],
             'items' => [
                 ['href' => 'products.php', 'label' => 'Products', 'description' => 'Manage the products that can be ordered and produced.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
-                ['href' => 'product_photos.php', 'label' => 'Product Photos', 'description' => 'Capture and manage catalog images with a primary photo per product.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'product_photos.php', 'label' => 'Product Photos', 'description' => 'Capture and manage catalog images with a primary photo per product.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'dough_types.php', 'label' => 'Dough Types & Lines', 'description' => 'Organize dough types and product lines.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'formulas.php', 'label' => 'Formulas', 'description' => 'Maintain dough formulas and recipe ratios.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'ingredients.php', 'label' => 'Ingredients', 'description' => 'Maintain the raw ingredient catalogue.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -274,6 +276,7 @@ function bakery_navigation_role_label($role) {
     $labels = [
         'administrator' => 'Administrator',
         'manager' => 'Manager',
+        'cashier' => 'Cashier',
         'baker' => 'Baker',
         'driver' => 'Driver',
         'driver_assistant' => 'Driver Assistant',

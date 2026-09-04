@@ -150,6 +150,28 @@ if ($navSelectedDriverName === '' && $navUser) {
     </div>
   </div>
 </nav>
+<?php elseif ($navRole === 'cashier'): ?>
+<nav class="bakery-nav bakery-nav--focused bakery-nav--cashier" aria-label="<?php bakery_te('nav.cashier_workspace_aria'); ?>">
+  <div class="bakery-nav__inner">
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'product_photos.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.cashier_workspace'); ?></a>
+    <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'product_photos' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'product_photos.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.item.product_photos'); ?>"<?php echo $currentPage === 'product_photos' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.product_photos'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.product_photos_short'); ?></span>
+      </a>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'cashier_shop_photos' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.shop_photos'); ?>"<?php echo $currentPage === 'cashier_shop_photos' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.shop_photos'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.shop_photos_short'); ?></span>
+      </a>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'cashier_add_product' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_add_product.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.item.cashier_add_product'); ?>"<?php echo $currentPage === 'cashier_add_product' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.cashier_add_product'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.cashier_add_product_short'); ?></span>
+      </a>
+      <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
+      <?php echo $navLogoutForm; ?>
+    </div>
+  </div>
+</nav>
 <?php elseif ($navRole === 'manager'): ?>
 <?php
   $navManagerDateRaw = $_GET['date'] ?? date('Y-m-d');

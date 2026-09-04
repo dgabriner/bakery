@@ -8,7 +8,7 @@ function Get-BakeryDeployRootFiles {
         'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
         'zones.php', 'leads.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
-        'products.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
+        'products.php', 'product_photos.php', 'cashier_add_product.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
         'daily_orders.php', 'standing_orders.php', 'standing_orders_manager.php', 'orders.php',
         'bread_distribution.php', 'product_distribution.php',
         'production.php', 'baker_mix.php', 'pack_list.php',
@@ -16,7 +16,8 @@ function Get-BakeryDeployRootFiles {
         'drivers.php', 'driver.php', 'driver_list.php', 'driver_assignment.php', 'driver_overview.php',
         'route_manager.php', 'route_summary.php', 'map.php', 'call_headquarters.php',
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
-        'upload_driver_photo.php',
+        'upload_driver_photo.php', 'upload_product_photo.php',
+        'cashier_shop_photos.php', 'upload_shop_photo.php',
         'daily_run.php', 'daily_run_api.php', 'daily_brief.php',
         'manager.php', 'billing_center.php', 'billing_api.php', 'billing_export.php', 'production_center.php',
         'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php', 'customer_portal_regular.php',
@@ -46,6 +47,7 @@ function Get-BakeryDeployOptionalPaths {
     return @(
         @{ Path = 'vendor\phpmailer'; Required = $false },
         @{ Path = 'uploads\driver_photos'; Required = $false; Files = @('.htaccess') },
+        @{ Path = 'uploads\shop_photos'; Required = $false; Files = @('.htaccess') },
         @{ Path = 'uploads\product_photos\catalog'; Required = $false }
     )
 }

@@ -47,7 +47,8 @@ php scripts/refresh_local_from_snapshot.php --snapshot=PATH --target=bakerysf_st
 menu or normal documentation. Whole staging/local database copies must never be
 imported over production.
 
-Cloud agents (Grok Bot, Cursor on the web) do not use laptop SFTP. Give them
+Cloud agents use injected staging SFTP via `scripts/cloud_agent_stage.py`.
+“Stage and live” queues hosted Live workers. See
 [GROK_AND_CLOUD_AGENT_DEPLOY.md](GROK_AND_CLOUD_AGENT_DEPLOY.md).
 
 New root-level PHP pages must be listed in `scripts/deploy_manifest.ps1`

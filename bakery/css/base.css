@@ -25,7 +25,8 @@ body {
 
 body.workspace-driver,
 body.workspace-baker,
-body.workspace-manager {
+body.workspace-manager,
+body.workspace-cashier {
   background: var(--sf-bg-elevated);
 }
 

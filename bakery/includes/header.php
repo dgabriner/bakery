@@ -10,12 +10,13 @@ $authRoleSlug = $authUser['role_slug'] ?? '';
 $isBakerUser = $authUser && $authRoleSlug === 'baker';
 $isDriverUser = $authUser && bakery_is_driver_route_role($authRoleSlug);
 $isManagerUser = $authUser && $authRoleSlug === 'manager';
-$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser || $isManagerUser;
+$isCashierUser = $authUser && $authRoleSlug === 'cashier';
+$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser || $isManagerUser || $isCashierUser;
 $showLocalDebugBanner = defined('IS_LOCAL') && IS_LOCAL && !$isBakerUser;
 $showStagingBanner = defined('IS_STAGING') && IS_STAGING;
 $workspaceBodyClass = $isDriverUser
     ? 'workspace-driver'
-    : ($isBakerUser ? 'workspace-baker' : ($isManagerUser ? 'workspace-manager' : ($authUser ? 'workspace-ops' : '')));
+    : ($isBakerUser ? 'workspace-baker' : ($isManagerUser ? 'workspace-manager' : ($isCashierUser ? 'workspace-cashier' : ($authUser ? 'workspace-ops' : ''))));
 if (!function_exists('bakery_user_can_control_auto_push')) {
     $autoPushControlPath = __DIR__ . '/auto_push_control.php';
     if (is_file($autoPushControlPath)) {

@@ -1000,11 +1000,13 @@
 @media (max-width: 720px) {
   body.workspace-driver,
   body.workspace-baker,
-  body.workspace-manager {
+  body.workspace-manager,
+  body.workspace-cashier {
     padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 
-  body.workspace-baker {
+  body.workspace-baker,
+  body.workspace-cashier {
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -1043,6 +1045,10 @@
 
   .bakery-nav--driver.bakery-nav--with-date .bakery-nav__groups {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .bakery-nav--cashier .bakery-nav__groups {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .bakery-nav--driver:not(.bakery-nav--with-date) .bakery-nav__groups {
