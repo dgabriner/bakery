@@ -9,16 +9,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 function bakery_daily_orders_update_order_total(PDO $db, int $orderId): void
 {
-    $stmt = $db->prepare("
-        UPDATE daily_orders 
-        SET total_amount = (
-            SELECT COALESCE(SUM(line_total), 0) 
-            FROM daily_order_items 
-            WHERE daily_order_id = ?
-        )
-        WHERE id = ?
-    ");
-    $stmt->execute([$orderId, $orderId]);
+    bakery_daily_order_recompute_total($db, $orderId);
 }
 
 function bakery_daily_orders_validate_date(string $date): void

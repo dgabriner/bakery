@@ -198,24 +198,16 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                     continue;
                 }
 
-                // Create or get daily order for this customer/date
-                $stmt = $db->prepare("
-                    INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
-                    VALUES (?, ?, 'pending', 0)
-                ");
-                $stmt->execute([$customerId, $date]);
+                $existedStmt = $db->prepare(
+                    'SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ? LIMIT 1'
+                );
+                $existedStmt->execute([$customerId, $date]);
+                $existedBefore = (int)$existedStmt->fetchColumn() > 0;
 
-                if ($stmt->rowCount() > 0) {
+                $dailyOrderId = bakery_daily_order_find_or_create($db, (int)$customerId, $date);
+                if (!$existedBefore) {
                     $ordersCreated++;
                 }
-
-                // Get the daily order ID
-                $stmt = $db->prepare("
-                    SELECT id FROM daily_orders
-                    WHERE customer_id = ? AND order_date = ?
-                ");
-                $stmt->execute([$customerId, $date]);
-                $dailyOrderId = $stmt->fetchColumn();
 
                 if ($dailyOrderId) {
                     $existingItemQtyStmt->execute([$dailyOrderId]);
@@ -282,16 +274,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                     }
 
                     // Update order total efficiently
-                    $stmt = $db->prepare("
-                        UPDATE daily_orders
-                        SET total_amount = (
-                            SELECT COALESCE(SUM(line_total), 0)
-                            FROM daily_order_items
-                            WHERE daily_order_id = ?
-                        )
-                        WHERE id = ?
-                    ");
-                    $stmt->execute([$dailyOrderId, $dailyOrderId]);
+                    bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
 
                     $standingRoute = $standingRouteByCustomer[(int)$customerId] ?? null;
                     if ($standingRoute) {

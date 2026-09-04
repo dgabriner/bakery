@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/customer_order_mutations.php';
 
 // Handle AJAX request to save order
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_order') {
@@ -15,25 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $productId = (int)$_POST['product_id'];
         $dayOfWeek = (int)$_POST['day_of_week'];
         $quantity = (int)$_POST['quantity'];
-        
-        if ($quantity > 0) {
-            // Insert or update the order
-            $stmt = $db->prepare("
-                INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE quantity = ?
-            ");
-            $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-        } else {
-            // If quantity is 0 or negative, remove the order if it exists
-            $stmt = $db->prepare("DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?");
-            $stmt->execute([$customerId, $productId, $dayOfWeek]);
-        }
+        bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
         
         echo json_encode(['success' => true]);
     } catch (Exception $e) {
         http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => bakery_error_message_for_user($e)]);
     }
     exit;
 }

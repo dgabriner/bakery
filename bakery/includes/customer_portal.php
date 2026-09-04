@@ -7,6 +7,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/brand.php';
+require_once __DIR__ . '/customer_order_mutations.php';
 
 /** Scripts for the customer self-service portal (separate from staff auth). */
 function bakery_customer_portal_scripts() {
@@ -1047,16 +1048,7 @@ function bakery_portal_catalog_products(PDO $db, array $customer) {
 }
 
 function bakery_portal_update_daily_order_total(PDO $db, $orderId) {
-    $stmt = $db->prepare(
-        'UPDATE daily_orders
-         SET total_amount = (
-             SELECT COALESCE(SUM(line_total), 0)
-             FROM daily_order_items
-             WHERE daily_order_id = ?
-         )
-         WHERE id = ?'
-    );
-    $stmt->execute([(int)$orderId, (int)$orderId]);
+    bakery_daily_order_recompute_total($db, (int)$orderId);
 }
 
 /**
@@ -1064,16 +1056,11 @@ function bakery_portal_update_daily_order_total(PDO $db, $orderId) {
  */
 function bakery_portal_ensure_daily_order(PDO $db, $customerId, $orderDate) {
     $customerId = (int)$customerId;
+    $orderId = bakery_daily_order_find_or_create($db, $customerId, (string)$orderDate);
     $stmt = $db->prepare(
-        'INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
-         VALUES (?, ?, ?, 0)'
+        'SELECT id, status FROM daily_orders WHERE id = ? LIMIT 1'
     );
-    $stmt->execute([$customerId, $orderDate, 'pending']);
-
-    $stmt = $db->prepare(
-        'SELECT id, status FROM daily_orders WHERE customer_id = ? AND order_date = ? LIMIT 1'
-    );
-    $stmt->execute([$customerId, $orderDate]);
+    $stmt->execute([$orderId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
         throw new RuntimeException('Could not create delivery order');
@@ -1207,11 +1194,7 @@ function bakery_portal_add_to_standing_order(PDO $db, array $customer, $dayOfWee
     );
     $deleteStmt->execute(array_merge([$customerId, $productId], $dayClause['values']));
 
-    $stmt = $db->prepare(
-        'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-         VALUES (?, ?, ?, ?)'
-    );
-    $stmt->execute([$customerId, $productId, $dayOfWeek, $newQty]);
+    bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $newQty);
 
     $dayLabels = bakery_standing_day_labels();
     return [

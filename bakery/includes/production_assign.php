@@ -744,24 +744,7 @@ function bakery_production_assign_save_standing_line(
         return;
     }
 
-    $clause = bakery_standing_day_in_clause($dayOfWeek);
-    if ($quantity > 0) {
-        $stmt = $db->prepare(
-            'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE quantity = ?'
-        );
-        $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-        $db->prepare(
-            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $clause['sql']
-            . ' AND day_of_week <> ?'
-        )->execute(array_merge([$customerId, $productId], $clause['values'], [$dayOfWeek]));
-    } else {
-        $stmt = $db->prepare(
-            'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $clause['sql']
-        );
-        $stmt->execute(array_merge([$customerId, $productId], $clause['values']));
-    }
+    bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
 
     $fullLabels = bakery_standing_day_full_labels();
     $dayLabel = $fullLabels[$dayOfWeek] ?? ('Day ' . $dayOfWeek);

@@ -210,7 +210,8 @@ function bakery_agent_program_work_map(): array
             ['includes/customer_order_mutations.php', 'includes/daily_order_generation.php', 'standing_orders.php', 'bread_distribution.php', 'product_distribution.php', 'includes/customer_portal.php', 'includes/driver_assignments.php', 'includes/production_assign.php', 'includes/pan_dulce_standards.php', 'includes/survey_store_verify.php'],
             ['tests/run_operating_demand_tests.php', 'tests/run_customer_order_power_tests.php', 'tests/run_golden_day_qa.php', 'tests/run_tomorrow_confirmed_tests.php', 'tests/run_integrity_tests.php'],
             ['Dated beats standing per customer', 'Standing edits never rewrite past dated orders; dated edits never write standing'],
-            'docs/prompts/52-one-mutation-path.md'
+            'docs/prompts/52-one-mutation-path.md',
+            'shipped'
         ),
         'hot-path-queries' => $m(
             'Batch N+1 loops; standing_routes day index; shared PDO',

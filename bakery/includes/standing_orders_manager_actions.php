@@ -7,6 +7,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/customer_order_mutations.php';
+
 function bakery_standing_orders_manager_action_save_order(PDO $db, array $input, ?array $user = null): array
 {
     $customerId = (int)($input['customer_id'] ?? 0);
@@ -18,17 +20,7 @@ function bakery_standing_orders_manager_action_save_order(PDO $db, array $input,
         throw new RuntimeException('Synthetic SF Bakers cannot have standing orders');
     }
 
-    if ($quantity > 0) {
-        $stmt = $db->prepare('
-            INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-            VALUES (?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE quantity = ?
-        ');
-        $stmt->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-    } else {
-        $stmt = $db->prepare('DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?');
-        $stmt->execute([$customerId, $productId, $dayOfWeek]);
-    }
+    bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
 
     return ['success' => true];
 }
@@ -42,24 +34,12 @@ function bakery_standing_orders_manager_action_bulk_save(PDO $db, array $input, 
 
     $db->beginTransaction();
     try {
-        $upsert = $db->prepare('
-            INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-            VALUES (?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE quantity = ?
-        ');
-        $delete = $db->prepare('DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week = ?');
-
         foreach ($updates as $update) {
             $customerId = (int)$update['customer_id'];
             $productId = (int)$update['product_id'];
             $dayOfWeek = (int)$update['day_of_week'];
             $quantity = (int)$update['quantity'];
-
-            if ($quantity > 0) {
-                $upsert->execute([$customerId, $productId, $dayOfWeek, $quantity, $quantity]);
-            } else {
-                $delete->execute([$customerId, $productId, $dayOfWeek]);
-            }
+            bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
         }
 
         $db->commit();
@@ -219,18 +199,13 @@ function bakery_standing_orders_manager_action_copy_orders(PDO $db, array $input
 
         $copiedCount = 0;
         foreach ($sourceOrders as $order) {
-            $stmt = $db->prepare('
-                INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE quantity = ?
-            ');
-            $stmt->execute([
+            bakery_standing_order_upsert(
+                $db,
                 $targetCustomerId,
-                $order['product_id'],
-                $order['day_of_week'],
-                $order['quantity'],
-                $order['quantity'],
-            ]);
+                (int)$order['product_id'],
+                (int)$order['day_of_week'],
+                (int)$order['quantity']
+            );
             $copiedCount++;
         }
 

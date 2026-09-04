@@ -220,20 +220,9 @@ function bakery_driver_assignment_action_sync_driver_route(PDO $db, array $input
         'assign_routes' => false,
     ]);
 
-    $findOrder = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?');
-    $createOrder = $db->prepare(
-        "INSERT IGNORE INTO daily_orders (customer_id, order_date, status, total_amount)
-         VALUES (?, ?, 'pending', 0)"
-    );
     $assignments = [];
     foreach ($routeStops as $index => $stop) {
-        $findOrder->execute([$stop['customer_id'], $deliveryDate]);
-        $dailyOrderId = (int)$findOrder->fetchColumn();
-        if ($dailyOrderId <= 0) {
-            $createOrder->execute([$stop['customer_id'], $deliveryDate]);
-            $findOrder->execute([$stop['customer_id'], $deliveryDate]);
-            $dailyOrderId = (int)$findOrder->fetchColumn();
-        }
+        $dailyOrderId = bakery_daily_order_find_or_create($db, (int)$stop['customer_id'], $deliveryDate);
         $assignments[] = [
             'daily_order_id' => $dailyOrderId,
             'route_order' => $index + 1,

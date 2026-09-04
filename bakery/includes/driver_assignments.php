@@ -403,17 +403,7 @@ function bakery_driver_assign_from_standing_routes(PDO $db, string $deliveryDate
 
         foreach ($standingRoutes as $route) {
             $customerId = (int)$route['customer_id'];
-            $orderStmt = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ?');
-            $orderStmt->execute([$customerId, $deliveryDate]);
-            $existingOrder = $orderStmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($existingOrder) {
-                $dailyOrderId = (int)$existingOrder['id'];
-            } else {
-                $ins = $db->prepare('INSERT INTO daily_orders (customer_id, order_date, total_amount) VALUES (?, ?, 0)');
-                $ins->execute([$customerId, $deliveryDate]);
-                $dailyOrderId = (int)$db->lastInsertId();
-            }
+            $dailyOrderId = bakery_daily_order_find_or_create($db, $customerId, $deliveryDate);
 
             $assignedDriverId = (int)$route['driver_id'];
             $routeOrderByDriver[$assignedDriverId] = ($routeOrderByDriver[$assignedDriverId] ?? 0) + 1;
@@ -891,18 +881,13 @@ function bakery_driver_add_customer_to_route(
         }
 
         if ($standingOrderLines !== []) {
-            $upsertStanding = $db->prepare('
-                INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)
-            ');
             foreach ($standingOrderLines as $line) {
                 $productId = (int)($line['product_id'] ?? 0);
                 $quantity = (int)($line['quantity'] ?? 0);
                 if ($productId <= 0 || $quantity <= 0) {
                     continue;
                 }
-                $upsertStanding->execute([$customerId, $productId, $dayOfWeek, $quantity]);
+                bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $quantity);
                 $standingOrdersUpdated++;
             }
         }
