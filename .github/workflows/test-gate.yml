@@ -79,6 +79,8 @@ jobs:
           DB_NAME=bakerysf_test
           DB_USER=root
           DB_PASS=root
+          LOCAL_ADMIN_EMAIL=danny@sourflour.org
+          LOCAL_ADMIN_NAME=Danny
           LOCAL_ADMIN_CODE=9741
           SFB_AGENT_ADMIN_CODE=9099
           TWILIO_VALIDATE_WEBHOOK=1
