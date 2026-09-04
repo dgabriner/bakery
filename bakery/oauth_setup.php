@@ -1,5 +1,8 @@
 <?php
-// OAuth setup and configuration page
+// OAuth setup and configuration page — administrator only (diagnostic script).
+define('ACCESS_ALLOWED', true);
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/database.php';
 require_once 'includes/gmail_oauth.php';
 
 echo "<h2>🔐 Gmail OAuth 2.0 Setup</h2>";

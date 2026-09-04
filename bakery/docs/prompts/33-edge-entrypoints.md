@@ -23,3 +23,5 @@ Auth is centralized in `bakery_enforce_request_security()` — but only for scri
 ## Done when
 
 No root PHP file reachable on Live skips `bakery_enforce_request_security()` except the documented public list.
+
+**Status: shipped (this branch).** Suite: `tests/run_edge_entrypoint_tests.php`. `assets/api/get_route.php` deleted (no callers).

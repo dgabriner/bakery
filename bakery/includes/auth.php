@@ -91,6 +91,7 @@ function bakery_diagnostic_scripts() {
         'run_sql_setup.php',
         'setup_directories.php',
         'oauth_setup.php',
+        'oauth_callback.php',
         'simple_performance_test.php',
         'test_email.php',
     ];
@@ -648,7 +649,12 @@ function bakery_wants_json() {
         'route_manager.php',
         'staff_alerts_api.php',
     ];
-    return in_array(basename($uri), $jsonScripts, true);
+    $script = basename($uri);
+    // Every *_api.php endpoint answers JSON on auth/CSRF failure, listed or not.
+    if (substr($script, -8) === '_api.php') {
+        return true;
+    }
+    return in_array($script, $jsonScripts, true);
 }
 
 function bakery_touch_session() {

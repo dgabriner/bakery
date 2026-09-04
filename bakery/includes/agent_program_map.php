@@ -78,9 +78,10 @@ function bakery_agent_program_work_map(): array
             'Every root script passes through bakery_enforce_request_security',
             ['33-edge-entrypoints', 'prompt-33', 'oauth-gate', 'ping-leak'],
             ['oauth_setup.php', 'oauth_callback.php', 'setup_directories.php', 'ping.php', 'assets/api/get_route.php', 'includes/auth.php'],
-            ['tests/run_auth_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_navigation_tests.php'],
+            ['tests/run_edge_entrypoint_tests.php', 'tests/run_auth_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_navigation_tests.php'],
             ['Menu hiding is never the only control', 'Diagnostics are administrator-only', '*_api.php answers JSON on auth/CSRF failure'],
-            'docs/prompts/33-edge-entrypoints.md'
+            'docs/prompts/33-edge-entrypoints.md',
+            'shipped'
         ),
         'error-boundary' => $m(
             'One error boundary; no raw exception text reaches a browser',

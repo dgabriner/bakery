@@ -1,5 +1,10 @@
 <?php
-// OAuth callback handler
+// OAuth callback handler — Google redirects the signed-in administrator here.
+// Bootstrapping through database.php runs bakery_enforce_request_security, so a
+// stranger cannot complete (or replay) a token exchange against this host.
+define('ACCESS_ALLOWED', true);
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/database.php';
 require_once 'includes/gmail_oauth.php';
 
 echo "<h2>🔐 OAuth Authorization</h2>";
