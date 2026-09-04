@@ -40,6 +40,16 @@ Do **not** request or invent:
 
 `scripts/sftp_upload.py` and `scripts/cloud_agent_stage.py` refuse a Live remote root. Live apply is the hosted worker after Staging approval manifests are written.
 
+### Live ops staff login (owner-authorized)
+
+For **read-only** live checks (Login History, Bakery Manager routes, Daily Run), use the Cloud Agent environment secrets and skill:
+
+- Skill: [`.cursor/skills/live-ops-login/SKILL.md`](../.cursor/skills/live-ops-login/SKILL.md)
+- Secrets: `BAKERY_LIVE_AGENT_CODE` (Cursor Agent / manager — default), `BAKERY_LIVE_ADMIN_CODE` (Danny / admin — Login History and admin screens)
+- Live URL: `https://bakery.sourflour.org/bake/login.php`
+
+Do **not** put the digit codes in Git, PR bodies, or new docs. Staging DB is not live delivery progress.
+
 ---
 
 ## Best approach (canonical)

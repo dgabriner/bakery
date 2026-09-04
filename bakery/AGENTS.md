@@ -16,7 +16,9 @@ The CLI hops onto `bakerysf_stage_local` (durable ledger). Tests use `bakerysf_t
 
 Prefer canonical `--agent=` slugs from `canonical_slugs`. Use `mission_packet`. Do not reopen shipped loops.
 
-Skills: `.cursor/skills/agent-homebase/SKILL.md`, `test-gate`, `close-a-loop`, `sfb-agent`.
+Skills: `.cursor/skills/agent-homebase/SKILL.md`, `test-gate`, `close-a-loop`, `sfb-agent`, `live-ops-login`.
+
+**Live ops login:** when the owner asks who is signed in or how live routes are doing, use `.cursor/skills/live-ops-login/SKILL.md` with env secrets `BAKERY_LIVE_AGENT_CODE` (manager) and `BAKERY_LIVE_ADMIN_CODE` (admin / Login History). Never commit the codes.
 
 Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`. New schema files take the next unused `NNN` (`php scripts/next_schema_migration.php --name=slug`); do not reuse 062 or rename applied migrations.
 
