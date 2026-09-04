@@ -37,6 +37,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="app-base-url" content="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>">
     <?php require __DIR__ . '/client_refresh.php'; ?>
+    <?php require_once __DIR__ . '/google_analytics.php'; ?>
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <?php if (!defined('IS_LOCAL') || !IS_LOCAL): ?>
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">

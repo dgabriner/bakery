@@ -49,6 +49,7 @@ $hasExistingCode = $invite && bakery_normalize_login_code($invite['portal_code']
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Customer Login - Sour Flour</title>
   <?php require __DIR__ . '/includes/client_refresh.php'; ?>
+  <?php require_once __DIR__ . '/includes/google_analytics.php'; ?>
   <link rel="stylesheet" href="<?php echo bakery_asset_href('css/qr_login.css'); ?>">
 </head>
 <body class="qr-customer-body">

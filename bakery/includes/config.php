@@ -137,15 +137,17 @@ if (PHP_SAPI !== 'cli') {
     header('Referrer-Policy: strict-origin-when-cross-origin');
 
     if (!IS_LOCAL && !isDevelopment()) {
-        // Allow Google Maps JS API tiles/fonts (map tiles load from maps.googleapis.com, not only maps.gstatic.com).
+        // Allow Google Maps JS API tiles/fonts, plus the Sour Flour Google tag (gtag.js)
+        // on bakery and hosted staging. Do not disable this CSP.
         header(
             "Content-Security-Policy: " .
             "default-src 'self'; " .
-            "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com; " .
+            "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://www.googleadservices.com https://www.google.com; " .
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
-            "img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com https://*.google.com https://*.googleusercontent.com; " .
+            "img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com https://*.google.com https://*.googleusercontent.com https://www.google-analytics.com https://www.googletagmanager.com https://*.google-analytics.com https://*.googletagmanager.com https://*.g.doubleclick.net; " .
             "font-src 'self' https://fonts.gstatic.com; " .
-            "connect-src 'self' https://maps.googleapis.com; " .
+            "connect-src 'self' https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.googleadservices.com https://*.g.doubleclick.net; " .
+            "frame-src https://www.googletagmanager.com https://www.googleadservices.com; " .
             "worker-src 'self' blob:"
         );
     }
