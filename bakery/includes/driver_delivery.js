@@ -1161,29 +1161,63 @@
 
     try {
       await refreshRouteSession();
-      var formData = new FormData();
-      formData.append('action', 'upload');
-      formData.append('photo', blob, filename || 'capture.jpg');
-      formData.append('driver_id', String(state.driverId));
-      formData.append('customer_id', String(state.customerId));
-      formData.append('daily_order_id', String(state.dailyOrderId));
-      formData.append('date', state.date);
       var photoType = ($('deliveryPhotoType') && $('deliveryPhotoType').value) || 'Before';
-      formData.append('photo_type', photoType);
-      formData.append('notes', ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '');
-      // Do not hold a proof photo behind an iPhone location prompt. Route GPS
-      // tracking and the final delivery event capture location independently.
-      formData.append('latitude', '');
-      formData.append('longitude', '');
+      var outbox = window.BakeryDriverOutbox;
+      var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('photo') : '';
+      var payload = {
+        driver_id: String(state.driverId),
+        customer_id: String(state.customerId),
+        daily_order_id: String(state.dailyOrderId),
+        date: state.date,
+        photo_type: photoType,
+        notes: ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '',
+        latitude: '',
+        longitude: ''
+      };
 
       if (fill) fill.style.width = '70%';
 
-      var response = await fetch('upload_driver_photo.php', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData
-      });
-      var data = await readJsonResponse(response, i18n('photo_upload_failed'));
+      var data = null;
+      var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline && outbox && typeof outbox.enqueuePhoto === 'function') {
+        await outbox.enqueuePhoto({
+          id: requestId,
+          dailyOrderId: state.dailyOrderId,
+          payload: payload,
+          photoBlob: blob,
+          filename: filename || 'capture.jpg'
+        });
+        data = { success: true, queued: true, client_request_id: requestId };
+      } else {
+        var formData = new FormData();
+        formData.append('action', 'upload');
+        formData.append('photo', blob, filename || 'capture.jpg');
+        Object.keys(payload).forEach(function (key) {
+          formData.append(key, payload[key]);
+        });
+        if (requestId) formData.append('client_request_id', requestId);
+        try {
+          var response = await fetch('upload_driver_photo.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+          });
+          data = await readJsonResponse(response, i18n('photo_upload_failed'));
+        } catch (networkErr) {
+          if (outbox && typeof outbox.enqueuePhoto === 'function') {
+            await outbox.enqueuePhoto({
+              id: requestId,
+              dailyOrderId: state.dailyOrderId,
+              payload: payload,
+              photoBlob: blob,
+              filename: filename || 'capture.jpg'
+            });
+            data = { success: true, queued: true, client_request_id: requestId };
+          } else {
+            throw networkErr;
+          }
+        }
+      }
       if (fill) fill.style.width = '100%';
 
       if (!data || !data.success) {
@@ -1192,7 +1226,7 @@
 
       var replacedPhotoId = state.retakePhotoId;
       state.retakePhotoId = null;
-      if (replacedPhotoId) {
+      if (replacedPhotoId && !data.queued) {
         try {
           await deletePhoto(replacedPhotoId, { silent: true });
         } catch (deleteErr) {
@@ -1204,26 +1238,28 @@
 
       if ($('deliveryPhotoNotes')) $('deliveryPhotoNotes').value = '';
       stopCamera();
-      await loadPhotos();
+      if (!data.queued) {
+        await loadPhotos();
+      }
       if (state.photoMode === 'review') {
         state.photoReturnStep = null;
         setStatus(
-          photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved'),
+          data.queued ? i18n('outbox_queued') : (photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved')),
           'success'
         );
         goToStep('invoice');
       } else if (state.photoReturnStep === 'complete') {
         state.photoReturnStep = null;
-        setStatus(i18n('departure_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
         finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
       } else if (photoType === 'Before') {
         // Arrival proof is enough to move directly to quantity confirmation.
         state.photoReturnStep = null;
-        setStatus(i18n('arrival_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('arrival_saved'), 'success');
         goToStep('delivery');
       } else {
         // Extra photos outside the guided flow return to delivery confirmation.
-        setStatus(i18n('departure_saved'), 'success');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
         goToStep('delivery');
       }
     } catch (err) {
@@ -1749,6 +1785,8 @@
     try {
       var coords = await getCoords({ timeout: 1500, maximumAge: 120000 });
       await refreshRouteSession();
+      var outbox = window.BakeryDriverOutbox;
+      var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('confirm') : '';
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
         '&delivered_pieces=' + encodeURIComponent(String(pieces)) +
         '&credits_taken_back=' + encodeURIComponent(String(credits));
@@ -1759,12 +1797,44 @@
         body += '&amount_collected=' + encodeURIComponent(String(parseFloat($('deliveryCashCollectedInput').value)));
       }
       body = appendGpsParams(body, coords);
-      var response = await fetch('complete_delivery.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
-      });
-      var data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+      if (requestId) {
+        body += '&client_request_id=' + encodeURIComponent(requestId);
+      }
+
+      var data = null;
+      var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline && outbox && typeof outbox.enqueueConfirm === 'function') {
+        await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
+        data = {
+          success: true,
+          queued: true,
+          message: i18n('outbox_queued'),
+          total: state.orderTotal || 0,
+          payment_collection: state.paymentCollection
+        };
+      } else {
+        try {
+          var response = await fetch('complete_delivery.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+          });
+          data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+        } catch (networkErr) {
+          if (outbox && typeof outbox.enqueueConfirm === 'function') {
+            await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
+            data = {
+              success: true,
+              queued: true,
+              message: i18n('outbox_queued'),
+              total: state.orderTotal || 0,
+              payment_collection: state.paymentCollection
+            };
+          } else {
+            throw networkErr;
+          }
+        }
+      }
       if (!data || !data.success) {
         throw new Error((data && data.error) || i18n('could_not_complete_delivery'));
       }

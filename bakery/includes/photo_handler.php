@@ -370,35 +370,71 @@ class PhotoHandler {
                 $deliveryDate = date('Y-m-d');
             }
 
-            $stmt = $db->prepare("
-                INSERT INTO driver_photos 
-                (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path, 
-                 file_size, mime_type, photo_type, latitude, longitude, notes) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            
-            $result = $stmt->execute([
-                $driverId,
-                $customerId,
-                $deliveryDate,
-                $photoData['filename'],
-                $photoData['original_filename'],
-                $photoData['file_path'],
-                $photoData['thumbnail_path'],
-                $photoData['file_size'],
-                $photoData['mime_type'],
-                $photoData['photo_type'],
-                $photoData['latitude'],
-                $photoData['longitude'],
-                $photoData['notes']
-            ]);
-            
+            $clientRequestId = '';
+            if (function_exists('bakery_normalize_client_request_id')) {
+                $clientRequestId = bakery_normalize_client_request_id($photoData['client_request_id'] ?? '');
+            } else {
+                $clientRequestId = trim((string)($photoData['client_request_id'] ?? ''));
+                if (strlen($clientRequestId) > 64) {
+                    $clientRequestId = '';
+                }
+            }
+            $hasClientRequestCol = function_exists('column_exists')
+                && column_exists($db, 'driver_photos', 'client_request_id');
+
+            if ($hasClientRequestCol && $clientRequestId !== '') {
+                $stmt = $db->prepare("
+                    INSERT INTO driver_photos
+                    (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
+                     file_size, mime_type, photo_type, latitude, longitude, notes, client_request_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $result = $stmt->execute([
+                    $driverId,
+                    $customerId,
+                    $deliveryDate,
+                    $photoData['filename'],
+                    $photoData['original_filename'],
+                    $photoData['file_path'],
+                    $photoData['thumbnail_path'],
+                    $photoData['file_size'],
+                    $photoData['mime_type'],
+                    $photoData['photo_type'],
+                    $photoData['latitude'],
+                    $photoData['longitude'],
+                    $photoData['notes'],
+                    $clientRequestId,
+                ]);
+            } else {
+                $stmt = $db->prepare("
+                    INSERT INTO driver_photos
+                    (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
+                     file_size, mime_type, photo_type, latitude, longitude, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $result = $stmt->execute([
+                    $driverId,
+                    $customerId,
+                    $deliveryDate,
+                    $photoData['filename'],
+                    $photoData['original_filename'],
+                    $photoData['file_path'],
+                    $photoData['thumbnail_path'],
+                    $photoData['file_size'],
+                    $photoData['mime_type'],
+                    $photoData['photo_type'],
+                    $photoData['latitude'],
+                    $photoData['longitude'],
+                    $photoData['notes'],
+                ]);
+            }
+
             if ($result) {
                 return ['success' => true, 'photo_id' => $db->lastInsertId()];
             } else {
                 return ['success' => false, 'error' => 'Failed to save photo to database'];
             }
-            
+
         } catch (Exception $e) {
             error_log("Database save error: " . $e->getMessage());
             return ['success' => false, 'error' => 'Database error: ' . $e->getMessage()];

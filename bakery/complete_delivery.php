@@ -21,6 +21,7 @@ require_once __DIR__ . '/includes/driver_route_prep.php';
 require_once __DIR__ . '/includes/delivery_recovery.php';
 require_once __DIR__ . '/includes/delivery_skip.php';
 require_once __DIR__ . '/includes/customer_portal.php';
+require_once __DIR__ . '/includes/client_request_id.php';
 
 if (PHP_SAPI !== 'cli') {
     header('Content-Type: application/json');
@@ -550,6 +551,60 @@ function bakery_confirm_delivery(
         throw new Exception('Credits taken back cannot exceed pieces delivered');
     }
 
+    $clientRequestId = bakery_normalize_client_request_id($options['client_request_id'] ?? '');
+    if ($clientRequestId !== '' && bakery_daily_orders_confirm_request_id_ready($db)) {
+        $dup = $db->prepare(
+            'SELECT id, delivered_pieces, credits_taken_back, total_amount, amount_collected,
+                    delivery_order_total, delivery_pricing_label
+             FROM daily_orders
+             WHERE confirm_request_id = ?
+             LIMIT 1'
+        );
+        $dup->execute([$clientRequestId]);
+        $existing = $dup->fetch(PDO::FETCH_ASSOC);
+        if ($existing) {
+            if ((int)$existing['id'] !== $dailyOrderId) {
+                throw new Exception('This confirmation was already recorded for another stop');
+            }
+            $delivered = (int)($existing['delivered_pieces'] ?? 0);
+            $credits = (int)($existing['credits_taken_back'] ?? 0);
+            $total = (float)($existing['total_amount'] ?? $existing['delivery_order_total'] ?? 0);
+            $billable = max(0, $delivered - $credits);
+            $pricePerPiece = $billable > 0 ? round($total / $billable, 4) : 0.0;
+            $custStmt = $db->prepare(
+                "SELECT CASE WHEN EXISTS (
+                            SELECT 1
+                            FROM daily_order_items payment_doi
+                            INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
+                            INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
+                            INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
+                            WHERE payment_doi.daily_order_id = do.id
+                              AND payment_pl.name = 'Pan Dulce'
+                        ) THEN 'cod' ELSE COALESCE(c.payment_collection, 'cod') END
+                 FROM daily_orders do
+                 JOIN customers c ON c.id = do.customer_id
+                 WHERE do.id = ?"
+            );
+            $custStmt->execute([$dailyOrderId]);
+            $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
+            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+            return [
+                'success' => true,
+                'duplicate' => true,
+                'message' => 'Delivery already confirmed.',
+                'delivered_pieces' => $delivered,
+                'credits_taken_back' => $credits,
+                'billable_pieces' => $billable,
+                'price_per_piece' => $pricePerPiece,
+                'total' => $total,
+                'amount_collected' => $existing['amount_collected'] !== null ? (float)$existing['amount_collected'] : null,
+                'payment_collection' => $paymentCollection,
+                'ordered_pieces' => (int)$invoice['ordered_pieces'],
+                'invoice' => $invoice,
+            ];
+        }
+    }
+
     $invoice = bakery_delivery_invoice($db, $dailyOrderId);
     $summary = [
         'ordered_pieces' => $invoice['ordered_pieces'],
@@ -645,18 +700,25 @@ function bakery_confirm_delivery(
                  delivery_order_total = ?,
                  delivery_pricing_label = COALESCE(delivery_pricing_label, ?),
                  amount_collected = ?,
-                 delivery_confirmed_at = NOW()
-             WHERE id = ?'
+                 delivery_confirmed_at = NOW()'
+            . ($clientRequestId !== '' && bakery_daily_orders_confirm_request_id_ready($db)
+                ? ', confirm_request_id = COALESCE(confirm_request_id, ?)'
+                : '')
+            . ' WHERE id = ?'
         );
-        $tot->execute([
+        $totParams = [
             $deliveredPieces,
             $creditsTakenBack,
             $total,
             $total,
             $summary['pricing_label'],
             $amountCollected,
-            $dailyOrderId,
-        ]);
+        ];
+        if ($clientRequestId !== '' && bakery_daily_orders_confirm_request_id_ready($db)) {
+            $totParams[] = $clientRequestId;
+        }
+        $totParams[] = $dailyOrderId;
+        $tot->execute($totParams);
         $verify = $db->prepare('SELECT id FROM daily_orders WHERE id = ?');
         $verify->execute([$dailyOrderId]);
         if (!$verify->fetchColumn()) {
@@ -794,6 +856,10 @@ try {
             if (isset($_POST['amount_collected'])) {
                 $confirmOptions['amount_collected'] = $_POST['amount_collected'];
             }
+            $clientRequestId = bakery_normalize_client_request_id($_POST['client_request_id'] ?? '');
+            if ($clientRequestId !== '') {
+                $confirmOptions['client_request_id'] = $clientRequestId;
+            }
             $confirmed = bakery_confirm_delivery(
                 $db,
                 $dailyOrderId,
@@ -802,28 +868,30 @@ try {
                 $confirmOptions
             );
 
-            $ctx = bakery_operational_order_context($db, $dailyOrderId);
-            $customerLabel = $ctx['customer_name'] ?? 'customer';
-            $user = bakery_current_user();
-            $actorName = $user['display_name'] ?? 'Driver';
-            bakery_operational_log_delivery(
-                $db,
-                BAKERY_OP_DELIVERY_COMPLETED,
-                $dailyOrderId,
-                $actorName . ' completed delivery to ' . $customerLabel,
-                [
-                    'ordered_pieces' => $confirmed['ordered_pieces'],
-                    'delivered_pieces' => $confirmed['delivered_pieces'],
-                    'credits_taken_back' => $confirmed['credits_taken_back'],
-                    'total' => $confirmed['total'],
-                    'amount_collected' => $confirmed['amount_collected'],
-                    'payment_collection' => $confirmed['payment_collection'],
-                    'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
-                ],
-                bakery_delivery_gps_payload($_POST)
-            );
-            bakery_customer_notify_delivery_completed($db, $dailyOrderId);
-            bakery_customer_notify_invoice_available($db, $dailyOrderId);
+            if (empty($confirmed['duplicate'])) {
+                $ctx = bakery_operational_order_context($db, $dailyOrderId);
+                $customerLabel = $ctx['customer_name'] ?? 'customer';
+                $user = bakery_current_user();
+                $actorName = $user['display_name'] ?? 'Driver';
+                bakery_operational_log_delivery(
+                    $db,
+                    BAKERY_OP_DELIVERY_COMPLETED,
+                    $dailyOrderId,
+                    $actorName . ' completed delivery to ' . $customerLabel,
+                    [
+                        'ordered_pieces' => $confirmed['ordered_pieces'],
+                        'delivered_pieces' => $confirmed['delivered_pieces'],
+                        'credits_taken_back' => $confirmed['credits_taken_back'],
+                        'total' => $confirmed['total'],
+                        'amount_collected' => $confirmed['amount_collected'],
+                        'payment_collection' => $confirmed['payment_collection'],
+                        'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
+                    ],
+                    bakery_delivery_gps_payload($_POST)
+                );
+                bakery_customer_notify_delivery_completed($db, $dailyOrderId);
+                bakery_customer_notify_invoice_available($db, $dailyOrderId);
+            }
 
             echo json_encode([
                 'success' => true,
@@ -835,6 +903,8 @@ try {
                 'total' => $confirmed['total'],
                 'amount_collected' => $confirmed['amount_collected'],
                 'payment_collection' => $confirmed['payment_collection'],
+                'duplicate' => !empty($confirmed['duplicate']),
+                'client_request_id' => $clientRequestId !== '' ? $clientRequestId : null,
             ]);
             break;
 

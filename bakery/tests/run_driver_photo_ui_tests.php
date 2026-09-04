@@ -371,6 +371,18 @@ driver_photo_assert(
         && strpos($tracking, "routeDate === localToday()") !== false
         && strpos($tracking, 'bakeryEnableGpsTracking(driverId, routeDate)') !== false
 );
+$outbox = (string)file_get_contents($root . '/includes/driver_offline_outbox.js');
+driver_photo_assert(
+    'offline outbox queues photo and confirm with client_request_id',
+    strpos($page, 'driver_offline_outbox.js') !== false
+        && strpos($outbox, 'indexedDB') !== false
+        && strpos($outbox, 'enqueuePhoto') !== false
+        && strpos($outbox, 'enqueueConfirm') !== false
+        && strpos($outbox, 'client_request_id') !== false
+        && strpos($script, 'BakeryDriverOutbox') !== false
+        && strpos($script, 'client_request_id') !== false
+        && strpos($page, 'id="driverOutboxChip"') !== false
+);
 driver_photo_assert(
     'failed stops update live and include HQ contact links',
     strpos($page, 'id="failStopHqLinks"') !== false

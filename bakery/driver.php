@@ -297,6 +297,7 @@ function bakery_render_driver_stop_item(
                 </div>
             </div>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
+            <span class="driver-outbox-chip driver-outbox-chip--stop" data-outbox-chip hidden></span>
         </div>
         <div class="contact-actions">
             <?php if (!$isDone && $mapsHref): ?>
@@ -577,6 +578,7 @@ $progressPct = $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 1
 <link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
+<script src="<?php echo bakery_asset_href('includes/driver_offline_outbox.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_delivery.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_map.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_prep.js'); ?>" defer></script>
@@ -627,6 +629,7 @@ document.body.classList.add('driver-route-prep');
             <div class="route-identity">
                 <span class="route-live-dot" aria-hidden="true"></span>
                 <div class="route-driver-label"><?php echo htmlspecialchars($driver['name']); ?></div>
+                <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
             </div>
             <?php if (!$isAuthenticatedDriver): ?>
             <a class="route-change-link" href="?change_driver=1&amp;date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('driver.change_driver'); ?></a>
@@ -1379,6 +1382,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'review_invoice' => bakery_t('driver.review_invoice'),
     'save_delivery' => bakery_t('driver.save_delivery'),
     'save_and_leave_photo' => bakery_t('driver.save_and_leave_photo'),
+    'outbox_queued' => bakery_t('driver.outbox_queued'),
+    'outbox_synced' => bakery_t('driver.outbox_synced'),
+    'outbox_failed' => bakery_t('driver.outbox_failed'),
     'phone_camera' => bakery_t('driver.phone_camera'),
     'skip_photo' => bakery_t('driver.skip_photo'),
     'skip_departure_photo' => bakery_t('driver.skip_departure_photo'),

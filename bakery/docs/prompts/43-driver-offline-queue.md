@@ -31,3 +31,5 @@ Extend `run_driver_workflow_tests.php`: same `client_request_id` twice → one c
 ## Done when
 
 Airplane mode: photo + confirm queue; back online: they sync once; `inventory_movements` shows a single return set.
+
+**Status:** shipped 2026-09-04 — migration `078_delivery_client_request_id`, idempotent upload/confirm, IndexedDB outbox + chips. Staging and Live were not touched.

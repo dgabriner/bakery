@@ -3961,6 +3961,31 @@ body.photo-mode-open {
     background: #15803d;
 }
 
+.driver-outbox-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    margin-left: 8px;
+    padding: 2px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: #d97706;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.driver-outbox-chip.is-failed,
+.driver-outbox-chip--stop.is-failed {
+    background: #b91c1c;
+}
+
+.driver-outbox-chip--stop {
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
 .delivery-invoice-footer-actions {
     display: flex;
     flex-direction: column;

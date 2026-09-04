@@ -153,7 +153,8 @@ function bakery_agent_program_work_map(): array
             ['includes/driver_offline_outbox.js', 'includes/driver_delivery.js', 'upload_driver_photo.php', 'complete_delivery.php', 'database/schema/078_delivery_client_request_id.sql'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php', 'tests/run_schema_compare_tests.php'],
             ['Same client_request_id twice → one confirmation, one set of movements', 'No service-worker page caching'],
-            'docs/prompts/43-driver-offline-queue.md'
+            'docs/prompts/43-driver-offline-queue.md',
+            'shipped'
         ),
         'manager-phone-closeout' => $m(
             'Manager phone Routes / Closeout cards; route_manager.php desktop-only',
