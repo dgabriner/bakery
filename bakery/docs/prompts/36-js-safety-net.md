@@ -25,3 +25,5 @@ Extend `run_driver_photo_ui_tests.php` / `run_driver_workflow_tests.php` (string
 ## Done when
 
 Rejecting the photo upload promise on `driver.php` shows a message, logs a beacon, and the modal can be retried.
+
+**Status:** shipped (2026-09-04). `includes/shell.js` beacons `unhandledrejection`/`error` to `client_error_api.php` (login-gated, CSRF-exempt, 20/min, `077_client_errors`); driver/baker/cashier toast via `error.something_failed`; `deletePhoto` and route-prep `post()` return `{ok,error}`; Login History overview lists recent browser errors. Staging and Live were not touched.

@@ -104,10 +104,11 @@ function bakery_agent_program_work_map(): array
         'js-safety-net' => $m(
             'Global browser error reporting and visible fetch failures',
             ['36-js-safety-net', 'prompt-36', 'unhandledrejection', 'client-errors'],
-            ['includes/shell.js', 'client_error_api.php', 'includes/driver_delivery.js', 'includes/driver_route_prep.js', 'includes/global_tracking.js', 'includes/portal_orders.js', 'login_history.php'],
-            ['tests/run_driver_photo_ui_tests.php', 'tests/run_driver_workflow_tests.php', 'tests/run_login_history_tests.php', 'tests/run_i18n_tests.php'],
+            ['includes/shell.js', 'client_error_api.php', 'includes/client_errors.php', 'includes/driver_delivery.js', 'includes/driver_route_prep.js', 'login_history.php', 'database/schema/077_client_errors.sql', 'lang/en.php', 'lang/es.php'],
+            ['tests/run_driver_photo_ui_tests.php', 'tests/run_driver_workflow_tests.php', 'tests/run_login_history_tests.php', 'tests/run_client_error_api_tests.php', 'tests/run_i18n_tests.php'],
             ['Every await fetch has a catch and a visible status', 'Beacon endpoint is login-gated and rate-limited'],
-            'docs/prompts/36-js-safety-net.md'
+            'docs/prompts/36-js-safety-net.md',
+            'shipped'
         ),
         'characterize-core' => $m(
             'Characterization suites for daily orders, standing orders, production center, delivery confirm',
@@ -147,7 +148,7 @@ function bakery_agent_program_work_map(): array
         'driver-offline-queue' => $m(
             'IndexedDB outbox with idempotent photo/confirm endpoints',
             ['43-driver-offline-queue', 'prompt-43', 'offline-driver', 'outbox'],
-            ['includes/driver_offline_outbox.js', 'includes/driver_delivery.js', 'upload_driver_photo.php', 'complete_delivery.php', 'database/schema/077_delivery_client_request_id.sql'],
+            ['includes/driver_offline_outbox.js', 'includes/driver_delivery.js', 'upload_driver_photo.php', 'complete_delivery.php', 'database/schema/078_delivery_client_request_id.sql'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php', 'tests/run_schema_compare_tests.php'],
             ['Same client_request_id twice → one confirmation, one set of movements', 'No service-worker page caching'],
             'docs/prompts/43-driver-offline-queue.md'

@@ -15,7 +15,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 34 `error-boundary` — global handlers, no raw exception text, `safe_execute` throws | **shipped** | `tests/run_error_boundary_tests.php` (18 checks) |
 | 35 `money-transactions` — invoice send outbox (queued → sent/logged/failed) | **partial** (Square tx audit remains) | `tests/run_invoice_send_tests.php` failure-path block |
 | 37 `characterize-core` — four god-page suites | **shipped** | `run_daily_orders_page_tests`, `run_standing_orders_manager_tests`, `run_production_center_tests`, `run_complete_delivery_tests` (all green twice) |
-| 36, 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 36 `js-safety-net` — browser error beacon + fetch audit | **shipped** | `run_client_error_api_tests`, extended `run_driver_photo_ui_tests` / `run_login_history_tests` / `run_i18n_tests` |
+| 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -42,13 +43,13 @@ Homebase needs `bakerysf_stage_local` with the 044 schema; on a fresh cloud VM `
 Each item names the brief; the brief names files, tests, invariants, and done-when. Do them one mission per commit/PR.
 
 ### Do next (highest severity, smallest lanes)
-1. **36 `js-safety-net`** — `unhandledrejection` beacon + driver fetch audit. `includes/error_boundary.php` already renders `{success:false,error:internal,error_id}` for `*_api.php`, so the client side can key on `error_id`.
-2. **35 remainder** — transaction audit of `includes/square_invoices.php` create/publish/webhook writes (the invoice-send outbox is done; reuse `$GLOBALS['bakery_billing_mail_handler']`-style seams).
+1. **35 remainder** — transaction audit of `includes/square_invoices.php` create/publish/webhook writes (the invoice-send outbox is done; reuse `$GLOBALS['bakery_billing_mail_handler']`-style seams).
+2. ~~**36 `js-safety-net`**~~ — **shipped**.
 3. ~~**37 `characterize-core`**~~ — **shipped** (four suites green twice).
 
 ### Then mobile (Wave 2)
 5. **40 `nav-catalog-roles`** — catalog drives the role allowlists (default-deny); manager More ≤ 8; `cashier_add_product.php` gets `nav.php`. Unlocks 45.
-6. **42 `driver-fast-path`** then **43 `driver-offline-queue`** (43 needs the next free migration number — run `php scripts/next_schema_migration.php --name=delivery_client_request_id`; the map guesses `077`, verify).
+6. **42 `driver-fast-path`** then **43 `driver-offline-queue`** (43 needs the next free migration number — run `php scripts/next_schema_migration.php --name=delivery_client_request_id`; currently **078** after `077_client_errors`).
 7. **44 `manager-phone-closeout`**, **45 `kitchen-one-screen`**, **41 `touch-tokens`**, **46 `sfb-bottom-nav`**.
 
 ### Then structure (Wave 3) — one page per PR
@@ -89,4 +90,4 @@ Each item names the brief; the brief names files, tests, invariants, and done-wh
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** start with 37, then 36, then finish 35's Square audit (§3). Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing.
+8. **Next agent:** finish 35's Square audit (§3), then Wave 2 (40 → 42 → 43 → 44 → 45 → 41 → 46). Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **37 and 36 are shipped.** Staging and Live were not touched.

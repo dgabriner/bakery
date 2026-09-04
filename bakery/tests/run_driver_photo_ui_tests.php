@@ -363,4 +363,48 @@ driver_photo_assert(
         && strpos($page, "setTimeout(function () { window.location.reload(); }, 700);") === false
 );
 
+$shell = (string)file_get_contents($root . '/includes/shell.js');
+$clientErrorApi = (string)file_get_contents($root . '/client_error_api.php');
+$clientErrorsHelper = (string)file_get_contents($root . '/includes/client_errors.php');
+driver_photo_assert(
+    'shell listens for unhandledrejection and error and beacons client_error_api',
+    strpos($shell, "addEventListener('unhandledrejection'") !== false
+        && strpos($shell, "addEventListener('error'") !== false
+        && strpos($shell, 'sendBeacon') !== false
+        && strpos($shell, 'client_error_api.php') !== false
+        && strpos($shell, 'something_failed') !== false
+);
+driver_photo_assert(
+    'photo delete await fetch is inside try/catch and returns {ok,error}',
+    strpos($script, 'async function deletePhoto') !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), 'try {') !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), "return { ok: false, error:") !== false
+        && strpos(driver_photo_section($script, 'async function deletePhoto', 'function openViewer'), 'credentials: \'same-origin\'') !== false
+);
+driver_photo_assert(
+    'route prep post() catches fetch failures and returns {ok,error}',
+    strpos($prepScript, 'async function post(') !== false
+        && strpos(driver_photo_section($prepScript, 'async function post(', 'function movableStops'), 'try {') !== false
+        && strpos(driver_photo_section($prepScript, 'async function post(', 'function movableStops'), 'ok: false') !== false
+);
+driver_photo_assert(
+    'client_error_api is login-gated, CSRF-exempt, and rate-limited',
+    strpos($clientErrorApi, "BAKERY_SKIP_REQUEST_SECURITY', true)") !== false
+        || strpos($clientErrorApi, 'BAKERY_SKIP_REQUEST_SECURITY') !== false
+);
+driver_photo_assert(
+    'client_error_api requires a session and rate-limits beacons',
+    strpos($clientErrorApi, 'bakery_current_user()') !== false
+        && strpos($clientErrorApi, 'bakery_client_error_rate_limit') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_error_rate_limit') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_error_record') !== false
+);
+driver_photo_assert(
+    'EN/ES something_failed strings exist for the shell toast',
+    isset($english['error.something_failed'])
+        && isset($spanish['error.something_failed'])
+        && $english['error.something_failed'] !== ''
+        && $spanish['error.something_failed'] !== ''
+);
+
 exit($failures > 0 ? 1 : 0);

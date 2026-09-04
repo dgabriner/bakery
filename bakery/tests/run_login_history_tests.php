@@ -77,8 +77,16 @@ $deltaFlat = bakery_login_history_delta(100, 99);
 login_history_assert($deltaFlat['direction'] === 'flat', 'delta treats a 1% change as flat');
 
 login_history_assert(in_array('login_audit_api', bakery_login_history_noise_pages(), true), 'heartbeat and API pages are treated as telemetry noise');
+login_history_assert(in_array('client_error_api', bakery_login_history_noise_pages(), true), 'client error beacon is treated as telemetry noise');
 login_history_assert(bakery_login_history_screen_href('login_audit_api') === '', 'noise pages do not get an open-screen link');
 login_history_assert(strpos(bakery_login_history_screen_href('production'), 'production.php') !== false, 'real screens get an open-screen href');
+
+$pageSource = (string)file_get_contents(dirname(__DIR__) . '/login_history.php');
+$en = require dirname(__DIR__) . '/lang/en.php';
+$es = require dirname(__DIR__) . '/lang/es.php';
+login_history_assert(strpos($pageSource, 'browser-errors') !== false, 'Login History overview has a browser errors section');
+login_history_assert(isset($en['login_history.browser_errors']) && isset($es['login_history.browser_errors']), 'browser errors i18n keys exist in EN and ES');
+login_history_assert(isset($en['error.something_failed']) && isset($es['error.something_failed']), 'shell toast i18n keys exist in EN and ES');
 
 $grouped = bakery_login_history_group_timeline([
     ['timestamp' => strtotime('2026-08-17 08:00:00'), 'title' => 'a'],

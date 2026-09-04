@@ -88,6 +88,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
         'loading_order' => bakery_t('driver.loading_order'),
         'loading_order_details' => bakery_t('driver.loading_order_details'),
         'loading_photos' => bakery_t('driver.loading_photos'),
+        'something_failed' => bakery_t('error.something_failed'),
     ], JSON_UNESCAPED_UNICODE); ?>;</script>
 
     <?php if ($current_page === 'driver'): ?>

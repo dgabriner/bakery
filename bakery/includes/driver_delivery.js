@@ -213,24 +213,33 @@
     }
 
     state.sessionRefreshPromise = (async function () {
-      var response = await fetch('driver_session_ping.php', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' }
-      });
-      if (response.redirected && /login\.php(?:[?#]|$)/i.test(response.url || '')) {
-        var redirectError = new Error(i18n('session_expired'));
-        redirectError.isSessionError = true;
-        throw redirectError;
+      try {
+        var response = await fetch('driver_session_ping.php', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' }
+        });
+        if (response.redirected && /login\.php(?:[?#]|$)/i.test(response.url || '')) {
+          var redirectError = new Error(i18n('session_expired'));
+          redirectError.isSessionError = true;
+          throw redirectError;
+        }
+        var data = await readJsonResponse(response, i18n('session_expired'));
+        if (!data || !data.success || !data.csrf_token) {
+          var sessionError = new Error(i18n('session_expired'));
+          sessionError.isSessionError = true;
+          throw sessionError;
+        }
+        applyCsrfToken(data.csrf_token);
+        return { ok: true };
+      } catch (err) {
+        if (err && err.isSessionError) {
+          throw err;
+        }
+        var networkError = new Error((err && err.message) || i18n('session_expired'));
+        networkError.isSessionError = true;
+        throw networkError;
       }
-      var data = await readJsonResponse(response, i18n('session_expired'));
-      if (!data || !data.success || !data.csrf_token) {
-        var sessionError = new Error(i18n('session_expired'));
-        sessionError.isSessionError = true;
-        throw sessionError;
-      }
-      applyCsrfToken(data.csrf_token);
-      return true;
     })();
 
     try {
@@ -916,25 +925,35 @@
       '&photo_id=' +
       encodeURIComponent(String(photoId));
 
-    await refreshRouteSession();
-    var response = await fetch('upload_driver_photo.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    });
+    try {
+      await refreshRouteSession();
+      var response = await fetch('upload_driver_photo.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body,
+        credentials: 'same-origin'
+      });
       var data = await readJsonResponse(response, i18n('could_not_remove_photo'));
-    if (!data || !data.success) {
-      throw new Error((data && data.error) || i18n('could_not_remove_photo'));
-    }
+      if (!data || !data.success) {
+        throw new Error((data && data.error) || i18n('could_not_remove_photo'));
+      }
 
-    state.photos = state.photos.filter(function (p) {
-      return Number(p.id) !== Number(photoId);
-    });
-    renderPhotos();
-    updatePhotoWorkflowUi(true);
+      state.photos = state.photos.filter(function (p) {
+        return Number(p.id) !== Number(photoId);
+      });
+      renderPhotos();
+      updatePhotoWorkflowUi(true);
 
-    if (!options.silent) {
-      setStatus(i18n('photo_removed'), 'success');
+      if (!options.silent) {
+        setStatus(i18n('photo_removed'), 'success');
+      }
+      return { ok: true };
+    } catch (err) {
+      var message = (err && err.message) || i18n('could_not_remove_photo');
+      if (!options.silent) {
+        setStatus(message, 'error');
+      }
+      return { ok: false, error: message };
     }
   }
 
@@ -985,13 +1004,9 @@
     if (!window.confirm(i18n('confirm_remove_photo').replace(':label', label))) {
       return;
     }
-    try {
-      await deletePhoto(photoId);
-      if (state.viewingPhotoId === Number(photoId)) {
-        closeViewer();
-      }
-    } catch (err) {
-      setStatus(err.message || i18n('could_not_remove_photo'), 'error');
+    var result = await deletePhoto(photoId);
+    if (result && result.ok && state.viewingPhotoId === Number(photoId)) {
+      closeViewer();
     }
   }
 

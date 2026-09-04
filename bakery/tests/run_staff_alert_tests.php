@@ -148,13 +148,22 @@ $issueId = 0;
 $hadIssueTable = table_exists($db, 'customer_delivery_issues');
 if ($hadIssueTable) {
     $custId = (int)$db->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
-    $orderId = (int)$db->query('SELECT COALESCE(MAX(id), 1) FROM daily_orders')->fetchColumn();
-    if ($custId > 0) {
-    $insertIssue = $db->prepare(
-        'INSERT INTO customer_delivery_issues (customer_id, daily_order_id, order_date, category, description, status)
-         VALUES (?, ?, ?, \'other\', \'Staff alert test issue\', \'submitted\')'
-    );
-        $insertIssue->execute([$custId, max(1, $orderId), $today]);
+    $orderId = (int)$db->query('SELECT id FROM daily_orders ORDER BY id DESC LIMIT 1')->fetchColumn();
+    if ($custId > 0 && $orderId <= 0) {
+        // Fixture DBs may have customers but no dated orders; invent a shell
+        // so the FK on customer_delivery_issues.daily_order_id is satisfiable.
+        $db->prepare(
+            "INSERT INTO daily_orders (customer_id, order_date, status, total_amount)
+             VALUES (?, ?, 'pending', 0)"
+        )->execute([$custId, $today]);
+        $orderId = (int)$db->lastInsertId();
+    }
+    if ($custId > 0 && $orderId > 0) {
+        $insertIssue = $db->prepare(
+            'INSERT INTO customer_delivery_issues (customer_id, daily_order_id, order_date, category, description, status)
+             VALUES (?, ?, ?, \'other\', \'Staff alert test issue\', \'submitted\')'
+        );
+        $insertIssue->execute([$custId, $orderId, $today]);
         $issueId = (int)$db->lastInsertId();
     }
 }

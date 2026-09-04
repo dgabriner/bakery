@@ -28,7 +28,7 @@ function Get-BakeryDeployRootFiles {
         'text_comms.php', 'text_comms_api.php', 'twilio_webhook.php', 'survey.php', 'text_media.php',
         'route_closeout.php', 'route_analysis.php',
         'driver_load.php', 'driver_stops.php', 'driver_session_ping.php',
-        'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php',
+        'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php', 'login_audit_api.php', 'client_error_api.php',
         'generate_invoice.php', 'oauth_callback.php',
         'sfb_dashboard.php', 'sfb_starters.php', 'sfb_ingredients.php', 'sfb_formulas.php',
         'sfb_batches.php', 'sfb_batch.php', 'sfb_resources.php', 'sfb_community.php',

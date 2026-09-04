@@ -34,28 +34,42 @@
 
   async function post(action, extra) {
     var node = root();
-    if (!node) throw new Error(t('route_order_error', 'Could not update the route.'));
+    if (!node) {
+      return { ok: false, error: t('route_order_error', 'Could not update the route.') };
+    }
     var body = 'action=' + encodeURIComponent(action)
       + '&driver_id=' + encodeURIComponent(node.getAttribute('data-driver-id') || '0')
       + '&date=' + encodeURIComponent(node.getAttribute('data-date') || '');
     Object.keys(extra || {}).forEach(function (key) {
       body += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(extra[key]);
     });
-    var response = await fetch('complete_delivery.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    });
-    var data = null;
     try {
-      data = await response.json();
-    } catch (ignore) {
-      throw new Error(t('route_order_error', 'Could not update the route.'));
+      var response = await fetch('complete_delivery.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body,
+        credentials: 'same-origin'
+      });
+      var data = null;
+      try {
+        data = await response.json();
+      } catch (ignore) {
+        return { ok: false, error: t('route_order_error', 'Could not update the route.') };
+      }
+      if (!response.ok || !data) {
+        return {
+          ok: false,
+          error: (data && (data.error || data.message)) || t('route_order_error', 'Could not update the route.')
+        };
+      }
+      data.ok = true;
+      return data;
+    } catch (err) {
+      return {
+        ok: false,
+        error: (err && err.message) || t('route_order_error', 'Could not update the route.')
+      };
     }
-    if (!response.ok || !data) {
-      throw new Error((data && (data.error || data.message)) || t('route_order_error', 'Could not update the route.'));
-    }
-    return data;
   }
 
   function movableStops() {
@@ -87,6 +101,10 @@
     document.body.classList.add('route-prep-saving');
     try {
       var data = await post('reorder_route', { order_ids: ids.join(',') });
+      if (!data || !data.ok) {
+        toast((data && data.error) || t('route_order_error', 'Could not update the route.'));
+        return;
+      }
       (data.stops || []).forEach(function (row) {
         var el = document.querySelector('#routePrepList .route-prep-stop[data-daily-order-id="' + row.daily_order_id + '"]');
         if (!el) return;
@@ -96,6 +114,8 @@
       if (window.DriverRouteMap && typeof window.DriverRouteMap.refresh === 'function') {
         window.DriverRouteMap.refresh();
       }
+    } catch (err) {
+      toast((err && err.message) || t('route_order_error', 'Could not update the route.'));
     } finally {
       savingOrder = false;
       document.body.classList.remove('route-prep-saving');
@@ -131,6 +151,10 @@
       var data = await post('plan_remove_stop', {
         daily_order_id: stopEl.getAttribute('data-daily-order-id') || '0'
       });
+      if (!data || !data.ok) {
+        toast((data && data.error) || t('route_order_error', 'Could not update the route.'));
+        return;
+      }
       toast(data.message || t('prep_removed', 'Stop removed from your route.'));
       window.setTimeout(function () { window.location.reload(); }, 350);
     } catch (err) {
@@ -235,6 +259,10 @@
     try {
       var data = await post('plan_search', { q: query || '' });
       if (seq !== searchSeq) return;
+      if (!data || !data.ok) {
+        box.innerHTML = '<p class="route-prep-results-status">' + escapeHtml((data && data.error) || t('route_order_error', 'Could not update the route.')) + '</p>';
+        return;
+      }
       var approval = data.take_approval || { required: false, mode: 'immediate' };
       var html = '';
       html += renderGroup(t('prep_unassigned', 'Needs a driver'), data.unassigned || [], approval);
@@ -269,6 +297,10 @@
         customer_id: customerId,
         take: take ? '1' : '0'
       });
+      if (!data || !data.ok) {
+        toast((data && data.error) || t('route_order_error', 'Could not update the route.'));
+        return;
+      }
       if (!data.success && data.code === 'take_needs_approval') {
         toast(data.message || t('prep_take_needs_approval', 'A manager has to approve moving this stop.'));
         return;
@@ -280,6 +312,10 @@
         }));
         if (!confirmed) return;
         data = await post('plan_add_stop', { customer_id: customerId, take: '1' });
+        if (!data || !data.ok) {
+          toast((data && data.error) || t('route_order_error', 'Could not update the route.'));
+          return;
+        }
       }
       if (!data.success) {
         toast(data.error || data.message || t('route_order_error', 'Could not update the route.'));

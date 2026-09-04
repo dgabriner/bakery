@@ -48,6 +48,7 @@ function bakery_public_scripts() {
         'customer_portal_login.php',
         'customer_portal_logout.php',
         'login_audit_api.php',
+        'client_error_api.php',
         // Token-gated store-verify / route-review: survey.php checks the token
         // before calling bakery_require_role. No token still requires login.
         'survey.php',
