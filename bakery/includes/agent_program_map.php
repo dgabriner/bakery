@@ -283,7 +283,7 @@ function bakery_agent_program_work_map(): array
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_customer_billing_tests.php'],
             ['Billing Center does not invent amounts', 'Ledger table only after an owner Decided'],
             'docs/prompts/61-settlement-story.md',
-            'owner-decision'
+            'partial'
         ),
         'engagement-writeback' => $m(
             'Survey → Driver Assignment; failed stop → text + credit handoff',
@@ -291,7 +291,8 @@ function bakery_agent_program_work_map(): array
             ['includes/survey_store_verify.php', 'includes/surveys.php', 'survey.php', 'includes/driver_assignments.php', 'includes/delivery_recovery.php', 'includes/exception_desk.php', 'includes/text_comms.php', 'includes/customer_delivery_issues.php'],
             ['tests/run_survey_store_verify_tests.php', 'tests/run_survey_route_order_tests.php', 'tests/run_failed_stop_recovery_tests.php', 'tests/run_text_comms_tests.php', 'tests/run_exception_desk_tests.php'],
             ['Failed-stop rules in docs/FAILED_STOP_RECOVERY_MODEL.md are law', 'Texts send only through the Command Center send path', 'No invoice/credit mutation from the desk'],
-            'docs/prompts/62-engagement-writeback.md'
+            'docs/prompts/62-engagement-writeback.md',
+            'shipped'
         ),
         'ingredient-light' => $m(
             'Ordered / received notes and light stock adjust for ingredients',

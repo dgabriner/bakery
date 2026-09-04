@@ -32,6 +32,8 @@ route_manager_cash_assert_same([
     'cash_on_hand' => 96.75,
     'expected_remaining' => 8.0,
     'turn_in_total' => 104.75,
+    'cash_turned_in' => null,
+    'cash_still_owed' => 96.75,
     'total_sold' => 204.75,
 ], $summary, 'Route Manager includes completed Pan Dulce cash from the final delivery total when cash was not recorded');
 
@@ -49,8 +51,24 @@ route_manager_cash_assert_same([
     'cash_on_hand' => 12.5,
     'expected_remaining' => 0.0,
     'turn_in_total' => 12.5,
+    'cash_turned_in' => null,
+    'cash_still_owed' => 12.5,
     'total_sold' => 12.5,
 ], $defaultCod, 'Missing payment_collection defaults to COD and cancelled stops are excluded from sold');
+
+$withTurnin = route_manager_compute_cash_summary([
+    ['payment_collection' => 'cod', 'delivery_status' => 'delivered', 'amount_collected' => 40.00, 'total_amount' => 40],
+], 25.00);
+route_manager_cash_assert_same(25.0, $withTurnin['cash_turned_in'], 'cash summary accepts recorded turn-in amount');
+route_manager_cash_assert_same(15.0, $withTurnin['cash_still_owed'], 'still owed is collected minus turned in');
+
+$codSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/cod_turnins.php');
+route_manager_cash_assert_same(
+    true,
+    strpos($codSrc, 'function bakery_cod_turnin_record') !== false
+        && is_file(dirname(__DIR__) . '/database/schema/080_cod_turnins.sql'),
+    'COD turn-in helper and migration 080 exist'
+);
 
 $phone = (string)file_get_contents(dirname(__DIR__) . '/includes/manager_phone.php');
 $closeout = (string)file_get_contents(dirname(__DIR__) . '/route_closeout.php');
@@ -61,6 +79,19 @@ route_manager_cash_assert_same(
         && strpos($closeout, 'bakery_inventory_reconcile_driver_load') !== false
         && strpos($phone, 'data-van-math="loaded - delivered - credits - returned - wasted"') !== false,
     'phone close reuses route_closeout reconcile helper and asserts van math by name'
+);
+route_manager_cash_assert_same(
+    true,
+    strpos($phone, 'phone_cod_turnin') !== false
+        && strpos($phone, 'cod_collected_vs_turned_in') !== false,
+    'manager phone Routes shows collected vs turned in and records turn-in'
+);
+
+$rmPhp = (string)file_get_contents(dirname(__DIR__) . '/route_manager.php');
+route_manager_cash_assert_same(
+    true,
+    strpos($rmPhp, 'record_cod_turnin') !== false,
+    'Route Manager can record COD turn-in'
 );
 
 echo "All route manager cash checks passed\n";

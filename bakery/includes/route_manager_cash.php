@@ -30,7 +30,7 @@ function route_manager_estimate_amount(array $delivery): float
     return $amount;
 }
 
-function route_manager_compute_cash_summary(array $deliveries): array
+function route_manager_compute_cash_summary(array $deliveries, ?float $cashTurnedIn = null): array
 {
     $collected = 0.0;
     $expectedRemaining = 0.0;
@@ -70,14 +70,20 @@ function route_manager_compute_cash_summary(array $deliveries): array
         }
     }
 
+    $cashOnHand = round($collected, 2);
+    $turnedIn = $cashTurnedIn !== null ? round($cashTurnedIn, 2) : null;
+    $stillOwed = $turnedIn === null ? $cashOnHand : round(max(0, $cashOnHand - $turnedIn), 2);
+
     return [
         'cod_stop_count' => $codStopCount,
         'cod_delivered_count' => $codDeliveredCount,
         'cash_recorded_count' => $cashRecordedCount,
         'cash_unrecorded_count' => $cashUnrecordedCount,
-        'cash_on_hand' => round($collected, 2),
+        'cash_on_hand' => $cashOnHand,
         'expected_remaining' => round($expectedRemaining, 2),
         'turn_in_total' => round($collected + $expectedRemaining, 2),
+        'cash_turned_in' => $turnedIn,
+        'cash_still_owed' => $stillOwed,
         'total_sold' => round($totalSold, 2),
     ];
 }

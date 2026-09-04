@@ -372,6 +372,57 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
 }
 
 /**
+ * Read-only settlement story for one delivery. Amounts come only from existing
+ * order fields — Billing Center invents nothing.
+ *
+ * @return array{
+ *   snapshot_total:float,
+ *   cod_collected:?float,
+ *   square_status:string,
+ *   send_status:string,
+ *   open_balance:float,
+ *   payment_collection:string
+ * }
+ */
+function bakery_billing_settlement_row(array $order): array
+{
+    $snapshot = isset($order['delivery_order_total']) && $order['delivery_order_total'] !== null && $order['delivery_order_total'] !== ''
+        ? (float)$order['delivery_order_total']
+        : (float)($order['billable_amount'] ?? $order['display_amount'] ?? $order['total_amount'] ?? 0);
+    $cod = null;
+    if (isset($order['amount_collected']) && $order['amount_collected'] !== null && $order['amount_collected'] !== '') {
+        $cod = (float)$order['amount_collected'];
+    }
+    $square = strtoupper(trim((string)($order['square_status'] ?? '')));
+    $send = 'none';
+    if (!empty($order['invoice_was_sent']) || !empty($order['invoice_sent_at'])) {
+        $send = 'sent';
+    }
+    if (!empty($order['last_send_failed']) || strtolower((string)($order['invoice_send_status'] ?? '')) === 'failed') {
+        $send = 'failed';
+    }
+    $open = function_exists('bakery_billing_order_outstanding')
+        ? (float)bakery_billing_order_outstanding($order)
+        : max(0.0, $snapshot - ($cod ?? 0.0) - ($square === 'PAID' ? $snapshot : 0.0));
+
+    return [
+        'snapshot_total' => round($snapshot, 2),
+        'cod_collected' => $cod !== null ? round($cod, 2) : null,
+        'square_status' => $square,
+        'send_status' => $send,
+        'open_balance' => round($open, 2),
+        'payment_collection' => (string)($order['payment_collection'] ?? 'signature'),
+    ];
+}
+
+/** Square statuses that mean the invoice path failed for settlement filters. */
+function bakery_billing_square_status_failed(string $squareStatus): bool
+{
+    $squareStatus = strtoupper(trim($squareStatus));
+    return in_array($squareStatus, ['CANCELED', 'CANCELLED', 'FAILED'], true);
+}
+
+/**
  * Whether billing audit/export/statement tables exist.
  */
 function bakery_billing_tables_ready(PDO $db) {
@@ -472,6 +523,7 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['invoice_was_sent'] = !empty($order['invoice_sent_at']);
         $order['is_fixture_noise'] = bakery_billing_is_fixture_noise($order);
         $order['work_queue'] = bakery_billing_work_queue($order);
+        $order['settlement'] = bakery_billing_settlement_row($order);
 
         $enriched[] = $order;
     }

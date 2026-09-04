@@ -25,7 +25,7 @@ if (!in_array($sortBy, $sortOptions, true)) {
 }
 
 $balancesFilter = (string)($_GET['balances'] ?? 'all');
-if (!in_array($balancesFilter, ['all', 'outstanding', 'aging30'], true)) {
+if (!in_array($balancesFilter, ['all', 'outstanding', 'aging30', 'unpaid14', 'cod_not_turned_in', 'square_failed'], true)) {
     $balancesFilter = 'all';
 }
 
@@ -111,16 +111,60 @@ if ($workQueue !== 'all') {
 }
 
 if ($balancesFilter !== 'all') {
-    $orders = array_values(array_filter($orders, static function ($order) use ($balancesFilter) {
-        $remainder = bakery_billing_order_outstanding($order);
+    if (!function_exists('bakery_cod_turnins_for_date')) {
+        require_once __DIR__ . '/cod_turnins.php';
+    }
+    $turninsByDriverDate = [];
+    if ($balancesFilter === 'cod_not_turned_in') {
+        $datesNeeded = [];
+        foreach ($orders as $order) {
+            $datesNeeded[(string)($order['order_date'] ?? '')] = true;
+        }
+        foreach (array_keys($datesNeeded) as $turninDate) {
+            if ($turninDate === '') {
+                continue;
+            }
+            foreach (bakery_cod_turnins_for_date($db, $turninDate) as $driverId => $amount) {
+                $turninsByDriverDate[$turninDate . ':' . (int)$driverId] = (float)$amount;
+            }
+        }
+    }
+    $orders = array_values(array_filter($orders, static function ($order) use ($balancesFilter, $turninsByDriverDate) {
+        $settlement = is_array($order['settlement'] ?? null)
+            ? $order['settlement']
+            : bakery_billing_settlement_row($order);
+        $remainder = (float)($settlement['open_balance'] ?? bakery_billing_order_outstanding($order));
+        if ($balancesFilter === 'square_failed') {
+            return bakery_billing_square_status_failed((string)($settlement['square_status'] ?? ''));
+        }
+        if ($balancesFilter === 'cod_not_turned_in') {
+            if (($order['payment_collection'] ?? '') !== 'cod') {
+                return false;
+            }
+            $collected = $settlement['cod_collected'];
+            if ($collected === null || (float)$collected <= bakery_billing_outstanding_tolerance()) {
+                return false;
+            }
+            $driverId = (int)($order['driver_id'] ?? $order['assigned_driver_id'] ?? 0);
+            $dateKey = (string)($order['order_date'] ?? '') . ':' . $driverId;
+            $turnedIn = $turninsByDriverDate[$dateKey] ?? null;
+            return $turnedIn === null || (float)$turnedIn + bakery_billing_outstanding_tolerance() < (float)$collected;
+        }
         if ($remainder <= bakery_billing_outstanding_tolerance()) {
             return false;
         }
-        if ($balancesFilter !== 'aging30') {
+        if ($balancesFilter === 'outstanding') {
             return true;
         }
-        return !empty($order['delivery_confirmed_at'])
-            && bakery_billing_oldest_days($order['delivery_confirmed_at']) >= 30;
+        if ($balancesFilter === 'unpaid14') {
+            return !empty($order['delivery_confirmed_at'])
+                && bakery_billing_oldest_days($order['delivery_confirmed_at']) >= 14;
+        }
+        if ($balancesFilter === 'aging30') {
+            return !empty($order['delivery_confirmed_at'])
+                && bakery_billing_oldest_days($order['delivery_confirmed_at']) >= 30;
+        }
+        return true;
     }));
 }
 
@@ -364,7 +408,10 @@ $formAction = 'billing_center.php?panel=invoices';
     <nav class="ic-balance-strip" aria-label="<?php echo htmlspecialchars(bakery_t('billing.balances_aria')); ?>">
         <a class="ic-chip <?php echo $balancesFilter === 'all' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'all', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_all')); ?></a>
         <a class="ic-chip <?php echo $balancesFilter === 'outstanding' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'outstanding', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_outstanding')); ?></a>
+        <a class="ic-chip <?php echo $balancesFilter === 'unpaid14' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'unpaid14', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_unpaid14', [], 'Unpaid >14d')); ?></a>
         <a class="ic-chip <?php echo $balancesFilter === 'aging30' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'aging30', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_aging30')); ?></a>
+        <a class="ic-chip <?php echo $balancesFilter === 'cod_not_turned_in' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'cod_not_turned_in', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_cod_turnin', [], 'COD not turned in')); ?></a>
+        <a class="ic-chip <?php echo $balancesFilter === 'square_failed' ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($query(['balances' => 'square_failed', 'invoice_id' => null])); ?>"><?php echo htmlspecialchars(bakery_t('billing.balances_chip_square_failed', [], 'Square failed')); ?></a>
         <?php if ($balanceSummary['customers'] > 0): ?>
             <span class="ic-bal-summary"><?php
                 echo htmlspecialchars(bakery_t('billing.balances_summary', [
@@ -443,8 +490,23 @@ $formAction = 'billing_center.php?panel=invoices';
                                     if (($order['work_queue'] ?? '') === 'other') {
                                         $queueLabel = (string)($order['category_meta']['short'] ?? '');
                                     }
+                                    $settle = is_array($order['settlement'] ?? null) ? $order['settlement'] : bakery_billing_settlement_row($order);
+                                    $codLabel = $settle['cod_collected'] !== null
+                                        ? '$' . number_format((float)$settle['cod_collected'], 2)
+                                        : '—';
+                                    $squareLabel = $settle['square_status'] !== '' ? $settle['square_status'] : '—';
+                                    $sendLabel = (string)bakery_t('billing.settlement_send_' . $settle['send_status'], [], $settle['send_status']);
                                     ?>
                                     <div style="font-size:.7rem;margin-top:2px;color:#334155"><?php echo htmlspecialchars($queueLabel); ?></div>
+                                    <div class="ic-settlement" style="font-size:.68rem;margin-top:4px;color:#475569;line-height:1.35">
+                                        <?php echo htmlspecialchars(bakery_t('billing.settlement_row', [
+                                            'snapshot' => number_format((float)$settle['snapshot_total'], 2),
+                                            'cod' => $codLabel,
+                                            'square' => $squareLabel,
+                                            'send' => $sendLabel,
+                                            'open' => number_format((float)$settle['open_balance'], 2),
+                                        ], 'Snap $:snapshot · COD :cod · Square :square · Send :send · Open $:open')); ?>
+                                    </div>
                                 </div>
                                 <div><span class="ic-att <?php echo $attentionClassFor($order['category']); ?>"><?php echo htmlspecialchars($order['category_meta']['short']); ?></span></div>
                                 <div style="text-align:right"><strong style="color:#0f766e">$<?php echo number_format($order['display_amount'], 2); ?></strong></div>

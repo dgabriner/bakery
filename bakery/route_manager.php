@@ -129,6 +129,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'record_cod_turnin') {
+    header('Content-Type: application/json');
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    if (function_exists('bakery_require_role')) {
+        bakery_require_role(['administrator', 'manager']);
+    }
+    require_once __DIR__ . '/includes/cod_turnins.php';
+    $date = trim((string)($_POST['date'] ?? ''));
+    $driverId = (int)($_POST['driver_id'] ?? 0);
+    $amount = filter_var($_POST['amount'] ?? null, FILTER_VALIDATE_FLOAT);
+    $userId = (int)(bakery_current_user()['id'] ?? 0);
+    try {
+        if ($amount === false) {
+            throw new InvalidArgumentException('Turn-in amount is required');
+        }
+        $id = bakery_cod_turnin_record($db, $driverId, $date, (float)$amount, $userId);
+        echo json_encode([
+            'success' => true,
+            'id' => $id,
+            'amount' => round((float)$amount, 2),
+            'driver_id' => $driverId,
+            'date' => $date,
+        ]);
+    } catch (Throwable $e) {
+        error_log('record_cod_turnin: ' . $e->getMessage());
+        $msg = function_exists('bakery_error_message_for_user')
+            ? bakery_error_message_for_user($e)
+            : 'Could not record COD turn-in';
+        echo json_encode(['success' => false, 'error' => $msg]);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_pack_units') {
     header('Content-Type: application/json');
     if (function_exists('bakery_require_csrf')) {

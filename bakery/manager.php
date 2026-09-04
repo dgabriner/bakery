@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $managerNotice = 'Live database migration ' . $migration['migration_id'] . ' queued. It will run separately after a fresh backup.';
             $liveQueuedKind = 'database';
-        } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip'], true)) {
+        } elseif (in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip', 'phone_cod_turnin'], true)) {
             $managerNotice = bakery_manager_phone_handle_post($db, $selectedDate, $_POST);
         } elseif ($mutation === 'exception_work') {
             $workKey = (string)($_POST['work_key'] ?? '');

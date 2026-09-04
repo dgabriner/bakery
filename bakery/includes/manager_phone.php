@@ -13,6 +13,8 @@ require_once __DIR__ . '/delivery_skip.php';
 require_once __DIR__ . '/demand_confirmation.php';
 require_once __DIR__ . '/sfb_origin.php';
 require_once __DIR__ . '/product_inventory.php';
+require_once __DIR__ . '/route_manager_cash.php';
+require_once __DIR__ . '/cod_turnins.php';
 
 function bakery_manager_is_phone_workspace(): bool
 {
@@ -182,7 +184,9 @@ function bakery_manager_phone_driver_stops(PDO $db, string $date): array
     $origin = function_exists('bakery_sfb_ops_origin_clause') ? bakery_sfb_ops_origin_clause('c', $db) : '';
     $stmt = $db->prepare(
         "SELECT doa.driver_id, do.id AS daily_order_id, c.name AS customer_name,
-                COALESCE(doa.delivery_status, 'pending') AS delivery_status, doa.route_order
+                COALESCE(doa.delivery_status, 'pending') AS delivery_status, doa.route_order,
+                do.amount_collected, COALESCE(c.payment_collection, 'cod') AS payment_collection,
+                do.delivery_order_total, do.total_amount
          FROM daily_order_assignments doa
          JOIN daily_orders do ON do.id = doa.daily_order_id
          JOIN customers c ON c.id = do.customer_id
@@ -342,8 +346,21 @@ function bakery_manager_phone_handle_post(PDO $db, string $date, array $input): 
 {
     bakery_require_role(['administrator', 'manager']);
     $mutation = (string)($input['manager_mutation'] ?? '');
-    if (!in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip'], true)) {
+    if (!in_array($mutation, ['phone_move', 'phone_qty', 'phone_skip', 'phone_unskip', 'phone_cod_turnin'], true)) {
         return null;
+    }
+    if ($mutation === 'phone_cod_turnin') {
+        if (!function_exists('bakery_cod_turnin_record')) {
+            require_once __DIR__ . '/cod_turnins.php';
+        }
+        $driverId = (int)($input['driver_id'] ?? 0);
+        $amount = filter_var($input['amount'] ?? null, FILTER_VALIDATE_FLOAT);
+        if ($amount === false) {
+            throw new InvalidArgumentException('Turn-in amount is required');
+        }
+        $userId = (int)(bakery_current_user()['id'] ?? 0);
+        bakery_cod_turnin_record($db, $driverId, $date, (float)$amount, $userId);
+        return (string)bakery_t('manager_phone.cod_turnin_done', [], 'COD turn-in recorded.');
     }
     if ($mutation === 'phone_move') {
         $orderId = (int)($input['daily_order_id'] ?? 0);
@@ -591,6 +608,54 @@ function bakery_manager_phone_render_routes(array $ctx): void
           <?php endif; ?>
           <?php if ($failed > 0): ?> · <strong><?php echo number_format($failed); ?> <?php bakery_te('manager_phone.failed'); ?></strong><?php endif; ?>
         </p>
+        <?php
+          $codCollected = null;
+          $codTurnedIn = null;
+          $dbPhone = $ctx['db'] ?? null;
+          if ($dbPhone instanceof PDO && function_exists('route_manager_compute_cash_summary')) {
+              $stopsForCash = $driverStops[$id] ?? [];
+              // Phone stop rows may lack payment fields; fall back to turn-in table only.
+              if (!function_exists('bakery_cod_turnin_get') && is_readable(__DIR__ . '/cod_turnins.php')) {
+                  require_once __DIR__ . '/cod_turnins.php';
+              }
+              if (function_exists('bakery_cod_turnin_get')) {
+                  $codTurnedIn = bakery_cod_turnin_get($dbPhone, $id, $date);
+              }
+              if ($stopsForCash !== [] && isset($stopsForCash[0]['payment_collection'])) {
+                  $cash = route_manager_compute_cash_summary($stopsForCash, $codTurnedIn);
+                  $codCollected = $cash['cash_on_hand'];
+                  $codTurnedIn = $cash['cash_turned_in'];
+              } elseif ($codTurnedIn !== null || (int)$driver['delivered'] > 0) {
+                  // Prefer amount_collected sum when phone stops lack COD flags.
+                  $codCollected = 0.0;
+                  foreach ($stopsForCash as $stopRow) {
+                      if (($stopRow['delivery_status'] ?? '') === 'delivered'
+                          && isset($stopRow['amount_collected']) && $stopRow['amount_collected'] !== '' && $stopRow['amount_collected'] !== null) {
+                          $codCollected += (float)$stopRow['amount_collected'];
+                      }
+                  }
+                  $codCollected = round($codCollected, 2);
+              }
+          }
+        ?>
+        <?php if ($codCollected !== null || $codTurnedIn !== null): ?>
+          <p class="manager-phone__counts manager-phone__counts--cash">
+            <?php echo htmlspecialchars(bakery_t('manager_phone.cod_collected_vs_turned_in', [
+                'collected' => number_format((float)($codCollected ?? 0), 2),
+                'turned_in' => $codTurnedIn !== null ? number_format((float)$codTurnedIn, 2) : '—',
+            ], 'COD $:collected collected · $:turned_in turned in'), ENT_QUOTES, 'UTF-8'); ?>
+          </p>
+          <form method="post" class="manager-phone__cod-turnin">
+            <?php echo bakery_csrf_field(); ?>
+            <input type="hidden" name="manager_mutation" value="phone_cod_turnin">
+            <input type="hidden" name="view" value="routes">
+            <input type="hidden" name="driver_id" value="<?php echo $id; ?>">
+            <label><?php bakery_te('manager_phone.cod_turnin_amount', [], 'Turned in $'); ?>
+              <input type="number" step="0.01" min="0" name="amount" value="<?php echo htmlspecialchars($codTurnedIn !== null ? number_format((float)$codTurnedIn, 2, '.', '') : number_format((float)($codCollected ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8'); ?>">
+            </label>
+            <button class="manager-phone__btn" type="submit"><?php bakery_te('manager_phone.cod_turnin_save', [], 'Record turn-in'); ?></button>
+          </form>
+        <?php endif; ?>
         <?php if ($isClosed): ?>
           <p class="manager-phone__cadence"><?php bakery_te('manager_phone.route_closed'); ?></p>
         <?php endif; ?>

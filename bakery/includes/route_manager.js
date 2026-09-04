@@ -491,7 +491,7 @@ function updateLegend() {
         const count = driverData.deliveries.length;
         const cash = driverData.cash_summary || {};
         const cashLine = (cash.cod_stop_count || 0) > 0
-            ? `<div class="legend-details">Cash: ${formatMoney(cash.cash_on_hand)} on hand · ${formatMoney(cash.turn_in_total)} turn-in</div>`
+            ? `<div class="legend-details">Cash: ${formatMoney(cash.cash_on_hand)} collected · ${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '—'} turned in</div>`
             : '';
         const soldLine = Number(cash.total_sold) > 0
             ? `<div class="legend-details">Sold: ${formatMoney(cash.total_sold)}</div>`
@@ -1474,18 +1474,28 @@ function updateDeliveryList() {
         const cash = driverData.cash_summary || {};
         const cashBits = [];
         if ((cash.cod_stop_count || 0) > 0) {
-            cashBits.push(`Cash on hand: <strong>${formatMoney(cash.cash_on_hand)}</strong>`);
-            cashBits.push(`Turn-in: <strong>${formatMoney(cash.turn_in_total)}</strong>`);
+            cashBits.push(`Collected: <strong>${formatMoney(cash.cash_on_hand)}</strong>`);
+            cashBits.push(`Turned in: <strong>${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '—'}</strong>`);
+            if (cash.cash_still_owed != null && Number(cash.cash_still_owed) > 0.005) {
+                cashBits.push(`Still owed: <strong>${formatMoney(cash.cash_still_owed)}</strong>`);
+            }
         }
         if (Number(cash.total_sold) > 0 || (cash.cod_stop_count || 0) > 0) {
             cashBits.push(`Sold: <strong>${formatMoney(cash.total_sold)}</strong>`);
         }
+        const turninForm = (cash.cod_stop_count || 0) > 0
+            ? `<form class="driver-cod-turnin" data-driver-id="${escapeHtml(String(driverId))}">
+                    <label>Turned in <input type="number" step="0.01" min="0" name="amount" value="${cash.cash_turned_in != null ? Number(cash.cash_turned_in).toFixed(2) : Number(cash.cash_on_hand || 0).toFixed(2)}"></label>
+                    <button type="submit">Record turn-in</button>
+               </form>`
+            : '';
         const cashHeader = cashBits.length
             ? `<span class="driver-cash-summary">
                     ${cashBits.join(' · ')}
                     ${(cash.cod_stop_count || 0) > 0
                         ? `<span class="driver-cash-meta">(${cash.cod_delivered_count || 0}/${cash.cod_stop_count || 0} COD/Pan Dulce stop${(cash.cod_stop_count || 0) === 1 ? '' : 's'} delivered)</span>`
                         : ''}
+                    ${turninForm}
                </span>`
             : '';
 
@@ -1533,6 +1543,43 @@ function updateDeliveryList() {
         // Prevent drag starting from the buttons on touch/desktop
         btn.addEventListener('mousedown', (e) => e.stopPropagation());
         btn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+    });
+
+    listEl.querySelectorAll('form.driver-cod-turnin').forEach(form => {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const driverId = Number(form.getAttribute('data-driver-id') || 0);
+            const amountInput = form.querySelector('input[name="amount"]');
+            const amount = amountInput ? Number(amountInput.value) : NaN;
+            if (!driverId || !Number.isFinite(amount)) {
+                return;
+            }
+            const body = new FormData();
+            body.append('action', 'record_cod_turnin');
+            body.append('driver_id', String(driverId));
+            body.append('date', document.getElementById('tracking-date').value);
+            body.append('amount', String(amount));
+            body.append('csrf_token', pickupCsrfToken());
+            try {
+                const res = await fetch('route_manager.php', { method: 'POST', body, credentials: 'same-origin' });
+                const data = await res.json();
+                if (!data || !data.success) {
+                    window.alert((data && data.error) || 'Could not record COD turn-in');
+                    return;
+                }
+                if (driversData[driverId] && driversData[driverId].cash_summary) {
+                    driversData[driverId].cash_summary.cash_turned_in = Number(data.amount);
+                    const onHand = Number(driversData[driverId].cash_summary.cash_on_hand) || 0;
+                    driversData[driverId].cash_summary.cash_still_owed = Math.max(0, Math.round((onHand - Number(data.amount)) * 100) / 100);
+                }
+                renderDeliveryList();
+                updateStatusPanel();
+                updateLegend();
+            } catch (err) {
+                window.alert('Could not record COD turn-in');
+            }
+        });
     });
 
     listEl.querySelectorAll('.delivery-stop').forEach(item => {
