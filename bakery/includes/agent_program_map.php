@@ -190,9 +190,10 @@ function bakery_agent_program_work_map(): array
             'Move inline CSS/JS out of the six largest pages',
             ['50-extract-assets', 'prompt-50', 'inline-css', 'god-pages'],
             ['route_manager.php', 'standing_orders_manager.php', 'driver_overview.php', 'driver_assignment.php', 'customer_schedule.php', 'standing_routes.php', 'css/route_manager.css', 'css/standing_orders_manager.css', 'css/driver_overview.css', 'css/driver_assignment.css', 'css/customer_schedule.css', 'css/standing_routes.css', 'includes/route_manager.js', 'includes/standing_orders_manager.js', 'includes/driver_overview.js', 'includes/driver_assignment.js', 'includes/customer_schedule.js', 'includes/standing_routes.js', 'scripts/deploy_manifest.ps1'],
-            ['tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php'],
+            ['tests/run_extract_assets_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_standing_orders_manager_tests.php'],
             ['Zero behavior change per extraction', 'New assets listed in scripts/deploy_manifest.ps1'],
-            'docs/prompts/50-extract-assets.md'
+            'docs/prompts/50-extract-assets.md',
+            'shipped'
         ),
         'split-actions' => $m(
             'Action handlers become includes/<page>_actions.php + thin *_api.php',
