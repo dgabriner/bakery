@@ -114,6 +114,12 @@ GitHub push alone does **not** update Staging. In this cloud environment, Stagin
 
 When a Staging Git pull exists, it tracks **`main` on `dgabriner/bakery`**. Do not invent a second production branch.
 
+### CI vs Staging vs Live (Mission 54)
+
+- GitHub Actions workflow `.github/workflows/test-gate.yml` runs the Linux gate on PRs (mapped suites via `--changed-since=origin/main --no-reset --report=json`) and the full gate on `main`.
+- CI green is **required before Staging sync**. CI ≠ Staging ≠ Live. The workflow holds **no** SFTP secrets and never deploys.
+- `USE_PROD_DB=true` or a non-loopback `DB_HOST` still fail closed via `includes/test_target_guard.php`.
+
 ---
 
 ## Live promotion

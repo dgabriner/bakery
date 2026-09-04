@@ -109,5 +109,21 @@ $agentEnv = bakery_agent_work_map_packet('agent-env');
 map_assert('agent-env is shipped', ($agentEnv['prompt_status'] ?? '') === 'shipped');
 map_assert('gate files map to agent-env', in_array('agent-env', bakery_agent_work_map_for_files(['scripts/run_test_gate.sh'])['missions'], true));
 
+$gateScaling = bakery_agent_work_map_packet('gate-scaling');
+map_assert('gate-scaling is shipped', ($gateScaling['prompt_status'] ?? '') === 'shipped');
+map_assert(
+    'heavy missions carry expected_suites_seconds',
+    (int)($program['characterize-core']['expected_suites_seconds'] ?? 0) >= 30
+    && (int)($program['money-transactions']['expected_suites_seconds'] ?? 0) >= 30
+);
+$workflow = dirname($root) . '/.github/workflows/test-gate.yml';
+map_assert('repo-root CI workflow exists', is_readable($workflow));
+$workflowBody = (string)file_get_contents($workflow);
+map_assert(
+    'CI workflow never deploys',
+    !preg_match('/^\s*[^#\n]*\b(sftp|deploy_status|push_sftp|cloud_agent_stage)\b/im', $workflowBody)
+);
+
+
 echo $failures === 0 ? "\nAll work-map checks passed\n" : "\n$failures failed\n";
 exit($failures > 0 ? 1 : 0);

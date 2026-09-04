@@ -30,8 +30,18 @@ function bakery_agent_program_common_invariants(): array
 function bakery_agent_program_work_map(): array
 {
     $common = bakery_agent_program_common_invariants();
-    $m = function (string $title, array $aliases, array $files, array $tests, array $invariants, string $prompt, string $status = 'open', array $bugs = []) use ($common): array {
-        return [
+    $m = function (
+        string $title,
+        array $aliases,
+        array $files,
+        array $tests,
+        array $invariants,
+        string $prompt,
+        string $status = 'open',
+        array $bugs = [],
+        ?int $expectedSuitesSeconds = null
+    ) use ($common): array {
+        $row = [
             'title' => $title,
             'aliases' => $aliases,
             'files' => $files,
@@ -41,6 +51,10 @@ function bakery_agent_program_work_map(): array
             'prompt' => $prompt,
             'prompt_status' => $status,
         ];
+        if ($expectedSuitesSeconds !== null) {
+            $row['expected_suites_seconds'] = $expectedSuitesSeconds;
+        }
+        return $row;
     };
 
     return [
@@ -99,7 +113,9 @@ function bakery_agent_program_work_map(): array
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_customer_billing_tests.php'],
             ['Never price historical invoices from live products.price', 'Billing Center marks invoiced; it does not invent amounts', 'A send row exists for every mail attempt; status never claims sent without an attempt'],
             'docs/prompts/35-money-transactions.md',
-            'shipped'
+            'shipped',
+            [],
+            120
         ),
         'js-safety-net' => $m(
             'Global browser error reporting and visible fetch failures',
@@ -117,7 +133,9 @@ function bakery_agent_program_work_map(): array
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_complete_delivery_tests.php'],
             ['Dated beats standing per customer', 'Re-generation preserves dated edits unless overwrite_changed', 'Confirm is one transaction; door credits return once'],
             'docs/prompts/37-characterize-core.md',
-            'shipped'
+            'shipped',
+            [],
+            90
         ),
 
         // ---------------------------------------------------------------- Wave 2
@@ -155,7 +173,9 @@ function bakery_agent_program_work_map(): array
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php', 'tests/run_schema_compare_tests.php'],
             ['Same client_request_id twice → one confirmation, one set of movements', 'No service-worker page caching'],
             'docs/prompts/43-driver-offline-queue.md',
-            'shipped'
+            'shipped',
+            [],
+            60
         ),
         'manager-phone-closeout' => $m(
             'Manager phone Routes / Closeout cards; route_manager.php desktop-only',
@@ -211,7 +231,9 @@ function bakery_agent_program_work_map(): array
             ['tests/run_operating_demand_tests.php', 'tests/run_customer_order_power_tests.php', 'tests/run_golden_day_qa.php', 'tests/run_tomorrow_confirmed_tests.php', 'tests/run_integrity_tests.php'],
             ['Dated beats standing per customer', 'Standing edits never rewrite past dated orders; dated edits never write standing'],
             'docs/prompts/52-one-mutation-path.md',
-            'shipped'
+            'shipped',
+            [],
+            90
         ),
         'hot-path-queries' => $m(
             'Batch N+1 loops; standing_routes day index; shared PDO',
@@ -220,7 +242,9 @@ function bakery_agent_program_work_map(): array
             ['tests/run_driver_workflow_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_production_confirm_tests.php', 'tests/run_schema_compare_tests.php'],
             ['(driver_id, delivery_date, route_order) stays unique', 'Route build issues O(1) statements'],
             'docs/prompts/53-hot-path-queries.md',
-            'shipped'
+            'shipped',
+            [],
+            60
         ),
         'gate-scaling' => $m(
             'Mapped-suite gate mode and CI without the laptop',
@@ -228,7 +252,10 @@ function bakery_agent_program_work_map(): array
             ['scripts/run_test_gate.sh', '.github/workflows/test-gate.yml', 'includes/agent_work_map.php', 'docs/GROK_AND_CLOUD_AGENT_DEPLOY.md'],
             ['tests/run_agent_work_map_tests.php', 'tests/run_local_test_target_guard_tests.php'],
             ['CI never deploys, never holds SFTP secrets', 'CI green ≠ Staging ≠ Live'],
-            'docs/prompts/54-gate-scaling.md'
+            'docs/prompts/54-gate-scaling.md',
+            'shipped',
+            [],
+            45
         ),
         'product-boundaries' => $m(
             'Prefixed tables with FKs to customers; no new core columns without owner approval',

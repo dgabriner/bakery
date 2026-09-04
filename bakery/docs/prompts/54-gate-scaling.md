@@ -25,3 +25,5 @@ CI must fail closed on `USE_PROD_DB=true` or any non-loopback `DB_HOST` (the gua
 ## Done when
 
 A PR touching `billing_center.php` runs only billing suites in CI and reports pass/fail on the PR; `main` runs everything.
+
+**Status:** shipped 2026-09-04 on `cursor/sour-flour-agent-program-a061` (PR #20). `--report=json` on `run_test_gate.sh`; `.github/workflows/test-gate.yml` (PR mapped / main full); heavy missions carry `expected_suites_seconds`; GROK doc states CI ≠ Staging ≠ Live. Staging and Live were not touched.
