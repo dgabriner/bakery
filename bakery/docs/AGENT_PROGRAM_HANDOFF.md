@@ -8,11 +8,13 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 
 | Mission | Status | Proof |
 |---|---|---|
-| 30 `agent-env` — cloud agents can run the gate | **shipped** | `bash scripts/run_test_gate.sh` → 76 passed, 0 failed, 8 desktop-only skipped |
+| 30 `agent-env` — cloud agents can run the gate | **shipped** | `bash scripts/run_test_gate.sh` → 77 passed, 0 failed, 8 desktop-only skipped |
 | 31 `docs-truth` — real-stack README/ARCHITECTURE, 26 briefs, work-map lanes | **shipped** | `php tests/run_agent_work_map_tests.php`; `brief --agent=<slug> --json` for every slug 30–64 |
 | 32 `webhook-fail-closed` — Square/Twilio refuse unsigned traffic | **shipped** | `tests/run_webhook_fail_closed_tests.php` (13 checks, real `php -S`) |
 | 33 `edge-entrypoints` — OAuth/setup scripts gated, ping sanitized, `*_api.php` JSON rule | **shipped** | `tests/run_edge_entrypoint_tests.php` (22 checks) |
-| 34–37, 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 34 `error-boundary` — global handlers, no raw exception text, `safe_execute` throws | **shipped** | `tests/run_error_boundary_tests.php` (18 checks) |
+| 35 `money-transactions` — invoice send outbox (queued → sent/logged/failed) | **partial** (Square tx audit remains) | `tests/run_invoice_send_tests.php` failure-path block |
+| 36–37, 40–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -29,7 +31,7 @@ Also fixed along the way (each is its own commit):
 git fetch origin && git checkout cursor/sour-flour-agent-program-8d3b   # or main after merge
 bash bakery/scripts/cloud_agent_install.sh        # only if php/mariadb are missing (fresh VM boots run it)
 cd bakery && bash scripts/run_test_gate.sh        # expect failed=0
-php scripts/agent_homebase.php brief --agent=error-boundary --json   # packet for the next mission
+php scripts/agent_homebase.php brief --agent=characterize-core --json   # packet for the next mission
 ```
 
 Homebase needs `bakerysf_stage_local` with the 044 schema; on a fresh cloud VM `start`/`handoff` will complain until `php scripts/run_migrations.php --database=bakerysf_stage_local` has run once. `brief` and `tests-for` work without it.
@@ -39,10 +41,9 @@ Homebase needs `bakerysf_stage_local` with the 044 schema; on a fresh cloud VM `
 Each item names the brief; the brief names files, tests, invariants, and done-when. Do them one mission per commit/PR.
 
 ### Do next (highest severity, smallest lanes)
-1. **34 `error-boundary`** — no global exception handler; raw PDO text reaches browsers; `safe_execute()` returns `false` on failed writes. New `includes/error_boundary.php` + new suite `tests/run_error_boundary_tests.php` (already listed in the map — the gate will stop skipping it once the file exists).
-2. **35 `money-transactions`** — `bakery_billing_send_invoice()` (`includes/billing.php:1296`) marks invoiced → SMTP → records send with no transaction. Outbox pattern. Note `run_invoice_send_tests.php` and `run_square_invoice_tests.php` are **desktop-only on fixture DBs** (they need snapshot data / gitignored quarantine files); extend them but prove locally with the owner or add fixture-safe assertions to a new suite.
-3. **37 `characterize-core`** — four suites for the four untested god-pages. Required before any Wave 3 refactor. Pure test work; cheap in review.
-4. **36 `js-safety-net`** — `unhandledrejection` beacon + driver fetch audit.
+1. **37 `characterize-core`** — four suites for the four untested god-pages. Required before any Wave 3 refactor. Pure test work; cheap in review.
+2. **36 `js-safety-net`** — `unhandledrejection` beacon + driver fetch audit. `includes/error_boundary.php` already renders `{success:false,error:internal,error_id}` for `*_api.php`, so the client side can key on `error_id`.
+3. **35 remainder** — transaction audit of `includes/square_invoices.php` create/publish/webhook writes (the invoice-send outbox is done; reuse `$GLOBALS['bakery_billing_mail_handler']`-style seams).
 
 ### Then mobile (Wave 2)
 5. **40 `nav-catalog-roles`** — catalog drives the role allowlists (default-deny); manager More ≤ 8; `cashier_add_product.php` gets `nav.php`. Unlocks 45.
@@ -73,6 +74,8 @@ Each item names the brief; the brief names files, tests, invariants, and done-wh
 - **`0000` is the test suite's guaranteed-bad login code**; the cloud `.env` uses `LOCAL_ADMIN_CODE=9741`, `SFB_AGENT_ADMIN_CODE=9099` so `run_auth_tests.php` passes. Do not "fix" `.env.example` back to 0000 for cloud.
 - **`tests/run_characterization.php` rewrites `docs/CHECKPOINT_0C_CHARACTERIZATION_FINDINGS.md`** from whatever DB it ran against. On a fixture DB the result is not truth — `git checkout` that file after running it.
 - **`bakery_agent_work_map_path_matches` matches by basename suffix** (`nav.php` also matches `portal_nav.php`). Prefer unique basenames in new lanes.
+- **`bakery_error_message_for_user($e)` is now the way to show an exception to a user.** New catch blocks must not echo `$e->getMessage()`; `run_error_boundary_tests.php` greps the four core pages for it — extend that list when you touch another page.
+- **`safe_execute()` throws now.** Any old caller that tested `if ($stmt)` must catch `RuntimeException` (only `generate_crud_handlers` used it in-tree).
 - **Every `tests/run_*.php` must be listed in the work map** or `run_agent_work_map_tests.php` fails. New suites go into `includes/agent_program_map.php` (program) or `includes/agent_work_map.php` (core).
 - **`pkill -f` with a pattern that appears in your own command line kills your shell.** Use `pgrep -f "php -S 127.0.0.1"` + loop `kill`.
 
@@ -83,6 +86,6 @@ Each item names the brief; the brief names files, tests, invariants, and done-wh
 3. **Files changed:** see `git log --stat main..cursor/sour-flour-agent-program-8d3b` — root `.cursor/environment.json`, `.gitignore`; `bakery/`: `README.md`, `ARCHITECTURE.md`, `.env.example`, `ping.php`, `oauth_setup.php`, `oauth_callback.php`, `setup_directories.php`, `square_webhook.php`, `twilio_webhook.php`, `includes/{auth,square_config,square_invoices,twilio_config,agent_work_map,agent_program_map}.php`, `scripts/{run_migrations.php,run_test_gate.sh,cloud_agent_install.sh,cloud_agent_start.sh}`, `tests/{isolate_test_db,run_agent_work_map_tests,run_manager_phone_tests,run_staging_env_tests,run_phase4_auto_deploy_tests,run_webhook_fail_closed_tests,run_edge_entrypoint_tests}.php`, `docs/prompts/30..64 + README.md`, `docs/archive/*`, `docs/GROK_AND_CLOUD_AGENT_DEPLOY.md`, `.cursor/skills/test-gate/SKILL.md`; deleted `assets/api/get_route.php`.
 4. **User-visible behavior:** none for bakery staff. Square/Twilio forged webhooks now refused; `ping.php` no longer prints paths; OAuth setup/callback and directory setup require an administrator session.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
-6. **Tests:** full Linux gate 76 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13) and `run_edge_entrypoint_tests` (22/22); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
+6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** start with 34, then 35, 37, 36 (§3). Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing.
+8. **Next agent:** start with 37, then 36, then finish 35's Square audit (§3). Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing.
