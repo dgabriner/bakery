@@ -2065,6 +2065,7 @@ return [
 
     // Dashboard
     'dashboard.ops_title' => 'Operations Dashboard',
+    'dashboard.cron_overnight_stale' => 'Overnight generation stale (:hours h)',
     'dashboard.baker_title' => 'Baker Dashboard',
     'dashboard.ops_eyebrow' => 'Manager daily command center',
     'dashboard.baker_eyebrow' => 'Baker workspace',

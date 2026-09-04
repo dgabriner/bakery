@@ -20,10 +20,14 @@ chdir($root);
 require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/daily_order_generation.php';
+require_once $root . '/includes/operational_timeline.php';
+require_once $root . '/includes/cron_run.php';
 
 $force = in_array('--force', $argv, true);
 $json = in_array('--json', $argv, true);
 
+$db = null;
+$exitCode = 0;
 try {
     $db = check_mysql_connection();
     $GLOBALS['db'] = $db;
@@ -33,6 +37,11 @@ try {
         'record_event' => true,
         'assign_routes' => true,
         'skip_if_closed' => true,
+    ]);
+    bakery_cron_record_run($db, 'demand_scheduler', 'ok', [
+        'from_date' => $result['from_date'] ?? null,
+        'through_date' => $result['through_date'] ?? null,
+        'ran_count' => (int)($result['ran_count'] ?? 0),
     ]);
     if ($json) {
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
@@ -49,8 +58,17 @@ try {
             (string)$db->query('SELECT DATABASE()')->fetchColumn()
         );
     }
-    exit(0);
 } catch (Throwable $e) {
+    $exitCode = 1;
+    if ($db instanceof PDO) {
+        bakery_cron_record_run($db, 'demand_scheduler', 'failed', [
+            'error' => substr($e->getMessage(), 0, 200),
+        ]);
+    } else {
+        bakery_cron_record_run(null, 'demand_scheduler', 'failed', [
+            'error' => substr($e->getMessage(), 0, 200),
+        ]);
+    }
     fwrite(STDERR, $e->getMessage() . "\n");
-    exit(1);
 }
+exit($exitCode);

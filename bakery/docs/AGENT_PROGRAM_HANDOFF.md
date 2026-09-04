@@ -31,7 +31,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 55 `product-boundaries` — prefixed tables; no unapproved core columns | **shipped** | Homebase Decided pin; product context §8; schema_compare 077+ assert |
 | 62 `engagement-writeback` — survey Apply + failed-stop text/credit | **shipped** | store_verify / route_order / failed_stop_recovery / text_comms (+ exception_desk writeback asserts) |
 | 61 `settlement-story` — settlement row + COD turn-in (no ledger) | **partial** | `080_cod_turnins`; customer_billing + route_manager_cash; filters unpaid14 / COD turn-in / Square failed |
-| 60, 63–64 | **briefed; Wave 4 remainder** | `docs/prompts/NN-*.md` + handoff §4 |
+| 63 `ingredient-light` — purchase notes (no stock adjust) | **partial** | `081_ingredient_purchase_notes`; planner toggles; PC unmarked chip |
+| 60, 64 | **briefed; Wave 4 remainder** | `docs/prompts/NN-*.md` + handoff §4 |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -73,7 +74,7 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 8. ~~**50–55**~~ — **Wave 3 complete.**
 
 ### Integration (Wave 4) — owner decisions first
-9. ~~**62 `engagement-writeback`**~~ — **shipped**. ~~**61 `settlement-story` steps 1–3**~~ — **partial** (no ledger). **60 `overnight-cron`** (staleness + runbook), **63 `ingredient-light` step A**, **64** (owner).
+9. ~~**62**~~ shipped. ~~**61 steps 1–3**~~ partial. ~~**63 step A**~~ partial. **60 `overnight-cron`** (staleness + runbook). **64** owner.
 
 ## 4. Owner decisions still open
 
@@ -107,4 +108,4 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** Wave 4 no-decision remainder — **63 step A**, **60 staleness chip + runbook** (owner installs cron). **Skip 64** and 61 ledger until owner Decided. **35–37, 40–46, 50–55, 62 shipped; 61 partial.** Staging and Live were not touched.
+8. **Next agent:** Wave 4 no-decision remainder — **60 staleness chip + runbook** (owner installs cron). **Skip 64**, 61 ledger, 63B until owner Decided. **35–37, 40–46, 50–55, 62 shipped; 61+63 partial.** Staging and Live were not touched.

@@ -1934,6 +1934,7 @@ return [
 
     // Dashboard
     'dashboard.ops_title' => 'Panel de operaciones',
+    'dashboard.cron_overnight_stale' => 'Generación nocturna atrasada (:hours h)',
     'dashboard.baker_title' => 'Panel del panadero',
     'dashboard.ops_eyebrow' => 'Centro de mando diario del gerente',
     'dashboard.baker_eyebrow' => 'Espacio del panadero',

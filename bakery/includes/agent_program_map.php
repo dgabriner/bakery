@@ -274,7 +274,8 @@ function bakery_agent_program_work_map(): array
             ['scripts/demand_scheduler.php', 'scripts/staff_alert_digest.php', 'health_deploy.php', 'includes/dashboard_command_center.php', 'includes/staff_alerts.php', 'docs/CRON_KIT.md'],
             ['tests/run_demand_scheduler_tests.php', 'tests/run_staff_alert_tests.php', 'tests/run_tomorrow_confirmed_tests.php'],
             ['Page load still fills the horizon without the cron', 'Dashboard is honest about stale overnight runs'],
-            'docs/prompts/60-overnight-cron.md'
+            'docs/prompts/60-overnight-cron.md',
+            'shipped'
         ),
         'settlement-story' => $m(
             'One settlement row per delivery; COD turn-in recorded',
@@ -301,7 +302,7 @@ function bakery_agent_program_work_map(): array
             ['tests/run_ingredient_planner_tests.php', 'tests/run_formula_units_tests.php'],
             ['No PO, receiving, or lot tracking', 'Step B (stock adjust) only after owner confirms'],
             'docs/prompts/63-ingredient-light.md',
-            'owner-decision'
+            'partial'
         ),
         'retail-scope-decision' => $m(
             'Owner decides retail cashier scope; agent records it',

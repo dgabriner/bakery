@@ -84,6 +84,19 @@ try {
     line('drivers count: ' . count($drivers));
     line('');
 
+    if (!function_exists('bakery_cron_age_hours')) {
+        require_once $root . '/includes/cron_run.php';
+    }
+    line('--- Overnight cron ---');
+    // Keys reported to operators (also asserted by Mission 60 suites):
+    // cron.demand_scheduler.age_hours / cron.staff_alert_digest.age_hours
+    foreach (['demand_scheduler', 'staff_alert_digest'] as $cronName) {
+        $age = bakery_cron_age_hours($cronName);
+        $key = 'cron.' . $cronName . '.age_hours';
+        line($key . '=' . ($age === null ? 'null' : (string)$age));
+    }
+    line('');
+
     $manifest = $root . '/storage/deploy/deploy_file_sizes.json';
     if (!is_readable($manifest)) {
         $manifest = $root . '/deploy_file_sizes.json';
