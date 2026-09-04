@@ -662,7 +662,6 @@ function bakery_restore_driver_trusted_device(PDO $db): bool {
            AND d.revoked_at IS NULL
            AND d.expires_at > NOW()
            AND u.is_active = 1
-           AND u.driver_id IS NOT NULL
            AND r.slug IN ('driver', 'driver_assistant')
          LIMIT 1"
     );
@@ -691,9 +690,11 @@ function bakery_restore_driver_trusted_device(PDO $db): bool {
         bakery_apply_locale_default_for_user($row['role_slug'] ?? null, false);
     }
     $routeDriverId = bakery_route_worker_driver_id($db, bakery_current_user(), date('Y-m-d'));
-    $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ? LIMIT 1');
-    $nameStmt->execute([$routeDriverId]);
-    bakery_set_selected_driver($routeDriverId, (string)($nameStmt->fetchColumn() ?: $row['display_name']));
+    if ($routeDriverId > 0) {
+        $nameStmt = $db->prepare('SELECT name FROM drivers WHERE id = ? LIMIT 1');
+        $nameStmt->execute([$routeDriverId]);
+        bakery_set_selected_driver($routeDriverId, (string)($nameStmt->fetchColumn() ?: $row['display_name']));
+    }
     return true;
 }
 

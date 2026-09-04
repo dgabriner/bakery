@@ -146,7 +146,7 @@ $currentLocale = bakery_locale();
       <label for="code"><?php bakery_te('login.label'); ?></label>
       <input type="tel" id="code" name="code" required
              inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4"
-             autocomplete="one-time-code" autofocus
+             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus
              value="<?php echo htmlspecialchars($_POST['code'] ?? ''); ?>">
     </form>
     <p class="portal-link"><a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php"><?php bakery_te('login.customer_portal_link'); ?></a></p>
