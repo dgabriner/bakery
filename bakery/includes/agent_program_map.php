@@ -198,10 +198,11 @@ function bakery_agent_program_work_map(): array
         'split-actions' => $m(
             'Action handlers become includes/<page>_actions.php + thin *_api.php',
             ['51-split-actions', 'prompt-51', 'actions-split'],
-            ['includes/daily_orders_actions.php', 'includes/standing_orders_manager_actions.php', 'includes/driver_assignment_actions.php', 'includes/production_center_actions.php', 'daily_orders_api.php', 'standing_orders_api.php', 'driver_assignment_api.php', 'production_center_api.php'],
+            ['includes/daily_orders_actions.php', 'includes/standing_orders_manager_actions.php', 'includes/driver_assignment_actions.php', 'includes/production_center_actions.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php'],
             ['tests/run_daily_orders_page_tests.php', 'tests/run_standing_orders_manager_tests.php', 'tests/run_production_center_tests.php', 'tests/run_deploy_surface_tests.php'],
             ['Pages authorize, validate, call includes/, render', 'Characterization suites stay green unchanged'],
-            'docs/prompts/51-split-actions.md'
+            'docs/prompts/51-split-actions.md',
+            'shipped'
         ),
         'one-mutation-path' => $m(
             'Single helpers for standing upsert, daily find-or-create, recompute total',

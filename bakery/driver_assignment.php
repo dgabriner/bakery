@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $db->rollBack();
         }
         http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => bakery_error_message_for_user($e)]);
     }
     exit;
 }
@@ -66,10 +66,14 @@ $weekDayLabels = bakery_day_names(true);
 $activeCustomers = [];
 $productsForStanding = [];
 $assignedCustomerIdsToday = [];
+$pageExceptions = [];
 $driverColors = [
     '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
     '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
 ];
+
+require_once 'includes/header.php';
+require_once 'includes/nav.php';
 
 try {
     $drivers = bakery_get_drivers($db);
@@ -230,24 +234,12 @@ try {
         LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
         ORDER BY product_line_name, p.name
     ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
 } catch (Throwable $e) {
-    $pageLoadError = $e->getMessage();
+    $pageLoadError = bakery_error_message_for_user($e);
     error_log('driver_assignment.php load failed: ' . $e->getMessage());
 }
-if (!empty($pageLoadError)) {
-    }
-
-$pageExceptions = [];
-if (empty($pageLoadError)) {
-    try {
-        $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
-    } catch (Throwable $e) {
-        error_log('driver_assignment exceptions: ' . $e->getMessage());
-    }
-}
-
-require_once 'includes/header.php';
-require_once 'includes/nav.php';
 ?>
 
 <!-- BUILD: driver-assignment-append-20260801 -->

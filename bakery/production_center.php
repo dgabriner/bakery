@@ -128,11 +128,12 @@ $routeCapacity = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $wantsJson = function_exists('bakery_wants_json') && bakery_wants_json();
+    // Autosave / drawer endpoints always return JSON; form save_plan stays HTML unless Accept asks for JSON.
     $jsonActions = [
-        'save_plan', 'product_formula', 'store_demand', 'save_store_demand',
+        'product_formula', 'store_demand', 'save_store_demand',
         'assign_preview', 'assign_apply', 'cut_preview', 'cut_apply',
     ];
-    if ($wantsJson || in_array((string)$_POST['action'], $jsonActions, true)) {
+    if (!$wantsJson && in_array((string)$_POST['action'], $jsonActions, true)) {
         $wantsJson = true;
     }
     try {
@@ -179,6 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $error = (string)($formatted['error'] ?? bakery_error_message_for_user($e));
     }
 }
+
+$page_title = bakery_t('page.production_center');
+require_once 'includes/header.php';
+require_once 'includes/nav.php';
 
 // Same product-line visibility rules as Daily Production (managers see all).
 $bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
@@ -580,9 +585,6 @@ $loadHref = function_exists('bakery_ops_link_driver_load')
     ? bakery_ops_link_driver_load($selectedDate, [], $pageReturnKey ?: 'production_center')
     : ('driver_load.php?date=' . rawurlencode($selectedDate));
 
-$page_title = bakery_t('page.production_center');
-require_once 'includes/header.php';
-require_once 'includes/nav.php';
 
 $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strtotime($weekEnd));
 ?>
