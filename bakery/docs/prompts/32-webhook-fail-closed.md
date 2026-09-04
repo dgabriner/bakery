@@ -26,3 +26,5 @@ Do not change invoice or education handlers. Do not add a bypass flag for stagin
 ## Done when
 
 Both webhook suites green; a curl with no signature and no key gets 503 and writes no rows.
+
+**Status: shipped (this branch).** Suite: `tests/run_webhook_fail_closed_tests.php` (13 checks, boots `php -S` on loopback).

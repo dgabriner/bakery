@@ -461,6 +461,15 @@ function bakery_square_refresh_invoice(PDO $db, $orderId): array
     ];
 }
 
+/**
+ * Payment truth is signature-checked or refused. Without a signature key the
+ * endpoint must answer 503 and process nothing — never fall open.
+ */
+function bakery_square_webhook_configured(): bool
+{
+    return defined('SQUARE_WEBHOOK_SIGNATURE_KEY') && (string)SQUARE_WEBHOOK_SIGNATURE_KEY !== '';
+}
+
 function bakery_square_webhook_valid($body, $signatureHeader, $notificationUrl): bool
 {
     $key = defined('SQUARE_WEBHOOK_SIGNATURE_KEY') ? (string)SQUARE_WEBHOOK_SIGNATURE_KEY : '';

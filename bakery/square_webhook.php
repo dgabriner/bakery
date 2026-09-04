@@ -30,8 +30,15 @@ if (defined('SQUARE_WEBHOOK_NOTIFICATION_URL') && SQUARE_WEBHOOK_NOTIFICATION_UR
     $notificationUrl = (string)SQUARE_WEBHOOK_NOTIFICATION_URL;
 }
 
-$keySet = defined('SQUARE_WEBHOOK_SIGNATURE_KEY') && SQUARE_WEBHOOK_SIGNATURE_KEY !== '';
-if ($keySet && !bakery_square_webhook_valid($raw, $signature, $notificationUrl)) {
+// Fail closed: no signature key means no payment truth. Refuse and log once so
+// a forged invoice.payment_made cannot mark anything paid or unlock a purchase.
+if (!bakery_square_webhook_configured()) {
+    error_log('square_webhook: refused — SQUARE_WEBHOOK_SIGNATURE_KEY is not configured');
+    http_response_code(503);
+    echo json_encode(['ok' => false, 'error' => 'webhook_unconfigured']);
+    exit;
+}
+if (!bakery_square_webhook_valid($raw, $signature, $notificationUrl)) {
     http_response_code(403);
     echo json_encode(['ok' => false, 'error' => 'signature']);
     exit;

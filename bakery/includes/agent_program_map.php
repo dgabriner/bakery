@@ -69,9 +69,10 @@ function bakery_agent_program_work_map(): array
             'Square and Twilio webhooks refuse unsigned traffic',
             ['32-webhook-fail-closed', 'prompt-32', 'square-webhook', 'twilio-webhook'],
             ['square_webhook.php', 'twilio_webhook.php', 'includes/square_invoices.php', 'includes/twilio_config.php'],
-            ['tests/run_square_invoice_tests.php', 'tests/run_text_comms_tests.php', 'tests/run_bread_education_gating_tests.php'],
+            ['tests/run_webhook_fail_closed_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_text_comms_tests.php', 'tests/run_bread_education_gating_tests.php'],
             ['Signature-checked webhook is the only payment truth', 'Unconfigured signature key → 503, nothing written'],
-            'docs/prompts/32-webhook-fail-closed.md'
+            'docs/prompts/32-webhook-fail-closed.md',
+            'shipped'
         ),
         'edge-entrypoints' => $m(
             'Every root script passes through bakery_enforce_request_security',
