@@ -3917,8 +3917,44 @@ body.photo-mode-open {
 
 .delivery-wizard-actions .delivery-wizard-primary {
     flex: 1.5 1 auto;
-    min-height: 52px;
+    min-height: 56px;
     margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.delivery-adjust {
+    margin-top: 12px;
+    border: 1px solid #d7e4df;
+    border-radius: 12px;
+    background: #f7fbf9;
+    padding: 0 12px;
+}
+
+.delivery-adjust-summary {
+    list-style: none;
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-weight: 750;
+    color: #1f4f49;
+}
+
+.delivery-adjust-summary::-webkit-details-marker {
+    display: none;
+}
+
+.delivery-adjust-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 0 12px;
+}
+
+.delivery-adjust-invoice-btn {
+    align-self: stretch;
+    min-height: 44px;
 }
 
 .delivery-wizard-primary.has-saved-photo {

@@ -523,6 +523,7 @@
     if (step === 'delivery') {
       if (title) title.textContent = i18n('confirm_delivery');
       if (eyebrow) eyebrow.textContent = i18n('confirm');
+      ensureAdjustOpenForRequiredFields();
     } else if (step === 'invoice') {
       if (title) title.textContent = i18n('delivery_invoice');
       if (eyebrow) eyebrow.textContent = i18n('confirm');
@@ -564,17 +565,12 @@
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
     if (reviewBtn) {
-      reviewBtn.hidden = step !== 'delivery' || usesCompactCapture();
+      reviewBtn.hidden = step !== 'delivery';
       reviewBtn.disabled = state.submitting;
     }
 
     if (step === 'delivery') {
-      var piecesInput = $('deliveryPiecesInput');
-      if (piecesInput && !state.submitting && !usesCompactCapture()) {
-        setTimeout(function () {
-          piecesInput.focus({ preventScroll: true });
-        }, 80);
-      }
+      // Prefill is the happy path — do not steal focus into Adjust steppers.
     }
 
     if (step === 'invoice') {
@@ -589,6 +585,28 @@
     var primaryBtn = $('deliveryWizardPrimaryBtn');
     if (!primaryBtn || state.currentStep !== 'photo') return;
     primaryBtn.classList.remove('has-saved-photo');
+  }
+
+  function openDeliveryAdjust() {
+    var details = $('deliveryAdjustDetails');
+    if (details) details.open = true;
+  }
+
+  function ensureAdjustOpenForRequiredFields() {
+    var needsAdjust = false;
+    if (state.pricingMissing && canEditPricing()) {
+      needsAdjust = true;
+    }
+    if (state.paymentCollection === 'cod') {
+      needsAdjust = true;
+    }
+    var pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
+    if (state.orderedPieces > 0 && Number.isInteger(pieces) && pieces !== state.orderedPieces) {
+      needsAdjust = true;
+    }
+    if (needsAdjust) {
+      openDeliveryAdjust();
+    }
   }
 
   function showReviewCameraControls() {
@@ -1697,6 +1715,7 @@
       if (!ack || !ack.checked) {
         var alertEl = $('deliveryVarianceAlert');
         if (alertEl) alertEl.hidden = false;
+        openDeliveryAdjust();
         setStatus(i18n('variance_ack_needed'), 'error');
         if (ack) ack.focus();
         return;
@@ -1708,6 +1727,7 @@
       var cashInput = $('deliveryCashCollectedInput');
       var cashAmount = cashInput ? parseFloat(cashInput.value) : NaN;
       if (!Number.isFinite(cashAmount) || cashAmount < 0) {
+        openDeliveryAdjust();
         setStatus(i18n('cash_required'), 'error');
         return;
       }
@@ -1716,6 +1736,7 @@
     if (state.pricingMissing && canEditPricing()) {
       var pricePerPiece = readPricePerPieceInput();
       if (!pricePerPiece) {
+        openDeliveryAdjust();
         setStatus(i18n('price_required'), 'error');
         return;
       }
@@ -2073,6 +2094,7 @@
     if (reviewBtn) {
       reviewBtn.addEventListener('click', function () {
         if (state.submitting) return;
+        openDeliveryAdjust();
         populateInvoicePreview();
       });
     }

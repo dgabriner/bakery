@@ -144,7 +144,8 @@ function bakery_agent_program_work_map(): array
             ['driver.php', 'includes/driver_delivery.js', 'css/driver.css', 'includes/global_tracking.js'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php'],
             ['Every write through bakery_confirm_delivery', 'billable_pieces = delivered_pieces - credits_taken_back', 'Driver UX is the reference implementation — change it surgically'],
-            'docs/prompts/42-driver-fast-path.md'
+            'docs/prompts/42-driver-fast-path.md',
+            'shipped'
         ),
         'driver-offline-queue' => $m(
             'IndexedDB outbox with idempotent photo/confirm endpoints',

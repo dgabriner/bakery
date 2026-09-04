@@ -17,7 +17,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 37 `characterize-core` — four god-page suites | **shipped** | `run_daily_orders_page_tests`, `run_standing_orders_manager_tests`, `run_production_center_tests`, `run_complete_delivery_tests` (all green twice) |
 | 36 `js-safety-net` — browser error beacon + fetch audit | **shipped** | `run_client_error_api_tests`, extended `run_driver_photo_ui_tests` / `run_login_history_tests` / `run_i18n_tests` |
 | 40 `nav-catalog-roles` — catalog drives role allowlists | **shipped** | `run_navigation_tests`, `run_auth_tests`, `run_cashier_role_tests`, `run_i18n_tests` |
-| 41–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 42 `driver-fast-path` — Photo → Confirm → Next | **shipped** | `run_driver_photo_ui_tests`, `run_driver_workflow_tests` |
+| 41, 43–46, 50–55, 60–64 | **briefed, not built** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -52,7 +53,7 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 
 ### Then mobile (Wave 2)
 5. ~~**40 `nav-catalog-roles`**~~ — **shipped** (catalog ∪ registry allowlists; manager More ≤ 8 + searchable sheet; cashier Add Product has nav).
-6. **42 `driver-fast-path`** then **43 `driver-offline-queue`** (43 needs the next free migration number — run `php scripts/next_schema_migration.php --name=delivery_client_request_id`; currently **078** after `077_client_errors`).
+6. ~~**42 `driver-fast-path`**~~ — **shipped** (Confirm step + Adjust disclosure; GPS on today's route load). Then **43 `driver-offline-queue`** (needs next free migration — run `php scripts/next_schema_migration.php --name=delivery_client_request_id`; currently **078** after `077_client_errors`).
 7. **44 `manager-phone-closeout`**, **45 `kitchen-one-screen`**, **41 `touch-tokens`**, **46 `sfb-bottom-nav`**.
 
 ### Then structure (Wave 3) — one page per PR
@@ -93,4 +94,4 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** Wave 2 continues: 42 → 43 → 44 → 45 → 41 → 46. Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **35, 36, 37, and 40 are shipped.** Staging and Live were not touched.
+8. **Next agent:** Wave 2 continues: 43 → 44 → 45 → 41 → 46. Read the brief, run `tests-for --files=`, keep the lane, register any new suite, `bash scripts/run_test_gate.sh --changed-since=origin/main` before pushing. **35, 36, 37, 40, and 42 are shipped.** Staging and Live were not touched.

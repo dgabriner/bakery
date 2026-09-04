@@ -154,7 +154,7 @@ driver_photo_assert(
     strpos($handler, "'image/heic', 'image/heif'") !== false
 );
 
-foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo', 'driver.skip_departure_photo', 'driver.save_and_leave_photo'] as $key) {
+foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo', 'driver.skip_departure_photo', 'driver.save_and_leave_photo', 'driver.adjust_delivery', 'driver.next', 'driver.confirm_delivery_hint'] as $key) {
     driver_photo_assert(
         "photo workflow translation exists in English and Spanish: {$key}",
         isset($english[$key], $spanish[$key])
@@ -351,9 +351,25 @@ driver_photo_assert(
     'happy-path confirm saves quantities then prompts for a leaving photo',
     strpos($page, 'id="deliveryWizardReviewBtn"') !== false
         && strpos($page, 'id="deliveryVarianceAck"') !== false
+        && strpos($page, 'id="deliveryAdjustDetails"') !== false
         && strpos($script, "primaryBtn.textContent = i18n('save_and_leave_photo')") !== false
         && strpos($script, "state.photoReturnStep = 'complete'") !== false
         && strpos($script, 'function promptDeparturePhoto()') !== false
+);
+driver_photo_assert(
+    'confirm step collapses quantity edits under Adjust and keeps billable = pieces - credits',
+    strpos($page, 'id="deliveryAdjustDetails"') !== false
+        && strpos($script, 'var billable = Math.max(0, pieces - credits)') !== false
+        && strpos($script, "action=confirm_delivery") !== false
+        && strpos($script, 'delivered_pieces=') !== false
+        && strpos($script, 'credits_taken_back=') !== false
+);
+$tracking = (string)file_get_contents($root . '/includes/global_tracking.js');
+driver_photo_assert(
+    'GPS tracking starts when today\'s dated route view loads',
+    strpos($tracking, 'function localToday') !== false
+        && strpos($tracking, "routeDate === localToday()") !== false
+        && strpos($tracking, 'bakeryEnableGpsTracking(driverId, routeDate)') !== false
 );
 driver_photo_assert(
     'failed stops update live and include HQ contact links',
