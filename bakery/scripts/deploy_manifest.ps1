@@ -13,7 +13,7 @@ function Get-BakeryDeployRootFiles {
         'bread_distribution.php', 'product_distribution.php',
         'production.php', 'baker_mix.php', 'pack_list.php',
         'standing_routes.php', 'daily_route.php',
-        'drivers.php', 'driver.php', 'driver_list.php', 'driver_assignment.php', 'driver_overview.php',
+        'drivers.php', 'driver.php', 'driver_list.php', 'driver_assignment.php', 'driver_assignment_api.php', 'driver_overview.php',
         'route_manager.php', 'route_summary.php', 'map.php', 'call_headquarters.php',
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
         'upload_driver_photo.php', 'upload_product_photo.php',
