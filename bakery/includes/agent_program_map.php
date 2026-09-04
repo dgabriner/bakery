@@ -263,7 +263,8 @@ function bakery_agent_program_work_map(): array
             ['BAKERY_PRODUCT_CONTEXT.md', 'ARCHITECTURE.md', '.opencode/agent/ox-reviewer.md', 'tests/run_schema_compare_tests.php', 'includes/schema_migration_numbers.php'],
             ['tests/run_schema_compare_tests.php', 'tests/run_agent_work_map_tests.php'],
             ['customers is the identity hub; product families add sfb_*/square_*/text_* style tables'],
-            'docs/prompts/55-product-boundaries.md'
+            'docs/prompts/55-product-boundaries.md',
+            'shipped'
         ),
 
         // ---------------------------------------------------------------- Wave 4

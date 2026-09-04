@@ -28,7 +28,8 @@ Trust order still applies: `BAKERY_PRODUCT_CONTEXT.md` → Homebase Decided → 
 | 52 `one-mutation-path` — standing upsert / find-or-create / recompute total | **shipped** | integrity grep-assert + operating_demand / customer_order_power / golden_day / tomorrow_confirmed |
 | 53 `hot-path-queries` — batch route build + standing_routes day index | **shipped** | `079_standing_routes_day_index`; driver_workflow / status_alignment / production_confirm / schema_compare |
 | 54 `gate-scaling` — mapped CI gate + `--report=json` | **shipped** | `.github/workflows/test-gate.yml`; work-map asserts; local_test_target_guard |
-| 55, 60–64 | **briefed / partial** | `docs/prompts/NN-*.md` + `includes/agent_program_map.php` |
+| 55 `product-boundaries` — prefixed tables; no unapproved core columns | **shipped** | Homebase Decided pin; product context §8; schema_compare 077+ assert |
+| 60–64 | **briefed; Wave 4 owner decisions partially buildable** | `docs/prompts/NN-*.md` + handoff §4 |
 
 Also fixed along the way (each is its own commit):
 - `scripts/run_migrations.php` never applied `025_customer_account_preferences.sql` (only the parallel `025_customer_notifications`). Fresh databases lacked `customers.ordering_contact_phone` etc., which `includes/text_comms.php:136` queries unguarded. Now wired with column guards.
@@ -67,7 +68,7 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 7. ~~**44 `manager-phone-closeout`**~~ — **shipped**. ~~**45 `kitchen-one-screen`**~~ — **shipped**. ~~**41 `touch-tokens`**~~ — **shipped**. ~~**46 `sfb-bottom-nav`**~~ — **shipped**. Wave 2 complete.
 
 ### Then structure (Wave 3) — one page per PR
-8. ~~**50–54**~~ — **shipped**. Then **55 `product-boundaries`**.
+8. ~~**50–55**~~ — **Wave 3 complete.**
 
 ### Integration (Wave 4) — owner decisions first
 9. **60 `overnight-cron`** (agent builds staleness chip + runbook; owner installs crontab), **62 `engagement-writeback`** (no decision needed), **61 `settlement-story`** (step 1 needs no decision; ledger does), **63 `ingredient-light`** (step A only until owner confirms), **64 `retail-scope-decision`** (owner).
@@ -104,4 +105,4 @@ Wave 1 reliability is complete. Continue with Wave 2 mobile below.
 5. **Invariants preserved:** no pricing, demand, inventory, or invoice logic touched; signature-checked webhook remains the only payment truth; tests only on `bakerysf_test`.
 6. **Tests:** full Linux gate 77 passed / 0 failed / 8 desktop-only skipped; new suites `run_webhook_fail_closed_tests` (13/13), `run_edge_entrypoint_tests` (22/22), `run_error_boundary_tests` (18/18); `run_invoice_send_tests` 56/58 (the 2 failures are the gitignored quarantine files, pre-existing on fixture DBs); `run_agent_work_map_tests`, `run_agent_homebase_tests` green. Not run here: the eight desktop-only suites (need snapshot/quarantine files).
 7. **Unresolved:** owner decisions in §4; Homebase `start`/`handoff` not recorded in the ledger from this VM (no `bakerysf_stage_local` schema here) — the next desktop session should `pin` the program as **Decided** and log this handoff.
-8. **Next agent:** Finish Wave 3 **55 `product-boundaries`**, then Wave 4 no-decision parts (62; 61 step 1; 63 step A; 60 staleness/runbook). **35–37, 40–46, 50–54 are shipped.** Staging and Live were not touched.
+8. **Next agent:** Wave 4 no-decision parts — **62 `engagement-writeback`**, **61 step 1**, **63 step A**, **60 staleness chip + runbook** (owner installs cron). **35–37, 40–46, 50–55 are shipped.** Staging and Live were not touched.
