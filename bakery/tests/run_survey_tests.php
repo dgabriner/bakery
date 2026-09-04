@@ -109,11 +109,27 @@ try {
     $assert(strpos($body, '2026-08-25') !== false && strpos($body, 'survey.php?t=') !== false, 'link message carries date and token URL');
     $url = bakery_survey_link_url((string)$survey['token']);
     $assert(strpos($url, 'survey.php?t=' . $survey['token']) !== false, 'link URL embeds raw token');
+    $dated = bakery_survey_link_url((string)$survey['token'], '2026-09-01');
+    $assert(strpos($dated, 'date=2026-09-01') !== false, 'optional delivery date is appended');
     $_SERVER['HTTP_HOST'] = 'staging.sourflour.org';
     $_SERVER['HTTPS'] = 'on';
     $absoluteUrl = bakery_survey_link_url((string)$survey['token']);
     unset($_SERVER['HTTP_HOST'], $_SERVER['HTTPS']);
     $assert(preg_match('#^https://staging\.sourflour\.org/[a-z0-9_./-]*survey\.php\?t=' . $survey['token'] . '$#', $absoluteUrl) === 1, 'under a request context the link is fully absolute and https');
+
+    $_SERVER['HTTP_HOST'] = 'bakery.sourflour.org';
+    $_SERVER['HTTPS'] = 'on';
+    $liveAbsolute = bakery_survey_link_url((string)$survey['token'], '2026-09-01');
+    unset($_SERVER['HTTP_HOST'], $_SERVER['HTTPS']);
+    $assert(
+        strpos($liveAbsolute, 'https://bakery.sourflour.org/') === 0
+        && strpos($liveAbsolute, 'survey.php?t=' . $survey['token']) !== false
+        && strpos($liveAbsolute, 'date=2026-09-01') !== false,
+        'Live host builds an absolute https survey URL with date'
+    );
+    if (defined('BASE_URL') && BASE_URL === '/bake/') {
+        $assert(strpos($liveAbsolute, 'https://bakery.sourflour.org/bake/survey.php?') === 0, 'Live /bake/ BASE_URL is preserved in survey links');
+    }
 
     $send = bakery_survey_send($db, $survey, 1);
     $messageIds[] = (int)$send['send']['id'];

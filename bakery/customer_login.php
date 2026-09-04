@@ -159,7 +159,7 @@ $submitLabel = $createMode ? $submitCreate : $submitSignin;
       <label for="code" id="codeLabel"><?php echo $createMode ? 'Choose a unique 4-digit code' : 'Your 4-digit code'; ?></label>
       <input type="tel" id="code" name="code" required
              inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4"
-             autocomplete="current-password"
+             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
              value="<?php echo htmlspecialchars($_POST['code'] ?? ''); ?>">
       <button type="submit" id="submitButton"><?php echo htmlspecialchars($submitLabel, ENT_QUOTES, 'UTF-8'); ?></button>
     </form>

@@ -43,7 +43,8 @@
     confirmationSaved: false,
     completionMessage: '',
     stopFinished: false,
-    sessionRefreshPromise: null
+    sessionRefreshPromise: null,
+    scrollLockY: 0
   };
 
   var STEPS = ['photo', 'delivery', 'invoice'];
@@ -304,6 +305,49 @@
     return window.innerWidth <= 768;
   }
 
+  function lockPhotoModalViewport() {
+    if (!usesCompactCapture()) return;
+    var modal = $('deliveryPhotoModal');
+    if (!modal) return;
+    state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.style.top = '-' + state.scrollLockY + 'px';
+    var height = window.innerHeight;
+    if (window.visualViewport && window.visualViewport.height > 0) {
+      height = Math.round(window.visualViewport.height);
+    }
+    modal.style.setProperty('--photo-modal-locked-height', height + 'px');
+  }
+
+  function unlockPhotoModalViewport() {
+    var modal = $('deliveryPhotoModal');
+    if (modal) {
+      modal.style.removeProperty('--photo-modal-locked-height');
+    }
+    document.body.style.top = '';
+    if (state.scrollLockY) {
+      window.scrollTo(0, state.scrollLockY);
+    }
+    state.scrollLockY = 0;
+  }
+
+  function updateNativeCameraControls() {
+    var pickerBtn = $('deliveryFilePickerBtn');
+    var captureBtn = $('deliveryCaptureBtn');
+    var skipBtn = $('deliverySkipPhotoInlineBtn');
+    var isDeparture = state.photoReturnStep === 'complete';
+    if (pickerBtn) {
+      pickerBtn.textContent = isDeparture ? i18n('take_departure_photo') : i18n('phone_camera');
+    }
+    if (captureBtn) {
+      captureBtn.textContent = isDeparture
+        ? i18n('take_departure_photo')
+        : (state.cameraActive ? i18n('take_photo') : i18n('activate_camera'));
+    }
+    if (skipBtn) {
+      skipBtn.textContent = isDeparture ? i18n('skip_departure_photo') : i18n('skip_photo');
+    }
+  }
+
   function setPhotoControlsBusy(isBusy) {
     ['deliveryCaptureBtn', 'deliveryRetakeBtn', 'deliveryFilePickerBtn', 'deliveryGalleryPickerBtn', 'deliverySkipPhotoInlineBtn']
       .forEach(function (id) {
@@ -393,6 +437,7 @@
           ? i18n('departure_guidance')
           : i18n('receipt_guidance');
     }
+    updateNativeCameraControls();
   }
 
   function setPhotoMode(mode) {
@@ -448,6 +493,7 @@
       modal.classList.toggle('delivery-step-invoice', step === 'invoice');
       modal.classList.toggle('delivery-step-delivery', step === 'delivery');
       modal.classList.toggle('delivery-step-photo', step === 'photo');
+      modal.classList.toggle('delivery-step-departure', step === 'photo' && state.photoReturnStep === 'complete');
       modal.classList.toggle('delivery-mode-review', state.photoMode === 'review');
     }
 
@@ -472,6 +518,8 @@
       if (title) title.textContent = i18n('delivery_invoice');
       if (eyebrow) eyebrow.textContent = i18n('confirm');
     }
+
+    updateNativeCameraControls();
 
     if (step === 'invoice') {
       if (wizardActions) wizardActions.hidden = true;
@@ -500,14 +548,14 @@
         primaryBtn.classList.remove('has-saved-photo');
       } else if (step === 'delivery') {
         primaryBtn.hidden = false;
-        primaryBtn.textContent = i18n('save_delivery');
+        primaryBtn.textContent = i18n('save_and_leave_photo');
         primaryBtn.classList.remove('has-saved-photo');
       }
       primaryBtn.disabled = state.submitting;
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
     if (reviewBtn) {
-      reviewBtn.hidden = step !== 'delivery';
+      reviewBtn.hidden = step !== 'delivery' || usesCompactCapture();
       reviewBtn.disabled = state.submitting;
     }
 
@@ -1227,7 +1275,7 @@
       if (isSubmitting && state.currentStep === 'delivery') {
         primaryBtn.textContent = i18n('saving');
       } else if (state.currentStep === 'delivery') {
-        primaryBtn.textContent = i18n('save_delivery');
+        primaryBtn.textContent = i18n('save_and_leave_photo');
       }
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
@@ -1440,6 +1488,15 @@
     var panel = $('deliveryVarianceConfirm');
     if (panel) panel.hidden = true;
     state.pendingVarianceConfirm = null;
+  }
+
+  function promptDeparturePhoto() {
+    if ($('deliveryPhotoType')) {
+      $('deliveryPhotoType').value = 'After';
+    }
+    updatePhotoWorkflowUi(false);
+    setStatus(i18n('take_departure_photo'), 'success');
+    goToStep('photo');
   }
 
   function populateInvoicePreview() {
@@ -1683,9 +1740,9 @@
       state.completionMessage = successMessage;
       state.savedTotal = Number(data.total || 0);
       state.isSaved = true;
-      state.photoReturnStep = null;
+      state.photoReturnStep = 'complete';
       setSubmitting(false);
-      finishDeliveryUi(i18n('saved_leaving_later') || successMessage);
+      promptDeparturePhoto();
     } catch (err) {
       if (err && err.isSessionError) {
         setStatus(err.message, 'error');
@@ -1798,6 +1855,7 @@
     var routeRoot = $('driverRouteRoot');
     if (routeRoot) routeRoot.setAttribute('inert', '');
     document.body.classList.add('photo-mode-open');
+    lockPhotoModalViewport();
     requestAnimationFrame(function () {
       modal.classList.add('is-open');
       var closeButton = $('deliveryPhotoModalClose');
@@ -1860,6 +1918,7 @@
     var routeRoot = $('driverRouteRoot');
     if (routeRoot) routeRoot.removeAttribute('inert');
     document.body.classList.remove('photo-mode-open');
+    unlockPhotoModalViewport();
     hideVarianceConfirm();
     state.currentStep = 'photo';
     state.photoReturnStep = null;
@@ -1872,7 +1931,7 @@
     });
     var modalEl = $('deliveryPhotoModal');
     if (modalEl) {
-      modalEl.classList.remove('delivery-step-photo', 'delivery-step-delivery', 'delivery-step-invoice', 'delivery-mode-review', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
+      modalEl.classList.remove('delivery-step-photo', 'delivery-step-delivery', 'delivery-step-invoice', 'delivery-step-departure', 'delivery-mode-review', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
     }
     setStatus('');
     if (options.focusRoute) {

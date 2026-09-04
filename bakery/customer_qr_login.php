@@ -69,11 +69,11 @@ $hasExistingCode = $invite && bakery_normalize_login_code($invite['portal_code']
         <?php echo bakery_csrf_field(); ?>
         <input type="hidden" name="token" value="<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>">
         <label for="code"><?php echo $hasExistingCode ? 'Your code' : 'New code'; ?></label>
-        <input type="tel" id="code" name="code" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" autocomplete="<?php echo $hasExistingCode ? 'current-password' : 'new-password'; ?>" autofocus aria-describedby="codeHint">
+        <input type="tel" id="code" name="code" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus aria-describedby="codeHint">
         <span id="codeHint" class="qr-field-hint">4 numbers</span>
         <?php if (!$hasExistingCode): ?>
           <label for="code_confirmation">Enter it again</label>
-          <input type="tel" id="code_confirmation" name="code_confirmation" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" autocomplete="new-password">
+          <input type="tel" id="code_confirmation" name="code_confirmation" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
         <?php endif; ?>
         <button type="submit"><?php echo $hasExistingCode ? 'Log me in' : 'Create code & log me in'; ?></button>
       </form>

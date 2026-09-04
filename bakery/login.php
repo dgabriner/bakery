@@ -95,8 +95,9 @@ $currentLocale = bakery_locale();
     .la-victoria-logo { display: block; height: auto; max-width: 400px; width: min(78vw, 400px); }
     .sour-flour-logo { display: block; height: auto; max-width: 250px; width: min(46vw, 250px); mix-blend-mode: multiply; }
     label { display: block; font-size: .94rem; margin-bottom: 14px; }
-    input[type=tel] { background: transparent; border: 0; border-bottom: 2px solid #c9b9a8; border-radius: 0; color: var(--ink); display: block; font-family: inherit; font-size: 2.5rem; letter-spacing: .55em; margin: 0 auto; max-width: 240px; outline: none; padding: 4px 0 9px 18px; text-align: center; width: 100%; }
-    input[type=tel]:focus { border-bottom-color: var(--terracotta); }
+    #code { background: transparent; border: 0; border-bottom: 2px solid #c9b9a8; border-radius: 0; color: var(--ink); display: block; font-family: inherit; font-size: 2.5rem; letter-spacing: .55em; margin: 0 auto; max-width: 240px; outline: none; padding: 4px 0 9px 18px; text-align: center; width: 100%; }
+    #code:focus { border-bottom-color: var(--terracotta); }
+    .login-autofill-trap { height: 1px; left: -10000px; overflow: hidden; position: absolute; top: auto; width: 1px; }
     .error { color: #9b332c; font-size: .9rem; margin: 0 0 18px; }
     .lang-row { display: flex; justify-content: center; margin-bottom: 20px; }
     .bakery-lang-switch--inline { background: rgba(0,0,0,.04); border-radius: 999px; display: inline-flex; gap: 2px; padding: 3px; }
@@ -112,7 +113,7 @@ $currentLocale = bakery_locale();
       .la-victoria-logo { width: min(80vw, 290px); }
       .sour-flour-logo { width: min(54vw, 210px); }
       label { margin-bottom: 6px; }
-      input[type=tel] { font-size: 2rem; padding: 0 0 4px 12px; }
+      #code { font-size: 2rem; padding: 0 0 4px 12px; }
     }
     /* Keep the complete brand stack visible when the mobile keypad reduces the viewport. */
     @media (max-width: 560px) and (max-height: 600px) {
@@ -121,7 +122,7 @@ $currentLocale = bakery_locale();
       .la-victoria-logo { width: min(80vw, 290px); }
       .sour-flour-logo { width: min(54vw, 210px); }
       label { margin-bottom: 6px; }
-      input[type=tel] { font-size: 2rem; padding: 0 0 4px 12px; }
+      #code { font-size: 2rem; padding: 0 0 4px 12px; }
     }
   </style>
 </head>
@@ -140,13 +141,23 @@ $currentLocale = bakery_locale();
       <div class="error" role="alert"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
     <div class="lang-row"><?php $langSwitchVariant = 'inline'; require __DIR__ . '/includes/language_switch.php'; ?></div>
-    <form method="post" action="">
+    <form method="post" action="" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore>
       <?php echo bakery_csrf_field(); ?>
       <input type="hidden" name="next" value="<?php echo htmlspecialchars($next); ?>">
+      <?php /* Trap iCloud Keychain / password managers so Face ID and Save Password
+           do not attach to the bakery PIN field. Values are ignored server-side. */ ?>
+      <div class="login-autofill-trap" aria-hidden="true">
+        <label for="bakery_user_decoy">Username</label>
+        <input type="text" id="bakery_user_decoy" name="bakery_user_decoy" tabindex="-1" autocomplete="username" value="">
+        <label for="bakery_pass_decoy">Password</label>
+        <input type="password" id="bakery_pass_decoy" name="bakery_pass_decoy" tabindex="-1" autocomplete="current-password" value="">
+      </div>
       <label for="code"><?php bakery_te('login.label'); ?></label>
-      <input type="tel" id="code" name="code" required
+      <input type="text" id="code" name="code" required
              inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4"
-             autocomplete="one-time-code" autofocus
+             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+             data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"
+             readonly
              value="<?php echo htmlspecialchars($_POST['code'] ?? ''); ?>">
     </form>
     <p class="portal-link"><a href="<?php echo htmlspecialchars(BASE_URL); ?>customer_login.php"><?php bakery_te('login.customer_portal_link'); ?></a></p>
@@ -165,6 +176,20 @@ $currentLocale = bakery_locale();
         document.body.scrollTop = 0;
       };
 
+      // Keep the field readonly until the driver taps/types. Programmatic focus
+      // while readonly stops Safari from offering Face ID / saved passwords on load.
+      var unlockPin = function () {
+        if (input.hasAttribute('readonly')) {
+          input.removeAttribute('readonly');
+        }
+      };
+      input.addEventListener('touchstart', unlockPin, { passive: true });
+      input.addEventListener('mousedown', unlockPin);
+      input.addEventListener('keydown', unlockPin);
+      input.addEventListener('focus', function () {
+        window.setTimeout(unlockPin, 25);
+      });
+
       input.focus({ preventScroll: true });
       keepMobileAtTop();
       requestAnimationFrame(keepMobileAtTop);
@@ -176,6 +201,7 @@ $currentLocale = bakery_locale();
       }
       var submitting = false;
       input.addEventListener('input', function () {
+        unlockPin();
         this.value = this.value.replace(/\D/g, '').slice(0, 4);
         if (this.value.length === 4 && !submitting) {
           submitting = true;

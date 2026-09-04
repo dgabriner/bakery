@@ -139,9 +139,10 @@ driver_photo_assert(
     strpos($script, 'if (state.uploading || state.preparing || state.submitting) return;') !== false
 );
 driver_photo_assert(
-    'mobile modal supports stable and dynamic viewport heights',
-    strpos($styles, 'height: 100svh;') !== false
-        && strpos($styles, 'height: 100dvh;') !== false
+    'mobile modal locks viewport height to stop toolbar jitter',
+    strpos($styles, '--photo-modal-locked-height') !== false
+        && strpos($styles, '100svh') !== false
+        && strpos($script, 'function lockPhotoModalViewport()') !== false
 );
 driver_photo_assert(
     'narrow delivery actions use a non-overflowing grid',
@@ -153,7 +154,7 @@ driver_photo_assert(
     strpos($handler, "'image/heic', 'image/heif'") !== false
 );
 
-foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo'] as $key) {
+foreach (['driver.choose_photo', 'driver.camera_off', 'driver.native_camera_hint', 'driver.saving_photo', 'driver.preparing_photo', 'driver.skip_departure_photo', 'driver.save_and_leave_photo'] as $key) {
     driver_photo_assert(
         "photo workflow translation exists in English and Spanish: {$key}",
         isset($english[$key], $spanish[$key])
@@ -347,12 +348,12 @@ driver_photo_assert(
         && strpos($page, 'route-prep-tomorrow-cta') === false
 );
 driver_photo_assert(
-    'happy-path confirm saves from the quantity step without a forced leave photo',
+    'happy-path confirm saves quantities then prompts for a leaving photo',
     strpos($page, 'id="deliveryWizardReviewBtn"') !== false
         && strpos($page, 'id="deliveryVarianceAck"') !== false
-        && strpos($script, "primaryBtn.textContent = i18n('save_delivery')") !== false
-        && strpos($script, "finishDeliveryUi(i18n('saved_leaving_later')") !== false
-        && strpos($script, "state.photoReturnStep = 'complete'") === false
+        && strpos($script, "primaryBtn.textContent = i18n('save_and_leave_photo')") !== false
+        && strpos($script, "state.photoReturnStep = 'complete'") !== false
+        && strpos($script, 'function promptDeparturePhoto()') !== false
 );
 driver_photo_assert(
     'failed stops update live and include HQ contact links',
