@@ -253,6 +253,8 @@ function bakery_agent_work_map_core(): array
                 'includes/survey_store_verify.php',
                 'includes/survey_interactions.php',
                 'includes/survey_route_order.php',
+                'includes/survey_route_order_render.php',
+                'includes/survey_dual_hub.php',
                 'database/schema/073_survey_interactions.sql',
                 'text_comms.php',
                 'text_comms_api.php',

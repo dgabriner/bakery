@@ -109,6 +109,9 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   .date-bar { display: flex; gap: 8px; align-items: end; margin: 0 0 10px; flex-wrap: wrap; }
   .date-bar label { font-size: 11px; font-weight: 700; opacity: .7; display: grid; gap: 3px; flex: 1; min-width: 130px; }
   .date-bar input[type="date"] { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d0c2; background: #fff; }
+  .survey-day-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; width: 100%; }
+  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; }
+  .survey-day-chip--active { background: #2c5aa0; border-color: #2c5aa0; color: #fff; }
   .links-card { background: #fff; border: 1px solid #e4ddd2; border-radius: 10px; padding: 8px 10px; margin: 0 0 10px; font-size: 13px; }
   .links-card .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #efe9df; }
   .links-card .row:last-child { border-bottom: none; }
@@ -151,6 +154,15 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   <?php endif; ?>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_order_hint', [], 'Tap remaining stores one by one.')); ?></p>
 
+  <?php
+    $chipToday = date('Y-m-d');
+    $chipTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+    $chipBase = 'survey.php?t=' . rawurlencode($token) . '&date=';
+  ?>
+  <div class="survey-day-chips" role="group" aria-label="<?php echo $esc(bakery_survey_text('survey.hub_day_aria', [], 'Choose delivery day')); ?>">
+    <a class="survey-day-chip<?php echo $verifyDate === $chipToday ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipToday)); ?>"<?php echo $verifyDate === $chipToday ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.today', [], 'Today')); ?></a>
+    <a class="survey-day-chip<?php echo $verifyDate === $chipTomorrow ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipTomorrow)); ?>"<?php echo $verifyDate === $chipTomorrow ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.tomorrow', [], 'Tomorrow')); ?></a>
+  </div>
   <form class="date-bar" method="get" action="survey.php">
     <input type="hidden" name="t" value="<?php echo $esc($token); ?>">
     <label><?php echo $esc(bakery_survey_text('survey.store_verify_date', [], 'Delivery day')); ?>

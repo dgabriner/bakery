@@ -107,7 +107,8 @@ navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager na
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
 navigation_test_assert(strpos($managerNav, 'daily_orders.php') !== false, 'manager More includes Daily Orders');
-navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') !== false, 'manager More includes Survey Center');
+navigation_test_assert(strpos($managerNav, 'survey.php') !== false, 'manager More includes Route survey for everyone');
+navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') !== false, 'manager All tools still includes Survey Center');
 navigation_test_assert(strpos($managerNav, 'billing_center.php') !== false, 'manager More includes Billing Center');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--ops') === false, 'manager focused nav is not the admin ops shell');
 
@@ -191,12 +192,21 @@ navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'dr
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__more') !== false, 'driver navigation parks Pack, Stops, and QR behind More');
-navigation_test_assert(strpos($driverNav, 'survey.php') !== false, 'driver More includes Tomorrow\'s stores survey');
+navigation_test_assert(strpos($driverNav, 'survey.php') !== false, 'driver primary nav includes Survey');
+$driverSurveyPos = strpos($driverNav, 'survey.php');
+$driverMorePos = strpos($driverNav, 'bakery-nav__more');
+navigation_test_assert($driverSurveyPos !== false && $driverMorePos !== false && $driverSurveyPos < $driverMorePos, 'driver Survey is a primary direct link before More');
 navigation_test_assert(strpos($driverNav, 'driver_stops.php') !== false, 'Stops remains reachable from More');
-navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Call HQ, and More');
+navigation_test_assert(strpos($navCss, 'repeat(5, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Survey, Call HQ, and More');
 
 $driverHqNav = navigation_test_render_nav('driver', 'call_headquarters');
 navigation_test_assert(strpos($driverHqNav, 'routeDateNavToggle') === false, 'driver Call HQ navigation omits the route date toggle');
+navigation_test_assert(strpos($driverHqNav, 'survey.php') !== false, 'driver Call HQ bar still includes Survey');
+$driverHqGroups = '';
+if (preg_match('/bakery-nav__groups">(.*?)<\/div>\s*<\/div>\s*<\/nav>/s', $driverHqNav, $m)) {
+    $driverHqGroups = $m[1];
+}
+navigation_test_assert(substr_count($driverHqGroups, 'bakery-nav__direct') >= 4, 'driver non-date bar has Survey among primary directs');
 
 echo "=== Catalog is the role allowlist ===\n";
 require_once dirname(__DIR__) . '/includes/customer_portal.php';

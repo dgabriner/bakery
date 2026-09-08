@@ -107,17 +107,20 @@ if ($navSelectedDriverName === '' && $navUser) {
         <span class="bakery-nav__label-short" aria-hidden="true"><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
       </button>
       <?php endif; ?>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'survey' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.survey_route'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.survey_route'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.survey_tomorrow_short'); ?></span>
+      </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'call_headquarters' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>call_headquarters.php" aria-label="<?php bakery_te('nav.call_hq'); ?>"<?php echo $currentPage === 'call_headquarters' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
       </a>
-      <details class="bakery-nav__more<?php echo in_array($currentPage, ['driver_stops', 'pack_list', 'qr_login', 'survey'], true) ? ' bakery-nav__more--active' : ''; ?>">
+      <details class="bakery-nav__more<?php echo in_array($currentPage, ['driver_stops', 'pack_list', 'qr_login'], true) ? ' bakery-nav__more--active' : ''; ?>">
         <summary class="bakery-nav__direct bakery-nav__more-toggle" aria-label="<?php bakery_te('nav.more_aria'); ?>">
           <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.more'); ?></span>
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet">
-          <a class="bakery-nav__more-link <?php echo $currentPage === 'survey' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.survey_tomorrow'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'pack_list' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverPackHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.pack_list'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'driver_stops' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverStopsHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.stops'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'qr_login' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>qr_login.php"><?php bakery_te('nav.customer_login'); ?></a>
@@ -184,7 +187,7 @@ if ($navSelectedDriverName === '' && $navUser) {
       return BASE_URL . 'manager.php?date=' . rawurlencode($navManagerDate) . '&view=' . rawurlencode($view);
   };
   $navManagerPrimary = [
-      ['href' => 'text_comms.php?view=surveys', 'label' => bakery_t('nav.item.survey_center')],
+      ['href' => 'survey.php', 'label' => bakery_t('nav.survey_route')],
       ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
       ['href' => 'billing_center.php?panel=invoices', 'label' => bakery_t('nav.item.billing_center')],
       ['href' => 'driver_assignment.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_assignment')],
@@ -219,7 +222,7 @@ if ($navSelectedDriverName === '' && $navUser) {
       <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
         <?php echo bakery_staff_alerts_nav_html(); ?>
       <?php endif; ?>
-      <details class="bakery-nav__more<?php echo !$navManagerOnHome ? ' bakery-nav__more--active' : ''; ?>">
+      <details class="bakery-nav__more<?php echo !$navManagerOnHome || $currentPage === 'survey' ? ' bakery-nav__more--active' : ''; ?>">
         <summary class="bakery-nav__direct bakery-nav__more-toggle" aria-label="<?php bakery_te('nav.manager_more_aria'); ?>">
           <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.more'); ?></span>
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
