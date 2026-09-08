@@ -161,6 +161,12 @@ $requiredKeys = [
     'manager_phone.confirm_close_route',
     'manager_phone.closeout_van_math',
     'manager_phone.desktop_use_manager',
+    'manager_phone.mission_timeline',
+    'manager_phone.mission_done_so_far',
+    'manager_phone.mission_still_to_deliver',
+    'manager_phone.mission_current_stop',
+    'manager_phone.mission_now',
+    'manager_phone.cod_section',
     'production_sheet.commit_diff_title',
     'production_sheet.commit_diff_chip',
     'nav.manager_today',
@@ -172,6 +178,19 @@ $requiredKeys = [
 foreach ($requiredKeys as $key) {
     manager_phone_assert(isset($en[$key], $es[$key]), "i18n key {$key} exists in en and es");
 }
+
+$mission = bakery_manager_phone_mission_from_stops([
+    ['daily_order_id' => 1, 'customer_name' => 'Cafe A', 'delivery_status' => 'delivered', 'actual_delivery_time' => '08:12:00', 'scheduled_delivery_time' => '08:00:00'],
+    ['daily_order_id' => 2, 'customer_name' => 'Cafe B', 'delivery_status' => 'in_transit', 'actual_delivery_time' => null, 'scheduled_delivery_time' => '09:00:00'],
+    ['daily_order_id' => 3, 'customer_name' => 'Cafe C', 'delivery_status' => 'pending', 'actual_delivery_time' => null, 'scheduled_delivery_time' => '10:00:00'],
+]);
+manager_phone_assert($mission['phase'] === 'in_progress', 'mission phase is in progress when a stop is open');
+manager_phone_assert($mission['done_count'] === 1 && $mission['left_count'] === 2, 'mission splits done and remaining stops');
+manager_phone_assert((string)($mission['current']['customer_name'] ?? '') === 'Cafe B', 'current stop prefers in_transit');
+manager_phone_assert($mission['last_done_time'] !== '', 'mission formats last delivered time');
+manager_phone_assert(strpos($phone, 'bakery_manager_phone_mission_from_stops') !== false, 'routes render uses mission helper');
+manager_phone_assert(strpos($phone, 'manager_phone.mission_still_to_deliver') !== false, 'routes show remaining delivery order');
+manager_phone_assert(strpos($phoneCss, '.manager-phone__mission-list') !== false, 'mission timeline styles exist');
 
 echo "\n{$passed} passed, {$failed} failed\n";
 exit($failed === 0 ? 0 : 1);
