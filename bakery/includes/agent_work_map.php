@@ -112,8 +112,10 @@ function bakery_agent_work_map_core(): array
                 'billing_center.php',
                 'includes/billing.php',
                 'includes/square_invoices.php',
+                'database/schema/049_invoice_send.sql',
                 'database/schema/055_square_invoices.sql',
                 'database/schema/056_square_webhook_invoice_index.sql',
+                'database/schema/082_invoice_send_failure_reason.sql',
                 'includes/billing_aging.php',
                 'includes/billing_panel_invoices.php',
                 'customer_record.php',
@@ -126,6 +128,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_invoice_send_tests.php',
                 'tests/run_square_invoice_tests.php',
                 'tests/run_customer_billing_tests.php',
+                'tests/run_schema_compare_tests.php',
             ],
             'invariants' => [
                 'Never price historical invoices from live products.price',

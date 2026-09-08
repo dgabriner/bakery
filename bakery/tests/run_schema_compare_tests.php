@@ -78,6 +78,34 @@ $discrepancyExtra = bakery_schema_inventory_compare(
 );
 $assert(($discrepancyExtra['state'] ?? '') === 'discrepancy', 'Live-only column is a discrepancy');
 
+// Mission 35 runtime ensure added failure_reason on Live before Staging had 082.
+$invoiceSendStop = bakery_schema_inventory_compare(
+    schema_compare_fixture($baseColumns, $baseIndexes, ['049_done']),
+    schema_compare_fixture(
+        $baseColumns + ['billing_invoice_sends.failure_reason' => 'varchar(255)|YES|'],
+        $baseIndexes,
+        ['049_done']
+    )
+);
+$assert(($invoiceSendStop['state'] ?? '') === 'discrepancy', 'Live-only invoice failure_reason Stops compare');
+$assert(
+    in_array('billing_invoice_sends.failure_reason', $invoiceSendStop['extra_on_live'] ?? [], true),
+    'Stop names billing_invoice_sends.failure_reason'
+);
+$invoiceSendMatch = bakery_schema_inventory_compare(
+    schema_compare_fixture(
+        $baseColumns + ['billing_invoice_sends.failure_reason' => 'varchar(255)|YES|'],
+        $baseIndexes,
+        ['049_done', '082_invoice_send_failure_reason']
+    ),
+    schema_compare_fixture(
+        $baseColumns + ['billing_invoice_sends.failure_reason' => 'varchar(255)|YES|'],
+        $baseIndexes,
+        ['049_done']
+    )
+);
+$assert(($invoiceSendMatch['state'] ?? '') === 'equal', '082 on Staging clears the Live-only failure_reason Stop');
+
 $extraIndexLive = bakery_schema_inventory_compare(
     $staging,
     schema_compare_fixture($baseColumns, $baseIndexes + ['text_messages.uq_text_messages_twilio_sid' => '1:twilio_sid'], ['049_done'])
@@ -341,8 +369,8 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 82, 'next unused schema number is 082');
-$assert(bakery_schema_next_migration_id('demo_feature') === '082_demo_feature', 'next id is 082_ plus slug');
+$assert(bakery_schema_next_migration_number() === 83, 'next unused schema number is 083');
+$assert(bakery_schema_next_migration_id('demo_feature') === '083_demo_feature', 'next id is 083_ plus slug');
 $third062 = bakery_schema_migration_ids_from_dir();
 $third062[] = '062_another_collision';
 $assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');
