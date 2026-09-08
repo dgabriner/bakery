@@ -3488,7 +3488,7 @@ return [
     'driver.camera_ready_replacement' => 'Camera ready — take the replacement photo.',
     'driver.camera_ready' => 'Camera ready — take a photo.',
     'driver.camera_off' => 'Camera is off',
-    'driver.native_camera_hint' => 'Use your phone camera below',
+    'driver.native_camera_hint' => 'Take a photo, choose from your library, or skip',
     'driver.saving_photo' => 'Saving photo…',
     'driver.camera_not_ready' => 'Camera not ready yet. Wait a moment or use file picker.',
     'driver.capture_failed' => 'Could not capture frame. Try the file picker.',
