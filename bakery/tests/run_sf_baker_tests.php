@@ -192,6 +192,10 @@ try {
     assert_eq(1, count($threads['roots']), 'question remains the discussion root');
     assert_eq(1, count($threads['replies'][$questionId]), 'administrator reply nests under question');
     assert_eq(1, (int)$threads['roots'][0]['is_resolved'], 'administrator reply resolves baker question');
+    $bakerFeedback = bakery_sfb_baker_feedback($db, $customerId);
+    assert_eq(1, count($bakerFeedback['coach_notes']), 'baker home feedback includes the coach reply');
+    assert_eq($batchId, (int)$bakerFeedback['coach_notes'][0]['batch_id'], 'coach feedback links to the baker-owned batch');
+    assert_eq(0, $bakerFeedback['open_question_count'], 'answered question is not shown as waiting');
     $openAfterReply = bakery_sfb_open_questions($db);
     assert_true(!(bool)array_filter($openAfterReply, function ($question) use ($questionId) {
         return (int)$question['id'] === $questionId;

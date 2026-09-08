@@ -301,8 +301,14 @@ assert_true(strpos($communitySource, 'bakery_sfb_ensure_library_pins') !== false
 assert_eq(1, substr_count($communitySource, 'id="start-discussion"'), 'community has a single compose panel');
 assert_eq(1, substr_count($communitySource, 'id="sfbCommunityCategory"'), 'community has a single category select');
 assert_true(strpos(file_get_contents(dirname(__DIR__) . '/sfb_resources.php'), 'bakery_sfb_library_ask_url') !== false, 'resources cards can ask the circle');
-assert_true(strpos(file_get_contents(dirname(__DIR__) . '/sfb_batch.php'), 'sfb_library_panel.php') !== false, 'batch page includes the review/diagnose panel');
-assert_true(strpos(file_get_contents(dirname(__DIR__) . '/sfb_dashboard.php'), 'sfb.library_review_open') !== false, 'dashboard offers a last-bake review');
+$batchSource = file_get_contents(dirname(__DIR__) . '/sfb_batch.php');
+assert_true(strpos($batchSource, 'sfb_library_panel.php') !== false, 'batch page includes the review/diagnose panel');
+assert_eq(4, substr_count($batchSource, '<details id="sfb-'), 'guided bake keeps four compact phase cards');
+$dashboardSource = file_get_contents(dirname(__DIR__) . '/sfb_dashboard.php');
+assert_true(strpos($dashboardSource, 'sfb.library_review_open') !== false, 'dashboard offers a last-bake review');
+assert_true(strpos($dashboardSource, 'bakery_sfb_baker_feedback') !== false, 'dashboard keeps coach feedback findable');
+$joinSource = file_get_contents(dirname(__DIR__) . '/sfb_join.php');
+assert_true(strpos($joinSource, 'sfb.join_journey_title') !== false, 'public door leads with the 1,000-loaf practice');
 assert_true(is_file(dirname(__DIR__) . '/docs/sfb_synthetic_eval.md'), 'synthetic eval document exists');
 
 // Synthetics never enroll, hold progress, or pay (bread-education invariant).

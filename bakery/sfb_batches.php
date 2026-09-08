@@ -104,26 +104,16 @@ $portalCustomerName = $customer['name'];
       <div class="notice notice--info"><?php echo htmlspecialchars($savedMessages[$saved]); ?></div>
     <?php endif; ?>
 
-    <?php if (($_GET['welcome'] ?? '') === '1'): ?>
-      <section class="card" style="margin-bottom:14px;">
-        <div class="card-body">
-          <p class="hero-label">You’re in</p>
-          <h2 style="margin:0 0 8px;">Start your first batch</h2>
-          <p class="muted" style="margin:0;">Choose a formula below, optionally name the batch, and tap Start batch. You can add your name or email later in Account.</p>
-        </div>
-      </section>
-    <?php endif; ?>
-
     <section class="card">
       <div class="card-header"><h2><?php bakery_te('sfb.start_batch'); ?></h2></div>
       <div class="card-body">
         <?php if (!$formulas && $templates): ?>
-          <p class="muted" style="margin-top:0;">Pick a standard formula and we’ll make an editable copy just for you.</p>
+          <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.first_formula_intro'); ?></p>
           <form method="post" class="inline-form" style="grid-template-columns:1fr;">
             <?php echo bakery_csrf_field(); ?>
             <input type="hidden" name="action" value="start_template_batch">
             <div class="sfb-field">
-              <label><span>Your first formula</span>
+              <label><span><?php bakery_te('sfb.first_formula_label'); ?></span>
                 <select name="template_id">
                   <?php foreach ($templates as $template): ?>
                     <option value="<?php echo (int)$template['id']; ?>"><?php echo htmlspecialchars($template['name']); ?></option>
@@ -132,7 +122,7 @@ $portalCustomerName = $customer['name'];
               </label>
             </div>
             <input type="hidden" name="started_at" value="<?php echo htmlspecialchars(bakery_sfb_now_local_value()); ?>">
-            <button type="submit" class="btn btn-block">Start my first batch</button>
+            <button type="submit" class="btn btn-block"><?php bakery_te('sfb.first_bake_cta'); ?></button>
           </form>
         <?php elseif (!$formulas): ?>
           <p class="empty-state"><?php bakery_te('sfb.need_formula_first'); ?></p>

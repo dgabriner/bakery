@@ -1471,6 +1471,50 @@ function bakery_sfb_batch_messages(PDO $db, $batchId) {
     return $stmt->fetchAll();
 }
 
+/**
+ * The small feedback inbox shown on a baker's home screen.
+ *
+ * There is intentionally no unread state: the journal shows the latest coach
+ * notes and the number of questions still waiting for an answer without
+ * pretending that we know whether the baker has seen a message.
+ *
+ * @return array{coach_notes: array, open_question_count: int}
+ */
+function bakery_sfb_baker_feedback(PDO $db, $customerId, $limit = 3) {
+    $out = ['coach_notes' => [], 'open_question_count' => 0];
+    if (!bakery_sfb_discussion_ready($db) || !table_exists($db, 'sfb_batches')) {
+        return $out;
+    }
+
+    $customerId = (int)$customerId;
+    $limit = max(1, min(10, (int)$limit));
+    $notes = $db->prepare(
+        'SELECT m.id, m.batch_id, m.author_name, m.body, m.created_at,
+                b.name AS batch_name
+         FROM sfb_batch_messages m
+         JOIN sfb_batches b ON b.id = m.batch_id
+         WHERE b.customer_id = ? AND m.author_type = "admin"
+         ORDER BY m.created_at DESC, m.id DESC
+         LIMIT ' . $limit
+    );
+    $notes->execute([$customerId]);
+    $out['coach_notes'] = $notes->fetchAll();
+
+    $waiting = $db->prepare(
+        'SELECT COUNT(*)
+         FROM sfb_batch_messages m
+         JOIN sfb_batches b ON b.id = m.batch_id
+         WHERE b.customer_id = ?
+           AND m.author_type = "baker"
+           AND m.message_type = "question"
+           AND m.parent_message_id IS NULL
+           AND m.is_resolved = 0'
+    );
+    $waiting->execute([$customerId]);
+    $out['open_question_count'] = (int)$waiting->fetchColumn();
+    return $out;
+}
+
 /** Split a flat batch discussion into root messages and their direct replies. */
 function bakery_sfb_message_threads(array $messages) {
     $roots = [];

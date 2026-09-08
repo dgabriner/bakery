@@ -329,6 +329,7 @@ $portalCustomerName = $customer['name'];
       </div>
     </section>
 
+    <?php if ($batch['status'] === 'completed'): ?>
     <section class="card sfb-batch-share">
       <div class="card-body">
         <?php if ($batchShare): ?>
@@ -395,6 +396,7 @@ $portalCustomerName = $customer['name'];
     $sfbLibraryCanAsk = true;
     require __DIR__ . '/includes/sfb_library_panel.php';
     ?>
+    <?php endif; ?>
     <?php if ($nextStep): ?>
       <section class="card sfb-phase current" aria-labelledby="sfbCurrentStep">
         <div class="card-body">
@@ -487,10 +489,8 @@ $portalCustomerName = $customer['name'];
       </section>
     <?php endif; ?>
 
-    <section id="sfb-mix" class="card sfb-phase <?php echo $phase === 'mix' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>1. <?php bakery_te('sfb.phase_mix'); ?></h2>
-        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=mix#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
-      </div>
+    <details id="sfb-mix" class="card sfb-phase <?php echo $phase === 'mix' ? 'current' : ''; ?>"<?php echo $phase === 'mix' ? ' open' : ''; ?>>
+      <summary class="card-header"><h2>1. <?php bakery_te('sfb.phase_mix'); ?></h2></summary>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -534,12 +534,10 @@ $portalCustomerName = $customer['name'];
           </div>
         <?php endif; ?>
       </div>
-    </section>
+    </details>
 
-    <section id="sfb-bulk" class="card sfb-phase <?php echo $phase === 'development' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>2. <?php bakery_te('sfb.phase_development'); ?></h2>
-        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=development#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
-      </div>
+    <details id="sfb-bulk" class="card sfb-phase <?php echo $phase === 'development' ? 'current' : ''; ?>"<?php echo $phase === 'development' ? ' open' : ''; ?>>
+      <summary class="card-header"><h2>2. <?php bakery_te('sfb.phase_development'); ?></h2></summary>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -618,12 +616,10 @@ $portalCustomerName = $customer['name'];
           </form>
         <?php endif; ?>
       </div>
-    </section>
+    </details>
 
-    <section id="sfb-shape" class="card sfb-phase <?php echo $phase === 'shape' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>3. <?php bakery_te('sfb.phase_shape'); ?></h2>
-        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=shape#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
-      </div>
+    <details id="sfb-shape" class="card sfb-phase <?php echo $phase === 'shape' ? 'current' : ''; ?>"<?php echo $phase === 'shape' ? ' open' : ''; ?>>
+      <summary class="card-header"><h2>3. <?php bakery_te('sfb.phase_shape'); ?></h2></summary>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -655,12 +651,10 @@ $portalCustomerName = $customer['name'];
           </div>
         <?php endif; ?>
       </div>
-    </section>
+    </details>
 
-    <section id="sfb-bake" class="card sfb-phase <?php echo $phase === 'bake' ? 'current' : ''; ?>">
-      <div class="card-header"><h2>4. <?php bakery_te('sfb.phase_bake'); ?></h2>
-        <?php if ($builderReady): ?><span style="float:right;"><a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$batch['id']; ?>&ask=bake#sfb-discussion"><?php bakery_te('sfb.ask_about_step'); ?></a></span><?php endif; ?>
-      </div>
+    <details id="sfb-bake" class="card sfb-phase <?php echo $phase === 'bake' ? 'current' : ''; ?>"<?php echo $phase === 'bake' ? ' open' : ''; ?>>
+      <summary class="card-header"><h2>4. <?php bakery_te('sfb.phase_bake'); ?></h2></summary>
       <div class="card-body">
         <form method="post" class="inline-form" style="grid-template-columns:1fr;">
           <?php echo bakery_csrf_field(); ?>
@@ -704,7 +698,7 @@ $portalCustomerName = $customer['name'];
           </div>
         <?php endif; ?>
       </div>
-    </section>
+    </details>
 
     <section class="card">
       <div class="card-header"><h2><?php bakery_te('sfb.dough_temps'); ?></h2></div>
@@ -920,5 +914,18 @@ $portalCustomerName = $customer['name'];
     <a class="btn btn-secondary btn-block" href="sfb_batches.php"><?php bakery_te('sfb.all_batches'); ?></a>
   </main>
   <?php require __DIR__ . '/includes/portal_nav.php'; ?>
+  <script>
+    (function () {
+      function openPhase(hash) {
+        if (!hash || hash.indexOf('#sfb-') !== 0) return;
+        var target = document.querySelector(hash);
+        if (target && target.tagName === 'DETAILS') target.open = true;
+      }
+      openPhase(window.location.hash);
+      document.querySelectorAll('a[href^="#sfb-"]').forEach(function (link) {
+        link.addEventListener('click', function () { openPhase(link.hash); });
+      });
+    })();
+  </script>
 </body>
 </html>

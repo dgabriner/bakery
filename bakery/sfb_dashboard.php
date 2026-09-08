@@ -14,6 +14,7 @@ $recentForReview = bakery_sfb_batches($db, $customerId, 20);
 $recentBatches = array_slice($recentForReview, 0, 5);
 $starters = bakery_sfb_starters($db, $customerId);
 $formulaCount = count(bakery_sfb_formulas($db, $customerId));
+$feedback = bakery_sfb_baker_feedback($db, $customerId, 3);
 
 $completedCourses = [];
 foreach (bakery_sfb_courses($db) as $learnCourse) {
@@ -27,13 +28,6 @@ foreach (bakery_sfb_courses($db) as $learnCourse) {
 // whenever the baker has nothing started yet.
 $firstRun = ($_GET['welcome'] ?? '') === '1'
     || (!$starters && $formulaCount === 0 && !$recentBatches);
-$firstRunActions = $firstRun ? bakery_sfb_first_run_actions($db, $customerId) : [];
-$firstRunLessonUrl = null;
-foreach ($firstRunActions as $action) {
-    if ($action['key'] === 'lesson' && !empty($action['lesson_id'])) {
-        $firstRunLessonUrl = 'sfb_lesson.php?lesson=' . (int)$action['lesson_id'];
-    }
-}
 
 $latestFeedings = [];
 foreach ($starters as $starter) {
@@ -70,38 +64,6 @@ $portalCustomerName = $customer['name'];
   <main class="container sfb-app">
     <?php $sfbActiveTab = 'dashboard'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
 
-    <?php if ($firstRun): ?>
-      <section class="card" aria-labelledby="sfbFirstRun">
-        <div class="card-header"><h2 id="sfbFirstRun"><?php bakery_te('sfb.first_run_title'); ?></h2></div>
-        <div class="card-body">
-          <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.first_run_intro'); ?></p>
-          <ul class="line-list">
-            <?php foreach ($firstRunActions as $action): ?>
-              <li>
-                <span>
-                  <span class="badge <?php echo $action['done'] ? 'badge-ok' : 'badge-info'; ?>"><?php
-                    bakery_te($action['done'] ? 'sfb.builder_step_done' : 'sfb.builder_step_todo');
-                  ?></span>
-                  <?php bakery_te('sfb.first_run_' . $action['key']); ?>
-                </span>
-                <?php if (!$action['done']): ?>
-                  <?php if ($action['key'] === 'starter'): ?>
-                    <a class="btn-link" href="sfb_starters.php"><?php bakery_te('sfb.first_run_go'); ?></a>
-                  <?php elseif ($action['key'] === 'formula'): ?>
-                    <a class="btn-link" href="sfb_formulas.php"><?php bakery_te('sfb.first_run_go'); ?></a>
-                  <?php elseif ($action['key'] === 'lesson'): ?>
-                    <a class="btn-link" href="<?php echo htmlspecialchars($firstRunLessonUrl ?? BASE_URL . 'sfb_resources.php', ENT_QUOTES, 'UTF-8'); ?>"><?php
-                      echo htmlspecialchars($action['lesson_title'] !== '' ? $action['lesson_title'] : bakery_t('sfb.first_run_go'), ENT_QUOTES, 'UTF-8');
-                    ?></a>
-                  <?php endif; ?>
-                <?php endif; ?>
-              </li>
-            <?php endforeach; ?>
-          </ul>
-        </div>
-      </section>
-    <?php endif; ?>
-
     <section class="card hero-card sfb-hero">
       <div class="card-body">
         <p class="hero-label"><?php bakery_te('sfb.journey_label'); ?></p>
@@ -134,28 +96,57 @@ $portalCustomerName = $customer['name'];
             <?php echo htmlspecialchars(bakery_t('sfb.journey_remaining', ['count' => (int)$journey['remaining']])); ?>
           <?php endif; ?>
         </p>
+        <p class="sfb-journey-how"><?php bakery_te('sfb.journey_how'); ?></p>
+        <div class="sfb-hero-action">
+          <?php if ($activeBatch): ?>
+            <p>
+              <strong><?php echo htmlspecialchars($activeBatch['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+              <span><?php echo htmlspecialchars(bakery_sfb_phase_label(bakery_sfb_batch_phase($activeBatch)), ENT_QUOTES, 'UTF-8'); ?></span>
+            </p>
+            <a class="btn" href="sfb_batch.php?batch=<?php echo (int)$activeBatch['id']; ?>"><?php bakery_te('sfb.continue_batch'); ?></a>
+          <?php else: ?>
+            <a class="btn" href="sfb_batches.php"><?php bakery_te($firstRun ? 'sfb.first_bake_cta' : 'sfb.start_batch'); ?></a>
+          <?php endif; ?>
+        </div>
       </div>
     </section>
 
-    <?php if ($activeBatch): ?>
-      <section class="card">
-        <div class="card-header"><h2><?php bakery_te('sfb.active_batch'); ?></h2></div>
-        <div class="card-body">
-          <p style="margin:0 0 4px;"><strong><?php echo htmlspecialchars($activeBatch['name']); ?></strong></p>
-          <p class="muted">
-            <?php echo htmlspecialchars($activeBatch['formula_name'] ?? ''); ?>
-            · <?php echo htmlspecialchars(bakery_sfb_phase_label(bakery_sfb_batch_phase($activeBatch))); ?>
-            · <?php echo htmlspecialchars(date('D, M j · g:ia', strtotime($activeBatch['started_at']))); ?>
-          </p>
-          <div class="btn-row">
-            <a class="btn btn-block" href="sfb_batch.php?batch=<?php echo (int)$activeBatch['id']; ?>"><?php bakery_te('sfb.continue_batch'); ?></a>
+    <?php if ($feedback['coach_notes'] || $feedback['open_question_count'] > 0): ?>
+      <section class="card sfb-feedback" aria-labelledby="sfbFeedbackTitle">
+        <div class="card-header">
+          <div>
+            <h2 id="sfbFeedbackTitle"><?php bakery_te('sfb.feedback_title'); ?></h2>
+            <p class="muted sfb-feedback__intro"><?php bakery_te('sfb.feedback_intro'); ?></p>
           </div>
+          <?php if ($feedback['open_question_count'] > 0): ?>
+            <span class="badge badge-info"><?php echo htmlspecialchars(bakery_t(
+                $feedback['open_question_count'] === 1 ? 'sfb.feedback_waiting' : 'sfb.feedback_waiting_plural',
+                ['count' => $feedback['open_question_count']]
+            ), ENT_QUOTES, 'UTF-8'); ?></span>
+          <?php endif; ?>
         </div>
+        <?php if ($feedback['coach_notes']): ?>
+          <div class="card-body">
+            <ul class="sfb-feedback-list">
+              <?php foreach ($feedback['coach_notes'] as $coachNote): ?>
+                <?php
+                $feedbackBody = trim((string)$coachNote['body']);
+                if (mb_strlen($feedbackBody) > 180) {
+                    $feedbackBody = rtrim(mb_substr($feedbackBody, 0, 177)) . '…';
+                }
+                ?>
+                <li>
+                  <div>
+                    <strong><?php echo htmlspecialchars($coachNote['batch_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                    <p><?php echo nl2br(htmlspecialchars($feedbackBody, ENT_QUOTES, 'UTF-8')); ?></p>
+                  </div>
+                  <a class="btn-link" href="sfb_batch.php?batch=<?php echo (int)$coachNote['batch_id']; ?>#sfb-discussion"><?php bakery_te('sfb.feedback_open'); ?></a>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        <?php endif; ?>
       </section>
-    <?php else: ?>
-      <div class="btn-row" style="margin-bottom:14px;">
-        <a class="btn btn-block" href="sfb_batches.php"><?php bakery_te('sfb.start_batch'); ?></a>
-      </div>
     <?php endif; ?>
 
     <?php if ($lastCompleted): ?>
@@ -170,37 +161,23 @@ $portalCustomerName = $customer['name'];
       </section>
     <?php endif; ?>
 
-    <div class="sfb-quick" style="margin-bottom:14px;">
-      <a href="sfb_starters.php"><strong><?php echo count($starters); ?></strong><?php bakery_te('sfb.tab_starters'); ?></a>
-      <a href="sfb_formulas.php"><strong><?php echo (int)$formulaCount; ?></strong><?php bakery_te('sfb.tab_formulas'); ?></a>
-      <a href="sfb_batches.php"><strong><?php echo count($recentBatches); ?></strong><?php bakery_te('sfb.tab_batches'); ?></a>
-      <a href="sfb_offerings.php"><?php bakery_te('sfb.offerings_quick'); ?></a>
-    </div>
-
-    <?php if (bakery_sfb_payments_ready($db)): ?>
-      <section class="card" style="margin-bottom:14px;">
-        <div class="card-body">
-          <p class="hero-label"><?php bakery_te('sfb.offerings_eyebrow'); ?></p>
-          <h2 style="margin:0 0 6px;font-size:1.05rem;font-weight:600;"><?php bakery_te('sfb.purchase_home_dash_title'); ?></h2>
-          <p class="muted" style="margin:0 0 12px;"><?php bakery_te('sfb.purchase_home_dash_copy'); ?></p>
-          <a class="btn btn-block" href="sfb_offerings.php"><?php bakery_te('sfb.tab_purchase'); ?></a>
+    <section class="card sfb-setup" aria-labelledby="sfbSetupTitle">
+      <div class="card-header"><h2 id="sfbSetupTitle"><?php bakery_te('sfb.setup_title'); ?></h2></div>
+      <div class="card-body">
+        <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.setup_copy'); ?></p>
+        <div class="sfb-quick">
+          <a href="sfb_starters.php"><strong><?php echo count($starters); ?></strong><?php bakery_te('sfb.tab_starters'); ?></a>
+          <a href="sfb_formulas.php"><strong><?php echo (int)$formulaCount; ?></strong><?php bakery_te('sfb.tab_formulas'); ?></a>
+          <a href="sfb_ingredients.php"><strong>+</strong><?php bakery_te('sfb.tab_ingredients'); ?></a>
         </div>
-      </section>
-    <?php endif; ?>
-
-    <?php if (bakery_sfb_starter_jar_ready($db)): ?>
-      <section class="card" style="margin-bottom:14px;">
-        <div class="card-body">
-          <p class="hero-label"><?php bakery_te('sfb.starter_jar_dash_eyebrow'); ?></p>
-          <h2 style="margin:0 0 6px;font-size:1.05rem;font-weight:600;"><?php bakery_te('sfb.starter_jar_dash_title'); ?></h2>
-          <p class="muted" style="margin:0 0 12px;"><?php bakery_te('sfb.starter_jar_dash_copy'); ?></p>
-          <a class="btn btn-block" href="starter.php"><?php bakery_te('sfb.starter_jar_dash_cta'); ?></a>
-          <?php if (bakery_sfb_first_loaf_kit_ready($db)): ?>
-            <a class="btn btn-secondary btn-block" href="starter.php?kit=1" style="margin-top:8px;"><?php bakery_te('sfb.purchase_home_kit_cta'); ?></a>
-          <?php endif; ?>
-        </div>
-      </section>
-    <?php endif; ?>
+        <?php if (bakery_sfb_payments_ready($db) || bakery_sfb_starter_jar_ready($db)): ?>
+          <div class="sfb-setup__links">
+            <?php if (bakery_sfb_starter_jar_ready($db)): ?><a class="btn-link" href="starter.php"><?php bakery_te('sfb.starter_jar_dash_cta'); ?></a><?php endif; ?>
+            <?php if (bakery_sfb_payments_ready($db)): ?><a class="btn-link" href="sfb_offerings.php"><?php bakery_te('sfb.offerings_quick'); ?></a><?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+    </section>
 
     <?php if ($starters): ?>
       <section class="card">
