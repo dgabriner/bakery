@@ -3053,7 +3053,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                 return;
             }
 
-            if (openStopDeliveryFromEl(stop, { autoOpenCamera: true })) {
+            if (openStopDeliveryFromEl(stop, { autoOpenCamera: false })) {
                 return;
             }
 
