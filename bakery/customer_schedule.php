@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/customer_schedule.css'); ?>">
 <?php
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
@@ -241,6 +240,7 @@ $daysFull = [
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/customer_schedule.css'); ?>">
 
 
 

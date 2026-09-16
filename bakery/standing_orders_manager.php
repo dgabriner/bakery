@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_orders_manager.css'); ?>">
 <?php
 // Security check
 define('ACCESS_ALLOWED', true);
@@ -27,6 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_orders_manager.css'); ?>">
+<?php
 
 // Fetch data
 try {

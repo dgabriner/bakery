@@ -40,6 +40,13 @@ foreach ($pages as $slug => $bootstrap) {
     $assert(strpos($src, '<style>') === false && strpos($src, '<style ') === false, "$slug has no inline <style>");
     $assert(strpos($src, 'css/' . $slug . '.css') !== false, "$slug links css via bakery_asset_href path");
     $assert(strpos($src, 'includes/' . $slug . '.js') !== false, "$slug links js via bakery_asset_href path");
+    $configPos = strpos($src, "includes/config.php");
+    $cssCallPos = strpos($src, "bakery_asset_href('css/" . $slug . ".css')");
+    $assert($configPos !== false, "$slug requires includes/config.php");
+    $assert(
+        $cssCallPos !== false && $cssCallPos > $configPos,
+        "$slug calls bakery_asset_href for CSS after config.php so the helper exists"
+    );
     if ($bootstrap !== null) {
         $assert(strpos($src, $bootstrap) !== false, "$slug keeps JSON bootstrap $bootstrap");
     }

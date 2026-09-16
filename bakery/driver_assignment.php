@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver_assignment.css'); ?>">
 <?php
 define('ACCESS_ALLOWED', true);
 define('BAKERY_PAGE_BUILD', 'driver-assignment-append-20260801');
@@ -74,6 +73,9 @@ $driverColors = [
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver_assignment.css'); ?>">
+<?php
 
 try {
     $drivers = bakery_get_drivers($db);
