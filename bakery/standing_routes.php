@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_routes.css'); ?>">
 <?php
 // Security check
 define('ACCESS_ALLOWED', true);
@@ -6,39 +5,33 @@ define('ACCESS_ALLOWED', true);
 // Load essential includes first
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/standing_route_analysis.php';
 
-// Handle AJAX request to save route
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_route') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
-    
+    $action = (string)$_POST['action'];
     try {
-        $driverId = (int)$_POST['driver_id'];
-        $customerId = (int)$_POST['customer_id'];
-        $dayOfWeek = bakery_normalize_standing_day((int)$_POST['day_of_week']);
-
-        if (!bakery_sfb_ops_customer_allowed($db, $customerId)) {
-            throw new Exception('Synthetic SF Bakers cannot be added to standing routes');
+        if ($action === 'save_route') {
+            bakery_standing_route_save(
+                $db,
+                (int)$_POST['customer_id'],
+                (int)$_POST['driver_id'],
+                (int)$_POST['day_of_week']
+            );
+            echo json_encode(['success' => true]);
+            exit;
         }
-        
-        // First, remove any existing route for this customer on this day
-        $dayClause = $dayOfWeek === 7 ? 'IN (0, 7)' : '= ?';
-        $stmt = $db->prepare("DELETE FROM standing_routes WHERE customer_id = ? AND day_of_week $dayClause");
-        $stmt->execute($dayOfWeek === 7 ? [$customerId] : [$customerId, $dayOfWeek]);
-        
-        // If a driver is selected (not empty), add the new route
-        if ($driverId > 0) {
-            $stmt = $db->prepare("
-                INSERT INTO standing_routes (driver_id, customer_id, day_of_week)
-                VALUES (?, ?, ?)
-            ");
-            $stmt->execute([$driverId, $customerId, $dayOfWeek]);
+        if ($action === 'apply_suggested') {
+            $dayRaw = $_POST['day_of_week'] ?? '';
+            $onlyDay = $dayRaw === '' || $dayRaw === null ? null : (int)$dayRaw;
+            $applied = bakery_standing_route_apply_suggestions($db, (int)$_POST['customer_id'], $onlyDay);
+            echo json_encode(['success' => true, 'applied' => $applied]);
+            exit;
         }
-        
-        echo json_encode(['success' => true]);
-        exit;
-    } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        throw new RuntimeException('Unknown standing route action.');
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
         exit;
     }
 }
@@ -46,6 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // Load the rest of the includes for normal page load
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_routes.css'); ?>">
+<?php
 
 // Set page title
 $page_title = bakery_t('page.standing_routes');
@@ -121,19 +117,167 @@ try {
     exit;
 }
 
-$days = [
-    1 => 'Monday',
-    2 => 'Tuesday',
-    3 => 'Wednesday',
-    4 => 'Thursday',
-    5 => 'Friday',
-    6 => 'Saturday',
-    7 => 'Sunday'
-];
+$days = bakery_day_names(false);
+$view = (string)($_GET['view'] ?? 'stores');
+if ($view !== 'board') {
+    $view = 'stores';
+}
+$analysis = $view === 'stores' ? bakery_standing_route_store_analysis($db) : null;
+$dayShort = bakery_day_names(true);
 ?>
 
 <div class="container">
-    <h1>Standing Routes - Color Coded by Zone</h1>
+    <h1><?php echo htmlspecialchars($view === 'stores' ? bakery_t('standing_routes.stores_title') : bakery_t('standing_routes.board_title'), ENT_QUOTES, 'UTF-8'); ?></h1>
+    <div class="sr-view-tabs" role="tablist">
+        <a class="sr-view-tab<?php echo $view === 'stores' ? ' is-active' : ''; ?>" href="standing_routes.php?view=stores"><?php bakery_te('standing_routes.view_stores'); ?></a>
+        <a class="sr-view-tab<?php echo $view === 'board' ? ' is-active' : ''; ?>" href="standing_routes.php?view=board"><?php bakery_te('standing_routes.view_board'); ?></a>
+    </div>
+<?php if ($view === 'stores' && is_array($analysis)): ?>
+    <p class="instruction-text"><?php bakery_te('standing_routes.stores_help'); ?></p>
+    <p class="sr-history-window"><?php bakery_te('standing_routes.history_window', ['from' => $analysis['bounds'][0], 'to' => $analysis['bounds'][1]]); ?></p>
+    <div class="sr-summary">
+        <span><?php bakery_te('standing_routes.summary_stores', ['n' => $analysis['summary']['stores']]); ?></span>
+        <span><?php bakery_te('standing_routes.summary_match', ['n' => $analysis['summary']['match']]); ?></span>
+        <span><?php bakery_te('standing_routes.summary_add', ['n' => $analysis['summary']['add']]); ?></span>
+        <span><?php bakery_te('standing_routes.summary_change', ['n' => $analysis['summary']['change']]); ?></span>
+        <span><?php bakery_te('standing_routes.summary_ask', ['n' => $analysis['summary']['ask']]); ?></span>
+        <span><?php bakery_te('standing_routes.summary_orders', ['n' => $analysis['summary']['orders']]); ?></span>
+    </div>
+    <div class="sr-filters">
+        <label>
+            <span><?php bakery_te('standing_routes.search'); ?></span>
+            <input type="search" id="sr-store-search" autocomplete="off">
+        </label>
+        <label>
+            <span><?php bakery_te('standing_routes.filter_zone'); ?></span>
+            <select id="sr-filter-zone">
+                <option value=""><?php bakery_te('standing_routes.all_zones'); ?></option>
+                <?php
+                $zones = [];
+                foreach ($analysis['stores'] as $store) {
+                    $zones[$store['zone'] === '' ? 'No Zone' : $store['zone']] = true;
+                }
+                ksort($zones);
+                foreach (array_keys($zones) as $zoneName):
+                ?>
+                    <option value="<?php echo htmlspecialchars($zoneName, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($zoneName, ENT_QUOTES, 'UTF-8'); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>
+            <span><?php bakery_te('standing_routes.filter_status'); ?></span>
+            <select id="sr-filter-status">
+                <option value=""><?php bakery_te('standing_routes.all_statuses'); ?></option>
+                <option value="add"><?php bakery_te('standing_routes.status_add'); ?></option>
+                <option value="change"><?php bakery_te('standing_routes.status_change'); ?></option>
+                <option value="orders"><?php bakery_te('standing_routes.status_orders'); ?></option>
+                <option value="ask"><?php bakery_te('standing_routes.status_ask'); ?></option>
+                <option value="match"><?php bakery_te('standing_routes.status_match'); ?></option>
+                <option value="fill"><?php bakery_te('standing_routes.status_fill'); ?></option>
+            </select>
+        </label>
+    </div>
+    <div class="sr-store-board" id="sr-store-board">
+        <table class="sr-store-table">
+            <thead>
+                <tr>
+                    <th><?php bakery_te('standing_routes.col_store'); ?></th>
+                    <th><?php bakery_te('standing_routes.col_zone'); ?></th>
+                    <?php foreach ($dayShort as $dow => $label): ?>
+                        <th><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></th>
+                    <?php endforeach; ?>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($analysis['stores'] as $store):
+                $storeStatuses = [];
+                foreach ($store['days'] as $cell) {
+                    $storeStatuses[$cell['status']] = true;
+                }
+                $zoneLabel = $store['zone'] !== '' ? $store['zone'] : 'No Zone';
+                ?>
+                <tr class="sr-store-row"
+                    data-store-name="<?php echo htmlspecialchars(strtolower($store['name']), ENT_QUOTES, 'UTF-8'); ?>"
+                    data-zone="<?php echo htmlspecialchars($zoneLabel, ENT_QUOTES, 'UTF-8'); ?>"
+                    data-statuses="<?php echo htmlspecialchars(implode(' ', array_keys($storeStatuses)), ENT_QUOTES, 'UTF-8'); ?>">
+                    <td class="sr-store-name">
+                        <a href="customer_record.php?customer_id=<?php echo (int)$store['id']; ?>"><?php echo htmlspecialchars($store['name'], ENT_QUOTES, 'UTF-8'); ?></a>
+                        <a class="sr-orders-link" href="standing_orders_manager.php"><?php bakery_te('standing_routes.edit_orders'); ?></a>
+                    </td>
+                    <td><?php echo htmlspecialchars($zoneLabel, ENT_QUOTES, 'UTF-8'); ?></td>
+                    <?php foreach ($days as $dow => $_dayName):
+                        $cell = $store['days'][$dow];
+                        $suggestName = '';
+                        if (!empty($cell['suggest_driver_id'])) {
+                            foreach ($analysis['drivers'] as $driver) {
+                                if ((int)$driver['id'] === (int)$cell['suggest_driver_id']) {
+                                    $suggestName = (string)$driver['name'];
+                                    break;
+                                }
+                            }
+                        }
+                        $mixBits = [];
+                        foreach ($cell['mix'] as $mixRow) {
+                            $mixBits[] = $mixRow['name'] . ' ' . $mixRow['visits'];
+                        }
+                        ?>
+                        <td class="sr-day-cell sr-status-<?php echo htmlspecialchars($cell['status'], ENT_QUOTES, 'UTF-8'); ?>"
+                            data-status="<?php echo htmlspecialchars($cell['status'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <label class="sr-driver-label">
+                                <span class="sr-visually-hidden"><?php echo htmlspecialchars($store['name'] . ' ' . $dayShort[$dow], ENT_QUOTES, 'UTF-8'); ?></span>
+                                <select class="sr-driver-select"
+                                        data-customer-id="<?php echo (int)$store['id']; ?>"
+                                        data-day="<?php echo (int)$dow; ?>">
+                                    <option value="0"><?php bakery_te('standing_routes.no_driver'); ?></option>
+                                    <?php foreach ($analysis['drivers'] as $driver): ?>
+                                        <option value="<?php echo (int)$driver['id']; ?>"<?php echo (int)($cell['standing_driver_id'] ?? 0) === (int)$driver['id'] ? ' selected' : ''; ?>>
+                                            <?php echo htmlspecialchars((string)$driver['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+                            <div class="sr-cell-usual">
+                                <?php
+                                if ($cell['usual_name']) {
+                                    bakery_te('standing_routes.usual', [
+                                        'driver' => $cell['usual_name'],
+                                        'visits' => $cell['usual_visits'],
+                                    ]);
+                                } elseif ($mixBits) {
+                                    echo htmlspecialchars(implode(' · ', $mixBits), ENT_QUOTES, 'UTF-8');
+                                } elseif ($cell['has_orders']) {
+                                    bakery_te('standing_routes.order_units', ['n' => $cell['order_units']]);
+                                } else {
+                                    echo '—';
+                                }
+                                ?>
+                            </div>
+                            <div class="sr-cell-reason"><?php echo htmlspecialchars(bakery_t($cell['reason_key'], $cell['reason_params']), ENT_QUOTES, 'UTF-8'); ?></div>
+                            <?php if ($cell['applyable'] && $suggestName !== ''): ?>
+                                <button type="button"
+                                        class="sr-apply"
+                                        data-customer-id="<?php echo (int)$store['id']; ?>"
+                                        data-day="<?php echo (int)$dow; ?>"
+                                        data-driver-id="<?php echo (int)$cell['suggest_driver_id']; ?>">
+                                    <?php bakery_te('standing_routes.apply_to', ['driver' => $suggestName]); ?>
+                                </button>
+                            <?php endif; ?>
+                        </td>
+                    <?php endforeach; ?>
+                    <td>
+                        <?php if ($store['applyable_count'] > 0): ?>
+                            <button type="button" class="sr-apply-store" data-customer-id="<?php echo (int)$store['id']; ?>">
+                                <?php bakery_te('standing_routes.apply_all', ['n' => $store['applyable_count']]); ?>
+                            </button>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+<?php else: ?>
     
     <!-- Filter Info -->
     <div class="filter-info">
@@ -272,7 +416,6 @@ $days = [
             </div>
         <?php endforeach; ?>
     </div>
-</div>
 
 <!-- Customer Assignment Modal -->
 <div id="assignment-modal" class="modal">
@@ -344,7 +487,8 @@ $days = [
         </div>
     </div>
 </div>
-
+<?php endif; ?>
+</div>
 
 
 

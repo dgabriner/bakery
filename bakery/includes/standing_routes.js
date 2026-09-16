@@ -1,4 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
+    const storeBoard = document.getElementById('sr-store-board');
+    if (storeBoard) {
+        initStoreAnalysis(storeBoard);
+        return;
+    }
+
     let draggedCustomer = null;
     let filteredDay = null;
     const days = {
@@ -587,3 +593,79 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+function initStoreAnalysis(board) {
+    const search = document.getElementById('sr-store-search');
+    const zoneFilter = document.getElementById('sr-filter-zone');
+    const statusFilter = document.getElementById('sr-filter-status');
+
+    function applyFilters() {
+        const q = (search && search.value ? search.value : '').trim().toLowerCase();
+        const zone = zoneFilter ? zoneFilter.value : '';
+        const status = statusFilter ? statusFilter.value : '';
+        board.querySelectorAll('.sr-store-row').forEach(function (row) {
+            const name = row.getAttribute('data-store-name') || '';
+            const rowZone = row.getAttribute('data-zone') || '';
+            const statuses = ' ' + (row.getAttribute('data-statuses') || '') + ' ';
+            const nameOk = !q || name.indexOf(q) !== -1;
+            const zoneOk = !zone || rowZone === zone;
+            const statusOk = !status || statuses.indexOf(' ' + status + ' ') !== -1;
+            row.hidden = !(nameOk && zoneOk && statusOk);
+        });
+    }
+
+    if (search) search.addEventListener('input', applyFilters);
+    if (zoneFilter) zoneFilter.addEventListener('change', applyFilters);
+    if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+
+    async function postStanding(body) {
+        const response = await fetch('standing_routes.php?view=stores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        });
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+        return result;
+    }
+
+    board.addEventListener('change', async function (e) {
+        const select = e.target.closest('.sr-driver-select');
+        if (!select) return;
+        try {
+            await postStanding(
+                'action=save_route&driver_id=' + encodeURIComponent(select.value) +
+                '&customer_id=' + encodeURIComponent(select.getAttribute('data-customer-id')) +
+                '&day_of_week=' + encodeURIComponent(select.getAttribute('data-day'))
+            );
+            window.location.href = 'standing_routes.php?view=stores';
+        } catch (err) {
+            alert(err.message || 'Error saving standing route');
+        }
+    });
+
+    board.addEventListener('click', async function (e) {
+        const applyDay = e.target.closest('.sr-apply');
+        const applyStore = e.target.closest('.sr-apply-store');
+        try {
+            if (applyDay) {
+                await postStanding(
+                    'action=apply_suggested&customer_id=' + encodeURIComponent(applyDay.getAttribute('data-customer-id')) +
+                    '&day_of_week=' + encodeURIComponent(applyDay.getAttribute('data-day'))
+                );
+                window.location.href = 'standing_routes.php?view=stores';
+                return;
+            }
+            if (applyStore) {
+                await postStanding(
+                    'action=apply_suggested&customer_id=' + encodeURIComponent(applyStore.getAttribute('data-customer-id'))
+                );
+                window.location.href = 'standing_routes.php?view=stores';
+            }
+        } catch (err) {
+            alert(err.message || 'Error applying standing route');
+        }
+    });
+}

@@ -782,6 +782,26 @@ function bakery_agent_work_map_core(): array
             'bugs' => [],
             'prompt' => null,
         ],
+        'standing-route-analysis' => [
+            'title' => 'Store-by-store standing route analysis on Standing Routes',
+            'aliases' => ['standing-routes-analysis', 'store-standing'],
+            'files' => [
+                'standing_routes.php',
+                'includes/standing_route_analysis.php',
+                'includes/standing_routes.js',
+                'css/standing_routes.css',
+            ],
+            'tests' => [
+                'tests/run_standing_route_analysis_tests.php',
+                'tests/run_extract_assets_tests.php',
+            ],
+            'invariants' => [
+                'Dated beats standing per customer',
+                'Do not add a top-level page for standing analysis',
+            ],
+            'bugs' => [],
+            'prompt' => null,
+        ],
         'general' => [
             'title' => 'Unscoped bakery coding mission',
             'aliases' => ['cursor-agent', 'anonymous-agent', 'admin', 'broken-windows'],
