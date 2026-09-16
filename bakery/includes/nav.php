@@ -183,6 +183,50 @@ if ($navSelectedDriverName === '' && $navUser) {
   $navManagerHref = static function (string $view) use ($navManagerDate): string {
       return BASE_URL . 'manager.php?date=' . rawurlencode($navManagerDate) . '&view=' . rawurlencode($view);
   };
+  /*
+   * Managers stay in their dated four-tab workspace for normal work. More is
+   * intentionally limited to the specialist screens that supervise drivers,
+   * production, packing, loading, and operating-day closeout — not the full
+   * customer, billing, catalog, and admin catalogue.
+   */
+  $navManagerToolGroups = [
+      [
+          'label' => bakery_t('nav.group.delivery'),
+          'items' => [
+              ['href' => 'driver_assignment.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_assignment')],
+              ['href' => 'route_manager.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_manager')],
+              ['href' => 'route_summary.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_summary')],
+              ['href' => 'daily_route.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_route')],
+              ['href' => 'route_closeout.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_closeout')],
+              ['href' => 'drivers.php', 'label' => bakery_t('nav.item.drivers')],
+              ['href' => 'standing_routes.php', 'label' => bakery_t('nav.item.standing_routes')],
+              ['href' => 'route_analysis.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_analysis')],
+              ['href' => 'driver.php?change_driver=1&date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver')],
+          ],
+      ],
+      [
+          'label' => bakery_t('nav.group.production'),
+          'items' => [
+              ['href' => 'production_manager.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.production_manager')],
+              ['href' => 'production_center.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.production_center')],
+              ['href' => 'product_manager_plan.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.product_manager_plan')],
+              ['href' => 'production.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.production')],
+              ['href' => 'pack_list.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.pack_list')],
+              ['href' => 'inventory.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.inventory')],
+              ['href' => 'driver_load.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_load')],
+              ['href' => 'ingredient_requirements.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.ingredient_requirements')],
+          ],
+      ],
+      [
+          'label' => bakery_t('nav.group.workday'),
+          'items' => [
+              ['href' => 'daily_run.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_run')],
+              ['href' => 'daily_brief.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_brief')],
+              ['href' => 'index.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.index')],
+              ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
+          ],
+      ],
+  ];
   $navManagerOnHome = $currentPage === 'manager';
 ?>
 <nav class="bakery-nav bakery-nav--focused bakery-nav--manager" aria-label="<?php bakery_te('nav.manager_workspace_aria'); ?>">
@@ -214,6 +258,12 @@ if ($navSelectedDriverName === '' && $navUser) {
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
+          <?php foreach ($navManagerToolGroups as $group): ?>
+            <p class="bakery-nav__more-group"><?php echo htmlspecialchars((string)$group['label'], ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php foreach ($group['items'] as $item): ?>
+              <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . $item['href'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
+            <?php endforeach; ?>
+          <?php endforeach; ?>
           <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
           <?php echo $navLogoutForm; ?>
         </div>

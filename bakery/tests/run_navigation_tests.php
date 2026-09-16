@@ -96,13 +96,21 @@ $managerNav = navigation_test_render_nav('manager', 'production');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--manager') !== false, 'manager navigation uses the focused manager shell');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--focused') !== false, 'manager navigation is a focused workspace');
 navigation_test_assert(strpos($managerNav, 'bakery-nav__menu-toggle') === false, 'manager phone navigation has no hamburger');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps account controls in More');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps critical operations and account controls in More');
 navigation_test_assert(strpos($managerNav, 'data-nav-tools-filter') === false, 'manager More does not reopen the all-tools catalog');
 navigation_test_assert(strpos($managerNav, 'bakery-nav__more-catalog') === false, 'manager navigation has no nested all-tools catalog');
 navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager navigation includes Routes');
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
-navigation_test_assert(strpos($managerNav, 'daily_orders.php') === false, 'manager navigation keeps dated-order work in Today rather than More');
+foreach ([
+    'driver_assignment.php', 'route_manager.php', 'route_summary.php', 'daily_route.php',
+    'route_closeout.php', 'drivers.php', 'standing_routes.php', 'route_analysis.php', 'driver.php?change_driver=1',
+    'production_manager.php', 'production_center.php', 'product_manager_plan.php', 'production.php',
+    'pack_list.php', 'inventory.php', 'driver_load.php', 'ingredient_requirements.php',
+    'daily_run.php', 'daily_brief.php', 'index.php', 'daily_orders.php',
+] as $criticalManagerTool) {
+    navigation_test_assert(strpos($managerNav, $criticalManagerTool) !== false, 'manager More includes critical tool ' . $criticalManagerTool);
+}
 navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') === false, 'manager navigation omits Survey Center');
 navigation_test_assert(strpos($managerNav, 'billing_center.php') === false, 'manager navigation omits Billing Center');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--ops') === false, 'manager focused nav is not the admin ops shell');
