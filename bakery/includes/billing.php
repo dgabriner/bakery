@@ -1143,6 +1143,7 @@ function bakery_billing_ensure_invoice_send_schema(PDO $db) {
                 sent_to_email VARCHAR(255) NULL DEFAULT NULL,
                 channel VARCHAR(16) NOT NULL DEFAULT \'log\',
                 status VARCHAR(16) NOT NULL DEFAULT \'logged\',
+                failure_reason VARCHAR(255) NULL DEFAULT NULL,
                 PRIMARY KEY (id),
                 KEY idx_billing_invoice_sends_order (daily_order_id),
                 KEY idx_billing_invoice_sends_sent (sent_at)
