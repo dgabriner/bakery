@@ -143,8 +143,19 @@ login_history_assert($page !== false && strpos($page, "export' => 'csv'") !== fa
 login_history_assert($page !== false && strpos($page, 'login-history-roles') !== false, 'portal exposes a role presence board');
 login_history_assert($page !== false && strpos($page, 'history-day') !== false, 'investigation timeline is grouped by day');
 login_history_assert($page !== false && strpos($page, 'login-history-filters__more') !== false, 'advanced filters sit behind a collapsed details block');
+login_history_assert($page !== false && strpos($page, "'timeline' => \$filterKey") !== false, 'timeline filter is URL-backed');
+login_history_assert($page !== false && strpos($page, 'login_history.load_older') !== false, 'older events can be loaded');
+login_history_assert($page !== false && strpos($page, 'login_history.investigate_actions') !== false, 'session cards link to action history');
+login_history_assert($page !== false && strpos($page, 'login_history.show_session_trail') !== false, 'session cards can expand a trail');
 login_history_assert($css !== false && strpos($css, '.login-history-briefing') !== false, 'CSS includes briefing chrome');
+login_history_assert($css !== false && strpos($css, '.login-history-session-trail') !== false, 'CSS includes session trail chrome');
 login_history_assert($insights !== false && strpos($insights, 'bakery_login_history_load_dwell') !== false, 'dwell time is aggregated from consecutive page views');
+login_history_assert($insights !== false && strpos($insights, 'function bakery_login_history_load_session_trail') !== false, 'session trail helper exists');
+login_history_assert($insights !== false && strpos($insights, "'timeline' =>") !== false, 'filters parse timeline kind');
+
+$timelineFilters = bakery_login_history_parse_filters(['timeline' => 'action', 'timeline_offset' => 500, 'user_id' => 3], '2026-08-17');
+login_history_assert($timelineFilters['timeline'] === 'action' && $timelineFilters['timeline_offset'] === 500, 'timeline filter and offset parse');
+login_history_assert(strpos(bakery_login_history_url(['timeline' => 'action'], $timelineFilters), 'timeline=action') !== false, 'action timeline stays in URLs');
 
 $auditHelper = file_get_contents($root . '/includes/login_audit.php');
 $migrations = file_get_contents($root . '/scripts/run_migrations.php');
