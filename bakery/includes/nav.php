@@ -183,17 +183,6 @@ if ($navSelectedDriverName === '' && $navUser) {
   $navManagerHref = static function (string $view) use ($navManagerDate): string {
       return BASE_URL . 'manager.php?date=' . rawurlencode($navManagerDate) . '&view=' . rawurlencode($view);
   };
-  $navManagerPrimary = [
-      ['href' => 'text_comms.php?view=surveys', 'label' => bakery_t('nav.item.survey_center')],
-      ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
-      ['href' => 'billing_center.php?panel=invoices', 'label' => bakery_t('nav.item.billing_center')],
-      ['href' => 'driver_assignment.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_assignment')],
-      ['href' => 'production.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.production')],
-      ['href' => 'pack_list.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.pack_list')],
-      ['href' => 'driver_load.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_load')],
-      ['href' => 'route_closeout.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_closeout')],
-  ];
-  $navManagerGroups = bakery_navigation_groups_for_role('manager');
   $navManagerOnHome = $currentPage === 'manager';
 ?>
 <nav class="bakery-nav bakery-nav--focused bakery-nav--manager" aria-label="<?php bakery_te('nav.manager_workspace_aria'); ?>">
@@ -225,23 +214,6 @@ if ($navSelectedDriverName === '' && $navUser) {
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
-          <?php foreach ($navManagerPrimary as $item): ?>
-            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . $item['href'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
-          <?php endforeach; ?>
-          <div class="bakery-nav__more-tools" data-nav-tools-sheet>
-            <p class="bakery-nav__more-group"><?php bakery_te('nav.manager_all_tools'); ?></p>
-            <label class="bakery-nav__tools-filter">
-              <span class="sf-sr-only"><?php bakery_te('nav.manager_tools_filter'); ?></span>
-              <input type="search" class="bakery-nav__tools-filter-input" data-nav-tools-filter placeholder="<?php bakery_te('nav.manager_tools_filter_placeholder'); ?>" autocomplete="off">
-            </label>
-            <div class="bakery-nav__tools-list" data-nav-tools-list>
-              <?php foreach ($navManagerGroups as $group): ?>
-                <?php foreach ($group['items'] as $item): ?>
-                  <a class="bakery-nav__more-link" data-nav-tool-label="<?php echo htmlspecialchars(mb_strtolower((string)$item['label'] . ' ' . (string)$group['label'], 'UTF-8'), ENT_QUOTES, 'UTF-8'); ?>" href="<?php echo htmlspecialchars(BASE_URL . ltrim((string)$item['href'], '/'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8'); ?></a>
-                <?php endforeach; ?>
-              <?php endforeach; ?>
-            </div>
-          </div>
           <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
           <?php echo $navLogoutForm; ?>
         </div>
