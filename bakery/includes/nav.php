@@ -153,8 +153,12 @@ if ($navSelectedDriverName === '' && $navUser) {
 <?php elseif ($navRole === 'cashier'): ?>
 <nav class="bakery-nav bakery-nav--focused bakery-nav--cashier" aria-label="<?php bakery_te('nav.cashier_workspace_aria'); ?>">
   <div class="bakery-nav__inner">
-    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'product_photos.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.cashier_workspace'); ?></a>
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.cashier_workspace'); ?></a>
     <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'time_clock' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.time_clock'); ?>"<?php echo $currentPage === 'time_clock' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.time_clock'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.time_clock_short'); ?></span>
+      </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.counter_orders'); ?>"<?php echo $currentPage === 'counter_orders' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
@@ -232,6 +236,7 @@ if ($navSelectedDriverName === '' && $navUser) {
               ['href' => 'daily_brief.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_brief')],
               ['href' => 'index.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.index')],
               ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
+              ['href' => 'time_clock.php', 'label' => bakery_t('nav.item.time_clock')],
           ],
       ],
   ];
