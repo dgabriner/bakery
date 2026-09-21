@@ -141,6 +141,10 @@ if ($navSelectedDriverName === '' && $navUser) {
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.baker_today'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.baker_today_short'); ?></span>
       </a>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php?view=pending', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.counter_orders'); ?>"<?php echo $currentPage === 'counter_orders' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
+      </a>
       <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
       <?php echo $navLogoutForm; ?>
     </div>
@@ -151,6 +155,10 @@ if ($navSelectedDriverName === '' && $navUser) {
   <div class="bakery-nav__inner">
     <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'product_photos.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.cashier_workspace'); ?></a>
     <div class="bakery-nav__groups">
+      <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.counter_orders'); ?>"<?php echo $currentPage === 'counter_orders' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
+      </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'product_photos' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'product_photos.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.item.product_photos'); ?>"<?php echo $currentPage === 'product_photos' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.product_photos'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.product_photos_short'); ?></span>
@@ -248,6 +256,10 @@ if ($navSelectedDriverName === '' && $navUser) {
       <a class="bakery-nav__direct <?php echo $navManagerOnHome && $navManagerView === 'missed' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars($navManagerHref('missed'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navManagerOnHome && $navManagerView === 'missed' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.manager_missed'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.manager_missed_short'); ?></span>
+      </a>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php?view=pending', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('counter_orders.title_pending'); ?>"<?php echo $currentPage === 'counter_orders' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
       </a>
       <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
         <?php echo bakery_staff_alerts_nav_html(); ?>

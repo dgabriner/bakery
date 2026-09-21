@@ -1,0 +1,305 @@
+.counter-orders {
+  box-sizing: border-box;
+  margin: 0 auto;
+  max-width: 40rem;
+  padding: 1rem 1rem 6.5rem;
+}
+
+.counter-orders__eyebrow {
+  color: #7a6454;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+
+.counter-orders h1 {
+  font-size: 1.75rem;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.counter-orders__lead {
+  color: #5c4a3d;
+  margin: 0.4rem 0 0;
+}
+
+.counter-orders__tabs {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr 1fr;
+  margin: 1rem 0;
+}
+
+.counter-orders__tab,
+.counter-orders__chip,
+.counter-orders__save,
+.counter-orders__done,
+.counter-orders__photo span,
+.counter-orders__date-filter button {
+  border-radius: 0.8rem;
+  font: inherit;
+  font-weight: 700;
+  min-height: 3rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.counter-orders__tab {
+  align-items: center;
+  background: #fff;
+  border: 2px solid #d7c8ba;
+  color: #3f2a1d;
+  display: flex;
+  justify-content: center;
+}
+
+.counter-orders__tab.is-active {
+  background: #3f2a1d;
+  border-color: #3f2a1d;
+  color: #fff;
+}
+
+.counter-orders__banner {
+  border-radius: 0.8rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.counter-orders__banner--ok {
+  background: #e7f6ea;
+  color: #14532d;
+}
+
+.counter-orders__banner--bad {
+  background: #fde8e4;
+  color: #9f1239;
+}
+
+.counter-orders__form,
+.counter-orders__card,
+.counter-orders__empty {
+  background: #fff;
+  border: 1px solid #eadfd4;
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.counter-orders__field {
+  border: 0;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.counter-orders__field > span,
+.counter-orders__field legend,
+.counter-orders__sub span,
+.counter-orders__date-filter span {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.counter-orders__field legend em,
+.counter-orders__meta,
+.counter-orders__who-line {
+  color: #7a6454;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.counter-orders input[type="date"],
+.counter-orders input[type="text"],
+.counter-orders input[type="tel"],
+.counter-orders input[type="email"],
+.counter-orders textarea,
+.counter-orders__note {
+  border: 2px solid #d7c8ba;
+  border-radius: 0.75rem;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.75rem;
+  width: 100%;
+}
+
+.counter-orders textarea {
+  resize: vertical;
+}
+
+.counter-orders__choices {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.counter-orders__choice input {
+  position: absolute;
+  opacity: 0;
+}
+
+.counter-orders__choice span {
+  align-items: center;
+  background: #fff;
+  border: 2px solid #d7c8ba;
+  border-radius: 0.8rem;
+  display: flex;
+  justify-content: center;
+  min-height: 3.25rem;
+  padding: 0.35rem;
+  text-align: center;
+}
+
+.counter-orders__choice input:checked + span {
+  background: #3f2a1d;
+  border-color: #3f2a1d;
+  color: #fff;
+}
+
+.counter-orders__choice input:focus-visible + span,
+.counter-orders__tab:focus-visible,
+.counter-orders__save:focus-visible,
+.counter-orders__done:focus-visible {
+  outline: 3px solid #c47b3a;
+  outline-offset: 2px;
+}
+
+.counter-orders__note {
+  margin-top: 0.6rem;
+}
+
+.counter-orders__sub {
+  display: block;
+  margin-top: 0.55rem;
+}
+
+.counter-orders__photo {
+  display: block;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.counter-orders__photo input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.counter-orders__photo span,
+.counter-orders__save {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.counter-orders__photo span {
+  background: #fff;
+  border: 2px dashed #3f2a1d;
+  color: #3f2a1d;
+}
+
+.counter-orders__preview,
+.counter-orders__photo-link img {
+  border-radius: 0.8rem;
+  display: block;
+  margin: 0.5rem 0 1rem;
+  max-height: 16rem;
+  max-width: 100%;
+  object-fit: cover;
+}
+
+.counter-orders__save,
+.counter-orders__done {
+  background: #9a3412;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  width: 100%;
+}
+
+.counter-orders__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.counter-orders__chip {
+  align-items: center;
+  background: #fff;
+  border: 2px solid #d7c8ba;
+  color: #3f2a1d;
+  display: inline-flex;
+  min-height: 2.5rem;
+  padding: 0.2rem 0.7rem;
+}
+
+.counter-orders__chip.is-active {
+  background: #3f2a1d;
+  border-color: #3f2a1d;
+  color: #fff;
+}
+
+.counter-orders__date-filter {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.counter-orders__date-filter input[type="date"] {
+  min-height: 2.75rem;
+}
+
+.counter-orders__date-filter button,
+.counter-orders__date-filter a {
+  background: #fff;
+  border: 2px solid #d7c8ba;
+  color: #3f2a1d;
+  padding: 0.4rem 0.7rem;
+}
+
+.counter-orders__list {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.counter-orders__card-top {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.counter-orders__pill {
+  background: #f4ece4;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+}
+
+.counter-orders__pill--paid {
+  background: #dcfce7;
+  color: #14532d;
+}
+
+.counter-orders__pill--unpaid {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.counter-orders__what {
+  font-size: 1.15rem;
+  margin: 0.6rem 0;
+  white-space: pre-wrap;
+}
+
+.counter-orders__done {
+  margin-top: 0.6rem;
+}

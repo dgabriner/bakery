@@ -102,6 +102,7 @@ navigation_test_assert(strpos($managerNav, 'bakery-nav__more-catalog') === false
 navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager navigation includes Routes');
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
+navigation_test_assert(strpos($managerNav, 'counter_orders.php?view=pending') !== false, 'manager navigation includes pending counter orders');
 foreach ([
     'driver_assignment.php', 'route_manager.php', 'route_summary.php', 'daily_route.php',
     'route_closeout.php', 'drivers.php', 'standing_routes.php', 'route_analysis.php', 'driver.php?change_driver=1',
@@ -168,6 +169,7 @@ navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashie
 navigation_test_assert(strpos($cashierNav, 'product_photos.php') !== false, 'cashier navigation links Product Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_shop_photos.php') !== false, 'cashier navigation links Shop Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_add_product.php') !== false, 'cashier navigation links Add Product');
+navigation_test_assert(strpos($cashierNav, 'counter_orders.php') !== false, 'cashier navigation links counter orders');
 navigation_test_assert(strpos($cashierNav, 'href="' . BASE_URL . 'index.php"') === false, 'cashier navigation does not link the ops dashboard');
 navigation_test_assert(strpos($cashierNav, 'manager.php') === false, 'cashier navigation does not link Manager Mode');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav__logout') !== false, 'cashier navigation includes logout in the focused bar');
@@ -180,7 +182,8 @@ navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
 navigation_test_assert(strpos($bakerNav, 'production.php') !== false, 'baker Today links to Daily Production home');
-navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 1, 'baker navigation has a single Today entry');
+navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 2, 'baker navigation has Today and Orders');
+navigation_test_assert(strpos($bakerNav, 'counter_orders.php?view=pending') !== false, 'baker navigation links counter orders');
 navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker navigation omits Production Center');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
