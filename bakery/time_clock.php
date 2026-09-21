@@ -36,8 +36,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
 $notice = (string)($_GET['notice'] ?? '');
 $noticeKeys = [
-    'in' => 'time_clock.notice_in',
-    'out' => 'time_clock.notice_out',
     'already_in' => 'time_clock.notice_already_in',
     'not_in' => 'time_clock.notice_not_in',
     'not_ready' => 'time_clock.not_ready',

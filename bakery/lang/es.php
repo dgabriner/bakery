@@ -4239,8 +4239,6 @@ return [
     'time_clock.status_in' => 'Entrada desde :time.',
     'time_clock.clock_in' => 'Entrada',
     'time_clock.clock_out' => 'Salida',
-    'time_clock.notice_in' => 'Marcaste entrada.',
-    'time_clock.notice_out' => 'Marcaste salida.',
     'time_clock.notice_already_in' => 'Ya marcaste entrada.',
     'time_clock.notice_not_in' => 'No has marcado entrada.',
     'time_clock.not_ready' => 'El reloj aún no está instalado. Ejecuta la actualización de la base.',

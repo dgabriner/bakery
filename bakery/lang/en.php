@@ -4242,8 +4242,6 @@ return [
     'time_clock.status_in' => 'Clocked in since :time.',
     'time_clock.clock_in' => 'Clock In',
     'time_clock.clock_out' => 'Clock Out',
-    'time_clock.notice_in' => 'You are clocked in.',
-    'time_clock.notice_out' => 'You are clocked out.',
     'time_clock.notice_already_in' => 'You are already clocked in.',
     'time_clock.notice_not_in' => 'You are not clocked in.',
     'time_clock.not_ready' => 'The time clock is not installed yet. Run the database update.',
