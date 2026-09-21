@@ -66,6 +66,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'time_clock.php', 'nav_key' => 'time_clock', 'label' => 'Time Clock', 'description' => 'Clock in and out. Managers see who is working and today\'s punches.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'cashier_shop_photos.php', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'cashier_add_product.php', 'nav_key' => 'cashier_add_product', 'label' => 'Add Product', 'description' => 'Quickly add a bakery or store item and take its photo.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
             ],
@@ -386,7 +387,7 @@ function &bakery_navigation_script_registry(): array
         $cashierRoles = ['cashier', 'administrator', 'manager'];
         foreach ([
             'cashier_shop_photos.php', 'upload_shop_photo.php', 'product_photos.php',
-            'upload_product_photo.php', 'cashier_add_product.php',
+            'upload_product_photo.php', 'cashier_add_product.php', 'time_clock.php',
         ] as $script) {
             $boot($registry, $script, $cashierRoles);
         }

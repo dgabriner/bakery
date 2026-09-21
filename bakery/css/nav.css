@@ -1048,7 +1048,7 @@
   }
 
   .bakery-nav--cashier .bakery-nav__groups {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .bakery-nav--baker .bakery-nav__groups {

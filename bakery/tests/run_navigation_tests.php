@@ -152,10 +152,10 @@ navigation_test_assert($usageCounts['everyday'] >= 10, 'everyday bucket includes
 navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket includes setup and admin tabs');
 
 navigation_test_assert(function_exists('bakery_role_home'), 'role home helper exists');
-navigation_test_assert(bakery_role_home('cashier') === 'product_photos.php', 'cashier home is product photos catalog');
+navigation_test_assert(bakery_role_home('cashier') === 'time_clock.php', 'cashier home is the time clock');
 navigation_test_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
 navigation_test_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
-navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'product_photos.php', 'cashiers hitting the ops dashboard are sent to product photos');
+navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'time_clock.php', 'cashiers hitting the ops dashboard are sent to the time clock');
 navigation_test_assert(bakery_ops_index_bypass_home('administrator') === null, 'administrators may open the ops dashboard');
 navigation_test_assert(isset(bakery_assignable_role_labels()['cashier']), 'User Management can assign the cashier type');
 $loginSrc = (string)file_get_contents(dirname(__DIR__) . '/login.php');
@@ -166,6 +166,7 @@ navigation_test_assert(strpos($usersSrc, 'bakery_assignable_role_labels') !== fa
 $cashierNav = navigation_test_render_nav('cashier', 'product_photos');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav bakery-nav--focused bakery-nav--cashier') !== false, 'cashier navigation uses the focused cashier shell');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashier navigation is not the admin ops shell');
+navigation_test_assert(strpos($cashierNav, 'time_clock.php') !== false, 'cashier navigation links Time Clock');
 navigation_test_assert(strpos($cashierNav, 'product_photos.php') !== false, 'cashier navigation links Product Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_shop_photos.php') !== false, 'cashier navigation links Shop Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_add_product.php') !== false, 'cashier navigation links Add Product');
