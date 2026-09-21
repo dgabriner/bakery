@@ -3354,7 +3354,7 @@ return [
     'driver.camera_ready_replacement' => 'Cámara lista; toma la foto de reemplazo.',
     'driver.camera_ready' => 'Cámara lista; toma una foto.',
     'driver.camera_off' => 'La cámara está apagada',
-    'driver.native_camera_hint' => 'Usa la cámara del teléfono abajo',
+    'driver.native_camera_hint' => 'Toma una foto, elige de la galería u omite',
     'driver.saving_photo' => 'Guardando foto…',
     'driver.camera_not_ready' => 'La cámara aún no está lista. Espera un momento o usa el selector de archivos.',
     'driver.capture_failed' => 'No se pudo capturar la imagen. Intenta con el selector de archivos.',

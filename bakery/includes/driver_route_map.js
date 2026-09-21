@@ -940,7 +940,7 @@
       photo.addEventListener('click', function () {
         var id = parseInt(photo.getAttribute('data-daily-order-id') || '0', 10);
         if (window.DriverRoute && typeof window.DriverRoute.openStop === 'function') {
-          window.DriverRoute.openStop(id, { autoOpenCamera: true });
+          window.DriverRoute.openStop(id, { autoOpenCamera: false });
         }
       });
     }
