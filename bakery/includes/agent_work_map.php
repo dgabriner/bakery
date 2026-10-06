@@ -664,6 +664,7 @@ function bakery_agent_work_map_core(): array
                 'database/schema/074_cashier_shop_photos.sql',
                 'database/schema/082_counter_orders.sql',
                 'database/schema/083_time_clock_punches.sql',
+                'database/schema/086_time_clock_overrides.sql',
                 'database/schema/075_sarita_cashier_user.sql',
                 'database/schema/076_retail_store_shelf.sql',
             ],

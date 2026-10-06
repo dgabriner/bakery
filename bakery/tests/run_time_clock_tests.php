@@ -79,6 +79,7 @@ tc_apply_sql_file($db, $root . '/database/schema/002_auth.sql');
 tc_apply_sql_file($db, $root . '/database/schema/007_baker_role.sql');
 tc_apply_sql_file($db, $root . '/database/schema/074_cashier_shop_photos.sql');
 tc_apply_sql_file($db, $root . '/database/schema/083_time_clock_punches.sql');
+tc_apply_sql_file($db, $root . '/database/schema/086_time_clock_overrides.sql');
 
 function tc_user(PDO $db, string $email, string $name, string $roleSlug, string $code): int {
     $roleId = (int)$db->query("SELECT id FROM roles WHERE slug = " . $db->quote($roleSlug) . " LIMIT 1")->fetchColumn();
@@ -202,6 +203,61 @@ $_SESSION['user_role_slug'] = 'cashier';
 tc_assert(bakery_time_clock_safe_return('/driver.php') === '', 'cashier cannot return to the driver route');
 $_SESSION = [];
 
+tc_assert(bakery_time_clock_week_monday('2026-10-07') === '2026-10-05', 'a Wednesday snaps to that Monday');
+tc_assert(bakery_time_clock_overrides_ready($db), 'override columns are ready');
+require_once $root . '/includes/hosted_migration_runtime.php';
+[$overrideSqlSafe] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/086_time_clock_overrides.sql'));
+tc_assert($overrideSqlSafe, 'override migration is hosted-gate safe');
+
+$monday = bakery_time_clock_week_monday('2026-10-07');
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$cashierId]);
+$db->prepare('INSERT INTO time_clock_punches (user_id, clock_in_at, clock_out_at) VALUES (?, ?, ?)')
+    ->execute([$cashierId, $monday . ' 08:00:00', $monday . ' 16:00:00']);
+$longIn = $monday . ' 06:00:00';
+$longOut = date('Y-m-d H:i:s', strtotime($longIn . ' +13 hours'));
+$db->prepare('INSERT INTO time_clock_punches (user_id, clock_in_at, clock_out_at) VALUES (?, ?, ?)')
+    ->execute([$managerId, $longIn, $longOut]);
+$earlier = date('Y-m-d H:i:s', strtotime($monday . ' -2 days 09:00:00'));
+$db->prepare('INSERT INTO time_clock_punches (user_id, clock_in_at) VALUES (?, ?)')
+    ->execute([$driverId, $earlier]);
+$week = bakery_time_clock_week($db, $monday, strtotime($monday . ' 18:00:00'));
+$byUser = [];
+foreach ($week['people'] as $person) {
+    $byUser[(int)$person['user_id']] = $person;
+}
+tc_assert(($byUser[$cashierId]['days'][$monday] ?? 0) === 480, 'an 8 hour day counts on the clock-in day');
+tc_assert(($byUser[$cashierId]['minutes'] ?? 0) === 480, 'weekly total adds that day');
+tc_assert(($byUser[$cashierId]['other'] ?? []) !== [], 'a normal day stays out of the flag list');
+tc_assert(($byUser[$managerId]['flagged'][0]['flags'] ?? []) === ['long'], 'a 13 hour punch is flagged as long');
+tc_assert(($byUser[$driverId]['minutes'] ?? 0) === 0, 'an open punch from before the week is not added to this week');
+tc_assert(($byUser[$driverId]['earlier'][0]['flags'][0] ?? '') === 'no_out', 'an old open punch is flagged as missing a clock out');
+$overnightIn = date('Y-m-d H:i:s', strtotime($monday . ' +1 day 20:00:00'));
+$overnightOut = date('Y-m-d H:i:s', strtotime($monday . ' +2 days 04:00:00'));
+tc_assert(bakery_time_clock_flags(['clock_in_at' => $overnightIn, 'clock_out_at' => $overnightOut]) === ['next_day'], 'a next-day clock out is flagged');
+
+$openId = (int)$byUser[$driverId]['earlier'][0]['id'];
+$refused = bakery_time_clock_override($db, $cashierId, 'cashier', $openId, $monday . 'T09:00', $monday . 'T17:00', 'forgot');
+tc_assert(empty($refused['ok']) && ($refused['error'] ?? '') === 'forbidden', 'a cashier cannot override a punch');
+$blank = bakery_time_clock_override($db, $managerId, 'manager', $openId, $monday . 'T09:00', $monday . 'T17:00', '  ');
+tc_assert(($blank['error'] ?? '') === 'note_required', 'a correction needs a note');
+$backwards = bakery_time_clock_override($db, $managerId, 'manager', $openId, $monday . 'T17:00', $monday . 'T09:00', 'swapped');
+tc_assert(($backwards['error'] ?? '') === 'out_before_in', 'clock out before clock in is refused');
+$fixed = bakery_time_clock_override($db, $managerId, 'manager', $openId, date('Y-m-d\TH:i', strtotime($earlier)), $monday . 'T17:00', 'Forgot to clock out');
+tc_assert(!empty($fixed['ok']), 'a manager can set the missing clock out');
+$saved = $db->prepare('SELECT clock_out_at, original_clock_in_at, original_clock_out_at, override_note FROM time_clock_punches WHERE id = ?');
+$saved->execute([$openId]);
+$savedRow = $saved->fetch(PDO::FETCH_ASSOC);
+tc_assert(is_array($savedRow) && $savedRow['clock_out_at'] !== null && $savedRow['original_clock_out_at'] === null, 'the original missing clock out is kept');
+tc_assert(($savedRow['original_clock_in_at'] ?? '') === $earlier, 'the original clock in is kept');
+tc_assert(bakery_time_clock_open_punch($db, $driverId) === null, 'the override closes the open punch');
+$again = bakery_time_clock_in($db, $driverId);
+tc_assert(!empty($again['ok']), 'the driver can clock in after the correction');
+$second = bakery_time_clock_override($db, $managerId, 'manager', $openId, date('Y-m-d\TH:i', strtotime($earlier)), $monday . 'T16:30', 'Adjusted the out');
+tc_assert(!empty($second['ok']), 'a second correction saves');
+$saved->execute([$openId]);
+$savedAgain = $saved->fetch(PDO::FETCH_ASSOC);
+tc_assert(($savedAgain['original_clock_in_at'] ?? '') === $earlier, 'a second correction does not replace the original time');
+
 $page = (string)file_get_contents($root . '/time_clock.php');
 tc_assert(strpos($page, 'bakery_require_role') !== false, 'time clock page enforces role');
 tc_assert(strpos($page, "'driver'") !== false && strpos($page, "'driver_assistant'") !== false, 'time clock page allows drivers');
@@ -209,6 +265,9 @@ tc_assert(strpos($page, 'bakery_require_csrf') !== false, 'time clock page check
 tc_assert(strpos($page, 'bakery_time_clock_in') !== false && strpos($page, 'bakery_time_clock_out') !== false, 'page punches through the shared helpers');
 tc_assert(strpos($page, 'bakery_time_clock_safe_return') !== false, 'successful punches can return to the working page');
 tc_assert(strpos($page, 'bakery_navigation_role_label') !== false, 'board shows the role label');
+tc_assert(strpos($page, 'time-clock-week') !== false, 'managers get a weekly view');
+tc_assert(strpos($page, "value=\"override\"") !== false, 'managers can post a punch correction');
+tc_assert(strpos($page, '!$canSeeBoard') !== false, 'a non-manager override is refused on the page');
 tc_assert(strpos($page, "['administrator', 'manager']") !== false || strpos($page, "['manager', 'administrator']") !== false, 'manager board is role gated');
 tc_assert(strpos($page, '$_POST[\'user_id\']') === false && strpos($page, '$_POST["user_id"]') === false, 'page does not accept a posted user id');
 
