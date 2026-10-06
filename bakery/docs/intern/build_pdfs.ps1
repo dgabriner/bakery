@@ -23,7 +23,7 @@ foreach ($name in $names) {
   New-Item -ItemType Directory -Path $profile | Out-Null
   & $edge --headless --disable-gpu --no-first-run --no-pdf-header-footer --user-data-dir="$profile" --print-to-pdf="$pdf" $uri
   Start-Sleep -Seconds 1
-  Remove-Item -Recurse -Force $profile
+  Remove-Item -Recurse -Force $profile -ErrorAction SilentlyContinue
   if (-not (Test-Path $pdf)) {
     throw "Edge did not write $pdf"
   }

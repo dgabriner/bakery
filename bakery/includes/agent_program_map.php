@@ -71,7 +71,7 @@ function bakery_agent_program_work_map(): array
         'docs-truth' => $m(
             'Top-level docs describe the real stack; program missions registered',
             ['31-docs-truth', 'prompt-31', 'readme', 'architecture-doc'],
-            ['README.md', 'ARCHITECTURE.md', 'docs/STUDENT_DEVELOPER_GUIDE.md', 'docs/archive/README.md', 'docs/prompts/README.md', 'docs/AGENT_PROGRAM_HANDOFF.md', 'includes/agent_program_map.php', 'includes/agent_work_map.php'],
+            ['README.md', 'ARCHITECTURE.md', 'docs/STUDENT_DEVELOPER_GUIDE.md', 'docs/intern/01-start-here.html', 'docs/intern/01-start-here.pdf', 'docs/intern/02-walk-the-day.html', 'docs/intern/02-walk-the-day.pdf', 'docs/intern/03-the-screens.html', 'docs/intern/03-the-screens.pdf', 'docs/intern/04-how-the-code-works.html', 'docs/intern/04-how-the-code-works.pdf', 'docs/intern/packet.css', 'docs/intern/build_pdfs.ps1', 'docs/archive/README.md', 'docs/prompts/README.md', 'docs/AGENT_PROGRAM_HANDOFF.md', 'includes/agent_program_map.php', 'includes/agent_work_map.php'],
             ['tests/run_agent_work_map_tests.php', 'tests/run_agent_homebase_tests.php', 'tests/run_deploy_surface_tests.php'],
             ['Code wins over a stale paragraph; then fix the paragraph', 'No Composer / PHPUnit / MVC claims in top-level docs'],
             'docs/prompts/31-docs-truth.md',
