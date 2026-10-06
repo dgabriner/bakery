@@ -713,8 +713,91 @@
   display: contents;
 }
 
-.bakery-nav__driver-bar {
-  display: none;
+.bakery-nav--driver .bakery-nav__driver-bar {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  gap: 8px;
+  min-height: var(--sf-touch-min);
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px var(--sf-space-3) 4px;
+}
+
+.bakery-nav__live-dot {
+  background: var(--sf-success);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(31, 122, 72, 0.18);
+  flex: 0 0 9px;
+  height: 9px;
+  width: 9px;
+}
+
+.bakery-nav__driver-name {
+  color: var(--sf-nav-text, #f4fbf9);
+  flex: 1 1 auto;
+  font-size: 0.82rem;
+  font-weight: 740;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bakery-nav__clock {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.bakery-nav__clock-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  min-height: var(--sf-touch-min);
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+.bakery-nav__clock-btn--out {
+  background: #1f6b3a;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.bakery-nav__clock-btn--in {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f4fbf9;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.bakery-nav__driver-bar .bakery-nav__date-hint {
+  color: var(--sf-nav-text-muted, #d7ebe6);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.bakery-nav__tomorrow {
+  flex: 0 0 auto;
+  min-height: var(--sf-touch-min);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #f3b23a;
+  color: #1b2e2c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bakery-nav__tomorrow--active {
+  background: #fff;
 }
 
 @media (max-width: 1180px) {
@@ -1048,7 +1131,7 @@
   }
 
   .bakery-nav--cashier .bakery-nav__groups {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .bakery-nav--baker .bakery-nav__groups {
@@ -1060,7 +1143,26 @@
   }
 
   .bakery-nav--manager .bakery-nav__groups {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 2px;
+    width: 100%;
+  }
+
+  .bakery-nav--manager .bakery-nav__direct,
+  .bakery-nav--manager .bakery-nav__more {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .bakery-nav--manager .bakery-nav__alerts {
+    flex: 0 0 44px;
+  }
+
+  .bakery-nav--manager .bakery-nav__direct {
+    font-size: 0.68rem;
+    padding: 6px 1px;
   }
 
   .bakery-nav--manager .bakery-nav__more {
@@ -1189,63 +1291,6 @@
 
   .bakery-nav--driver .bakery-nav__more-link--active {
     background: rgba(255, 255, 255, 0.2);
-  }
-
-  .bakery-nav__driver-bar {
-    align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    display: flex;
-    gap: 8px;
-    min-height: var(--sf-touch-min);
-    min-width: 0;
-    overflow: hidden;
-    padding: 6px var(--sf-space-3) 4px;
-  }
-
-  .bakery-nav__live-dot {
-    background: var(--sf-success);
-    border-radius: 50%;
-    box-shadow: 0 0 0 4px rgba(31, 122, 72, 0.18);
-    flex: 0 0 9px;
-    height: 9px;
-    width: 9px;
-  }
-
-  .bakery-nav__driver-name {
-    color: var(--sf-nav-text, #f4fbf9);
-    flex: 1 1 0;
-    font-size: 0.82rem;
-    font-weight: 740;
-    line-height: 1.2;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .bakery-nav__driver-bar .bakery-nav__date-hint {
-    color: var(--sf-nav-text-muted, #d7ebe6);
-    flex: 0 0 auto;
-    font-size: 0.72rem;
-    font-weight: 650;
-    white-space: nowrap;
-  }
-
-  .bakery-nav__tomorrow {
-    flex: 0 0 auto;
-    min-height: var(--sf-touch-min);
-    padding: 4px 9px;
-    border-radius: 999px;
-    background: #f3b23a;
-    color: #1b2e2c;
-    font-size: 0.72rem;
-    font-weight: 800;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .bakery-nav__tomorrow--active {
-    background: #fff;
   }
 
   .bakery-nav__date-toggle {

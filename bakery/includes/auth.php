@@ -154,7 +154,7 @@ function bakery_role_home(string $role): string {
         case 'manager':
             return 'manager.php';
         case 'cashier':
-            return 'product_photos.php';
+            return 'time_clock.php';
         default:
             return 'index.php';
     }
