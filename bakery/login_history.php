@@ -21,6 +21,8 @@ $view = $filters['view'];
 $investigation = $data['investigation'];
 $dayNames = function_exists('bakery_day_names') ? bakery_day_names(true) : [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'];
 $comparison = $data['comparison'];
+$trailId = max(0, (int)($_GET['trail_id'] ?? 0));
+$sessionTrail = $trailId > 0 ? bakery_login_history_load_session_trail($db, $trailId, $ready, 300) : [];
 
 if ($filters['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
@@ -47,10 +49,11 @@ function bakery_login_history_tab(array $filters, string $view, string $label): 
         . htmlspecialchars($label) . '</a>';
 }
 
-function bakery_login_history_render_session(array $row): void
+function bakery_login_history_render_session(array $row, array $sessionTrail = [], int $activeTrailId = 0): void
 {
     $isSuccess = !empty($row['is_success']);
     $isLive = !empty($row['is_live']);
+    $auditId = (int)($row['id'] ?? 0);
     $clientMetadata = !empty($row['client_metadata']) && is_array(json_decode((string)$row['client_metadata'], true))
         ? json_decode((string)$row['client_metadata'], true)
         : [];
@@ -63,8 +66,9 @@ function bakery_login_history_render_session(array $row): void
     $subject = (($row['auth_type'] ?? '') === 'customer' && !empty($row['customer_id']))
         ? ['user_id' => 0, 'customer_id' => (int)$row['customer_id'], 'subject' => 'c-' . (int)$row['customer_id']]
         : (!empty($row['user_id']) ? ['user_id' => (int)$row['user_id'], 'customer_id' => 0, 'subject' => 's-' . (int)$row['user_id']] : null);
+    $showTrail = $activeTrailId > 0 && $activeTrailId === $auditId;
     ?>
-    <article class="login-history-row">
+    <article class="login-history-row" id="session-<?php echo $auditId; ?>">
       <div>
         <span class="login-history-label"><?php bakery_te('login_history.user'); ?></span>
         <h2><?php echo htmlspecialchars((string)$row['display_name']); ?></h2>
@@ -72,7 +76,31 @@ function bakery_login_history_render_session(array $row): void
         <?php if (!empty($row['staff_email'])): ?><p><?php echo htmlspecialchars((string)$row['staff_email']); ?></p><?php endif; ?>
         <p><span class="login-history-pill<?php echo $isSuccess ? '' : ' failure'; ?>"><?php echo htmlspecialchars($isSuccess ? bakery_t('login_history.successful') : bakery_t('login_history.failed')); ?></span></p>
         <?php if ($subject): ?>
-          <a class="login-history-investigate" href="<?php echo htmlspecialchars(bakery_login_history_url($subject)); ?>#investigation"><?php bakery_te('login_history.investigate'); ?></a>
+          <p class="login-history-row__links">
+            <a class="login-history-investigate" href="<?php echo htmlspecialchars(bakery_login_history_url($subject)); ?>#activity-stream"><?php bakery_te('login_history.investigate'); ?></a>
+            <a class="login-history-investigate" href="<?php echo htmlspecialchars(bakery_login_history_url(array_merge($subject, ['timeline' => 'action', 'timeline_offset' => 0]))); ?>#activity-stream"><?php bakery_te('login_history.investigate_actions'); ?></a>
+          </p>
+        <?php endif; ?>
+        <?php if ($isSuccess && $auditId > 0): ?>
+          <?php if ($showTrail): ?>
+            <details class="login-history-session-trail" open>
+              <summary><?php bakery_te('login_history.session_trail'); ?> · <?php echo count($sessionTrail); ?></summary>
+              <?php if ($sessionTrail): ?>
+                <ol class="login-history-session-trail__list">
+                  <?php foreach ($sessionTrail as $event): ?>
+                    <li>
+                      <time><?php echo htmlspecialchars((string)$event['time_label']); ?></time>
+                      <span><?php echo htmlspecialchars((string)$event['title']); ?></span>
+                    </li>
+                  <?php endforeach; ?>
+                </ol>
+              <?php else: ?>
+                <p class="login-history-session-trail__empty"><?php bakery_te('login_history.session_trail_empty'); ?></p>
+              <?php endif; ?>
+            </details>
+          <?php else: ?>
+            <a class="login-history-investigate" href="<?php echo htmlspecialchars(bakery_login_history_url(['trail_id' => $auditId])); ?>#session-<?php echo $auditId; ?>"><?php bakery_te('login_history.show_session_trail'); ?></a>
+          <?php endif; ?>
         <?php endif; ?>
       </div>
       <div>
@@ -390,27 +418,37 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
     </div>
     <?php endif; ?>
     <div class="timeline-header" id="activity-stream">
-      <div><h3><?php bakery_te('login_history.activity_stream'); ?></h3><p><?php bakery_te('login_history.timeline_help'); ?></p></div>
+      <div>
+        <h3><?php bakery_te('login_history.activity_stream'); ?></h3>
+        <p><?php bakery_te('login_history.timeline_help'); ?></p>
+        <p class="login-history-panel__lead"><?php echo htmlspecialchars(bakery_t('login_history.timeline_showing', [
+            'shown' => count($investigation['timeline']),
+            'total' => (int)($investigation['timeline_total'] ?? count($investigation['timeline'])),
+        ])); ?></p>
+      </div>
+      <?php
+        $timelineFilter = (string)($investigation['timeline_filter'] ?? $filters['timeline'] ?? 'all');
+        $timelineOffset = (int)($investigation['timeline_offset'] ?? $filters['timeline_offset'] ?? 0);
+      ?>
       <div class="timeline-filters" role="group" aria-label="<?php echo htmlspecialchars(bakery_t('login_history.filter_activity')); ?>">
-        <button class="timeline-filter is-active" type="button" data-timeline-filter="all"><?php bakery_te('login_history.filter_all'); ?></button>
-        <button class="timeline-filter" type="button" data-timeline-filter="session"><?php bakery_te('login_history.filter_session'); ?></button>
-        <button class="timeline-filter" type="button" data-timeline-filter="navigation"><?php bakery_te('login_history.filter_pages'); ?></button>
-        <button class="timeline-filter" type="button" data-timeline-filter="action"><?php bakery_te('login_history.filter_actions'); ?></button>
+        <?php foreach (['all' => 'login_history.filter_all', 'session' => 'login_history.filter_session', 'navigation' => 'login_history.filter_pages', 'action' => 'login_history.filter_actions'] as $filterKey => $labelKey): ?>
+          <a class="timeline-filter<?php echo $timelineFilter === $filterKey ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars(bakery_login_history_url(['timeline' => $filterKey, 'timeline_offset' => 0])); ?>#activity-stream"><?php bakery_te($labelKey); ?></a>
+        <?php endforeach; ?>
       </div>
     </div>
     <?php $timelineGroups = $investigation['timeline_groups'] ?: bakery_login_history_group_timeline($investigation['timeline']); ?>
     <?php if ($timelineGroups): ?>
-      <div class="history-timeline" aria-live="polite">
+      <div class="history-timeline<?php echo $timelineFilter === 'action' ? ' is-actions' : ''; ?>" aria-live="polite">
         <?php foreach ($timelineGroups as $dayKey => $events):
             $dayLabel = $dayKey !== '' ? bakery_login_history_when($dayKey . ' 12:00:00', 'date') : bakery_t('login_history.day_group');
         ?>
           <section class="history-day" data-day="<?php echo htmlspecialchars((string)$dayKey); ?>">
             <h4 class="history-day__title"><?php echo htmlspecialchars($dayLabel); ?></h4>
             <?php foreach ($events as $event): ?>
-              <article class="history-event" data-kind="<?php echo htmlspecialchars((string)$event['kind']); ?>">
+              <article class="history-event history-event--<?php echo htmlspecialchars((string)$event['kind']); ?>" data-kind="<?php echo htmlspecialchars((string)$event['kind']); ?>">
                 <time class="history-event-time" datetime="<?php echo htmlspecialchars(date('c', (int)$event['timestamp'])); ?>"><?php echo htmlspecialchars(date('g:i:s A', (int)$event['timestamp'])); ?></time>
                 <h4><?php echo htmlspecialchars((string)$event['title']); ?></h4>
-                <?php if ($event['detail']): ?><p><?php echo htmlspecialchars((string)$event['detail']); ?></p><?php endif; ?>
+                <?php if ($event['detail'] && ($event['kind'] ?? '') !== 'action'): ?><p><?php echo htmlspecialchars((string)$event['detail']); ?></p><?php endif; ?>
                 <?php if ($event['path']): ?>
                   <?php $eventScreen = bakery_login_history_screen_href((string)$event['path']); ?>
                   <?php if ($eventScreen !== ''): ?>
@@ -424,8 +462,17 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
           </section>
         <?php endforeach; ?>
       </div>
-      <?php if ((int)($investigation['timeline_total'] ?? 0) > count($investigation['timeline'])): ?>
-        <p class="login-history-panel__lead"><?php bakery_te('login_history.more_events'); ?></p>
+      <?php if (!empty($investigation['timeline_has_more'])): ?>
+        <p class="login-history-panel__lead">
+          <a class="login-history-load-older" href="<?php echo htmlspecialchars(bakery_login_history_url([
+              'timeline' => $timelineFilter,
+              'timeline_offset' => $timelineOffset + count($investigation['timeline']),
+          ])); ?>#activity-stream"><?php bakery_te('login_history.load_older'); ?></a>
+        </p>
+      <?php elseif ($timelineOffset > 0): ?>
+        <p class="login-history-panel__lead">
+          <a href="<?php echo htmlspecialchars(bakery_login_history_url(['timeline' => $timelineFilter, 'timeline_offset' => 0])); ?>#activity-stream"><?php bakery_te('login_history.back_to_newest'); ?></a>
+        </p>
       <?php endif; ?>
     <?php else: ?>
       <div class="timeline-empty"><?php bakery_te('login_history.no_activity'); ?></div>
@@ -608,7 +655,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
         <a href="<?php echo htmlspecialchars(bakery_login_history_url(['view' => 'records'])); ?>"><?php bakery_te('login_history.see_all'); ?></a>
       </div>
       <?php if (!$data['recent']): ?><div class="login-history-empty"><?php echo $ready['audit'] ? bakery_t('login_history.no_records') : bakery_t('login_history.no_storage'); ?></div><?php endif; ?>
-      <?php foreach ($data['recent'] as $row) { bakery_login_history_render_session($row); } ?>
+      <?php foreach ($data['recent'] as $row) { bakery_login_history_render_session($row, $sessionTrail, $trailId); } ?>
     </section>
 
     <section class="login-history-panel" id="browser-errors" aria-labelledby="browser-errors-title">
@@ -877,7 +924,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
       <p class="login-history-panel__lead"><?php bakery_te('login_history.live_lead'); ?></p>
       <?php if ($data['live']): ?>
         <div class="login-history-list">
-          <?php foreach ($data['live'] as $row) { bakery_login_history_render_session($row); } ?>
+          <?php foreach ($data['live'] as $row) { bakery_login_history_render_session($row, $sessionTrail, $trailId); } ?>
         </div>
       <?php else: ?>
         <div class="login-history-empty"><?php bakery_te('login_history.no_live'); ?></div>
@@ -888,7 +935,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
       <p class="login-history-panel__lead"><?php bakery_te('login_history.idle_lead'); ?></p>
       <?php if ($data['idle']): ?>
         <div class="login-history-list">
-          <?php foreach ($data['idle'] as $row) { bakery_login_history_render_session($row); } ?>
+          <?php foreach ($data['idle'] as $row) { bakery_login_history_render_session($row, $sessionTrail, $trailId); } ?>
         </div>
       <?php else: ?>
         <div class="login-history-empty"><?php bakery_te('login_history.no_idle'); ?></div>
@@ -904,7 +951,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
         <a href="<?php echo htmlspecialchars(bakery_login_history_url(['export' => 'csv'])); ?>"><?php bakery_te('login_history.export_csv'); ?></a>
       </div>
       <?php if (!$records['rows']): ?><div class="login-history-empty"><?php echo $ready['audit'] ? bakery_t('login_history.no_records') : bakery_t('login_history.no_storage'); ?></div><?php endif; ?>
-      <?php foreach ($records['rows'] as $row) { bakery_login_history_render_session($row); } ?>
+      <?php foreach ($records['rows'] as $row) { bakery_login_history_render_session($row, $sessionTrail, $trailId); } ?>
     </section>
     <?php if (($records['last_page'] ?? 1) > 1): ?>
       <div class="login-history-pager">
@@ -919,24 +966,4 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
 
   <p class="login-history-privacy"><?php bakery_te('login_history.privacy_footer'); ?></p>
 </main>
-<script>
-document.querySelectorAll('[data-timeline-filter]').forEach(function (button) {
-  button.addEventListener('click', function () {
-    var filter = button.getAttribute('data-timeline-filter');
-    document.querySelectorAll('[data-timeline-filter]').forEach(function (item) { item.classList.toggle('is-active', item === button); });
-    document.querySelectorAll('.history-day').forEach(function (day) {
-      var visible = false;
-      day.querySelectorAll('.history-event').forEach(function (event) {
-        var hidden = filter !== 'all' && event.getAttribute('data-kind') !== filter;
-        event.hidden = hidden;
-        if (!hidden) visible = true;
-      });
-      day.hidden = !visible;
-    });
-    document.querySelectorAll('.history-timeline > .history-event').forEach(function (event) {
-      event.hidden = filter !== 'all' && event.getAttribute('data-kind') !== filter;
-    });
-  });
-});
-</script>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

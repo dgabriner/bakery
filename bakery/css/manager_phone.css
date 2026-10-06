@@ -379,6 +379,116 @@ body.workspace-manager {
   background: #fdeeec;
 }
 
+.manager-phone__driver--mission header {
+  align-items: center;
+}
+
+.manager-phone__mission-progress {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #173f3c;
+  white-space: nowrap;
+}
+
+.manager-phone__mission-glance {
+  margin: 0 0 0.45rem;
+  color: #24352f;
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.manager-phone__mission-last {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.manager-phone__mission {
+  margin: 0.35rem 0 0.55rem;
+}
+
+.manager-phone__mission > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 750;
+  color: #173f3c;
+  cursor: pointer;
+}
+
+.manager-phone__mission-label {
+  margin: 0.55rem 0 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5a726a;
+}
+
+.manager-phone__mission-list {
+  list-style: decimal;
+  margin: 0 0 0.4rem;
+  padding: 0 0 0 1.25rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.manager-phone__mission-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
+  align-items: baseline;
+  padding: 0.4rem 0.35rem;
+  border-bottom: 1px solid var(--sf-border, #d5e0dc);
+}
+
+.manager-phone__mission-list li.is-current {
+  background: #e8f4f1;
+  border-radius: 8px;
+  border-bottom-color: transparent;
+  margin: 0.1rem 0;
+}
+
+.manager-phone__mission-stop {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.manager-phone__mission-stop strong {
+  font-size: 0.92rem;
+  color: #1c2c27;
+}
+
+.manager-phone__mission-stop small,
+.manager-phone__mission-list time {
+  color: var(--sf-text-secondary, #536258);
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.manager-phone__mission-list .is-failed strong,
+.manager-phone__mission-list .is-failed {
+  color: var(--sf-danger, #c0392b);
+}
+
+.manager-phone__cash-details {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.manager-phone__cash-details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  color: #536258;
+  cursor: pointer;
+}
+
 @media (min-width: 640px) {
   .manager-phone__adjust {
     grid-template-columns: repeat(3, minmax(0, 1fr));
