@@ -103,6 +103,10 @@ navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager na
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
 navigation_test_assert(strpos($managerNav, 'counter_orders.php?view=pending') !== false, 'manager navigation includes pending counter orders');
+navigation_test_assert(preg_match('/<a class="bakery-nav__direct [^"]*" href="[^"]*time_clock\.php"/', $managerNav) === 1, 'manager navigation has a direct time clock button');
+$managerClockNav = navigation_test_render_nav('manager', 'time_clock');
+navigation_test_assert(preg_match('/bakery-nav__direct bakery-nav__direct--active" href="[^"]*time_clock\.php"[^>]*aria-current="page"/', $managerClockNav) === 1, 'manager time clock button is active on the clock page');
+navigation_test_assert(strpos($managerClockNav, 'bakery-nav__more--active') === false, 'manager More stays quiet while the time clock button is current');
 foreach ([
     'driver_assignment.php', 'route_manager.php', 'route_summary.php', 'daily_route.php',
     'route_closeout.php', 'drivers.php', 'standing_routes.php', 'route_analysis.php', 'driver.php?change_driver=1',

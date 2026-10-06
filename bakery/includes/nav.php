@@ -289,10 +289,14 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
       </a>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'time_clock' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.item.time_clock'); ?>"<?php echo $currentPage === 'time_clock' ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.item.time_clock'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.time_clock_short'); ?></span>
+      </a>
       <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
         <?php echo bakery_staff_alerts_nav_html(); ?>
       <?php endif; ?>
-      <details class="bakery-nav__more<?php echo !$navManagerOnHome ? ' bakery-nav__more--active' : ''; ?>">
+      <details class="bakery-nav__more<?php echo (!$navManagerOnHome && $currentPage !== 'time_clock') ? ' bakery-nav__more--active' : ''; ?>">
         <summary class="bakery-nav__direct bakery-nav__more-toggle" aria-label="<?php bakery_te('nav.manager_more_aria'); ?>">
           <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.more'); ?></span>
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>

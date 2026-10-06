@@ -1143,7 +1143,26 @@
   }
 
   .bakery-nav--manager .bakery-nav__groups {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 2px;
+    width: 100%;
+  }
+
+  .bakery-nav--manager .bakery-nav__direct,
+  .bakery-nav--manager .bakery-nav__more {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .bakery-nav--manager .bakery-nav__alerts {
+    flex: 0 0 44px;
+  }
+
+  .bakery-nav--manager .bakery-nav__direct {
+    font-size: 0.68rem;
+    padding: 6px 1px;
   }
 
   .bakery-nav--manager .bakery-nav__more {
