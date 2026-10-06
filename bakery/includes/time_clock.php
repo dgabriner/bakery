@@ -1,7 +1,7 @@
 <?php
 /**
- * Staff time clock. Cashiers punch themselves. Managers read who is in
- * and the punches that started today. One open punch per person.
+ * Staff time clock. Cashiers and drivers punch themselves. Managers read
+ * who is in and the punches that started today. One open punch per person.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -18,6 +18,46 @@ function bakery_time_clock_ready(PDO $db): bool
 function bakery_time_clock_stamp(): string
 {
     return date('Y-m-d H:i:s');
+}
+
+/**
+ * Same-origin return path after a successful punch.
+ * Empty when the candidate is off this app or not a page this role may open.
+ */
+function bakery_time_clock_safe_return(string $candidate): string
+{
+    $candidate = trim($candidate);
+    if ($candidate === '' || preg_match('/[\x00-\x1F\x7F\\\\]/', $candidate)) {
+        return '';
+    }
+    if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $candidate) || str_starts_with($candidate, '//')) {
+        return '';
+    }
+    if (!str_starts_with($candidate, '/') || str_contains($candidate, '..')) {
+        return '';
+    }
+    $parts = parse_url($candidate);
+    if (!is_array($parts) || isset($parts['scheme']) || isset($parts['host'])) {
+        return '';
+    }
+    $path = (string)($parts['path'] ?? '');
+    $base = basename($path);
+    if (!preg_match('/^[A-Za-z0-9_-]+\.php$/', $base)) {
+        return '';
+    }
+    $role = '';
+    if (function_exists('bakery_current_user')) {
+        $user = bakery_current_user();
+        $role = strtolower(trim((string)($user['role_slug'] ?? '')));
+    }
+    if ($role === '' || !function_exists('bakery_navigation_scripts_for_role')) {
+        return '';
+    }
+    if (!in_array($base, bakery_navigation_scripts_for_role($role), true)) {
+        return '';
+    }
+    $query = isset($parts['query']) && $parts['query'] !== '' ? '?' . $parts['query'] : '';
+    return $path . $query;
 }
 
 function bakery_time_clock_format_time(string $stamp): string
@@ -120,9 +160,10 @@ function bakery_time_clock_who_is_in(PDO $db): array
         return [];
     }
     $stmt = $db->query(
-        'SELECT p.id, p.user_id, p.clock_in_at, u.display_name
+        'SELECT p.id, p.user_id, p.clock_in_at, u.display_name, r.slug AS role_slug
          FROM time_clock_punches p
          JOIN users u ON u.id = p.user_id
+         LEFT JOIN roles r ON r.id = u.role_id
          WHERE p.clock_out_at IS NULL
          ORDER BY p.clock_in_at ASC, u.display_name ASC'
     );
@@ -142,9 +183,10 @@ function bakery_time_clock_punches_for_day(PDO $db, string $date): array
     $start = $date . ' 00:00:00';
     $end = date('Y-m-d', strtotime($date . ' +1 day')) . ' 00:00:00';
     $stmt = $db->prepare(
-        'SELECT p.id, p.user_id, p.clock_in_at, p.clock_out_at, u.display_name
+        'SELECT p.id, p.user_id, p.clock_in_at, p.clock_out_at, u.display_name, r.slug AS role_slug
          FROM time_clock_punches p
          JOIN users u ON u.id = p.user_id
+         LEFT JOIN roles r ON r.id = u.role_id
          WHERE p.clock_in_at >= ? AND p.clock_in_at < ?
          ORDER BY p.clock_in_at ASC, u.display_name ASC'
     );

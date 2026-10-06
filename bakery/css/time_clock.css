@@ -85,6 +85,19 @@
   border-bottom: 1px solid var(--sf-border, #e4d8cc);
 }
 
+.time-clock__who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.time-clock__role {
+  color: var(--sf-text-muted, #5c534c);
+  font-size: 0.85rem;
+}
+
 .time-clock__table {
   width: 100%;
   border-collapse: collapse;

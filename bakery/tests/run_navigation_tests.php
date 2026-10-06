@@ -199,6 +199,7 @@ navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'dr
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__more') !== false, 'driver navigation parks Pack, Stops, and QR behind More');
+navigation_test_assert(strpos($driverNav, 'time_clock.php') !== false, 'driver More includes the time clock');
 navigation_test_assert(strpos($driverNav, 'survey.php') !== false, 'driver More includes Tomorrow\'s stores survey');
 navigation_test_assert(strpos($driverNav, 'driver_stops.php') !== false, 'Stops remains reachable from More');
 navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Call HQ, and More');

@@ -1,6 +1,6 @@
 <?php
 /**
- * Cashier time clock: one open punch, today's board, cashier home.
+ * Staff time clock: one open punch, today's board, cashier home, driver return.
  * Usage: php tests/run_time_clock_tests.php
  */
 if (PHP_SAPI !== 'cli') {
@@ -135,6 +135,11 @@ $db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$cash
 $yesterday = date('Y-m-d H:i:s', strtotime('-1 day'));
 $db->prepare('INSERT INTO time_clock_punches (user_id, clock_in_at) VALUES (?, ?)')->execute([$cashierId, $yesterday]);
 $who = bakery_time_clock_who_is_in($db);
+$whoById = [];
+foreach ($who as $row) {
+    $whoById[(int)$row['user_id']] = $row;
+}
+tc_assert(($whoById[$cashierId]['role_slug'] ?? '') === 'cashier', 'who is in includes the cashier role');
 $whoIds = array_map(static function ($row) {
     return (int)$row['user_id'];
 }, $who);
@@ -163,22 +168,57 @@ $badDay = bakery_time_clock_punches_for_day($db, 'not-a-date');
 tc_assert($badDay === [], 'invalid day returns no punches');
 
 tc_assert(bakery_role_home('cashier') === 'time_clock.php', 'cashier home is the time clock');
+tc_assert(bakery_role_home('driver') === 'driver.php', 'driver home stays the route');
+tc_assert(bakery_role_home('driver_assistant') === 'driver.php', 'driver assistant home stays the route');
 tc_assert(bakery_ops_index_bypass_home('cashier') === 'time_clock.php', 'cashiers hitting the ops dashboard land on the time clock');
 tc_assert(in_array('time_clock.php', bakery_cashier_scripts(), true), 'time clock is a cashier script');
+tc_assert(in_array('time_clock.php', bakery_driver_scripts(), true), 'time clock is a driver script');
+tc_assert(in_array('time_clock.php', bakery_navigation_scripts_for_role('driver_assistant'), true), 'driver assistant may open the time clock');
 tc_assert(in_array('cashier', bakery_navigation_roles_for_script('time_clock.php'), true), 'cashier role may open the time clock');
 tc_assert(in_array('manager', bakery_navigation_roles_for_script('time_clock.php'), true), 'manager role may open the time clock');
+tc_assert(in_array('driver', bakery_navigation_roles_for_script('time_clock.php'), true), 'driver role may open the time clock');
+tc_assert(in_array('driver_assistant', bakery_navigation_roles_for_script('time_clock.php'), true), 'driver assistant role may open the time clock');
+
+$driverId = tc_user($db, 'clock-driver@sourflour.test', 'Clock Driver', 'driver', '6163');
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$driverId]);
+$driverIn = bakery_time_clock_in($db, $driverId);
+tc_assert(!empty($driverIn['ok']), 'driver can clock in');
+$whoRoles = [];
+foreach (bakery_time_clock_who_is_in($db) as $row) {
+    $whoRoles[(int)$row['user_id']] = (string)($row['role_slug'] ?? '');
+}
+tc_assert(($whoRoles[$driverId] ?? '') === 'driver', 'who is in includes the driver role');
+bakery_time_clock_out($db, $driverId);
+
+$_SESSION['user_id'] = $driverId;
+$_SESSION['user_role_slug'] = 'driver';
+tc_assert(bakery_time_clock_safe_return('/driver.php?date=2026-09-21') === '/driver.php?date=2026-09-21', 'driver may return to the dated route');
+tc_assert(bakery_time_clock_safe_return('/bake/driver.php?date=2026-09-21&stop=4') === '/bake/driver.php?date=2026-09-21&stop=4', 'driver may return under the app prefix');
+tc_assert(bakery_time_clock_safe_return('https://evil.example/driver.php') === '', 'external return is rejected');
+tc_assert(bakery_time_clock_safe_return('//evil.example/driver.php') === '', 'protocol-relative return is rejected');
+tc_assert(bakery_time_clock_safe_return('/users.php') === '', 'driver cannot return to user management');
+tc_assert(bakery_time_clock_safe_return("/driver.php\nLocation: https://evil.example") === '', 'return header injection is rejected');
+$_SESSION['user_role_slug'] = 'cashier';
+tc_assert(bakery_time_clock_safe_return('/driver.php') === '', 'cashier cannot return to the driver route');
+$_SESSION = [];
 
 $page = (string)file_get_contents($root . '/time_clock.php');
 tc_assert(strpos($page, 'bakery_require_role') !== false, 'time clock page enforces role');
+tc_assert(strpos($page, "'driver'") !== false && strpos($page, "'driver_assistant'") !== false, 'time clock page allows drivers');
 tc_assert(strpos($page, 'bakery_require_csrf') !== false, 'time clock page checks CSRF');
 tc_assert(strpos($page, 'bakery_time_clock_in') !== false && strpos($page, 'bakery_time_clock_out') !== false, 'page punches through the shared helpers');
+tc_assert(strpos($page, 'bakery_time_clock_safe_return') !== false, 'successful punches can return to the working page');
+tc_assert(strpos($page, 'bakery_navigation_role_label') !== false, 'board shows the role label');
 tc_assert(strpos($page, "['administrator', 'manager']") !== false || strpos($page, "['manager', 'administrator']") !== false, 'manager board is role gated');
 tc_assert(strpos($page, '$_POST[\'user_id\']') === false && strpos($page, '$_POST["user_id"]') === false, 'page does not accept a posted user id');
 
 $nav = (string)file_get_contents($root . '/includes/nav.php');
 tc_assert(strpos($nav, 'time_clock.php') !== false, 'navigation links the time clock');
+tc_assert(strpos($nav, 'bakery-nav__clock') !== false, 'driver bar includes the clock control');
+tc_assert(strpos($nav, 'name="return"') !== false, 'driver punch posts a return path');
+tc_assert(strpos($nav, 'isset($db) && $db instanceof PDO') !== false, 'driver clock query is skipped when navigation renders without a database');
 
-$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?)')->execute([$cashierId, $managerId]);
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?, ?)')->execute([$cashierId, $managerId, $driverId]);
 
 echo $failed === 0
     ? "Time clock tests passed ({$passed})\n"

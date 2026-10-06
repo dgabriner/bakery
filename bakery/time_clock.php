@@ -1,6 +1,7 @@
 <?php
 /**
- * Personal time clock. Cashiers land here after login.
+ * Personal time clock. Cashiers land here after login. Drivers open it
+ * from their route bar and return to the stop they were on.
  * Managers and administrators also see who is in and today's punches.
  */
 define('ACCESS_ALLOWED', true);
@@ -9,7 +10,7 @@ require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/time_clock.php';
 
-bakery_require_role(['cashier', 'manager', 'administrator']);
+bakery_require_role(['cashier', 'manager', 'administrator', 'driver', 'driver_assistant']);
 
 $user = bakery_current_user();
 $userId = (int)($user['id'] ?? 0);
@@ -29,6 +30,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     } elseif ($action === 'clock_out') {
         $result = bakery_time_clock_out($db, $userId);
         $notice = !empty($result['ok']) ? 'out' : (string)($result['error'] ?? 'save_failed');
+    }
+    $returnTo = bakery_time_clock_safe_return((string)($_POST['return'] ?? ''));
+    if (($notice === 'in' || $notice === 'out') && $returnTo !== '') {
+        header('Location: ' . $returnTo);
+        exit;
     }
     header('Location: ' . BASE_URL . 'time_clock.php?notice=' . rawurlencode($notice));
     exit;
@@ -60,7 +66,7 @@ $h = static function (string $value): string {
 
 <main class="time-clock">
   <header class="time-clock__hero">
-    <p class="time-clock__eyebrow"><?php echo $h(bakery_t('time_clock.eyebrow')); ?></p>
+    <p class="time-clock__eyebrow"><?php echo $h(bakery_navigation_role_label($role)); ?></p>
     <h1><?php echo $h(bakery_t('time_clock.title')); ?></h1>
     <p class="time-clock__lead"><?php echo $h((string)($user['display_name'] ?? '')); ?></p>
   </header>
@@ -97,7 +103,10 @@ $h = static function (string $value): string {
         <ul class="time-clock__people">
           <?php foreach ($whoIsIn as $person): ?>
             <li>
-              <strong><?php echo $h((string)$person['display_name']); ?></strong>
+              <span class="time-clock__who">
+                <strong><?php echo $h((string)$person['display_name']); ?></strong>
+                <span class="time-clock__role"><?php echo $h(bakery_navigation_role_label((string)($person['role_slug'] ?? ''))); ?></span>
+              </span>
               <span><?php echo $h(bakery_t('time_clock.since', ['time' => bakery_time_clock_format_time((string)$person['clock_in_at'])])); ?></span>
             </li>
           <?php endforeach; ?>
@@ -112,6 +121,7 @@ $h = static function (string $value): string {
           <thead>
             <tr>
               <th><?php echo $h(bakery_t('time_clock.col_name')); ?></th>
+              <th><?php echo $h(bakery_t('time_clock.col_role')); ?></th>
               <th><?php echo $h(bakery_t('time_clock.col_in')); ?></th>
               <th><?php echo $h(bakery_t('time_clock.col_out')); ?></th>
             </tr>
@@ -120,6 +130,7 @@ $h = static function (string $value): string {
             <?php foreach ($todayPunches as $punch): ?>
               <tr>
                 <td><?php echo $h((string)$punch['display_name']); ?></td>
+                <td><?php echo $h(bakery_navigation_role_label((string)($punch['role_slug'] ?? ''))); ?></td>
                 <td><?php echo $h(bakery_time_clock_format_time((string)$punch['clock_in_at'])); ?></td>
                 <td><?php echo $h($punch['clock_out_at'] ? bakery_time_clock_format_time((string)$punch['clock_out_at']) : bakery_t('time_clock.still_in')); ?></td>
               </tr>
