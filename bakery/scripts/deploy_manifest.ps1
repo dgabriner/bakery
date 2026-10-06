@@ -33,7 +33,8 @@ function Get-BakeryDeployRootFiles {
         'sfb_dashboard.php', 'sfb_starters.php', 'sfb_ingredients.php', 'sfb_formulas.php',
         'sfb_batches.php', 'sfb_batch.php', 'sfb_resources.php', 'sfb_community.php',
         'sfb_community_topic.php', 'sfb_shared_batch.php',
-        'sfb_admin_overview.php', 'sfb_admin_batch.php', 'sfb_admin_impersonate.php',
+        'sfb_admin_overview.php', 'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_intensive.php',
+        'sfb_intensive.php',
         'sfb_admin_studio.php', 'sfb_admin_studio_baker.php',
         'agent_homebase.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php'
     )

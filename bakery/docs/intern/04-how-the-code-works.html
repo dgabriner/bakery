@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>How the code is built — Sour Flour OS intern packet</title>
+  <link rel="stylesheet" href="packet.css">
+</head>
+<body>
+  <p class="kicker">Sour Flour OS · Intern packet · 4 of 4</p>
+  <h1>How the code is built</h1>
+  <p class="lede">Read this after you have walked October 1 on Staging. The screens will give these files a place to land. You will not change code on your first day.</p>
+
+  <h2>What kind of program this is</h2>
+  <p>In school you may have used a framework that generates folders called models, views, and controllers, or a JavaScript app that runs in the browser and talks to an API. This project is older in style, and that is a decision, not a backlog item.</p>
+  <p>It is PHP pages on a server, a MariaDB database, and ordinary CSS and JavaScript. There is no React app, no Composer project, and no PHPUnit. A rewrite into a framework is not the work. The work is that one bakery day stays trustworthy.</p>
+  <p>When the code looks uneven, assume it got that way by closing a real handoff. Understand the handoff before you clean the file.</p>
+
+  <h2>One web address, one file</h2>
+  <p>The folder you will open is <span class="url">bakery/</span>. A file in that top folder is a page. <span class="url">daily_orders.php</span> is the Daily Orders address you already opened. Shared rules live in <span class="url">includes/</span>, in functions whose names start with <span class="url">bakery_</span>. Shared page chrome is the header, the navigation, and the footer.</p>
+  <table>
+    <tr><th>Place</th><th>What you will find</th></tr>
+    <tr><td><span class="url">*.php</span> in the top folder</td><td>One URL. Check who may open it, validate the form, call a function, print the page.</td></tr>
+    <tr><td><span class="url">includes/*.php</span></td><td>The business rule, once. Orders, inventory, billing, and delivery confirmation live here.</td></tr>
+    <tr><td><span class="url">css/</span> and <span class="url">includes/*.js</span></td><td>Look and behavior in the browser. No bundler.</td></tr>
+    <tr><td><span class="url">lang/en.php</span> and <span class="url">lang/es.php</span></td><td>Every phrase a person sees, in both languages, with the same keys.</td></tr>
+    <tr><td><span class="url">database/schema/</span></td><td>Numbered SQL files that add tables and columns. Applied in order. Never renamed after they have been used.</td></tr>
+    <tr><td><span class="url">tests/run_*.php</span></td><td>Scripts that call those functions and check the database. This is the test suite.</td></tr>
+  </table>
+
+  <h2>What happens when you open a page</h2>
+  <ol>
+    <li>The page loads configuration: environment, session, the Los Angeles clock, and the language.</li>
+    <li>It opens the database and checks login, role, and, on any save, a token that proves the form came from our page.</li>
+    <li>If you submitted a form, the page calls one function in <span class="url">includes/</span>. It should not invent a second copy of the same SQL.</li>
+    <li>It prints the header, the page, and the footer.</li>
+  </ol>
+  <p>A useful exercise, after your walk: pick the delivered stop you opened on My Route. In the repository, search for <span class="url">bakery_confirm_delivery</span>. That function is the moment a delivery becomes a bill. Read it. You are not asked to change it.</p>
+
+  <h2>The data, only as far as the day requires</h2>
+  <p>Customers are the identity. A wholesale store, a portal login, and a student in the baking classes all point at a customer row. New side products get their own tables. They do not keep adding columns to the order tables.</p>
+  <ul>
+    <li><strong>Standing orders</strong> are the weekly habit.</li>
+    <li><strong>Daily orders and their lines</strong> are one date’s promise.</li>
+    <li><strong>Assignments</strong> are the route: which driver, which position, delivered or not.</li>
+    <li><strong>A production commit</strong> is the bake list the baker executes.</li>
+    <li><strong>Inventory movements</strong> are an append-only story of bread: made, loaded, delivered, returned, wasted.</li>
+    <li><strong>Snapshot columns on the order</strong> are the prices and total frozen at delivery.</li>
+  </ul>
+  <p>If you need “how much bread is expected that day,” use the demand helpers. Do not add up the raw tables yourself. You will drop pauses, inactive stores, or the rule that one store’s special order does not speak for every store.</p>
+
+  <h2>Rules that matter when you eventually change code</h2>
+  <p>You saw these on the screens. They are also rules for a patch.</p>
+  <ol>
+    <li>Dated beats standing, per customer. Never for the whole date at once.</li>
+    <li>Editing the habit does not rewrite a past date. Editing a date does not rewrite the habit.</li>
+    <li>Generating the date again must keep quantities a person already changed.</li>
+    <li>Confirming a delivery is one transaction: pieces, credits, prices, and cash together.</li>
+    <li>A historical invoice never looks up today’s catalog price.</li>
+    <li>The order status and the route-stop status are two fields. They move on different writes and have to stay in agreement.</li>
+    <li>Loading the van moves bread onto the van. It does not record the sale. The route closeout does that math.</li>
+    <li>Marking an exception “handled” must not hide the fact that it is still true.</li>
+  </ol>
+  <p>The long version is section 4 of <span class="url">BAKERY_PRODUCT_CONTEXT.md</span>. Read that section before you change orders, prices, inventory, or invoices. You do not need it to finish the Staging walk.</p>
+
+  <h2>Three databases on the laptop, and two on the host</h2>
+  <p>You will not set the laptop up on day one. When you do, ask which database a command will write to before you run it. The names look similar. They are not interchangeable.</p>
+  <table>
+    <tr><th>Name</th><th>What it is</th><th>May you write?</th></tr>
+    <tr><td>bakerysf_local</td><td>A nightly mirror of production, for looking.</td><td>No.</td></tr>
+    <tr><td>bakerysf_stage_local</td><td>Everyday development on the laptop.</td><td>Yes, once you are set up.</td></tr>
+    <tr><td>bakerysf_test</td><td>A disposable database the tests wipe.</td><td>Only the test scripts.</td></tr>
+    <tr><td>bakerysoftware</td><td>Staging, the site in this packet.</td><td>Only by using the site, and only when Danny asks you to save something.</td></tr>
+    <tr><td>bakerysf</td><td>Live. Today’s bread and invoices.</td><td>No.</td></tr>
+  </table>
+
+  <h2>Git is not the website</h2>
+  <p>There are three copies of the <em>code</em>, and updating one does not update the next.</p>
+  <ol>
+    <li><strong>GitHub</strong> (<span class="url">dgabriner/bakery</span>, branch <span class="url">main</span>) is the history of the code. A commit does not change what a phone is running.</li>
+    <li><strong>Staging</strong> (<span class="url">https://staging.sourflour.org/</span>) is the copy you just used. It is updated by a separate file sync.</li>
+    <li><strong>Live</strong> (<span class="url">https://bakery.sourflour.org/bake/</span>) is promoted by Danny from a screen called Staging Manager. You do not copy files there, and you do not import a database over it.</li>
+  </ol>
+  <p>Passwords, <span class="url">.env</span> files, uploads, and database dumps do not go in Git.</p>
+
+  <h2>How a small change is supposed to go</h2>
+  <p>When Danny asks you to change something, this is the shape of a good change. It is not a request to start one now.</p>
+  <ol>
+    <li>Name the date, the person, and the screen where that person already decides.</li>
+    <li>Click that screen on Staging, and the screen before it and the screen after it.</li>
+    <li>Change the function that already owns that fact. Prefer the existing page over a new page.</li>
+    <li>If a person will see a new sentence, add it in English and in Spanish in the same change. Spanish is a translation, not a copy of the English.</li>
+    <li>Run the test script that covers those files, on the disposable test database.</li>
+    <li>Say what you did not understand. Leave Live alone.</li>
+  </ol>
+  <p>A small change that finishes a handoff is the sophisticated one. A new home page, however clean, is a failed change. This app already has too many screens.</p>
+
+  <h2>What not to do in the first month</h2>
+  <ul>
+    <li>Do not propose replacing PHP with a framework as your first idea.</li>
+    <li>Do not add a new top-level page because a menu feels missing.</li>
+    <li>Do not build a second way to confirm a delivery or a second way to number an invoice.</li>
+    <li>Do not price an old invoice from the current product price.</li>
+    <li>Do not run a command whose name says production, live, or push until you can say which database it writes.</li>
+    <li>Do not put customer names, codes, or dumps into Git or into a chat with an outside model.</li>
+  </ul>
+
+  <h2>If you want the long version later</h2>
+  <table>
+    <tr><th>Read</th><th>When</th></tr>
+    <tr><td><span class="url">BAKERY_PRODUCT_CONTEXT.md</span></td><td>Before you change a feature. Sections 1 through 5, and section 4 as the rule book.</td></tr>
+    <tr><td><span class="url">ARCHITECTURE.md</span></td><td>When you need the request and the folder map in more detail.</td></tr>
+    <tr><td><span class="url">docs/DEV_WORKFLOW.md</span> and <span class="url">docs/LOCAL_SETUP.md</span></td><td>When Danny sits with you to set up the laptop.</td></tr>
+    <tr><td><span class="url">docs/archive/</span></td><td>Do not. Those notes describe old plans. They will send you to fix things that already shipped.</td></tr>
+  </table>
+  <p>If a document and the code disagree, the code is what the bakery is running. Then the document should be corrected. That is a normal part of the job, and it is a good first kind of change: small, checkable, and hard to do by accident to a store.</p>
+  <p class="doc-end">Sour Flour OS intern packet, October 2026. Practice on Staging. Live stays with the bakery.</p>
+</body>
+</html>

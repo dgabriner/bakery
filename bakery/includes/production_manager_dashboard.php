@@ -22,6 +22,9 @@ require_once __DIR__ . '/product_inventory.php';
 /** @var list<string> */
 define('BAKERY_PMD_VIEWS', ['batches', 'week', 'routes', 'supply']);
 
+/** @var list<string> */
+define('BAKERY_PMD_SOURCES', ['bake_list', 'last_entered']);
+
 /**
  * Resolve an operating date (default: tomorrow).
  */
@@ -42,6 +45,71 @@ function bakery_pmd_resolve_view(string $raw): string
 {
     $raw = strtolower(trim($raw));
     return in_array($raw, BAKERY_PMD_VIEWS, true) ? $raw : 'batches';
+}
+
+/**
+ * Resolve bake-quantity source (default: current bake list).
+ */
+function bakery_pmd_resolve_source(string $raw): string
+{
+    $raw = strtolower(trim($raw));
+    return in_array($raw, BAKERY_PMD_SOURCES, true) ? $raw : 'bake_list';
+}
+
+/**
+ * Most recent saved Production Center plan (kitchen-note / typed targets).
+ *
+ * Ignores store-demand estimates. Only dates with planned_quantity > 0 count.
+ *
+ * @return array{date:string,date_display:string,pieces:int,products:int,quantities:array<int,int>}|null
+ */
+function bakery_pmd_entered_plan_for_date(PDO $db, string $date): ?array
+{
+    $date = bakery_pmd_resolve_date($date);
+    if (!function_exists('bakery_production_plan_draft_quantities')) {
+        return null;
+    }
+    $quantities = bakery_production_plan_draft_quantities($db, $date);
+    $quantities = array_filter(
+        $quantities,
+        static fn(int $qty): bool => $qty > 0
+    );
+    if ($quantities === []) {
+        return null;
+    }
+    return [
+        'date' => $date,
+        'date_display' => date('D, M j, Y', strtotime($date)),
+        'pieces' => (int)array_sum($quantities),
+        'products' => count($quantities),
+        'quantities' => $quantities,
+    ];
+}
+
+function bakery_pmd_latest_entered_plan(PDO $db): ?array
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'production_plan_items')) {
+        return null;
+    }
+    try {
+        $stmt = $db->query(
+            'SELECT delivery_date
+             FROM production_plan_items
+             WHERE planned_quantity > 0
+             GROUP BY delivery_date
+             HAVING SUM(planned_quantity) > 0
+             ORDER BY delivery_date DESC
+             LIMIT 1'
+        );
+        $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+    } catch (Throwable $e) {
+        error_log('pmd last entered plan: ' . $e->getMessage());
+        return null;
+    }
+    if (!$row) {
+        return null;
+    }
+    return bakery_pmd_entered_plan_for_date($db, (string)$row['delivery_date']);
 }
 
 /**
@@ -158,11 +226,21 @@ function bakery_pmd_standard_batches(?int $standardBatchGrams, int $doughGrams):
 /**
  * Build the Production Manager Dashboard payload for one delivery date.
  *
+ * @param array{source?:string} $options
  * @return array<string,mixed>
  */
-function bakery_pmd_build(PDO $db, string $date): array
+function bakery_pmd_build(PDO $db, string $date, array $options = []): array
 {
     $date = bakery_pmd_resolve_date($date);
+    $sourceMode = bakery_pmd_resolve_source((string)($options['source'] ?? 'bake_list'));
+    $rawEnteredDate = trim((string)($options['entered_date'] ?? ''));
+    $enteredDate = '';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawEnteredDate) === 1) {
+        $enteredDt = DateTime::createFromFormat('!Y-m-d', $rawEnteredDate);
+        if ($enteredDt && $enteredDt->format('Y-m-d') === $rawEnteredDate) {
+            $enteredDate = $rawEnteredDate;
+        }
+    }
     $priorDate = date('Y-m-d', strtotime($date . ' -7 days'));
 
     $bakeList = bakery_production_bake_list($db, $date);
@@ -170,10 +248,31 @@ function bakery_pmd_build(PDO $db, string $date): array
     $draft = function_exists('bakery_production_plan_draft_quantities')
         ? bakery_production_plan_draft_quantities($db, $date)
         : [];
+    $entered = null;
+    if ($sourceMode === 'last_entered') {
+        $entered = $enteredDate !== ''
+            ? bakery_pmd_entered_plan_for_date($db, $enteredDate)
+            : bakery_pmd_latest_entered_plan($db);
+    }
 
     $bakeByProduct = [];
     foreach ($bakeList['items'] as $item) {
         $bakeByProduct[(int)$item['product_id']] = $item;
+    }
+    if ($entered !== null) {
+        $overlay = [];
+        foreach ($entered['quantities'] as $pid => $qty) {
+            $pid = (int)$pid;
+            $overlay[$pid] = [
+                'product_id' => $pid,
+                'demand_quantity' => (int)($bakeByProduct[$pid]['demand_quantity'] ?? 0),
+                'bake_quantity' => (int)$qty,
+                'source' => 'last_entered',
+            ];
+        }
+        $bakeByProduct = $overlay;
+        $bakeList['items'] = array_values($overlay);
+        $bakeList['committed'] = false;
     }
     $priorByProduct = [];
     foreach ($priorBake['items'] as $item) {
@@ -206,7 +305,10 @@ function bakery_pmd_build(PDO $db, string $date): array
             'prior_date' => $priorDate,
             'date_display' => date('l, F j, Y', strtotime($date)),
             'committed' => !empty($bakeList['committed']),
-            'bake_source' => !empty($bakeList['committed']) ? 'committed_plan' : 'demand',
+            'bake_source' => $entered !== null
+                ? 'last_entered'
+                : (!empty($bakeList['committed']) ? 'committed_plan' : 'demand'),
+            'entered_plan' => $entered,
             'has_daily' => !empty($bakeList['has_daily']),
             'inventory_ready' => $inventoryReady,
             'commit' => $bakeList['commit'] ?? null,
@@ -424,7 +526,10 @@ function bakery_pmd_build(PDO $db, string $date): array
         'prior_date' => $priorDate,
         'date_display' => date('l, F j, Y', strtotime($date)),
         'committed' => !empty($bakeList['committed']),
-        'bake_source' => !empty($bakeList['committed']) ? 'committed_plan' : 'demand',
+        'bake_source' => $entered !== null
+            ? 'last_entered'
+            : (!empty($bakeList['committed']) ? 'committed_plan' : 'demand'),
+        'entered_plan' => $entered,
         'has_daily' => !empty($bakeList['has_daily']),
         'inventory_ready' => $inventoryReady,
         'commit' => $bakeList['commit'] ?? null,

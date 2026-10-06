@@ -109,6 +109,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
       <h1><?php bakery_te('sfb.admin_overview'); ?></h1>
       <p><?php bakery_te('sfb.admin_overview_desc'); ?></p>
     </div>
+      <a href="sfb_admin_intensive.php">Full Week Intensive</a>
       <a href="#sfb-admin-batches">Jump to batches</a>
       <a href="sfb_admin_studio.php"><?php bakery_te('sfb.studio_manager'); ?></a>
       <a href="sfb_community.php"><?php bakery_te('sfb.community_staff_circles'); ?></a>

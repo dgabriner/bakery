@@ -167,6 +167,7 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator'],
             'items' => [
                 ['href' => 'sfb_admin_overview.php', 'label' => 'SF Baker Engagement', 'description' => 'Review SF Baker batches, respond to questions, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'sfb_admin_intensive.php', 'label' => 'Full Week Intensive', 'description' => 'Enroll a baker, follow three guided bakes, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'sfb_admin_studio.php', 'label' => 'Synthetic Manager', 'description' => 'Pace the synthetic baker clock, read the action log, and inspect a baker.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'agent_homebase.php', 'label' => 'Agent Homebase', 'description' => 'Learning studio, whiteboard, bug watchlist, and agent session log for Cursor missions.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'users.php', 'label' => 'User Management', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
@@ -410,7 +411,7 @@ function &bakery_navigation_script_registry(): array
             'driver_pages_probe.php', 'trace_driver_list.php',
             'build_id.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
             'health_deploy.php', 'health_driver.php', 'health_prod.php',
-            'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php',
+            'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php', 'sfb_admin_intensive.php',
             'sfb_admin_studio_baker.php',
         ] as $script) {
             $boot($registry, $script, $adminOnly);
