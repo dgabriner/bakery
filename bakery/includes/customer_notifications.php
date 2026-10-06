@@ -174,8 +174,10 @@ function bakery_customer_notify(PDO $db, $customerId, $eventType, $title, $messa
 
     $category = $options['category'] ?? bakery_customer_notification_category_for_event($eventType);
     $prefs = bakery_customer_notification_preferences($db, $customerId);
-    $wantsInApp = bakery_customer_notification_channel_enabled($prefs, $category, 'in_app');
-    $wantsEmail = bakery_customer_notification_channel_enabled($prefs, $category, 'email')
+    $alwaysInApp = !empty($options['always_in_app']);
+    $wantsInApp = $alwaysInApp || bakery_customer_notification_channel_enabled($prefs, $category, 'in_app');
+    $wantsEmail = !$alwaysInApp
+        && bakery_customer_notification_channel_enabled($prefs, $category, 'email')
         && in_array($eventType, bakery_customer_notification_email_event_types(), true);
 
     if (!$wantsInApp && !$wantsEmail) {

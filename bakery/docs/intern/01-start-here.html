@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Start here — Sour Flour OS intern packet</title>
+  <link rel="stylesheet" href="packet.css">
+</head>
+<body>
+  <p class="kicker">Sour Flour OS · Intern packet · 1 of 4</p>
+  <h1>Start here</h1>
+  <p class="lede">You already know how to program. This packet is about a program that a bakery uses while the bread is still in the oven. Read this one before you click anything.</p>
+
+  <h2>What you are walking into</h2>
+  <p>Sour Flour is a wholesale bakery in San Francisco. It bakes bread and pan dulce and delivers them to stores. Sour Flour OS is the software for that day: who gets what, what the bakers should make, what went on the van, what actually arrived, and what to bill.</p>
+  <p>It is not a website about bread, and it is not a school project that you can reset. Stores, prices, and routes in here are real. The copy you will use for learning is called Staging. It is safe from the live bakery, and it is still real enough that a careless save can confuse the people testing on their phones.</p>
+
+  <h2>The four documents</h2>
+  <ol>
+    <li><strong>Start here.</strong> The job, the words, and the rules for your first login.</li>
+    <li><strong>Walk a day.</strong> One real Thursday, with a link for each step. This is the one to keep open while you click.</li>
+    <li><strong>The screens.</strong> A map of the pages, for when you forget which one does what.</li>
+    <li><strong>How the code is built.</strong> Read this after you have seen the day on screen. It will make more sense then.</li>
+  </ol>
+  <p>You do not need the long manuals in the repository this week. They are listed at the end of document 4, for when you are about to change code.</p>
+
+  <h2>One date is the whole idea</h2>
+  <p>Almost every screen asks: which delivery date? Wednesday’s order is not “the usual Wednesday.” It is that Wednesday. A baker, a driver, and a bill all have to be talking about the same date, or the store gets the wrong bread or the wrong invoice.</p>
+  <p>There are two kinds of order. Learn this before the screens.</p>
+  <table>
+    <tr><th>Name</th><th>What it means</th><th>Example</th></tr>
+    <tr>
+      <td>Standing order</td>
+      <td>The weekly habit. It repeats until someone changes the habit.</td>
+      <td>A store usually wants 12 conchas on Wednesday.</td>
+    </tr>
+    <tr>
+      <td>Dated order</td>
+      <td>What is actually true for one calendar date.</td>
+      <td>This Wednesday they want 4, because they close early.</td>
+    </tr>
+  </table>
+  <p>The dated order wins for that store, on that date only. Every other store with no special note still uses its habit. Next Wednesday, the 12 comes back unless someone changes the habit. People on this project say <strong>dated beats standing, per customer.</strong> That sentence is the one to remember.</p>
+  <p>The bake day and the delivery day are not always the same day. The software still labels the work by the delivery date. Tuesday’s pan dulce bake is for Wednesday’s orders. You will feel this when a screen says “Wednesday” and the kitchen is working on Tuesday.</p>
+
+  <h2>Words you will see</h2>
+  <table>
+    <tr><th>Word</th><th>Plain meaning</th></tr>
+    <tr><td>Route</td><td>One driver’s list of stops for a date, in order.</td></tr>
+    <tr><td>Stop</td><td>One store on that route.</td></tr>
+    <tr><td>Confirm a delivery</td><td>The driver records what the store kept, what came back, and any cash. That record becomes the bill. The price is frozen at that moment.</td></tr>
+    <tr><td>COD</td><td>Cash on delivery. The driver collects it. It is not a Square invoice.</td></tr>
+    <tr><td>Credit</td><td>Pieces the store did not keep, taken back at the door. They reduce the bill.</td></tr>
+    <tr><td>Finished goods</td><td>Bread that is baked and counted, ready to pack or load. Not flour and not a recipe.</td></tr>
+    <tr><td>Commit the plan</td><td>A manager says “this is the bake list.” Until that happens, the baker’s screen should say the day is not committed.</td></tr>
+    <tr><td>Close the day</td><td>A manager records that the date is finished. The software refuses if routes or other blockers are still open.</td></tr>
+    <tr><td>Staging</td><td>The practice copy. Address starts with staging.sourflour.org. You belong here.</td></tr>
+    <tr><td>Live</td><td>The real bakery, at bakery.sourflour.org/bake/. You do not learn on Live.</td></tr>
+  </table>
+
+  <h2>Who uses which screen</h2>
+  <p>The same software shows a different home to each job. Hiding a menu is not the security. The server also checks the role. If you log in as a driver, you will only see the driver screens, and document 2 will look broken. Ask for an <strong>administrator</strong> code for this packet.</p>
+  <table>
+    <tr><th>Person</th><th>What they open</th></tr>
+    <tr><td>Administrator</td><td>The full menu, on a computer. English by default.</td></tr>
+    <tr><td>Manager</td><td>A phone screen: Today, Routes, Kitchen, Missed. Spanish by default.</td></tr>
+    <tr><td>Baker</td><td>Mix today, the bake list, and the pack list. Not the order book.</td></tr>
+    <tr><td>Driver</td><td>My Route, and Call HQ if they need the bakery. The reference for “a screen that knows its job.”</td></tr>
+    <tr><td>Customer</td><td>A separate portal, with their own code. You will not use that this week.</td></tr>
+  </table>
+  <p>The floor often works in Spanish. You can switch the site to English. Document 2’s first working link does that for you, and the site remembers.</p>
+
+  <h2>Where you are allowed to click</h2>
+  <div class="callout">
+    <p><strong>Your site for this packet</strong></p>
+    <p><a href="https://staging.sourflour.org/login.php">Staging sign-in</a></p>
+    <p class="url">https://staging.sourflour.org/login.php</p>
+  </div>
+  <p>The sign-in page says <strong>Código para entrar</strong>. That means “code to enter.” Type the 4-digit code Danny gives you. Do not put that code in email, chat, a screenshot, or a GitHub file.</p>
+  <p>After you are in, look for the word <strong>Staging</strong>. If you do not see it, stop. You might be on the live bakery. Close the tab. The live address contains <span class="url">bakery.sourflour.org/bake/</span>. Do not type your code there.</p>
+  <div class="callout stop">
+    <p><strong>On the first walk, look. Do not save.</strong> Do not press Save, Generate, Confirm, Commit, Close the day, Send, or Reopen. Do not drag stops into a new order. Do not type into quantity boxes. Do not check boxes on the pack list. Those actions write, and other people are using this copy.</p>
+    <p>Opening five pages also prepares missing orders for the coming week: the Operations Dashboard, Daily Run, Daily Orders, Daily Production, and Mix Today. That does not erase an order someone already edited. It is still a write. Document 2 warns you again at those steps.</p>
+  </div>
+  <p>Names on the screens are real stores. Read them so you understand the day. Do not copy them into a portfolio, a class assignment, or a public repository.</p>
+
+  <h2>If a page looks empty</h2>
+  <p>The walk uses <strong>Thursday, October 1, 2026</strong>. The bake-plan step also uses <strong>Wednesday, September 2, 2026</strong>, because that is a date where a production plan was actually committed. Those dates are real on the office copy of the bakery’s data. Staging is a separate copy, so a count on the page may not match this packet. Trust the page. Tell Danny what you opened and what you saw. Do not try to repair it.</p>
+
+  <p class="doc-end">Next: document 2, Walk a day. Sour Flour OS intern packet, October 2026. Staging only.</p>
+</body>
+</html>

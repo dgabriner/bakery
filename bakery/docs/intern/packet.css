@@ -1,0 +1,106 @@
+@page {
+  size: letter;
+  margin: 0.7in 0.72in 0.75in;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  color: #24180f;
+  font-family: "Segoe UI", Calibri, sans-serif;
+  font-size: 11.5pt;
+  line-height: 1.45;
+  background: #fff;
+}
+
+body { padding: 0 0.15in; }
+
+.kicker {
+  margin: 0 0 0.2in;
+  color: #8a4b2a;
+  font-size: 9.5pt;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 0.18in;
+  font-size: 22pt;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  margin: 0.32in 0 0.1in;
+  font-size: 14.5pt;
+  line-height: 1.2;
+  page-break-after: avoid;
+}
+
+h3 {
+  margin: 0.18in 0 0.06in;
+  font-size: 12pt;
+  page-break-after: avoid;
+}
+
+p { margin: 0 0 0.1in; }
+
+.lede { font-size: 12.5pt; }
+
+a { color: #8a3b12; }
+
+ol, ul { margin: 0.06in 0 0.12in; padding-left: 0.22in; }
+li { margin: 0 0 0.05in; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.08in 0 0.16in;
+  page-break-inside: avoid;
+  font-size: 10.5pt;
+}
+
+th, td {
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #e4d5c8;
+  padding: 0.06in 0.08in 0.06in 0;
+}
+
+th { color: #6a5344; font-weight: 650; }
+
+.step, .callout {
+  page-break-inside: avoid;
+  margin: 0.14in 0;
+  padding: 0.1in 0.12in;
+  border: 1px solid #eadfd4;
+  border-radius: 6px;
+  background: #fbf7f3;
+}
+
+.callout.stop {
+  background: #fbf3ef;
+  border-color: #e4cfc3;
+}
+
+.callout strong, .step strong { font-weight: 650; }
+
+.url {
+  margin: 0.06in 0 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 8.7pt;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.small { color: #5c4a3e; font-size: 10pt; }
+
+.doc-end {
+  margin-top: 0.35in;
+  color: #6a5344;
+  font-size: 9pt;
+}

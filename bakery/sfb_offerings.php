@@ -89,6 +89,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+if (bakery_sfb_intensive_ready($db)) {
+    bakery_sfb_intensive_ensure_catalog($db);
+}
 $offerings = bakery_sfb_offerings($db);
 $starterJarTitles = [
     bakery_sfb_starter_jar_offering_title('pickup'),

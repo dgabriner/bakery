@@ -2,7 +2,9 @@
 
 Operations software for a wholesale sourdough bakery in San Francisco: standing orders → dated demand → production plan → bake → pack → load → deliver → close the day → invoice. It also carries the customer portal, the SF Baker community, Bread Education commerce, a retail cashier workspace, Square invoicing, and Twilio texting.
 
-**Read first:** [`BAKERY_PRODUCT_CONTEXT.md`](BAKERY_PRODUCT_CONTEXT.md) (product manual and business invariants), then [`AGENTS.md`](AGENTS.md) and [`docs/AGENT_DEVELOPMENT_MANUAL.md`](docs/AGENT_DEVELOPMENT_MANUAL.md) (how we develop). Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+**New to the project:** the intern PDFs in [`docs/intern/`](docs/intern/) (`01` through `04`), then [`docs/STUDENT_DEVELOPER_GUIDE.md`](docs/STUDENT_DEVELOPER_GUIDE.md).
+
+**Read first for product work:** [`BAKERY_PRODUCT_CONTEXT.md`](BAKERY_PRODUCT_CONTEXT.md) (product manual and business invariants), then [`AGENTS.md`](AGENTS.md) and [`docs/AGENT_DEVELOPMENT_MANUAL.md`](docs/AGENT_DEVELOPMENT_MANUAL.md) (how we develop). Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## What this actually is
 

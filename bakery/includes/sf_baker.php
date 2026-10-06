@@ -102,6 +102,7 @@ function bakery_sfb_portal_scripts() {
         'sfb_batches.php',
         'sfb_batch.php',
         'sfb_resources.php',
+        'sfb_intensive.php',
         'sfb_offerings.php',
         'sfb_lesson.php',
         'sfb_media.php',
@@ -2074,6 +2075,15 @@ function bakery_sfb_course_lock(PDO $db, $customerId, array $course) {
         // A retired offering frees its students instead of stranding them.
         return ['locked' => false, 'offering' => null];
     }
+    if (function_exists('bakery_sfb_intensive_program_for_course')) {
+        $program = bakery_sfb_intensive_program_for_course($db, (int)$course['id']);
+        if ($program && bakery_sfb_intensive_material_open_for_customer($db, (int)$customerId, $program)) {
+            return ['locked' => false, 'offering' => $offering];
+        }
+        if ($program && $program['material_access_days'] !== null && $program['material_access_days'] !== '') {
+            return ['locked' => true, 'offering' => $offering];
+        }
+    }
     $locked = !bakery_sfb_customer_entitled_to($db, (int)$customerId, $requiredId);
     return ['locked' => $locked, 'offering' => $offering];
 }
@@ -2359,6 +2369,9 @@ function bakery_sfb_first_run_actions(PDO $db, $customerId) {
     $hasFormula = count(bakery_sfb_formulas($db, $customerId)) > 0;
     $firstLesson = null;
     foreach (bakery_sfb_courses($db) as $course) {
+        if (bakery_sfb_course_lock($db, $customerId, $course)['locked']) {
+            continue;
+        }
         foreach (bakery_sfb_course_lessons($db, (int)$course['id']) as $lesson) {
             $firstLesson = $lesson;
             break 2;
@@ -3383,6 +3396,9 @@ function bakery_sfb_set_purchase_status(PDO $db, $purchaseId, $status, $squarePa
     if ($changed && $status === 'paid') {
         bakery_sfb_maybe_grant_credits($db, (int)$purchaseId);
         bakery_sfb_maybe_issue_gift_certificate($db, (int)$purchaseId);
+    }
+    if ($changed && function_exists('bakery_sfb_intensive_on_purchase_status')) {
+        bakery_sfb_intensive_on_purchase_status($db, (int)$purchaseId, $status);
     }
     return $changed;
 }
@@ -4567,3 +4583,5 @@ function bakery_sfb_human_loaf_total(PDO $db) {
             WHERE b.status = "completed"' . bakery_sfb_human_origin_clause('c', $db);
     return (int)$db->query($sql)->fetchColumn();
 }
+
+require_once __DIR__ . '/sfb_intensive.php';

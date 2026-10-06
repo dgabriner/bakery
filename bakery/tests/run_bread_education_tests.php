@@ -288,11 +288,13 @@ try {
     $assert([$doneCount, $totalCount] === [1, 3], 'course progress counts across lessons');
 
     // Bakers see only active content; admins see hidden rows too.
-    $visibleCourses = bakery_sfb_courses($db);
-    $allCourses = bakery_sfb_courses($db, true);
+    // Other courses may already exist (the Intensive catalog, for one).
+    $visibleIds = array_map('intval', array_column(bakery_sfb_courses($db), 'id'));
+    $assert(in_array($courseId, $visibleIds, true), 'fixture course is on the baker index');
     bakery_sfb_toggle_course($db, $courseId);
-    $afterHide = bakery_sfb_courses($db);
-    $assert(count($visibleCourses) === 1 && count($afterHide) === 0 && count($allCourses) === 1, 'hidden course leaves the baker index but stays for staff');
+    $afterHide = array_map('intval', array_column(bakery_sfb_courses($db), 'id'));
+    $afterAll = array_map('intval', array_column(bakery_sfb_courses($db, true), 'id'));
+    $assert(!in_array($courseId, $afterHide, true) && in_array($courseId, $afterAll, true), 'hidden course leaves the baker index but stays for staff');
 
     // ---- Home Base Onboarding (Prompt 25) ------------------------------------------
     $assert(bakery_sfb_invites_ready($db), '064 invites table exists');

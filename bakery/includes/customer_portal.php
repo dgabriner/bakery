@@ -42,6 +42,7 @@ function bakery_customer_portal_scripts() {
         'sfb_batches.php',
         'sfb_batch.php',
         'sfb_resources.php',
+        'sfb_intensive.php',
         'sfb_community.php',
         'sfb_community_topic.php',
         'sfb_shared_batch.php',
