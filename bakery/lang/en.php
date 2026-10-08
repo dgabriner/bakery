@@ -4359,4 +4359,13 @@ return [
     'sfb.intensive_kind_salt' => 'Salt',
     'sfb.intensive_kind_starter' => 'Starter',
     'sfb.intensive_kind_other' => 'Other',
+
+    'no_charge.label' => 'No charge',
+    'no_charge.mark' => 'No charge',
+    'no_charge.reason' => 'Reason',
+    'no_charge.reason.none' => 'No reason given',
+    'no_charge.reason.comp' => 'Comp',
+    'no_charge.reason.sample' => 'Sample',
+    'no_charge.reason.replacement' => 'Replacement',
+    'no_charge.reason.donation' => 'Donation',
 ];
