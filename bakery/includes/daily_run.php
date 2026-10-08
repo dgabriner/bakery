@@ -822,10 +822,10 @@ function bakery_daily_run_build(PDO $db, string $date): array
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $invRows[(int)$row['product_id']] = $row;
             }
+            $coverage = bakery_inventory_finished_goods_coverage($db, $date, $productIds, $invRows);
             foreach ($requiredByProduct as $productId => $requiredQty) {
-                $inv = $invRows[$productId] ?? null;
-                $stock = $inv ? ((int)$inv['available_quantity'] + (int)$inv['loaded_quantity']) : 0;
-                if ($requiredQty > $stock) {
+                $covered = $coverage[(int)$productId] ?? 0;
+                if ((int)$requiredQty > $covered) {
                     $stockShortProducts++;
                 }
             }
@@ -852,7 +852,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 'title' => 'Insufficient finished goods to pack',
                 'detail' => $stockShortProducts . ' product'
                     . ($stockShortProducts === 1 ? '' : 's')
-                    . ' have less available+loaded stock than committed demand.',
+                    . ' have less on-hand or already-delivered stock than committed demand.',
                 'count' => $stockShortProducts,
                 'href' => bakery_ops_link_inventory($date, ['attention' => 'shortfall'], 'daily_run'),
                 'action' => 'Open Finished Goods',
