@@ -93,6 +93,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_product_manager_plan_tests.php',
                 'tests/run_production_manager_dashboard_tests.php',
                 'tests/run_baker_mix_tests.php',
+                'tests/run_daily_run_core_tests.php',
             ],
             'invariants' => [
                 '§4 dated beats standing per customer',
@@ -128,6 +129,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_invoice_send_tests.php',
                 'tests/run_square_invoice_tests.php',
                 'tests/run_customer_billing_tests.php',
+                'tests/run_billing_center_tests.php',
             ],
             'invariants' => [
                 'Never price historical invoices from live products.price',
@@ -172,6 +174,7 @@ function bakery_agent_work_map_core(): array
             'tests' => [
                 'tests/run_exception_connection_tests.php',
                 'tests/run_manager_mode_tests.php',
+                'tests/run_daily_run_core_tests.php',
             ],
             'invariants' => [
                 'Completing exception work never hides a still-true operational fact',
@@ -742,6 +745,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_pack_list_tests.php',
+                'tests/run_pack_list_coverage_tests.php',
                 'tests/run_product_pack_yield_tests.php',
                 'tests/run_i18n_tests.php',
                 'tests/run_golden_day_qa.php',
