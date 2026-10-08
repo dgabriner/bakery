@@ -259,12 +259,24 @@ $GLOBALS['bakery_i18n_catalog'] = null;
 bakery_set_locale('en', false);
 $balanceColon = bakery_t('hub.balance_due', [':total' => '$12.50', ':days' => 6]);
 $balancePlain = bakery_t('hub.balance_due', ['total' => '$12.50', 'days' => 6]);
-assert_true($balanceColon === $balancePlain, 'Balance params accept :total and total');
-assert_true(strpos($balancePlain, '$12.50') !== false && strpos($balancePlain, '6') !== false, 'Balance line renders the amount and age');
-assert_true(strpos($balancePlain, ':total') === false && strpos($balancePlain, ':days') === false, 'Balance line does not leave placeholders');
+assert_true($balanceColon === 'Balance due $12.50 · oldest 6 d', 'English balance-due line fills :total and :days');
+assert_true($balancePlain === $balanceColon, 'Balance params accept total and :total');
+assert_true(bakery_t('hub.balance_current') === 'Balance current', 'A known zero balance stays Balance current');
 assert_true(bakery_t('hub.balance_none') === 'No balance on file', 'Missing balance uses a clear English string');
+bakery_set_locale('es', false);
+$balanceEs = bakery_t('hub.balance_due', ['total' => '$12.50', 'days' => 6]);
+assert_true($balanceEs === 'Saldo pendiente $12.50 · más antiguo 6 d', 'Spanish balance-due line fills :total and :days');
+assert_true(bakery_t('hub.balance_current') === 'Saldo al día', 'Spanish zero balance stays current');
 $hubSrc = (string)file_get_contents($root . '/customer_record.php');
-assert_true(strpos($hubSrc, "':total'") === false && strpos($hubSrc, 'hub.balance_none') !== false, 'Customer Hub substitutes balance params and has an empty state');
+assert_true(
+    strpos($hubSrc, "bakery_t('hub.balance_due'") !== false
+        && strpos($hubSrc, "'total' =>") !== false
+        && strpos($hubSrc, "'days' =>") !== false
+        && strpos($hubSrc, "':total'") === false
+        && strpos($hubSrc, 'hub.balance_current') !== false
+        && strpos($hubSrc, 'hub.balance_none') !== false,
+    'Customer Hub due branch passes total and days'
+);
 
 $badRange = bakery_billing_export_normalize_range('', '2026-10-07');
 assert_true($badRange['ok'] === false, 'Unconfirmed empty export dates are rejected');
