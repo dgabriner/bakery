@@ -145,6 +145,9 @@ function bakery_agent_work_map_core(): array
                 'complete_delivery.php',
                 'includes/product_inventory.php',
                 'route_closeout.php',
+                'billing_export.php',
+                'includes/invoice_document.php',
+                'database/schema/088_order_line_no_charge.sql',
             ],
             'tests' => [
                 'tests/run_credit_return_tests.php',
