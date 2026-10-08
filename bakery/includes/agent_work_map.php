@@ -819,6 +819,32 @@ function bakery_agent_work_map_core(): array
             'bugs' => [],
             'prompt' => null,
         ],
+        'ingredient-prices' => [
+            'title' => 'Ingredient invoice prices, reorder flag, and draft purchase order',
+            'aliases' => ['ingredient-price-history', 'draft-po'],
+            'files' => [
+                'ingredients.php',
+                'includes/ingredient_prices.php',
+                'scripts/import_ingredient_prices.php',
+                'database/schema/086_ingredient_prices.sql',
+                'lang/en.php',
+                'lang/es.php',
+            ],
+            'tests' => [
+                'tests/run_ingredient_prices_tests.php',
+                'tests/run_i18n_tests.php',
+                'tests/run_agent_work_map_tests.php',
+            ],
+            'invariants' => [
+                'Current cost per kg is the latest ingredient_price_history row by invoice date',
+                'Draft purchase order is printable only and never emails, texts, or sends',
+                'Reorder point is ingredients.reorder_level; reorder_qty is the suggested order quantity',
+                'No new top-level nav module — prices and the draft order stay on ingredients.php',
+                'Migration 086 is reserved here; the next free number is 087',
+            ],
+            'bugs' => [],
+            'prompt' => null,
+        ],
         'general' => [
             'title' => 'Unscoped bakery coding mission',
             'aliases' => ['cursor-agent', 'anonymous-agent', 'admin', 'broken-windows'],
