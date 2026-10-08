@@ -22,6 +22,7 @@ require_once __DIR__ . '/includes/delivery_recovery.php';
 require_once __DIR__ . '/includes/delivery_skip.php';
 require_once __DIR__ . '/includes/customer_portal.php';
 require_once __DIR__ . '/includes/client_request_id.php';
+require_once __DIR__ . '/includes/daily_orders_actions.php';
 
 if (PHP_SAPI !== 'cli') {
     header('Content-Type: application/json');
@@ -199,11 +200,14 @@ function bakery_pan_dulce_catalog_standard_price(PDO $db): float {
  * Resolve a zero/blank line price using store pan dulce default, customer
  * pricing tiers, and catalog standard — so drivers are not asked for a price
  * that is already on file.
+ *
+ * @return array{price:float,source:string}
  */
-function bakery_delivery_resolve_line_unit_price(PDO $db, array $order, array $item): float {
+function bakery_delivery_resolve_missing_price(PDO $db, array $order, array $item): array
+{
     $unitPrice = round((float)($item['unit_price'] ?? 0), 2);
     if ($unitPrice > 0) {
-        return $unitPrice;
+        return ['price' => $unitPrice, 'source' => 'line'];
     }
 
     $customer = [
@@ -220,15 +224,58 @@ function bakery_delivery_resolve_line_unit_price(PDO $db, array $order, array $i
 
     $resolved = round((float)bakery_resolve_customer_price($db, $customer, $product), 2);
     if ($resolved > 0) {
-        return $resolved;
+        return ['price' => $resolved, 'source' => 'customer_catalog'];
     }
 
     $catalogStandard = bakery_pan_dulce_catalog_standard_price($db);
     if ($catalogStandard > 0) {
-        return $catalogStandard;
+        return ['price' => $catalogStandard, 'source' => 'pan_dulce_catalog_standard'];
     }
 
-    return 0.0;
+    return ['price' => 0.0, 'source' => 'unset'];
+}
+
+function bakery_delivery_resolve_line_unit_price(PDO $db, array $order, array $item): float
+{
+    return bakery_delivery_resolve_missing_price($db, $order, $item)['price'];
+}
+
+/**
+ * @param float|null $oldPrice
+ */
+function bakery_delivery_log_price_repair(
+    PDO $db,
+    array $order,
+    int $dailyOrderId,
+    array $item,
+    $oldPrice,
+    float $newPrice,
+    string $source
+): void {
+    if (!function_exists('bakery_record_operational_event')) {
+        return;
+    }
+    $lineId = (int)($item['id'] ?? 0);
+    $eventType = defined('BAKERY_OP_LINE_PRICE_REPAIRED')
+        ? BAKERY_OP_LINE_PRICE_REPAIRED
+        : 'line_price_repaired';
+    bakery_record_operational_event(
+        $db,
+        $eventType,
+        'Filled unset line price on line ' . $lineId . ' from ' . $source,
+        [
+            'operational_date' => $order['order_date'] ?? null,
+            'customer_id' => (int)($order['customer_id'] ?? 0) ?: null,
+            'daily_order_id' => $dailyOrderId,
+            'product_id' => (int)($item['product_id'] ?? 0) ?: null,
+            'metadata' => [
+                'line_id' => $lineId,
+                'old_price' => $oldPrice,
+                'new_price' => round($newPrice, 2),
+                'source' => $source,
+            ],
+        ]
+    );
 }
 
 function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
@@ -271,9 +318,10 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
         throw new Exception('Order not found');
     }
 
+    $noChargeSelect = bakery_order_line_no_charge_select($db);
     $itemStmt = $db->prepare(
         "SELECT doi.id, doi.product_id, doi.quantity, doi.delivered_quantity,
-                doi.unit_price, doi.line_total, p.name AS product_name,
+                doi.unit_price, doi.line_total, {$noChargeSelect}, p.name AS product_name,
                 p.price AS standard_price, p.wholesale_price,
                 pl.name AS product_line_name,
                 dt.name AS dough_type_name
@@ -299,12 +347,17 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
         $quantity = (int)$item['quantity'];
         // Older daily orders can have a zero-priced line even though the store
         // default pan dulce price or catalog rate is configured. Resolve it here
-        // so drivers are not blocked on the invoice step.
-        $unitPrice = bakery_delivery_resolve_line_unit_price($db, $order, $item);
+        // so drivers are not blocked on the invoice step. A line staff marked
+        // no-charge keeps the explicit $0.
+        $isNoCharge = bakery_order_line_is_no_charge($item);
+        $unitPrice = $isNoCharge
+            ? 0.0
+            : bakery_delivery_resolve_line_unit_price($db, $order, $item);
         $lineTotal = round($quantity * $unitPrice, 2);
         $orderedPieces += $quantity;
         $storedOrderTotal += $lineTotal;
         $item['quantity'] = $quantity;
+        $item['is_no_charge'] = $isNoCharge ? 1 : 0;
         $item['unit_price'] = $unitPrice;
         $item['line_total'] = $lineTotal;
         $isPanDulce = strcasecmp((string)($item['product_line_name'] ?? ''), 'Pan Dulce') === 0;
@@ -350,18 +403,20 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
 }
 
 function bakery_delivery_pricing_missing(array $invoice): bool {
-    if ($invoice['ordered_pieces'] <= 0) {
-        return false;
-    }
-    if ($invoice['order_total'] <= 0 || $invoice['average_price'] <= 0) {
-        return true;
-    }
+    $chargeablePieces = 0;
     foreach ($invoice['items'] as $item) {
-        if ((int)$item['quantity'] > 0 && (float)$item['unit_price'] <= 0) {
+        if ((int)$item['quantity'] <= 0 || bakery_order_line_is_no_charge($item)) {
+            continue;
+        }
+        $chargeablePieces += (int)$item['quantity'];
+        if ((float)$item['unit_price'] <= 0) {
             return true;
         }
     }
-    return false;
+    if ($chargeablePieces <= 0) {
+        return false;
+    }
+    return $invoice['order_total'] <= 0 || $invoice['average_price'] <= 0;
 }
 
 /**
@@ -378,10 +433,17 @@ function bakery_delivery_known_fallback_price(PDO $db, array $order): float {
     return bakery_pan_dulce_catalog_standard_price($db);
 }
 
-/** Persist valid catalog/store prices for historical zero-priced order lines. */
+/**
+ * Persist valid catalog/store prices for lines whose price was never set.
+ *
+ * unit_price defaults to 0.00 and writers store 0 when the catalog price is
+ * unknown, so an unmarked 0 is still treated as unset. Lines with is_no_charge
+ * keep $0. NULL is also unset (the column allows it; current writers do not
+ * insert it).
+ */
 function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId): void {
     $orderStmt = $db->prepare(
-        'SELECT do.customer_id, c.default_pan_dulce_price, c.pricing_tier
+        'SELECT do.customer_id, do.order_date, c.default_pan_dulce_price, c.pricing_tier
          FROM daily_orders do
          JOIN customers c ON c.id = do.customer_id
          WHERE do.id = ?'
@@ -392,6 +454,9 @@ function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId):
         return;
     }
 
+    bakery_delivery_enforce_no_charge_prices($db, $dailyOrderId, $order);
+
+    $noChargeClause = bakery_order_line_no_charge_ready($db) ? ' AND doi.is_no_charge = 0' : '';
     $stmt = $db->prepare(
         "SELECT doi.id, doi.product_id, doi.quantity, doi.unit_price,
                 p.price AS standard_price, p.wholesale_price,
@@ -400,7 +465,8 @@ function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId):
          JOIN products p ON p.id = doi.product_id
          LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
          LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
-         WHERE doi.daily_order_id = ? AND doi.quantity > 0 AND doi.unit_price <= 0"
+         WHERE doi.daily_order_id = ? AND doi.quantity > 0
+           AND (doi.unit_price IS NULL OR doi.unit_price <= 0)" . $noChargeClause
     );
     $stmt->execute([$dailyOrderId]);
     $update = $db->prepare(
@@ -408,13 +474,47 @@ function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId):
     );
     $fallback = bakery_delivery_known_fallback_price($db, $order);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-        $price = bakery_delivery_resolve_line_unit_price($db, $order, $item);
+        if (bakery_order_line_is_no_charge($item)) {
+            continue;
+        }
+        $fill = bakery_delivery_resolve_missing_price($db, $order, $item);
+        $price = $fill['price'];
+        $source = $fill['source'];
         if ($price <= 0 && $fallback > 0) {
             $price = $fallback;
+            $source = 'known_fallback';
         }
         if ($price > 0) {
+            $oldPrice = $item['unit_price'] === null ? null : round((float)$item['unit_price'], 2);
             $update->execute([$price, round((int)$item['quantity'] * $price, 2), (int)$item['id'], $dailyOrderId]);
+            bakery_delivery_log_price_repair($db, $order, $dailyOrderId, $item, $oldPrice, $price, $source);
         }
+    }
+}
+
+/** Keep a deliberate no-charge mark at $0 even if a later edit wrote a price. */
+function bakery_delivery_enforce_no_charge_prices(PDO $db, int $dailyOrderId, array $order): void
+{
+    if (!bakery_order_line_no_charge_ready($db)) {
+        return;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, product_id, quantity, unit_price
+         FROM daily_order_items
+         WHERE daily_order_id = ? AND is_no_charge = 1 AND quantity > 0
+           AND (unit_price IS NULL OR unit_price <> 0 OR line_total <> 0)'
+    );
+    $stmt->execute([$dailyOrderId]);
+    $update = $db->prepare(
+        'UPDATE daily_order_items SET unit_price = 0, line_total = 0 WHERE id = ? AND daily_order_id = ?'
+    );
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $oldPrice = $item['unit_price'] === null ? null : round((float)$item['unit_price'], 2);
+        $update->execute([(int)$item['id'], $dailyOrderId]);
+        if ($oldPrice !== null && abs($oldPrice) < 0.005) {
+            continue;
+        }
+        bakery_delivery_log_price_repair($db, $order, $dailyOrderId, $item, $oldPrice, 0.0, 'no_charge');
     }
 }
 
@@ -451,8 +551,11 @@ function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPi
         throw new Exception('Enter a price greater than zero');
     }
 
+    $noChargeSelect = bakery_order_line_no_charge_ready($db)
+        ? 'is_no_charge'
+        : '0 AS is_no_charge';
     $itemStmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ?'
+        "SELECT id, quantity, {$noChargeSelect} FROM daily_order_items WHERE daily_order_id = ?"
     );
     $itemStmt->execute([$dailyOrderId]);
     $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -464,9 +567,12 @@ function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPi
     );
     foreach ($items as $item) {
         $quantity = (int)$item['quantity'];
+        $orderedPieces += $quantity;
+        if (bakery_order_line_is_no_charge($item)) {
+            continue;
+        }
         $lineTotal = round($quantity * $pricePerPiece, 2);
         $updateStmt->execute([$pricePerPiece, $lineTotal, (int)$item['id'], $dailyOrderId]);
-        $orderedPieces += $quantity;
         $orderTotal += $lineTotal;
     }
 

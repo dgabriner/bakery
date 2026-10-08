@@ -44,6 +44,7 @@ $headers = [
     'pricing_label',
     'status',
     'memo',
+    'no_charge',
 ];
 
 $csvLines = [];

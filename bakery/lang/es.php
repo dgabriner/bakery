@@ -4356,4 +4356,13 @@ return [
     'sfb.intensive_kind_salt' => 'Sal',
     'sfb.intensive_kind_starter' => 'Masa madre',
     'sfb.intensive_kind_other' => 'Otro',
+
+    'no_charge.label' => 'Sin cargo',
+    'no_charge.mark' => 'Sin cargo',
+    'no_charge.reason' => 'Motivo',
+    'no_charge.reason.none' => 'Sin motivo',
+    'no_charge.reason.comp' => 'Cortesía',
+    'no_charge.reason.sample' => 'Muestra',
+    'no_charge.reason.replacement' => 'Reposición',
+    'no_charge.reason.donation' => 'Donación',
 ];
