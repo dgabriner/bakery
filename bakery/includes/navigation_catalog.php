@@ -401,6 +401,7 @@ function &bakery_navigation_script_registry(): array
             'staff_alerts_api.php', 'auto_push_api.php', 'ping.php',
             'billing_export.php', 'generate_invoice.php', 'invoice_center.php',
             'text_media.php', 'ai_photo_text.php', 'customer_statement.php',
+            'account_health.php',
         ] as $script) {
             $boot($registry, $script, $managerApiRoles);
         }
