@@ -205,6 +205,41 @@ foreach ($requiredKeys as $key) {
 $catalog = (string)file_get_contents($root . '/includes/navigation_catalog.php');
 route_summary_assert('Delivery nav includes Route Summary', strpos($catalog, "'href' => 'route_summary.php'") !== false);
 
+require_once $root . '/includes/photo_handler.php';
+route_summary_assert(
+    'Live delivery photo URL keeps the /bake/ base',
+    bakery_upload_display_url('driver_photos', '2026/10/proof.jpg', '/bake/') === '/bake/uploads/driver_photos/2026/10/proof.jpg'
+);
+route_summary_assert(
+    'Staging delivery photo URL stays at the site root',
+    bakery_upload_display_url('driver_photos', '2026/10/proof.jpg', '/') === '/uploads/driver_photos/2026/10/proof.jpg'
+);
+route_summary_assert(
+    'A stored /uploads path is rewritten onto the app base',
+    bakery_upload_display_url('driver_photos', '/uploads/driver_photos/2026/10/proof.jpg', '/bake/') === '/bake/uploads/driver_photos/2026/10/proof.jpg'
+);
+route_summary_assert(
+    'A legacy host /uploads URL is rewritten onto the app base',
+    bakery_upload_display_url('driver_photos', 'https://bakery.sourflour.org/uploads/driver_photos/2026/10/proof.jpg', '/bake/') === '/bake/uploads/driver_photos/2026/10/proof.jpg'
+);
+route_summary_assert(
+    'Shop photos use the same base-path helper',
+    bakery_upload_display_url('shop_photos', '2026/10/window.jpg', '/') === '/uploads/shop_photos/2026/10/window.jpg'
+);
+$photoHandlerSrc = (string)file_get_contents($root . '/includes/photo_handler.php');
+$shopPhotoSrc = (string)file_get_contents($root . '/includes/shop_photo_handler.php');
+route_summary_assert(
+    'Driver photo URLs are not hard-coded to the site-root host',
+    strpos($photoHandlerSrc, 'https://bakery.sourflour.org/uploads/driver_photos/') === false
+        && strpos($photoHandlerSrc, "return bakery_upload_display_url('driver_photos'") !== false
+);
+route_summary_assert(
+    'Shop photo URLs are not hard-coded to the site-root host',
+    strpos($shopPhotoSrc, 'https://bakery.sourflour.org/uploads/shop_photos/') === false
+        && strpos($shopPhotoSrc, 'bakery_upload_display_url(') !== false
+);
+route_summary_assert('Route summary thumbnails come from photo URL fields', strpos((string)file_get_contents($root . '/route_summary.php'), "\$hero['url']") !== false);
+
 if ($failed > 0) {
     fwrite(STDERR, "{$failed} Route Summary checks failed\n");
     exit(1);
