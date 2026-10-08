@@ -23,7 +23,7 @@ function Get-BakeryDeployRootFiles {
         'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php', 'customer_portal_regular.php',
         'customer_portal_account.php', 'customer_portal_notifications.php',
         'customer_portal_delivery.php', 'customer_catalog.php', 'customer_upcoming_edit.php', 'customer_upcoming.php',
-        'customer_record.php',
+        'customer_record.php', 'account_health.php',
         'square_webhook.php',
         'text_comms.php', 'text_comms_api.php', 'twilio_webhook.php', 'survey.php', 'text_media.php',
         'route_closeout.php', 'route_analysis.php',

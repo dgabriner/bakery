@@ -203,6 +203,7 @@ $zones = array_column($zonesCatalog, 'name');
         <button class="btn-info" onclick="toggleEditMode()">
             <i class="icon">✏️</i> <span id="editModeText">Enable Quick Edit</span>
         </button>
+        <a class="btn-secondary" href="account_health.php"><?php echo htmlspecialchars(bakery_t('account_health.link'), ENT_QUOTES, 'UTF-8'); ?></a>
         <input type="search" id="customerSearch" class="customer-search"
                placeholder="Search by name, phone, email, zone, or address…"
                autocomplete="off"
