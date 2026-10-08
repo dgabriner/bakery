@@ -219,6 +219,66 @@ function bakery_daily_run_required_products(PDO $db, string $date, int $weekday)
 }
 
 /**
+ * Standing orders for this weekday that have no standing route or driver.
+ *
+ * @return list<array{customer_id:int, customer_name:string, products:list<array{name:string, quantity:int}>, summary:string}>
+ */
+function bakery_daily_run_unrouted_standing_orders(PDO $db, string $date): array
+{
+    if (!table_exists($db, 'standing_orders') || !table_exists($db, 'customers') || !table_exists($db, 'products')) {
+        return [];
+    }
+    $day = bakery_standing_day_from_date($date);
+    $dayClause = bakery_standing_day_in_clause($day);
+    $routeSql = '1 = 0';
+    $routeParams = [];
+    if (table_exists($db, 'standing_routes')) {
+        $routeSql = 'CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?';
+        $routeParams[] = $day;
+    }
+    $stmt = $db->prepare(
+        'SELECT c.id AS customer_id, c.name AS customer_name, p.name AS product_name, so.quantity
+         FROM standing_orders so
+         JOIN customers c ON c.id = so.customer_id AND c.is_active = 1
+         ' . bakery_sfb_ops_origin_clause('c', $db) . '
+         JOIN products p ON p.id = so.product_id
+         WHERE so.quantity > 0
+           AND so.day_of_week ' . $dayClause['sql'] . '
+           AND NOT EXISTS (
+               SELECT 1 FROM standing_routes sr
+               WHERE sr.customer_id = c.id AND ' . $routeSql . '
+           )
+         ORDER BY c.name, p.name'
+    );
+    $stmt->execute([...$dayClause['values'], ...$routeParams]);
+    $grouped = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $customerId = (int)$row['customer_id'];
+        if (!isset($grouped[$customerId])) {
+            $grouped[$customerId] = [
+                'customer_id' => $customerId,
+                'customer_name' => (string)$row['customer_name'],
+                'products' => [],
+            ];
+        }
+        $grouped[$customerId]['products'][] = [
+            'name' => (string)$row['product_name'],
+            'quantity' => (int)$row['quantity'],
+        ];
+    }
+    $rows = [];
+    foreach ($grouped as $row) {
+        $parts = [];
+        foreach ($row['products'] as $product) {
+            $parts[] = $product['name'] . ' × ' . $product['quantity'];
+        }
+        $row['summary'] = implode(', ', $parts);
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+/**
  * Build the full Daily Run payload for one operating date.
  *
  * @return array
@@ -1199,6 +1259,13 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $nextAction = $closeStage;
     }
 
+    $unroutedStandingOrders = [];
+    try {
+        $unroutedStandingOrders = bakery_daily_run_unrouted_standing_orders($db, $date);
+    } catch (Throwable $e) {
+        error_log('daily_run unrouted standing: ' . $e->getMessage());
+    }
+
     return [
         'date' => $date,
         'weekday' => $weekday,
@@ -1222,5 +1289,6 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'links' => $links,
         'demand_review' => $demandReview,
         'inventory_ready' => $inventoryReady,
+        'unrouted_standing_orders' => $unroutedStandingOrders,
     ];
 }

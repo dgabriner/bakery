@@ -168,6 +168,7 @@ function bakery_agent_work_map_core(): array
                 'includes/dashboard_command_center.php',
                 'index.php',
                 'daily_run.php',
+                'css/daily_run.css',
             ],
             'tests' => [
                 'tests/run_exception_connection_tests.php',
@@ -602,6 +603,7 @@ function bakery_agent_work_map_core(): array
                 'driver.php',
                 'complete_delivery.php',
                 'driver_assignment.php',
+                'css/driver_assignment.css',
                 'includes/driver_assignments.php',
                 'includes/delivery_skip.php',
                 'driver_load.php',
