@@ -589,6 +589,7 @@ function bakery_formula_structure_changes_requirements(array $structure, array $
 
 /**
  * Ingredient grams for one finished piece: dough, folded starter, add-ins, loss share.
+ * Grams only. Does not price ingredients and does not call bakery_ingredient_current_cost_per_kg.
  *
  * @param list<array<string, mixed>> $lines
  * @param array<string, mixed> $structure

@@ -1,7 +1,7 @@
 -- 087 — Formula structure for bakers and costing.
 -- Standard batch (grams or pieces) plus a mix multiplier, dough loss per mix,
 -- starter sub-formulas, and topping/filling grams per piece.
--- 086 is left unused for a concurrent ingredient price-history migration.
+-- 086 is ingredient price history (086_ingredient_prices.sql). This migration is 087.
 -- No recipe numbers are written here. Blank columns keep the old formula math.
 
 ALTER TABLE dough_types
