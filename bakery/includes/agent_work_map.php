@@ -838,6 +838,25 @@ function bakery_agent_work_map_core(): array
             'bugs' => [],
             'prompt' => null,
         ],
+        'daily-status' => [
+            'title' => 'Read-only daily operations JSON snapshot',
+            'aliases' => ['daily-status-json', 'monitoring-snapshot'],
+            'files' => [
+                'daily_status_api.php',
+                'includes/daily_status.php',
+            ],
+            'tests' => [
+                'tests/run_daily_status_tests.php',
+            ],
+            'invariants' => [
+                'GET only; never write from the snapshot',
+                'Reject anonymous requests with 401',
+                'Do not add a top-level page or nav item',
+                'Local/test DB only',
+            ],
+            'bugs' => [],
+            'prompt' => null,
+        ],
         'surface-hygiene' => [
             'title' => 'Deploy-surface hygiene: quarantine, archive, and root cleanup',
             'aliases' => ['quarantine', 'cleanup', 'root-cleanup'],
