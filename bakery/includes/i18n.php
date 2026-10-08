@@ -152,7 +152,7 @@ function bakery_i18n_catalog(): array {
 /**
  * Translate a key. Falls back to English, then the key itself.
  *
- * @param array<string, scalar|null> $params Placeholders like :name
+ * @param array<string, scalar|null> $params Placeholder names (`total` or `:total`)
  */
 function bakery_t(string $key, array $params = []): string {
     $catalog = bakery_i18n_catalog();
@@ -168,7 +168,11 @@ function bakery_t(string $key, array $params = []): string {
         $text = $key;
     }
     foreach ($params as $name => $value) {
-        $text = str_replace(':' . $name, (string)$value, $text);
+        $token = ltrim((string)$name, ':');
+        if ($token === '') {
+            continue;
+        }
+        $text = str_replace(':' . $token, (string)$value, $text);
     }
     return $text;
 }
