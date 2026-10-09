@@ -1512,23 +1512,11 @@ require_once 'includes/nav.php';
 @media (max-width: 720px) {
     .pack-page { padding: 8px 8px 20px; }
     .pack-toolbar__row { align-items: flex-start; flex-direction: column; }
-    .pack-line__qty { font-size: 1.1rem; min-width: 42px; padding: 8px 10px; }
     .pack-section__header { padding: 12px; }
     .pack-total-card__value { font-size: 1.35rem; }
 }
-
-@media print {
-    .bakery-nav, .pack-toolbar__actions, .pack-view-toggle, .pack-check,
-    .pack-session-note, .pack-date-form, .pack-day-shortcuts, .auth-bar,
-    footer, .pack-btn, .pack-all-form, .pack-produced-banner, .pack-count-board__actions, .pack-count-row-actions { display: none !important; }
-    .pack-page { max-width: none; padding: 0; }
-    .pack-toolbar { background: none; border: 0; padding: 0 0 8px; }
-    .pack-section, .pack-inventory-bar, .pack-totals, .pack-count-board { break-inside: avoid; }
-    .pack-line--checked { opacity: 1; }
-    .pack-line--checked .pack-line__label { text-decoration: none; }
-    .pack-section__header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
 </style>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/pack_list_print.css'); ?>">
 
 <main class="pack-page<?php echo $isBaker ? ' pack-page--baker' : ''; ?>" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
@@ -1899,6 +1887,7 @@ require_once 'includes/nav.php';
         </nav>
 
         <?php if ($viewMode === 'product'): ?>
+            <div class="pack-screen-view">
             <?php foreach ($byProduct as $product):
                 $pid = (int)$product['product_id'];
                 $required = (int)$product['total'];
@@ -1981,7 +1970,9 @@ require_once 'includes/nav.php';
                     </div>
                 </section>
             <?php endforeach; ?>
+            </div>
         <?php elseif ($viewMode === 'customer'): ?>
+            <div class="pack-screen-view">
             <?php foreach ($byCustomer as $customer):
                 $customerFocusId = (int)$customer['customer_id'];
                 $phoneFocusClass = ($isBaker && $packPhoneFocus['current'] !== null && (int)$packPhoneFocus['current'] === $customerFocusId) ? ' is-phone-focus' : '';
@@ -2025,16 +2016,19 @@ require_once 'includes/nav.php';
                     </div>
                 </section>
             <?php endforeach; ?>
-        <?php else: ?>
+            </div>
+        <?php endif; ?>
+            <div class="pack-routes<?php echo $viewMode === 'route' ? '' : ' pack-routes--print-only'; ?>">
             <?php foreach ($byRouteList as $route):
                 $isUnassigned = ((int)$route['driver_id'] === 0);
                 $stopCount = count($route['customers']);
                 $routeFocusId = (int)$route['driver_id'];
                 $phoneFocusClass = ($isBaker && $packPhoneFocus['current'] !== null && (int)$packPhoneFocus['current'] === $routeFocusId) ? ' is-phone-focus' : '';
             ?>
-                <section class="pack-section<?php echo $phoneFocusClass; ?>">
+                <section class="pack-section pack-route-sheet<?php echo $phoneFocusClass; ?>" id="pack-route-<?php echo (int)$route['driver_id']; ?>">
                     <header class="pack-section__header <?php echo $isUnassigned ? 'pack-section__header--unassigned' : 'pack-section__header--route'; ?>">
                         <div>
+                            <p class="pack-print-kicker"><?php echo htmlspecialchars($dateLabel, ENT_QUOTES, 'UTF-8'); ?></p>
                             <h2 class="pack-section__title"><?php echo htmlspecialchars($route['driver_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
                             <span class="pack-section__subtitle">
                                 <?php echo htmlspecialchars(bakery_t('pack_list.stops', ['count' => number_format($stopCount)]), ENT_QUOTES, 'UTF-8'); ?>
@@ -2057,6 +2051,11 @@ require_once 'includes/nav.php';
                         </div>
                     </header>
                     <div class="pack-section__body">
+                        <div class="pack-print-cols" aria-hidden="true">
+                            <span class="pack-print-cols__check"></span>
+                            <span class="pack-print-cols__item"><?php bakery_te('pack_list.product'); ?></span>
+                            <span class="pack-print-cols__qty"><?php bakery_te('common.quantity'); ?></span>
+                        </div>
                         <?php foreach (($route['product_totals'] ?? []) as $roll):
                             $rollPid = (int)$roll['product_id'];
                             $rollBreak = bakery_pack_count_breakdown($db, $rollPid, (int)$roll['quantity']);
@@ -2064,7 +2063,8 @@ require_once 'includes/nav.php';
                         ?>
                             <details class="pack-driver-product">
                                 <summary>
-                                    <div>
+                                    <span class="pack-print-box" aria-hidden="true"></span>
+                                    <div class="pack-driver-product__copy">
                                         <div class="pack-driver-product__name"><?php echo htmlspecialchars($roll['product_name'], ENT_QUOTES, 'UTF-8'); ?></div>
                                         <div class="pack-driver-product__hint"><?php echo htmlspecialchars(bakery_t('pack_list.expand_stores', ['count' => number_format(count($roll['stores']))]), ENT_QUOTES, 'UTF-8'); ?></div>
                                     </div>
@@ -2117,7 +2117,7 @@ require_once 'includes/nav.php';
                     </div>
                 </section>
             <?php endforeach; ?>
-        <?php endif; ?>
+            </div>
     <?php endif; ?>
 </main>
 
