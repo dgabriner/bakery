@@ -65,27 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $page_title = bakery_t('login.title');
 $currentLocale = bakery_locale();
-
-// Page-local copy until these keys move into lang/en.php and lang/es.php.
-$loginUiCatalog = [
-    'en' => [
-        'product' => 'Sour Flour OS',
-        'show' => 'Show',
-        'hide' => 'Hide',
-        'show_label' => 'Show sign in code',
-        'hide_label' => 'Hide sign in code',
-        'sign_in' => 'Sign in',
-    ],
-    'es' => [
-        'product' => 'Sour Flour OS',
-        'show' => 'Mostrar',
-        'hide' => 'Ocultar',
-        'show_label' => 'Mostrar código de acceso',
-        'hide_label' => 'Ocultar código de acceso',
-        'sign_in' => 'Entrar',
-    ],
-];
-$loginUi = $loginUiCatalog[$currentLocale] ?? $loginUiCatalog['en'];
+$loginUi = [];
+foreach (['product', 'show', 'hide', 'show_label', 'hide_label', 'sign_in'] as $loginUiKey) {
+    $loginUi[$loginUiKey] = bakery_t('login.' . $loginUiKey);
+}
 $codeDescribedBy = $error !== '' ? ' aria-invalid="true" aria-describedby="login-error"' : '';
 ?>
 <!DOCTYPE html>

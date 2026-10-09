@@ -89,28 +89,6 @@ if (!function_exists('bakery_production_echo_formula_items')) {
     }
 }
 
-if (!function_exists('bakery_production_ui_copy')) {
-    /**
-     * Page-local copy. Consolidate into lang/en.php and lang/es.php later.
-     */
-    function bakery_production_ui_copy(string $key): string {
-        $locale = function_exists('bakery_locale') && bakery_locale() === 'es' ? 'es' : 'en';
-        $copy = [
-            'en' => [
-                'empty_next' => 'Choose another delivery date above. Then record what you bake, or open the Pack List if this day is already packed.',
-                'empty_ops' => 'If this day should have a bake, check Daily Orders or commit the plan in Production Center.',
-                'formula_next' => 'Ask a manager to add a formula before you scale this mix.',
-            ],
-            'es' => [
-                'empty_next' => 'Elige otra fecha de entrega arriba. Luego anota lo que hornees, o abre la lista de empaque si este día ya está empacado.',
-                'empty_ops' => 'Si este día debe tener horneado, revisa Pedidos del día o confirma el plan en Centro de producción.',
-                'formula_next' => 'Pide a un gerente que agregue una fórmula antes de escalar esta mezcla.',
-            ],
-        ];
-        return $copy[$locale][$key] ?? $copy['en'][$key] ?? '';
-    }
-}
-
 if (!function_exists('bakery_production_column_head')) {
     /** Sticky labels for the count columns. Cards keep their own labels for screen readers. */
     function bakery_production_column_head(bool $isBaker, bool $planCommitted): void {
@@ -922,9 +900,9 @@ if (!empty($groupedData) && is_array($groupedData)) {
     <?php elseif (empty($groupedData)): ?>
         <div class="bp-empty" role="status">
             <h2 class="bp-empty__title"><?php bakery_te('production.no_scheduled'); ?></h2>
-            <p class="bp-empty__next"><?php echo htmlspecialchars(bakery_production_ui_copy('empty_next'), ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="bp-empty__next"><?php echo htmlspecialchars(bakery_t('production.empty_next'), ENT_QUOTES, 'UTF-8'); ?></p>
             <?php if (!$isBaker): ?>
-                <p class="bp-empty__next"><?php echo htmlspecialchars(bakery_production_ui_copy('empty_ops'), ENT_QUOTES, 'UTF-8'); ?></p>
+                <p class="bp-empty__next"><?php echo htmlspecialchars(bakery_t('production.empty_ops'), ENT_QUOTES, 'UTF-8'); ?></p>
             <?php endif; ?>
             <div class="bp-empty__actions">
                 <a class="bp-btn bp-btn--primary" href="#date"><?php bakery_te('production.bake_for_delivery'); ?></a>
@@ -1047,7 +1025,7 @@ if (!empty($groupedData) && is_array($groupedData)) {
                                     $isBaker
                                 );
                             else: ?>
-                                <p class="bp-mix-card__empty"><?php bakery_te('production.mix_no_formula'); ?> <?php echo htmlspecialchars(bakery_production_ui_copy('formula_next'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                <p class="bp-mix-card__empty"><?php bakery_te('production.mix_no_formula'); ?> <?php echo htmlspecialchars(bakery_t('production.formula_next'), ENT_QUOTES, 'UTF-8'); ?></p>
                             <?php endif; ?>
                             <a class="bp-mix-card__jump" href="#<?php echo htmlspecialchars($overviewKey, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.mix_work_this'); ?></a>
                         </article>

@@ -1,32 +1,16 @@
 /**
  * Standing Orders Manager editor aids.
- * Page-local copy (en/es) lives here so lang/en.php and lang/es.php stay untouched.
- * Consolidate these keys into the shared catalogs later:
- *   standing_orders.day_total
- *   standing_orders.unsaved
- *   standing_orders.saved
- *   standing_orders.save_failed
- *   standing_orders.leave_warning
+ * Copy arrives from standing_orders_manager.php as window.standingOrdersEditorCopy.
  */
 (function () {
-    var copy = {
-        en: {
-            dayTotal: 'Day total',
-            unsaved: 'Unsaved changes. They save on their own in a moment. Leaving now can drop them.',
-            saved: 'Saved. Standing order changes are stored.',
-            saveFailed: 'Save failed. Your changes are still on this page.',
-            leave: 'You have unsaved standing order changes. Leave this page anyway?'
-        },
-        es: {
-            dayTotal: 'Total del día',
-            unsaved: 'Cambios sin guardar. Se guardan solos en un momento. Si sales ahora, puedes perderlos.',
-            saved: 'Guardado. Los cambios del pedido fijo ya están almacenados.',
-            saveFailed: 'No se pudo guardar. Tus cambios siguen en esta página.',
-            leave: 'Hay cambios sin guardar en los pedidos fijos. ¿Salir de esta página de todos modos?'
-        }
+    var incoming = window.standingOrdersEditorCopy || {};
+    var t = {
+        dayTotal: incoming.dayTotal || '',
+        unsaved: incoming.unsaved || '',
+        saved: incoming.saved || '',
+        saveFailed: incoming.saveFailed || '',
+        leave: incoming.leave || ''
     };
-    var lang = (document.documentElement.lang || 'en').toLowerCase().indexOf('es') === 0 ? 'es' : 'en';
-    var t = copy[lang];
     var allowLeave = false;
     var saveTimer = 0;
 

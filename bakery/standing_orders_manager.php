@@ -28,6 +28,15 @@ require_once 'includes/header.php';
 require_once 'includes/nav.php';
 ?>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_orders_manager.css'); ?>">
+<script>
+window.standingOrdersEditorCopy = <?php echo json_encode([
+    'dayTotal' => bakery_t('standing_orders.day_total'),
+    'unsaved' => bakery_t('standing_orders.unsaved'),
+    'saved' => bakery_t('standing_orders.saved'),
+    'saveFailed' => bakery_t('standing_orders.save_failed'),
+    'leave' => bakery_t('standing_orders.leave_warning'),
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
 <script src="<?php echo bakery_asset_href('includes/standing_orders_editor.js'); ?>"></script>
 <?php
 
@@ -260,8 +269,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
     return $days !== [] ? $days : $allWeekDays;
 };
 
-// First-paint label. The editor script replaces this from its page-local en/es table.
-$somDayTotalLabel = (function_exists('bakery_locale') && bakery_locale() === 'es') ? 'Total del día' : 'Day total';
+$somDayTotalLabel = bakery_t('standing_orders.day_total');
 
 /**
  * Day column sums for one customer grid. Row totals stay on each product row.

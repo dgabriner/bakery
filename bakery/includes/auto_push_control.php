@@ -144,30 +144,29 @@ function bakery_auto_push_proc_open_available() {
 }
 
 /**
- * Page-local copy so this local-only widget can fail quietly without editing
- * lang/en.php or lang/es.php. Consolidate into those catalogs later.
+ * Quiet-fail status copy from lang/en.php and lang/es.php.
+ * Loads the catalog directly so a control script that does not boot i18n
+ * still returns the same sentences.
  */
 function bakery_auto_push_local_message($key, $locale = null) {
     if ($locale === null) {
         $locale = function_exists('bakery_locale') ? (string)bakery_locale() : 'en';
     }
     $locale = $locale === 'es' ? 'es' : 'en';
-    $messages = [
-        'en' => [
-            'powershell_missing' => 'PowerShell not found',
-            'control_unavailable' => 'Auto-push control is unavailable',
-            'status_unavailable' => 'Could not load sync status',
-        ],
-        'es' => [
-            'powershell_missing' => 'No se encontró PowerShell',
-            'control_unavailable' => 'El control de auto-envío no está disponible',
-            'status_unavailable' => 'No se pudo cargar el estado de sincronización',
-        ],
-    ];
-    if (!isset($messages[$locale][$key])) {
-        return $messages['en'][$key] ?? '';
+    $catalogKey = 'auto_push.' . $key;
+    $read = static function ($lang) {
+        $file = dirname(__DIR__) . '/lang/' . $lang . '.php';
+        if (!is_file($file)) {
+            return [];
+        }
+        $catalog = require $file;
+        return is_array($catalog) ? $catalog : [];
+    };
+    $text = (string)($read($locale)[$catalogKey] ?? '');
+    if ($text === '' && $locale !== 'en') {
+        $text = (string)($read('en')[$catalogKey] ?? '');
     }
-    return $messages[$locale][$key];
+    return $text;
 }
 
 function bakery_auto_push_is_runnable($path) {

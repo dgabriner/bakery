@@ -11,15 +11,12 @@
   var syncBtn = document.getElementById('auto-push-sync');
   var statusEl = document.getElementById('auto-push-status');
   var busy = false;
-  var statusCopy = {
-    en: { unavailable: 'Could not load sync status' },
-    es: { unavailable: 'No se pudo cargar el estado de sincronización' }
-  };
 
   function copy(key) {
-    var locale = window.__BAKERY_LOCALE__ === 'es' ? 'es' : 'en';
-    var pack = statusCopy[locale] || statusCopy.en;
-    return pack[key] || statusCopy.en[key] || '';
+    if (key === 'unavailable') {
+      return root.getAttribute('data-status-unavailable') || '';
+    }
+    return '';
   }
 
   function plainStatus(text) {

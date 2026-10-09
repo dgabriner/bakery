@@ -136,18 +136,14 @@ if (!$survey && $token === '') {
 }
 
 /**
- * Page-local titles until lang/en.php and lang/es.php can take them.
  * Reuses survey.hub_title when the sell day is literally tomorrow, and
- * day.monday through day.sunday for any later weekday.
+ * survey.hub_day_title plus day.monday through day.sunday for any later weekday.
  */
 function bakery_survey_hub_page_title(string $today, string $sellDate): string
 {
-    $tomorrowTitle = (string)bakery_t('survey.hub_title', [], 'Tomorrow’s route surveys');
+    $tomorrowTitle = (string)bakery_t('survey.hub_title');
     $locale = function_exists('bakery_locale') && bakery_locale() === 'es' ? 'es' : 'en';
-    $templates = [
-        'en' => ':day route surveys',
-        'es' => 'Encuestas de ruta del :day',
-    ];
+    $template = (string)bakery_t('survey.hub_day_title');
     $names = function_exists('bakery_day_names') ? bakery_day_names() : [];
     if ($locale === 'es') {
         foreach ($names as $key => $name) {
@@ -156,7 +152,7 @@ function bakery_survey_hub_page_title(string $today, string $sellDate): string
                 : strtolower((string)$name);
         }
     }
-    return bakery_survey_hub_title_text($today, $sellDate, $tomorrowTitle, $names, $templates[$locale]);
+    return bakery_survey_hub_title_text($today, $sellDate, $tomorrowTitle, $names, $template);
 }
 
 function bakery_survey_fail(string $title, string $message): void

@@ -177,67 +177,16 @@ if (isset($_GET['success'])) {
 $zonesCatalog = bakery_zones_catalog($db);
 $zones = array_column($zonesCatalog, 'name');
 
-// Page-local copy. Consolidate into lang/en.php and lang/es.php later.
-$customersListLocale = function_exists('bakery_locale') && bakery_locale() === 'es' ? 'es' : 'en';
-$customersListCopy = [
-    'en' => [
-        'filters' => 'Filters',
-        'active' => 'Active',
-        'inactive' => 'Inactive',
-        'cod' => 'COD',
-        'balance' => 'Has balance',
-        'name' => 'Name',
-        'email' => 'Email',
-        'phone' => 'Phone',
-        'address' => 'Address',
-        'zone' => 'Zone',
-        'deliver_by' => 'Deliver By',
-        'deliver_after' => 'Deliver After',
-        'price' => 'Pan Dulce Price',
-        'actions' => 'Actions',
-        'sort_name' => 'Sort by Name',
-        'sort_email' => 'Sort by Email',
-        'sort_phone' => 'Sort by Phone',
-        'sort_address' => 'Sort by Address',
-        'sort_zone' => 'Sort by Zone',
-        'sort_deliver_by' => 'Sort by Deliver By',
-        'sort_deliver_after' => 'Sort by Deliver After',
-        'sort_price' => 'Sort by Pan Dulce Price',
-        'empty' => 'No customers match',
-        'hint_idle' => 'Type to filter. Enter opens the first match',
-        'hint_one' => '1 match. Enter opens their hub',
-        'hint_many' => ':count matches. Enter opens the first',
-    ],
-    'es' => [
-        'filters' => 'Filtros',
-        'active' => 'Activo',
-        'inactive' => 'Inactivo',
-        'cod' => 'COD',
-        'balance' => 'Con saldo',
-        'name' => 'Nombre',
-        'email' => 'Correo',
-        'phone' => 'Teléfono',
-        'address' => 'Dirección',
-        'zone' => 'Zona',
-        'deliver_by' => 'Entregar antes de',
-        'deliver_after' => 'Entregar después de',
-        'price' => 'Precio pan dulce',
-        'actions' => 'Acciones',
-        'sort_name' => 'Ordenar por nombre',
-        'sort_email' => 'Ordenar por correo',
-        'sort_phone' => 'Ordenar por teléfono',
-        'sort_address' => 'Ordenar por dirección',
-        'sort_zone' => 'Ordenar por zona',
-        'sort_deliver_by' => 'Ordenar por entregar antes de',
-        'sort_deliver_after' => 'Ordenar por entregar después de',
-        'sort_price' => 'Ordenar por precio pan dulce',
-        'empty' => 'Ningún cliente coincide',
-        'hint_idle' => 'Escribe para filtrar. Enter abre la primera coincidencia',
-        'hint_one' => '1 coincidencia. Enter abre su ficha',
-        'hint_many' => ':count coincidencias. Enter abre la primera',
-    ],
-];
-$customersUi = $customersListCopy[$customersListLocale];
+$customersUi = [];
+foreach ([
+    'filters', 'active', 'inactive', 'cod', 'balance', 'name', 'email', 'phone',
+    'address', 'zone', 'deliver_by', 'deliver_after', 'price', 'actions',
+    'sort_name', 'sort_email', 'sort_phone', 'sort_address', 'sort_zone',
+    'sort_deliver_by', 'sort_deliver_after', 'sort_price', 'empty',
+    'hint_idle', 'hint_one', 'hint_many',
+] as $customersListKey) {
+    $customersUi[$customersListKey] = bakery_t('customers_list.' . $customersListKey);
+}
 
 $customerBalances = [];
 try {
