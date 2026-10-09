@@ -4513,4 +4513,14 @@ return [
     'account_health.csv_share_delivered' => 'Unidades entregadas, últimas 4 semanas',
     'account_health.csv_share_ordered' => 'Unidades pedidas, últimas 4 semanas',
     'account_health.balance_age' => 'el más antiguo :days d',
+
+    // no_charge — líneas en $0 explícitas que se conservan al confirmar. Mantener este bloque junto.
+    'no_charge.label' => 'Sin cargo',
+    'no_charge.mark' => 'Sin cargo',
+    'no_charge.reason' => 'Motivo',
+    'no_charge.reason.none' => 'Sin motivo',
+    'no_charge.reason.comp' => 'Cortesía',
+    'no_charge.reason.sample' => 'Muestra',
+    'no_charge.reason.replacement' => 'Reposición',
+    'no_charge.reason.donation' => 'Donación',
 ];

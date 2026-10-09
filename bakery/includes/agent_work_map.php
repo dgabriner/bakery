@@ -148,11 +148,15 @@ function bakery_agent_work_map_core(): array
                 'complete_delivery.php',
                 'includes/product_inventory.php',
                 'route_closeout.php',
+                'billing_export.php',
+                'includes/invoice_document.php',
+                'database/schema/088_order_line_no_charge.sql',
             ],
             'tests' => [
                 'tests/run_credit_return_tests.php',
                 'tests/run_golden_day_qa.php',
                 'tests/run_delivery_pan_dulce_price_tests.php',
+                'tests/run_zero_price_confirm_tests.php',
             ],
             'invariants' => [
                 'Delivery confirmation creates the billable snapshot',

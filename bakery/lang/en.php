@@ -4516,4 +4516,14 @@ return [
     'account_health.csv_share_delivered' => 'Delivered units, last 4 weeks',
     'account_health.csv_share_ordered' => 'Ordered units, last 4 weeks',
     'account_health.balance_age' => 'oldest :days d',
+
+    // no_charge — explicit $0 lines kept at confirm. Keep this block together.
+    'no_charge.label' => 'No charge',
+    'no_charge.mark' => 'No charge',
+    'no_charge.reason' => 'Reason',
+    'no_charge.reason.none' => 'No reason given',
+    'no_charge.reason.comp' => 'Comp',
+    'no_charge.reason.sample' => 'Sample',
+    'no_charge.reason.replacement' => 'Replacement',
+    'no_charge.reason.donation' => 'Donation',
 ];
