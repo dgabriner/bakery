@@ -24,7 +24,95 @@ require_once __DIR__ . '/includes/customer_portal.php';
 require_once __DIR__ . '/includes/client_request_id.php';
 require_once __DIR__ . '/includes/daily_orders_actions.php';
 
+/**
+ * Browser navigation (GET/HEAD) should not dump the JSON API.
+ * Real delivery calls are POST and stay JSON.
+ *
+ * @param array<string, mixed> $query
+ * @return array{kind:'redirect', location:string}|array{kind:'page', title:string, body:string, href:string, link:string}
+ */
+function bakery_complete_delivery_browser_get_plan(PDO $db, array $query): array
+{
+    $base = defined('BASE_URL') ? BASE_URL : '';
+    $orderId = (int)($query['order_id'] ?? $query['daily_order_id'] ?? 0);
+    if ($orderId > 0 && function_exists('table_exists') && table_exists($db, 'daily_orders')) {
+        $stmt = $db->prepare('SELECT order_date FROM daily_orders WHERE id = ?');
+        $stmt->execute([$orderId]);
+        $date = $stmt->fetchColumn();
+        if (is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return [
+                'kind' => 'redirect',
+                'location' => $base . 'driver.php?date=' . rawurlencode($date),
+            ];
+        }
+    }
+    $missing = $orderId > 0;
+    return [
+        'kind' => 'page',
+        'title' => bakery_t('ux.delivery_get.title'),
+        'body' => bakery_t($missing ? 'ux.delivery_get.missing' : 'ux.delivery_get.body'),
+        'href' => $base . 'driver.php',
+        'link' => bakery_t('ux.delivery_get.link'),
+    ];
+}
+
+function bakery_complete_delivery_render_get_page(array $plan): void
+{
+    $page_title = (string)($plan['title'] ?? '');
+    require __DIR__ . '/includes/header.php';
+    require __DIR__ . '/includes/nav.php';
+    echo '<main class="container" style="max-width:40rem;padding:1.5rem 1rem 2rem">';
+    echo '<h1>' . htmlspecialchars((string)$plan['title'], ENT_QUOTES, 'UTF-8') . '</h1>';
+    echo '<p>' . htmlspecialchars((string)$plan['body'], ENT_QUOTES, 'UTF-8') . '</p>';
+    echo '<p><a class="btn btn-primary" href="' . htmlspecialchars((string)$plan['href'], ENT_QUOTES, 'UTF-8') . '">';
+    echo htmlspecialchars((string)$plan['link'], ENT_QUOTES, 'UTF-8') . '</a></p>';
+    echo '</main>';
+    require __DIR__ . '/includes/footer.php';
+}
+
+/** Stable English label stored on the order. The confirm step translates it. */
+function bakery_delivery_pricing_label_code(bool $hasStorePrice, bool $hasStandardPrice, bool $hasPanDulce): string
+{
+    if ($hasStorePrice && $hasStandardPrice) {
+        return 'Mixed Pan Dulce pricing';
+    }
+    if ($hasStorePrice) {
+        return 'Store price';
+    }
+    if ($hasPanDulce || $hasStandardPrice) {
+        return 'Standard price';
+    }
+    return 'Order pricing';
+}
+
+/** Translate the stable pricing labels shown on the confirm step. */
+function bakery_delivery_pricing_label_display(string $label): string
+{
+    $map = [
+        'Mixed Pan Dulce pricing' => 'ux.pricing.mixed',
+        'Store price' => 'ux.pricing.store',
+        'Standard price' => 'ux.pricing.standard',
+        'Order pricing' => 'ux.pricing.order',
+        'Driver-entered price' => 'ux.pricing.driver',
+    ];
+    if (!isset($map[$label]) || !function_exists('bakery_t')) {
+        return $label;
+    }
+    return bakery_t($map[$label]);
+}
+
 if (PHP_SAPI !== 'cli') {
+    $browserMethod = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if ($browserMethod === 'GET' || $browserMethod === 'HEAD') {
+        $browserDb = check_mysql_connection();
+        $browserPlan = bakery_complete_delivery_browser_get_plan($browserDb, $_GET);
+        if ($browserPlan['kind'] === 'redirect') {
+            header('Location: ' . $browserPlan['location']);
+            exit;
+        }
+        bakery_complete_delivery_render_get_page($browserPlan);
+        exit;
+    }
     header('Content-Type: application/json');
     error_reporting(0);
     ini_set('display_errors', 0);
@@ -374,15 +462,7 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
 
     $pricingLabel = (string)($order['delivery_pricing_label'] ?? '');
     if ($pricingLabel === '') {
-        if ($hasStorePrice && $hasStandardPrice) {
-            $pricingLabel = 'Mixed Pan Dulce pricing';
-        } elseif ($hasStorePrice) {
-            $pricingLabel = 'Store price';
-        } elseif ($hasPanDulce || $hasStandardPrice) {
-            $pricingLabel = 'Standard price';
-        } else {
-            $pricingLabel = 'Order pricing';
-        }
+        $pricingLabel = bakery_delivery_pricing_label_code($hasStorePrice, $hasStandardPrice, $hasPanDulce);
     }
 
     // Until a delivery is confirmed, item lines are the source of truth. This
@@ -602,7 +682,7 @@ function bakery_delivery_summary(PDO $db, int $dailyOrderId): array {
         'ordered_pieces' => $invoice['ordered_pieces'],
         'order_total' => $invoice['order_total'],
         'average_price' => $invoice['average_price'],
-        'pricing_label' => $invoice['pricing_label'],
+        'pricing_label' => bakery_delivery_pricing_label_display((string)$invoice['pricing_label']),
         'pricing_missing' => bakery_delivery_pricing_missing($invoice),
     ];
 }
@@ -936,7 +1016,7 @@ try {
                     'price_per_piece' => $invoice['average_price'],
                     'order_total' => $invoice['order_total'],
                     'total' => (float)$invoice['order']['total_amount'],
-                    'pricing_label' => $invoice['pricing_label'],
+                    'pricing_label' => bakery_delivery_pricing_label_display((string)$invoice['pricing_label']),
                     'confirmed_at' => $invoice['order']['delivery_confirmed_at'],
                     'items' => $invoice['items'],
                 ],
