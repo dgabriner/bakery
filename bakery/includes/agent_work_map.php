@@ -413,6 +413,7 @@ function bakery_agent_work_map_core(): array
                 'database/schema/071_bread_education_purchase_home.sql',
                 'database/schema/072_first_loaf_kit.sql',
                 'database/schema/073_starter_price_upgrade.sql',
+                'database/schema/086_checkout_idempotency.sql',
                 'breadeducation/index.html',
                 'breadeducation/js/gtag.js',
                 'breadeducation/start/first-loaf-shopping.html',

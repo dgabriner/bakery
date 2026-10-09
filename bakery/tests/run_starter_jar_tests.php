@@ -260,5 +260,63 @@ $assert($kitOrder && (string)$kitOrder['pack_kind'] === 'first_loaf_kit', 'kit p
 $kitPurchase = bakery_sfb_purchase($db, $buyKit['purchase_id']);
 $assert((int)$kitPurchase['price_cents_snapshot'] === 7500, 'kit price snapshot $75');
 
+$kept = bakery_sfb_starter_jar_normalize_draft([
+    'fulfillment' => 'pickup',
+    'pickup_day' => 'tuesday',
+    'contact_name' => 'Starter Buyer',
+    'checkout_key' => 'pickupkey12345678',
+]);
+$assert(($kept['checkout_key'] ?? '') === 'pickupkey12345678', 'starter draft keeps the checkout key');
+
+$checkoutMigration = dirname(__DIR__) . '/database/schema/086_checkout_idempotency.sql';
+if (!column_exists($db, 'sfb_offering_purchases', 'checkout_key') && is_file($checkoutMigration)) {
+    $migrationSql = (string)file_get_contents($checkoutMigration);
+    foreach (array_filter(array_map('trim', explode(';', $migrationSql))) as $migrationStmt) {
+        $migrationLines = [];
+        foreach (preg_split("/\r\n|\n|\r/", $migrationStmt) as $migrationLine) {
+            $migrationTrim = trim($migrationLine);
+            if ($migrationTrim === '' || strpos($migrationTrim, '--') === 0) {
+                continue;
+            }
+            $migrationLines[] = $migrationLine;
+        }
+        $migrationStmt = trim(implode("\n", $migrationLines));
+        if ($migrationStmt === '') {
+            continue;
+        }
+        $db->exec($migrationStmt);
+    }
+    bakery_forget_column_exists('sfb_offering_purchases', 'checkout_key');
+}
+$assert(column_exists($db, 'sfb_offering_purchases', 'checkout_key'), '086 checkout key column exists for starter pickup');
+
+$jarOrdersBefore = (int)$db->query('SELECT COUNT(*) FROM sfb_starter_jar_orders WHERE customer_id = ' . (int)$customerId)->fetchColumn();
+$pickupReplayDraft = $pickupDraft;
+$pickupReplayDraft['checkout_key'] = 'starter' . bin2hex(random_bytes(8));
+$jarCalls = [];
+$GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null) use (&$jarCalls): array {
+    if ($method !== 'POST' || $path !== '/v2/online-checkout/payment-links') {
+        throw new RuntimeException('refusing unexpected Square call ' . $method . ' ' . $path);
+    }
+    $jarCalls[] = (string)($body['idempotency_key'] ?? '');
+    $n = count($jarCalls);
+    return ['payment_link' => [
+        'id' => 'PL-JAR-ONCE-' . $n,
+        'url' => 'https://sandbox.square.link/u/jar-once-' . $n,
+        'order_id' => 'ORDER-JAR-ONCE-' . $n,
+    ]];
+};
+$pickupOnce = bakery_sfb_buy_starter_jar($db, $customerId, $pickupReplayDraft);
+$pickupTwice = bakery_sfb_buy_starter_jar($db, $customerId, $pickupReplayDraft);
+unset($GLOBALS['bakery_square_api_handler']);
+$jarOrdersAfter = (int)$db->query('SELECT COUNT(*) FROM sfb_starter_jar_orders WHERE customer_id = ' . (int)$customerId)->fetchColumn();
+$assert((int)$pickupOnce['purchase_id'] === (int)$pickupTwice['purchase_id'], 'same starter click reuses one purchase');
+$assert($jarOrdersAfter === $jarOrdersBefore + 1, 'same starter click stores one jar order');
+$assert(count($jarCalls) === 1 && $jarCalls[0] !== '', 'same starter click creates one Square payment link');
+$assert((string)($pickupTwice['url'] ?? '') === 'https://sandbox.square.link/u/jar-once-1', 'starter replay returns the original checkout url');
+
+$starterSrc = (string)file_get_contents(dirname(__DIR__) . '/starter.php');
+$assert(strpos($starterSrc, 'data-checkout-once') !== false, 'starter pay button locks after the first click');
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);
