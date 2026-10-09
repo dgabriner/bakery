@@ -268,7 +268,7 @@ $kept = bakery_sfb_starter_jar_normalize_draft([
 ]);
 $assert(($kept['checkout_key'] ?? '') === 'pickupkey12345678', 'starter draft keeps the checkout key');
 
-$checkoutMigration = dirname(__DIR__) . '/database/schema/086_checkout_idempotency.sql';
+$checkoutMigration = dirname(__DIR__) . '/database/schema/089_checkout_idempotency.sql';
 if (!column_exists($db, 'sfb_offering_purchases', 'checkout_key') && is_file($checkoutMigration)) {
     $migrationSql = (string)file_get_contents($checkoutMigration);
     foreach (array_filter(array_map('trim', explode(';', $migrationSql))) as $migrationStmt) {
@@ -288,7 +288,7 @@ if (!column_exists($db, 'sfb_offering_purchases', 'checkout_key') && is_file($ch
     }
     bakery_forget_column_exists('sfb_offering_purchases', 'checkout_key');
 }
-$assert(column_exists($db, 'sfb_offering_purchases', 'checkout_key'), '086 checkout key column exists for starter pickup');
+$assert(column_exists($db, 'sfb_offering_purchases', 'checkout_key'), '089 checkout key column exists for starter pickup');
 
 $jarOrdersBefore = (int)$db->query('SELECT COUNT(*) FROM sfb_starter_jar_orders WHERE customer_id = ' . (int)$customerId)->fetchColumn();
 $pickupReplayDraft = $pickupDraft;

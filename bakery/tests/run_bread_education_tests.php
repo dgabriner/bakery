@@ -622,9 +622,9 @@ try {
         echo "NOTE  [skip] gating column not applied; migration 068 lifecycle asserts skipped\n";
     }
 
-    // ---- Double-submit: one click, one Square draft (086) ------------------------
+    // ---- Double-submit: one click, one Square draft (089) ------------------------
     // Local bakerysf_test only. Square is mocked; this block must not call the network.
-    $checkoutMigration = dirname(__DIR__) . '/database/schema/086_checkout_idempotency.sql';
+    $checkoutMigration = dirname(__DIR__) . '/database/schema/089_checkout_idempotency.sql';
     if (!column_exists($db, 'sfb_offering_purchases', 'checkout_key') && is_file($checkoutMigration)) {
         $migrationSql = (string)file_get_contents($checkoutMigration);
         foreach (array_filter(array_map('trim', explode(';', $migrationSql))) as $migrationStmt) {
@@ -646,7 +646,7 @@ try {
     }
     $assert(
         column_exists($db, 'sfb_offering_purchases', 'checkout_key'),
-        '086 adds sfb_offering_purchases.checkout_key'
+        '089 adds sfb_offering_purchases.checkout_key'
     );
 
     $donateKey = 'donate' . bin2hex(random_bytes(8));
