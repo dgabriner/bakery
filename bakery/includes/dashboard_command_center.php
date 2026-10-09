@@ -392,12 +392,10 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $invRows[(int)$row['product_id']] = $row;
             }
 
+            $coverage = bakery_inventory_finished_goods_coverage($db, $date, $productIds, $invRows);
             foreach ($requiredByProduct as $productId => $required) {
-                $inv = $invRows[$productId] ?? null;
-                $stock = $inv
-                    ? ((int)$inv['available_quantity'] + (int)$inv['loaded_quantity'])
-                    : 0;
-                if ($required > $stock) {
+                $covered = $coverage[(int)$productId] ?? 0;
+                if ((int)$required > $covered) {
                     $shortProducts++;
                 }
             }
@@ -412,7 +410,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'title' => 'Finished-goods shortfall',
                     'detail' => $shortProducts . ' product'
                         . ($shortProducts === 1 ? '' : 's')
-                        . ' have less available+loaded stock than committed demand.',
+                        . ' have less on-hand or already-delivered stock than committed demand.',
                     'count' => $shortProducts,
                     'href' => bakery_ops_link_inventory($date, ['attention' => 'shortfall']),
                     'action' => 'Open Finished Goods',

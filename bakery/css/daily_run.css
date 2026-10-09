@@ -375,6 +375,43 @@
     color: var(--sf-text);
 }
 
+.dr-unrouted-standing {
+    margin: 0 0 var(--sf-space-4);
+    padding: var(--sf-space-4);
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: var(--sf-radius-lg);
+    color: #9a3412;
+}
+
+.dr-unrouted-standing h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+}
+
+.dr-unrouted-standing p {
+    margin: 0 0 0.75rem;
+}
+
+.dr-unrouted-standing ul {
+    margin: 0 0 0.75rem;
+    padding-left: 1.2rem;
+}
+
+.dr-unrouted-standing li {
+    margin: 0.2rem 0;
+}
+
+.dr-unrouted-standing li span {
+    display: block;
+    color: #7c2d12;
+    font-size: 0.92rem;
+}
+
+.dr-unrouted-standing a {
+    font-weight: 700;
+}
+
 @media (max-width: 720px) {
     .dr-hero {
         grid-template-columns: 1fr;

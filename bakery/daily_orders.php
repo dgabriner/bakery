@@ -1013,7 +1013,44 @@ $summary = $demandSummaryAll['summary'];
                                                         <strong><?= (int)$item['delivered_quantity'] ?></strong>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td>$<?= number_format($item['unit_price'], 2) ?></td>
+                                                <td>
+                                                    <?php
+                                                        $lineNoCharge = function_exists('bakery_order_line_is_no_charge') && bakery_order_line_is_no_charge($item);
+                                                        $lineReason = (string)($item['no_charge_reason'] ?? '');
+                                                        $canMarkNoCharge = function_exists('bakery_order_line_no_charge_ready')
+                                                            && bakery_order_line_no_charge_ready($db)
+                                                            && empty($order['delivery_confirmed_at']);
+                                                    ?>
+                                                    <?php if ($lineNoCharge): ?>
+                                                        <span class="source-tag"><?= htmlspecialchars(bakery_t('no_charge.label')) ?></span>
+                                                        $0.00
+                                                    <?php else: ?>
+                                                        $<?= number_format((float)$item['unit_price'], 2) ?>
+                                                    <?php endif; ?>
+                                                    <?php if ($canMarkNoCharge): ?>
+                                                        <div class="source-tag">
+                                                            <label>
+                                                                <input type="checkbox"
+                                                                       id="noChargeFlag<?= (int)$item['id'] ?>"
+                                                                       <?= $lineNoCharge ? 'checked' : '' ?>
+                                                                       onchange="setLineNoCharge(<?= (int)$item['id'] ?>, this.checked, document.getElementById('noChargeReason<?= (int)$item['id'] ?>').value, <?= $isAdvanced ? 'true' : 'false' ?>)">
+                                                                <?= htmlspecialchars(bakery_t('no_charge.mark')) ?>
+                                                            </label>
+                                                            <select id="noChargeReason<?= (int)$item['id'] ?>"
+                                                                    aria-label="<?= htmlspecialchars(bakery_t('no_charge.reason')) ?>"
+                                                                    onchange="setLineNoCharge(<?= (int)$item['id'] ?>, document.getElementById('noChargeFlag<?= (int)$item['id'] ?>').checked, this.value, <?= $isAdvanced ? 'true' : 'false' ?>)">
+                                                                <option value=""><?= htmlspecialchars(bakery_t('no_charge.reason.none')) ?></option>
+                                                                <?php foreach (bakery_no_charge_reasons() as $reasonCode): ?>
+                                                                    <option value="<?= htmlspecialchars($reasonCode) ?>" <?= $lineReason === $reasonCode ? 'selected' : '' ?>>
+                                                                        <?= htmlspecialchars(bakery_t('no_charge.reason.' . $reasonCode)) ?>
+                                                                    </option>
+                                                                <?php endforeach; ?>
+                                                            </select>
+                                                        </div>
+                                                    <?php elseif ($lineNoCharge && $lineReason !== ''): ?>
+                                                        <div class="source-tag"><?= htmlspecialchars(bakery_t('no_charge.reason.' . $lineReason)) ?></div>
+                                                    <?php endif; ?>
+                                                </td>
                                                 <td>$<?= number_format($item['line_total'], 2) ?></td>
                                                 <td>
                                                     <button class="btn btn-small btn-danger" 
@@ -2210,6 +2247,37 @@ function confirmAdvancedEdit(isAdvanced) {
         'This dated order already appears progressed in production or delivery.\n\n' +
         'Changing it updates demand for ' + selectedOrderDate + ' only (not standing).\n\nContinue?'
     );
+}
+
+function setLineNoCharge(itemId, checked, reason, isAdvanced) {
+    if (!confirmAdvancedEdit(!!isAdvanced)) {
+        location.reload();
+        return;
+    }
+    const body = new URLSearchParams({
+        action: 'set_no_charge',
+        item_id: String(itemId),
+        is_no_charge: checked ? '1' : '0',
+        no_charge_reason: reason || ''
+    });
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unable to update no-charge'));
+            location.reload();
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+        location.reload();
+    });
 }
 
 function updateQuantity(itemId, quantity, isAdvanced) {

@@ -312,6 +312,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
                 $customer['paused'] = true;
             }
         }
+        $customer['on_standing_route'] = isset($standingRouteByCustomer[$cid]);
         $customer['state'] = bakery_demand_review_classify_customer($customer);
         $customer['diff_lines'] = bakery_demand_review_diff_lines($customer['line_map']);
         $customer['standing_units'] = 0;
@@ -559,6 +560,10 @@ function bakery_demand_review_classify_customer(array $customer) {
                 $hasItems = true;
                 break;
             }
+        }
+        // A standing-route visit with nothing to bake is not missing demand.
+        if (!$hasItems && !empty($customer['on_standing_route'])) {
+            return 'matches';
         }
         return $hasItems ? 'one_off' : 'empty_daily';
     }

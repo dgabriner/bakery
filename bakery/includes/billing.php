@@ -89,6 +89,24 @@ function bakery_billing_attention_meta() {
     ];
 }
 
+function bakery_billing_line_no_charge_label(array $line): string
+{
+    if ((int)($line['is_no_charge'] ?? 0) !== 1) {
+        return '';
+    }
+    $label = function_exists('bakery_t') ? bakery_t('no_charge.label') : 'No charge';
+    $reason = strtolower(trim((string)($line['no_charge_reason'] ?? '')));
+    if ($reason === '') {
+        return $label;
+    }
+    $key = 'no_charge.reason.' . $reason;
+    $reasonLabel = function_exists('bakery_t') ? bakery_t($key) : $reason;
+    if ($reasonLabel === $key) {
+        $reasonLabel = $reason;
+    }
+    return $label . ' (' . $reasonLabel . ')';
+}
+
 /**
  * Classify a delivery for manager billing / reconciliation.
  *
@@ -130,7 +148,11 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
             }
         }
 
-        if ($ordered > 0 && $unitPrice <= 0) {
+        $isNoCharge = (int)($item['is_no_charge'] ?? 0) === 1;
+        $noChargeReason = isset($item['no_charge_reason']) && $item['no_charge_reason'] !== ''
+            ? (string)$item['no_charge_reason']
+            : null;
+        if ($ordered > 0 && $unitPrice <= 0 && !$isNoCharge) {
             $missingLinePrice = true;
         }
 
@@ -144,7 +166,13 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
             'variance' => $variance,
             'unit_price' => $unitPrice,
             'line_total' => $lineTotal,
-            'has_price' => $unitPrice > 0,
+            'has_price' => $unitPrice > 0 || $isNoCharge,
+            'is_no_charge' => $isNoCharge ? 1 : 0,
+            'no_charge_reason' => $isNoCharge ? $noChargeReason : null,
+            'no_charge_label' => $isNoCharge ? bakery_billing_line_no_charge_label([
+                'is_no_charge' => 1,
+                'no_charge_reason' => $noChargeReason,
+            ]) : '',
             'is_match' => $variance === null || $variance === 0,
         ];
     }
@@ -448,9 +476,13 @@ function bakery_billing_load_items(PDO $db, array $orderIds) {
         return $itemsByOrder;
     }
     $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $noChargeSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_no_charge')
+        ? 'doi.is_no_charge, doi.no_charge_reason,'
+        : '0 AS is_no_charge, NULL AS no_charge_reason,';
     $itemStmt = $db->prepare(
         "SELECT doi.daily_order_id, doi.id AS item_id, doi.product_id, doi.quantity,
                 doi.delivered_quantity, doi.unit_price, doi.line_total,
+                {$noChargeSelect}
                 p.name AS product_name, pl.name AS product_line_name
          FROM daily_order_items doi
          JOIN products p ON p.id = doi.product_id
@@ -872,12 +904,58 @@ function bakery_billing_statement_data(PDO $db, $customerId, $startDate, $endDat
 }
 
 /**
+ * True when both ends are real calendar dates (YYYY-MM-DD).
+ *
+ * @return array{ok:bool,start:string,end:string}
+ */
+function bakery_billing_export_normalize_range(string $startDate, string $endDate): array {
+    $valid = static function (string $value): bool {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+            return false;
+        }
+        $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $dt instanceof DateTimeImmutable && $dt->format('Y-m-d') === $value;
+    };
+    $startDate = trim($startDate);
+    $endDate = trim($endDate);
+    if (!$valid($startDate) || !$valid($endDate)) {
+        return ['ok' => false, 'start' => $startDate, 'end' => $endDate];
+    }
+    return ['ok' => true, 'start' => $startDate, 'end' => $endDate];
+}
+
+/**
  * Deterministic accounting export rows (one row per line item).
+ *
+ * Zero-dollar lines stay in the file so the row count matches order lines.
+ * An invalid or empty-looking date range returns no rows instead of throwing.
  *
  * @param array<string, mixed> $filters
  * @return array<int, array<string, scalar|null>>
  */
 function bakery_billing_export_rows(PDO $db, array $filters) {
+    $range = bakery_billing_export_normalize_range(
+        (string)($filters['start_date'] ?? ''),
+        (string)($filters['end_date'] ?? '')
+    );
+    if (!$range['ok']) {
+        return [];
+    }
+    $filters['start_date'] = $range['start'];
+    $filters['end_date'] = $range['end'];
+    try {
+        return bakery_billing_export_rows_query($db, $filters);
+    } catch (Throwable $e) {
+        error_log('billing export rows: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * @param array<string, mixed> $filters
+ * @return array<int, array<string, scalar|null>>
+ */
+function bakery_billing_export_rows_query(PDO $db, array $filters) {
     $orders = bakery_billing_query_orders($db, array_merge($filters, [
         'confirmed_only' => !empty($filters['confirmed_only']),
     ]));
@@ -902,24 +980,21 @@ function bakery_billing_export_rows(PDO $db, array $filters) {
 
     $rows = [];
     foreach ($invoices as $inv) {
-        if (!empty($inv['pricing_issue']) && empty($filters['include_exceptions'])) {
-            continue;
-        }
         $invoiceNumber = $inv['invoice_number'];
         $invoiceTotal = $inv['amount_is_billable']
             ? round((float)$inv['billable_amount'], 2)
             : round((float)$inv['display_amount'], 2);
 
-        if ($invoiceTotal <= 0 && !empty($inv['delivery_confirmed_at']) && ($inv['ordered_pieces'] ?? 0) > 0) {
-            continue;
-        }
-
-        foreach ($inv['items'] as $line) {
-            $qty = $line['delivered_quantity'] ?? $line['quantity'];
-            $unitPrice = (float)$line['unit_price'];
+        $lines = isset($inv['items']) && is_array($inv['items']) ? $inv['items'] : [];
+        foreach ($lines as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $unitPrice = (float)($line['unit_price'] ?? 0);
             $lineTotal = $line['delivered_quantity'] !== null
                 ? round($unitPrice * (int)$line['delivered_quantity'], 2)
                 : (float)$line['line_total'];
+            $noChargeLabel = bakery_billing_line_no_charge_label($line);
 
             $rows[] = [
                 'invoice_id' => $invoiceNumber,
@@ -938,7 +1013,9 @@ function bakery_billing_export_rows(PDO $db, array $filters) {
                 'credits_taken_back' => (int)($inv['credits_taken_back'] ?? 0),
                 'pricing_label' => (string)($inv['delivery_pricing_label'] ?? ''),
                 'status' => (string)$inv['status'],
-                'memo' => 'Delivery ' . $inv['order_date'] . ' #' . $inv['id'],
+                'memo' => 'Delivery ' . $inv['order_date'] . ' #' . $inv['id']
+                    . ($noChargeLabel !== '' ? ' · ' . $noChargeLabel : ''),
+                'no_charge' => $noChargeLabel,
             ];
         }
     }

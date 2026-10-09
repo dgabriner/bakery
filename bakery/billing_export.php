@@ -15,6 +15,17 @@ $customerId = max(0, (int)($_GET['customer_id'] ?? 0));
 $confirmedOnly = !isset($_GET['include_unconfirmed']) || (string)$_GET['include_unconfirmed'] !== '1';
 $recordExport = !isset($_GET['record']) || (string)$_GET['record'] !== '0';
 
+$range = bakery_billing_export_normalize_range($startDate, $endDate);
+if (!$range['ok']) {
+    http_response_code(200);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo bakery_t('billing.export_bad_range');
+    exit;
+}
+$startDate = $range['start'];
+$endDate = $range['end'];
+
 $filters = [
     'start_date' => $startDate,
     'end_date' => $endDate,
@@ -24,7 +35,16 @@ $filters = [
     'sort' => 'date_asc',
 ];
 
-$rows = bakery_billing_export_rows($db, $filters);
+try {
+    $rows = bakery_billing_export_rows($db, $filters);
+} catch (Throwable $e) {
+    error_log('billing_export rows: ' . $e->getMessage());
+    http_response_code(200);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo bakery_t('billing.export_failed');
+    exit;
+}
 
 $headers = [
     'invoice_id',
@@ -44,6 +64,7 @@ $headers = [
     'pricing_label',
     'status',
     'memo',
+    'no_charge',
 ];
 
 $csvLines = [];

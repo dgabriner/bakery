@@ -49,24 +49,40 @@ $user = bakery_current_user() ?: [];
 $isManager = bakery_user_has_role(['administrator', 'manager']);
 
 // Logged-in staff/driver (no token): dual hub — lock stores + set order.
+// GET only looks up surveys. Creating HQ rows is a POST (open_hub) with CSRF.
 if (!$survey && $token === '') {
     $selfDriverId = bakery_route_worker_driver_id($db, $user ?: null, $nextDeliveryDate);
     if ($selfDriverId <= 0 && !empty($user['driver_id'])) {
         $selfDriverId = (int)$user['driver_id'];
     }
     $hubDriverId = $selfDriverId > 0 ? $selfDriverId : 0;
-    if ($isManager || $selfDriverId > 0) {
+    $hubSubjectId = ($isManager && $selfDriverId <= 0) ? 0 : $hubDriverId;
+    $hubDate = $nextDeliveryDate;
+    $requestedHubDate = trim((string)($_REQUEST['date'] ?? ''));
+    if ($requestedHubDate !== '') {
         try {
-            $hub = bakery_survey_dual_hub_links(
-                $db,
-                $isManager && $selfDriverId <= 0 ? 0 : $hubDriverId,
-                $nextDeliveryDate,
-                (int)($user['id'] ?? 0)
-            );
+            $hubDate = bakery_survey_store_verify_resolve_date($nextDeliveryDate, $requestedHubDate);
+        } catch (RuntimeException $e) {
+            $hubDate = $nextDeliveryDate;
+        }
+    }
+    if ($isManager || $selfDriverId > 0) {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'open_hub') {
+            bakery_require_csrf();
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+            try {
+                bakery_survey_dual_hub_links($db, $hubSubjectId, $hubDate, (int)($user['id'] ?? 0));
+            } catch (Throwable $e) {
+                error_log('survey.php open hub: ' . $e->getMessage());
+            }
+            safe_redirect('survey.php?date=' . rawurlencode($hubDate));
+        }
+        try {
+            $hub = bakery_survey_dual_hub_existing($db, $hubSubjectId, $hubDate);
             $esc = static function ($s): string {
                 return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
             };
-            $pageTitle = (string)bakery_t('survey.hub_title', [], 'Tomorrow’s route surveys');
+            $pageTitle = (string)bakery_t('survey.hub_title');
             echo '<!DOCTYPE html><html lang="' . $esc(bakery_locale()) . '"><head><meta charset="utf-8">'
                 . '<meta name="viewport" content="width=device-width, initial-scale=1">'
                 . '<title>' . $esc($pageTitle) . '</title>'
@@ -76,26 +92,44 @@ if (!$survey && $token === '') {
                 . '.card{display:block;background:#fff;border:1px solid #e4ddd2;border-radius:14px;padding:16px;margin:0 0 12px;text-decoration:none;color:inherit}'
                 . '.card strong{display:block;font-size:16px;margin-bottom:4px}.card span{font-size:13px;opacity:.7}'
                 . '.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}'
-                . '.btn{font:inherit;border:none;border-radius:9px;padding:10px 12px;font-weight:600;background:#2c5aa0;color:#fff;text-decoration:none}'
-                . '.ghost{background:#efe9df;color:#24303e}</style></head><body><main>';
+                . '.btn{font:inherit;border:none;border-radius:9px;padding:10px 12px;font-weight:600;background:#2c5aa0;color:#fff;text-decoration:none;cursor:pointer}'
+                . '.ghost{background:#efe9df;color:#24303e}'
+                . '.date-bar{display:flex;gap:8px;align-items:end;margin:0 0 14px;flex-wrap:wrap}'
+                . '.date-bar label{font-size:12px;font-weight:700;opacity:.7;display:grid;gap:4px}'
+                . '.date-bar input[type=date]{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #d8d0c2;background:#fff}'
+                . '</style></head><body><main>';
             echo '<div class="lang-row">';
             $langSwitchVariant = 'inline';
             require __DIR__ . '/includes/language_switch.php';
             echo '</div>';
             echo '<h1>' . $esc($pageTitle) . '</h1>';
-            echo '<p class="sub">' . $esc(bakery_t('survey.hub_sub', ['date' => $hub['delivery_date']], 'Do step 1 first, then step 2. Same day: :date')) . '</p>';
+            echo '<p class="sub">' . $esc(bakery_t('survey.hub_sub', ['date' => $hub['delivery_date']])) . '</p>';
+            echo '<form class="date-bar" method="get" action="survey.php">'
+                . '<label>' . $esc(bakery_t('survey.store_verify_date'))
+                . '<input type="date" name="date" value="' . $esc($hubDate) . '" required></label>'
+                . '<button type="submit" class="btn ghost">' . $esc(bakery_t('survey.store_verify_date_go')) . '</button>'
+                . '</form>';
             if ($hub['verify_url'] !== '') {
-                echo '<a class="card" href="' . $esc($hub['verify_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step1_title', [], '1 · Lock stores')) . '</strong>'
-                    . '<span>' . $esc(bakery_t('texts.survey_step1_help', [], 'Yes/No which stops')) . '</span>'
-                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_verify', [], 'Lock stores')) . '</span></div></a>';
+                echo '<a class="card" href="' . $esc($hub['verify_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step1_title')) . '</strong>'
+                    . '<span>' . $esc(bakery_t('texts.survey_step1_help')) . '</span>'
+                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_verify')) . '</span></div></a>';
             }
             if ($hub['order_url'] !== '') {
-                echo '<a class="card" href="' . $esc($hub['order_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step2_title', [], '2 · Set order')) . '</strong>'
-                    . '<span>' . $esc(bakery_t('texts.survey_step2_help', [], 'Tap delivery sequence')) . '</span>'
-                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_order', [], 'Set order')) . '</span></div></a>';
+                echo '<a class="card" href="' . $esc($hub['order_url']) . '"><strong>' . $esc(bakery_t('texts.survey_step2_title')) . '</strong>'
+                    . '<span>' . $esc(bakery_t('texts.survey_step2_help')) . '</span>'
+                    . '<div class="btnrow"><span class="btn">' . $esc(bakery_t('texts.survey_open_order')) . '</span></div></a>';
+            }
+            if ($hub['verify_url'] === '' || $hub['order_url'] === '') {
+                echo '<p class="sub">' . $esc(bakery_t('survey.hub_empty', ['date' => $hubDate])) . '</p>';
+                echo '<form method="post" action="survey.php?date=' . $esc(rawurlencode($hubDate)) . '">';
+                echo '<input type="hidden" name="csrf_token" value="' . $esc(bakery_csrf_token()) . '">';
+                echo '<input type="hidden" name="action" value="open_hub">';
+                echo '<input type="hidden" name="date" value="' . $esc($hubDate) . '">';
+                echo '<button type="submit" class="btn">' . $esc(bakery_t('survey.hub_open')) . '</button>';
+                echo '</form>';
             }
             if ($isManager) {
-                echo '<p class="sub"><a class="btn ghost" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys') . '">' . $esc(bakery_t('nav.item.survey_center', [], 'Survey Center')) . '</a></p>';
+                echo '<p class="sub"><a class="btn ghost" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys') . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
             }
             echo '</main></body></html>';
             exit;
@@ -171,12 +205,7 @@ if ($sessionDriverId <= 0 && !empty($user['driver_id'])) {
 $interactionStaffId = (int)($user['id'] ?? 0);
 $interactionDriverId = $sessionDriverId > 0 ? $sessionDriverId : ($driverId > 0 ? $driverId : 0);
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    bakery_survey_record_interaction($db, $survey, 'open', [
-        'staff_user_id' => $interactionStaffId > 0 ? $interactionStaffId : null,
-        'driver_id' => $interactionDriverId > 0 ? $interactionDriverId : null,
-    ]);
-}
+// Page views stay read-only. Opens are not ledger rows; submits still record.
 
 $flash = trim((string)($_GET['done'] ?? ''));
 $error = trim((string)($_GET['err'] ?? ''));
@@ -586,7 +615,7 @@ if ($isHqStoreVerify) {
             continue;
         }
         try {
-            $linkSurvey = bakery_survey_ensure_store_verify($db, $gid, $verifyDate, (int)($user['id'] ?? 0));
+            $linkSurvey = bakery_survey_find_store_verify($db, $gid, $verifyDate);
             $driverLinkTokens[$gid] = (string)($linkSurvey['token'] ?? '');
         } catch (Throwable $e) {
             error_log('survey.php driver link token: ' . $e->getMessage());
@@ -598,7 +627,7 @@ $selfUrl = bakery_survey_link_url($token, $verifyDate);
 $siblingOrderUrl = '';
 if ($showStoreVerify || $isHqStoreVerify) {
     try {
-        $sib = bakery_survey_dual_hub_links($db, $driverId, $verifyDate, (int)($user['id'] ?? 0));
+        $sib = bakery_survey_dual_hub_existing($db, $driverId, $verifyDate);
         $siblingOrderUrl = (string)($sib['order_url'] ?? '');
     } catch (Throwable $e) {
         error_log('survey sibling order link: ' . $e->getMessage());
