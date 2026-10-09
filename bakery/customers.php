@@ -8,6 +8,7 @@ require_once 'includes/database.php';
 require_once 'includes/zones_catalog.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/sf_baker.php';
+require_once 'includes/billing_aging.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
@@ -175,9 +176,78 @@ if (isset($_GET['success'])) {
 // Load zones from DB (fallback to legacy hardcoded list if empty)
 $zonesCatalog = bakery_zones_catalog($db);
 $zones = array_column($zonesCatalog, 'name');
+
+// Page-local copy. Consolidate into lang/en.php and lang/es.php later.
+$customersListLocale = function_exists('bakery_locale') && bakery_locale() === 'es' ? 'es' : 'en';
+$customersListCopy = [
+    'en' => [
+        'filters' => 'Filters',
+        'active' => 'Active',
+        'inactive' => 'Inactive',
+        'cod' => 'COD',
+        'balance' => 'Has balance',
+        'name' => 'Name',
+        'email' => 'Email',
+        'phone' => 'Phone',
+        'address' => 'Address',
+        'zone' => 'Zone',
+        'deliver_by' => 'Deliver By',
+        'deliver_after' => 'Deliver After',
+        'price' => 'Pan Dulce Price',
+        'actions' => 'Actions',
+        'sort_name' => 'Sort by Name',
+        'sort_email' => 'Sort by Email',
+        'sort_phone' => 'Sort by Phone',
+        'sort_address' => 'Sort by Address',
+        'sort_zone' => 'Sort by Zone',
+        'sort_deliver_by' => 'Sort by Deliver By',
+        'sort_deliver_after' => 'Sort by Deliver After',
+        'sort_price' => 'Sort by Pan Dulce Price',
+        'empty' => 'No customers match',
+        'hint_idle' => 'Type to filter. Enter opens the first match',
+        'hint_one' => '1 match. Enter opens their hub',
+        'hint_many' => ':count matches. Enter opens the first',
+    ],
+    'es' => [
+        'filters' => 'Filtros',
+        'active' => 'Activo',
+        'inactive' => 'Inactivo',
+        'cod' => 'COD',
+        'balance' => 'Con saldo',
+        'name' => 'Nombre',
+        'email' => 'Correo',
+        'phone' => 'Teléfono',
+        'address' => 'Dirección',
+        'zone' => 'Zona',
+        'deliver_by' => 'Entregar antes de',
+        'deliver_after' => 'Entregar después de',
+        'price' => 'Precio pan dulce',
+        'actions' => 'Acciones',
+        'sort_name' => 'Ordenar por nombre',
+        'sort_email' => 'Ordenar por correo',
+        'sort_phone' => 'Ordenar por teléfono',
+        'sort_address' => 'Ordenar por dirección',
+        'sort_zone' => 'Ordenar por zona',
+        'sort_deliver_by' => 'Ordenar por entregar antes de',
+        'sort_deliver_after' => 'Ordenar por entregar después de',
+        'sort_price' => 'Ordenar por precio pan dulce',
+        'empty' => 'Ningún cliente coincide',
+        'hint_idle' => 'Escribe para filtrar. Enter abre la primera coincidencia',
+        'hint_one' => '1 coincidencia. Enter abre su ficha',
+        'hint_many' => ':count coincidencias. Enter abre la primera',
+    ],
+];
+$customersUi = $customersListCopy[$customersListLocale];
+
+$customerBalances = [];
+try {
+    $customerBalances = bakery_billing_customer_balances($db);
+} catch (Throwable $e) {
+    error_log('customers.php balance chips: ' . $e->getMessage());
+}
 ?>
 
-<div class="container container--wide">
+<div class="container container--wide customers-page">
     <h1>👥 Customers Management</h1>
     
     <?php if (isset($error)): ?>
@@ -210,8 +280,17 @@ $zones = array_column($zonesCatalog, 'name');
                autofocus
                value="<?php echo htmlspecialchars(trim((string)($_GET['q'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"
                aria-label="Search customers">
-        <span id="customerSearchHint" class="customer-search-hint">Type to filter · Enter opens the first match</span>
+        <span id="customerSearchHint" class="customer-search-hint"><?php echo htmlspecialchars($customersUi['hint_idle'], ENT_QUOTES, 'UTF-8'); ?></span>
     </div>
+
+    <div class="customers-filters" role="group" aria-label="<?php echo htmlspecialchars($customersUi['filters'], ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="customers-filters-label"><?php echo htmlspecialchars($customersUi['filters'], ENT_QUOTES, 'UTF-8'); ?></span>
+        <button type="button" class="customers-chip" data-filter="active" aria-pressed="false"><?php echo htmlspecialchars($customersUi['active'], ENT_QUOTES, 'UTF-8'); ?></button>
+        <button type="button" class="customers-chip" data-filter="inactive" aria-pressed="false"><?php echo htmlspecialchars($customersUi['inactive'], ENT_QUOTES, 'UTF-8'); ?></button>
+        <button type="button" class="customers-chip" data-filter="cod" aria-pressed="false"><?php echo htmlspecialchars($customersUi['cod'], ENT_QUOTES, 'UTF-8'); ?></button>
+        <button type="button" class="customers-chip" data-filter="balance" aria-pressed="false"><?php echo htmlspecialchars($customersUi['balance'], ENT_QUOTES, 'UTF-8'); ?></button>
+    </div>
+    <p id="customersListEmpty" class="customers-empty" hidden><?php echo htmlspecialchars($customersUi['empty'], ENT_QUOTES, 'UTF-8'); ?></p>
 
     <!-- Add/Edit Customer Form (Hidden by default) -->
     <div id="customerForm" class="modal" style="display: none;">
@@ -369,22 +448,22 @@ $zones = array_column($zonesCatalog, 'name');
     </div>
 
     <!-- Customers Table -->
-    <div class="table-responsive">
+    <div class="table-responsive customers-table-wrap">
         <div class="mobile-table-header">
             <div class="mobile-scroll-hint">← Scroll to see all columns →</div>
         </div>
         <table class="table-hover" id="customersTable">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Address</th>
-                    <th>🗺️ Zone</th>
-                    <th>📅 Deliver By</th>
-                    <th>🕐 Deliver After</th>
-                    <th>💰 Pan Dulce Price</th>
-                    <th>Actions</th>
+                    <th scope="col" class="customers-colhead" data-sort-key="name" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="name" aria-label="<?php echo htmlspecialchars($customersUi['sort_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="email" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="email" aria-label="<?php echo htmlspecialchars($customersUi['sort_email'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customersUi['email'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="phone" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="phone" aria-label="<?php echo htmlspecialchars($customersUi['sort_phone'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customersUi['phone'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="address" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="address" aria-label="<?php echo htmlspecialchars($customersUi['sort_address'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customersUi['address'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="zone" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="zone" aria-label="<?php echo htmlspecialchars($customersUi['sort_zone'], ENT_QUOTES, 'UTF-8'); ?>">🗺️ <?php echo htmlspecialchars($customersUi['zone'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="deliver_by" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="deliver_by" aria-label="<?php echo htmlspecialchars($customersUi['sort_deliver_by'], ENT_QUOTES, 'UTF-8'); ?>">📅 <?php echo htmlspecialchars($customersUi['deliver_by'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="deliver_after" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="deliver_after" aria-label="<?php echo htmlspecialchars($customersUi['sort_deliver_after'], ENT_QUOTES, 'UTF-8'); ?>">🕐 <?php echo htmlspecialchars($customersUi['deliver_after'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col" class="customers-colhead" data-sort-key="price" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="price" aria-label="<?php echo htmlspecialchars($customersUi['sort_price'], ENT_QUOTES, 'UTF-8'); ?>">💰 <?php echo htmlspecialchars($customersUi['price'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <th scope="col"><?php echo htmlspecialchars($customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?></th>
                 </tr>
             </thead>
             <tbody>
@@ -393,22 +472,39 @@ $zones = array_column($zonesCatalog, 'name');
                     $customers = $db->query("SELECT * FROM customers ORDER BY zone, name")->fetchAll();
                     $highlightId = max(0, (int)($_GET['highlight'] ?? 0));
                     foreach ($customers as $customer):
+                        $phoneDigits = preg_replace('/\D+/', '', (string)($customer['phone'] ?? '') . (string)($customer['portal_phone'] ?? ''));
                         $searchBlob = strtolower(trim(implode(' ', array_filter([
                             (string)($customer['name'] ?? ''),
                             (string)($customer['email'] ?? ''),
                             (string)($customer['phone'] ?? ''),
                             (string)($customer['portal_phone'] ?? ''),
+                            $phoneDigits,
                             (string)($customer['address'] ?? ''),
                             (string)($customer['zone'] ?? ''),
                         ]))));
                         $rowClass = ((int)$customer['id'] === $highlightId) ? ' is-highlighted' : '';
+                        $isActive = (int)($customer['is_active'] ?? 1) === 1;
+                        $isCod = (string)($customer['payment_collection'] ?? 'cod') === 'cod';
+                        $balanceRow = $customerBalances[(int)$customer['id']] ?? null;
+                        $outstanding = is_array($balanceRow) ? (float)($balanceRow['outstanding_total'] ?? 0) : 0.0;
+                        $hasBalance = $outstanding > 0.005;
+                        $sortName = strtolower((string)($customer['name'] ?? ''));
+                        $sortEmail = strtolower((string)($customer['email'] ?? ''));
+                        $sortPhone = strtolower((string)($customer['phone'] ?? ''));
+                        $sortAddress = strtolower((string)($customer['address'] ?? ''));
+                        $sortZone = strtolower((string)($customer['zone'] ?? ''));
+                        $sortBy = (string)($customer['deliver_by'] ?? '');
+                        $sortAfter = (string)($customer['deliver_after'] ?? '');
+                        $sortPrice = ($customer['default_pan_dulce_price'] ?? '') === '' || $customer['default_pan_dulce_price'] === null
+                            ? ''
+                            : number_format((float)$customer['default_pan_dulce_price'], 2, '.', '');
                 ?>
-                    <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>">
-                        <td class="editable" data-field="name"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
-                        <td class="editable" data-field="email"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
-                        <td class="editable" data-field="phone"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
-                        <td class="editable" data-field="address"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>
-                        <td class="editable zone-field" data-field="zone">
+                    <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>" data-active="<?php echo $isActive ? '1' : '0'; ?>" data-cod="<?php echo $isCod ? '1' : '0'; ?>" data-has-balance="<?php echo $hasBalance ? '1' : '0'; ?>">
+                        <td class="editable" data-field="name" data-label="<?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortName, ENT_QUOTES, 'UTF-8'); ?>"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
+                        <td class="editable" data-field="email" data-label="<?php echo htmlspecialchars($customersUi['email'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortEmail, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
+                        <td class="editable" data-field="phone" data-label="<?php echo htmlspecialchars($customersUi['phone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPhone, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
+                        <td class="editable" data-field="address" data-label="<?php echo htmlspecialchars($customersUi['address'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAddress, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>
+                        <td class="editable zone-field" data-field="zone" data-label="<?php echo htmlspecialchars($customersUi['zone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortZone, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php if ($customer['zone']): ?>
                                 <span class="zone-badge zone-<?php echo strtolower(str_replace([' ', '/'], ['-', '-'], $customer['zone'])); ?>">
                                     <?php echo htmlspecialchars($customer['zone']); ?>
@@ -417,7 +513,7 @@ $zones = array_column($zonesCatalog, 'name');
                                 <span class="text-muted">No zone</span>
                             <?php endif; ?>
                         </td>
-                        <td class="editable time-field" data-field="deliver_by">
+                        <td class="editable time-field" data-field="deliver_by" data-label="<?php echo htmlspecialchars($customersUi['deliver_by'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortBy, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['deliver_by']) {
                                 $time = new DateTime($customer['deliver_by']);
@@ -429,7 +525,7 @@ $zones = array_column($zonesCatalog, 'name');
                             }
                             ?>
                         </td>
-                        <td class="editable time-field" data-field="deliver_after">
+                        <td class="editable time-field" data-field="deliver_after" data-label="<?php echo htmlspecialchars($customersUi['deliver_after'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAfter, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['deliver_after']) {
                                 $time = new DateTime($customer['deliver_after']);
@@ -441,7 +537,7 @@ $zones = array_column($zonesCatalog, 'name');
                             }
                             ?>
                         </td>
-                        <td class="editable price-field" data-field="default_pan_dulce_price">
+                        <td class="editable price-field" data-field="default_pan_dulce_price" data-label="<?php echo htmlspecialchars($customersUi['price'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPrice, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['default_pan_dulce_price']) {
                                 echo '<span class="price-display">$' . number_format($customer['default_pan_dulce_price'], 2) . '</span>';
@@ -452,7 +548,7 @@ $zones = array_column($zonesCatalog, 'name');
                             }
                             ?>
                         </td>
-                        <td class="actions">
+                        <td class="actions" data-label="<?php echo htmlspecialchars($customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?>">
                             <a class="btn-icon" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" title="Open customer hub">👤</a>
                             <button class="btn-icon" onclick="editCustomer(<?php echo htmlspecialchars(json_encode($customer)); ?>)" title="Edit Customer">
                                 ✏️
@@ -495,42 +591,125 @@ $zones = array_column($zonesCatalog, 'name');
     <script>
         let editMode = false;
         const zones = <?php echo json_encode($zones); ?>;
+        const customersListText = <?php echo json_encode($customersUi, JSON_UNESCAPED_UNICODE); ?>;
 
         (function () {
             const search = document.getElementById('customerSearch');
-            if (!search) return;
-            const rows = Array.prototype.slice.call(document.querySelectorAll('#customersTable tbody tr[data-customer-id]'));
+            const table = document.getElementById('customersTable');
+            if (!search || !table) return;
+            const tbody = table.querySelector('tbody');
+            const rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr[data-customer-id]'));
             const hint = document.getElementById('customerSearchHint');
+            const empty = document.getElementById('customersListEmpty');
+            const chips = Array.prototype.slice.call(document.querySelectorAll('.customers-chip'));
+            let sortKey = '';
+            let sortDir = 'asc';
+
+            rows.forEach(function (row, index) {
+                row.dataset.originalIndex = String(index);
+            });
+
+            function textOf(key) {
+                return customersListText && customersListText[key] ? customersListText[key] : '';
+            }
+
+            function chipOn(name) {
+                const chip = document.querySelector('.customers-chip[data-filter="' + name + '"]');
+                return !!(chip && chip.getAttribute('aria-pressed') === 'true');
+            }
+
+            function filtersActive() {
+                return chipOn('active') || chipOn('inactive') || chipOn('cod') || chipOn('balance');
+            }
+
+            function rowMatches(row, query) {
+                const blob = ((row.getAttribute('data-search') || '') + ' ' + (row.textContent || '')).toLowerCase();
+                if (query !== '' && blob.indexOf(query) === -1) return false;
+                if (chipOn('active') && row.getAttribute('data-active') !== '1') return false;
+                if (chipOn('inactive') && row.getAttribute('data-active') !== '0') return false;
+                if (chipOn('cod') && row.getAttribute('data-cod') !== '1') return false;
+                if (chipOn('balance') && row.getAttribute('data-has-balance') !== '1') return false;
+                return true;
+            }
 
             function visibleRows() {
                 return rows.filter(function (row) {
-                    return row.style.display !== 'none';
+                    return !row.hidden;
                 });
             }
 
-            function applyFilter() {
-                const q = search.value.trim().toLowerCase();
+            function sortValue(row) {
+                const cell = row.querySelector('[data-field="' + (sortKey === 'price' ? 'default_pan_dulce_price' : sortKey) + '"]');
+                if (!cell) return '';
+                return (cell.getAttribute('data-sort') || '').trim();
+            }
+
+            function sortRows() {
+                const sorted = rows.slice().sort(function (a, b) {
+                    const aIndex = Number(a.dataset.originalIndex);
+                    const bIndex = Number(b.dataset.originalIndex);
+                    if (!sortKey) return aIndex - bIndex;
+                    const av = sortValue(a);
+                    const bv = sortValue(b);
+                    if (av === '' && bv === '') return aIndex - bIndex;
+                    if (av === '') return 1;
+                    if (bv === '') return -1;
+                    let cmp = 0;
+                    if (sortKey === 'price') {
+                        cmp = Number(av) - Number(bv);
+                        if (isNaN(cmp)) cmp = 0;
+                    } else {
+                        cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+                    }
+                    if (cmp === 0) cmp = aIndex - bIndex;
+                    return sortDir === 'desc' ? -cmp : cmp;
+                });
+                sorted.forEach(function (row) {
+                    tbody.appendChild(row);
+                });
+            }
+
+            function applyList() {
+                const query = search.value.trim().toLowerCase();
                 let shown = 0;
                 rows.forEach(function (row) {
-                    const blob = (row.getAttribute('data-search') || row.textContent || '').toLowerCase();
-                    const match = q === '' || blob.indexOf(q) !== -1;
-                    row.style.display = match ? '' : 'none';
+                    const match = rowMatches(row, query);
+                    row.hidden = !match;
                     if (match) shown++;
                 });
+                sortRows();
+                const filtering = query !== '' || filtersActive();
                 if (hint) {
-                    if (q === '') {
-                        hint.textContent = 'Type to filter · Enter opens the first match';
+                    if (!filtering) {
+                        hint.textContent = textOf('hint_idle');
                     } else if (shown === 0) {
-                        hint.textContent = 'No customers match';
+                        hint.textContent = textOf('empty');
                     } else if (shown === 1) {
-                        hint.textContent = '1 match · Enter opens their hub';
+                        hint.textContent = textOf('hint_one');
                     } else {
-                        hint.textContent = shown + ' matches · Enter opens the first';
+                        hint.textContent = textOf('hint_many').replace(':count', String(shown));
                     }
+                }
+                if (empty) {
+                    empty.hidden = shown !== 0;
                 }
             }
 
-            search.addEventListener('input', applyFilter);
+            function syncStickyTop() {
+                let stickyBottom = 0;
+                document.querySelectorAll('.local-env-banner, .bakery-nav').forEach(function (el) {
+                    if (!el || el.hidden) return;
+                    const style = window.getComputedStyle(el);
+                    if (style.position !== 'sticky' && style.position !== 'fixed') return;
+                    const top = parseFloat(style.top) || 0;
+                    stickyBottom = Math.max(stickyBottom, top + el.offsetHeight);
+                });
+                if (stickyBottom > 0) {
+                    document.documentElement.style.setProperty('--customers-sticky-top', Math.ceil(stickyBottom) + 'px');
+                }
+            }
+
+            search.addEventListener('input', applyList);
             search.addEventListener('keydown', function (event) {
                 if (event.key !== 'Enter') return;
                 event.preventDefault();
@@ -542,12 +721,46 @@ $zones = array_column($zonesCatalog, 'name');
                 }
             });
 
-            if (search.value.trim() !== '') {
-                applyFilter();
-            }
+            chips.forEach(function (chip) {
+                chip.addEventListener('click', function () {
+                    const turningOn = chip.getAttribute('aria-pressed') !== 'true';
+                    const key = chip.getAttribute('data-filter');
+                    if (turningOn && (key === 'active' || key === 'inactive')) {
+                        chips.forEach(function (other) {
+                            const otherKey = other.getAttribute('data-filter');
+                            if (otherKey === 'active' || otherKey === 'inactive') {
+                                other.setAttribute('aria-pressed', 'false');
+                            }
+                        });
+                    }
+                    chip.setAttribute('aria-pressed', turningOn ? 'true' : 'false');
+                    applyList();
+                });
+            });
 
-            const highlighted = document.querySelector('#customersTable tbody tr.is-highlighted');
-            if (highlighted) {
+            table.querySelectorAll('.customers-sort').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const key = button.getAttribute('data-sort-key') || '';
+                    if (sortKey === key) {
+                        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortKey = key;
+                        sortDir = 'asc';
+                    }
+                    table.querySelectorAll('thead th[data-sort-key]').forEach(function (th) {
+                        const thKey = th.getAttribute('data-sort-key');
+                        th.setAttribute('aria-sort', thKey === sortKey ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none');
+                    });
+                    applyList();
+                });
+            });
+
+            syncStickyTop();
+            window.addEventListener('resize', syncStickyTop);
+            applyList();
+
+            const highlighted = table.querySelector('tbody tr.is-highlighted');
+            if (highlighted && !highlighted.hidden) {
                 highlighted.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }
         })();
@@ -870,7 +1083,13 @@ $zones = array_column($zonesCatalog, 'name');
             cell.classList.remove('editing');
         }
 
+        function customersRememberSort(cell, value) {
+            if (!cell) return;
+            cell.setAttribute('data-sort', String(value == null ? '' : value).trim().toLowerCase());
+        }
+
         function updateZoneDisplay(cell, value) {
+            customersRememberSort(cell, value);
             if (value) {
                 const zoneClass = 'zone-' + value.toLowerCase().replace(/[\s\/]/g, '-');
                 cell.innerHTML = `<span class="zone-badge ${zoneClass}">${value}</span>`;
@@ -889,6 +1108,7 @@ $zones = array_column($zonesCatalog, 'name');
                     .then(success => {
                         if (success) {
                             timeInput.value = newValue;
+                            customersRememberSort(cell, newValue);
                             updateTimeDisplay(timeDisplay, newValue);
                             showMessage('Time constraint updated successfully', 'success');
                         } else {
@@ -924,6 +1144,7 @@ $zones = array_column($zonesCatalog, 'name');
                     .then(success => {
                         if (success) {
                             cell.textContent = newValue || (field === 'email' ? '' : '');
+                            customersRememberSort(cell, newValue);
                             showMessage('Field updated successfully', 'success');
                         } else {
                             cell.textContent = originalValue;
@@ -958,6 +1179,7 @@ $zones = array_column($zonesCatalog, 'name');
                     .then(success => {
                         if (success) {
                             priceInput.value = newValue;
+                            customersRememberSort(cell, newValue);
                             updatePriceDisplay(priceDisplay, newValue);
                             showMessage('Pan dulce price updated successfully', 'success');
                         } else {
@@ -1555,6 +1777,7 @@ $zones = array_column($zonesCatalog, 'name');
             }
         }
     </style>
+    <link rel="stylesheet" href="<?php echo bakery_asset_href('css/customers-list.css'); ?>">
 </div>
 
 <?php require_once 'includes/footer.php'; ?> 
