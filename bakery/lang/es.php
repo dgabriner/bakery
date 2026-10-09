@@ -4525,6 +4525,28 @@ return [
     'account_health.csv_share_ordered' => 'Unidades pedidas, últimas 4 semanas',
     'account_health.balance_age' => 'el más antiguo :days d',
 
+    // cost_margin — vista de solo lectura de costo y margen. Mantener este bloque junto.
+    'cost_margin.page_title' => 'Costo y margen',
+    'cost_margin.heading' => 'Costo y margen',
+    'cost_margin.intro' => 'El costo de ingredientes por pieza usa los porcentajes de panadero por el costo actual por kilogramo. La merma de masa es 50 g por mezcla, repartida en el lote.',
+    'cost_margin.loss_note' => 'El margen resta el costo de ingredientes y esa merma. Una celda en blanco significa que la fórmula está vacía, que un ingrediente no tiene precio, o que el lote no puede repartir la merma. En blanco no es cero.',
+    'cost_margin.link' => 'Costo y margen',
+    'cost_margin.export_csv' => 'Descargar CSV',
+    'cost_margin.back_to_products' => 'Productos',
+    'cost_margin.col_product' => 'Producto',
+    'cost_margin.col_piece_grams' => 'Gramos por pieza',
+    'cost_margin.col_ingredient_cost' => 'Costo de ingredientes',
+    'cost_margin.col_dough_loss' => 'Merma de masa',
+    'cost_margin.col_unit_price' => 'Precio unitario',
+    'cost_margin.col_margin_dollars' => 'Margen $',
+    'cost_margin.col_margin_percent' => 'Margen %',
+    'cost_margin.col_delivered' => 'Entregado, 90 días',
+    'cost_margin.col_flag' => 'Aviso',
+    'cost_margin.flag_empty_formula' => 'La fórmula está vacía',
+    'cost_margin.flag_missing_price' => 'Un ingrediente no tiene precio',
+    'cost_margin.empty' => 'No hay productos activos.',
+    'cost_margin.method_not_allowed' => 'Esta página solo acepta GET y HEAD.',
+
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demanda',
     'ux.stage.production' => 'Producción',

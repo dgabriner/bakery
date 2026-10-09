@@ -4528,6 +4528,28 @@ return [
     'account_health.csv_share_ordered' => 'Ordered units, last 4 weeks',
     'account_health.balance_age' => 'oldest :days d',
 
+    // cost_margin — read-only product cost and margin. Keep this block together.
+    'cost_margin.page_title' => 'Cost and margin',
+    'cost_margin.heading' => 'Cost and margin',
+    'cost_margin.intro' => 'Ingredient cost per piece uses baker\'s percentages times the current cost per kilogram. Dough loss is 50 g per mix, spread across the batch.',
+    'cost_margin.loss_note' => 'Margin subtracts ingredient cost and that dough loss. A blank cell means the formula is empty, an ingredient has no price, or the batch cannot spread the loss. Blank is not zero.',
+    'cost_margin.link' => 'Cost and margin',
+    'cost_margin.export_csv' => 'Download CSV',
+    'cost_margin.back_to_products' => 'Products',
+    'cost_margin.col_product' => 'Product',
+    'cost_margin.col_piece_grams' => 'Piece grams',
+    'cost_margin.col_ingredient_cost' => 'Ingredient cost',
+    'cost_margin.col_dough_loss' => 'Dough loss',
+    'cost_margin.col_unit_price' => 'Unit price',
+    'cost_margin.col_margin_dollars' => 'Margin $',
+    'cost_margin.col_margin_percent' => 'Margin %',
+    'cost_margin.col_delivered' => 'Delivered, 90 days',
+    'cost_margin.col_flag' => 'Flag',
+    'cost_margin.flag_empty_formula' => 'Formula is empty',
+    'cost_margin.flag_missing_price' => 'Ingredient has no price',
+    'cost_margin.empty' => 'No active products.',
+    'cost_margin.method_not_allowed' => 'This page only accepts GET and HEAD.',
+
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demand',
     'ux.stage.production' => 'Production',
