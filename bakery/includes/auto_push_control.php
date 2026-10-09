@@ -135,27 +135,97 @@ function bakery_auto_push_is_enabled() {
     return !is_file(bakery_auto_push_disabled_flag_path());
 }
 
-function bakery_auto_push_powershell() {
-    foreach ([
-        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-        'powershell.exe',
-        'pwsh.exe',
-    ] as $candidate) {
-        if ($candidate === 'powershell.exe' || $candidate === 'pwsh.exe') {
-            return $candidate;
+function bakery_auto_push_proc_open_available() {
+    if (!function_exists('proc_open')) {
+        return false;
+    }
+    $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    return !in_array('proc_open', $disabled, true);
+}
+
+/**
+ * Page-local copy so this local-only widget can fail quietly without editing
+ * lang/en.php or lang/es.php. Consolidate into those catalogs later.
+ */
+function bakery_auto_push_local_message($key, $locale = null) {
+    if ($locale === null) {
+        $locale = function_exists('bakery_locale') ? (string)bakery_locale() : 'en';
+    }
+    $locale = $locale === 'es' ? 'es' : 'en';
+    $messages = [
+        'en' => [
+            'powershell_missing' => 'PowerShell not found',
+            'control_unavailable' => 'Auto-push control is unavailable',
+            'status_unavailable' => 'Could not load sync status',
+        ],
+        'es' => [
+            'powershell_missing' => 'No se encontró PowerShell',
+            'control_unavailable' => 'El control de auto-envío no está disponible',
+            'status_unavailable' => 'No se pudo cargar el estado de sincronización',
+        ],
+    ];
+    if (!isset($messages[$locale][$key])) {
+        return $messages['en'][$key] ?? '';
+    }
+    return $messages[$locale][$key];
+}
+
+function bakery_auto_push_is_runnable($path) {
+    if (!is_string($path) || $path === '' || !is_file($path)) {
+        return false;
+    }
+    if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+        return true;
+    }
+    return is_executable($path);
+}
+
+function bakery_auto_push_resolve_on_path($name) {
+    $pathEnv = getenv('PATH');
+    if (!is_string($pathEnv) || $pathEnv === '') {
+        return null;
+    }
+    $sep = strncasecmp(PHP_OS, 'WIN', 3) === 0 ? ';' : ':';
+    foreach (explode($sep, $pathEnv) as $dir) {
+        $dir = trim($dir, " \t\"'");
+        if ($dir === '') {
+            continue;
         }
-        if (is_file($candidate)) {
-            return $candidate;
+        $full = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $name;
+        if (bakery_auto_push_is_runnable($full)) {
+            return $full;
         }
     }
     return null;
 }
 
-function bakery_auto_push_run_ctl($action) {
+function bakery_auto_push_powershell() {
+    $absolute = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    if (bakery_auto_push_is_runnable($absolute)) {
+        return $absolute;
+    }
+    foreach (['powershell.exe', 'pwsh.exe', 'pwsh', 'powershell'] as $name) {
+        $resolved = bakery_auto_push_resolve_on_path($name);
+        if ($resolved !== null) {
+            return $resolved;
+        }
+    }
+    return null;
+}
+
+function bakery_auto_push_require_shell() {
+    if (!bakery_auto_push_proc_open_available()) {
+        throw new RuntimeException(bakery_auto_push_local_message('control_unavailable'));
+    }
     $ps = bakery_auto_push_powershell();
     if ($ps === null) {
-        throw new RuntimeException('PowerShell not found');
+        throw new RuntimeException(bakery_auto_push_local_message('powershell_missing'));
     }
+    return $ps;
+}
+
+function bakery_auto_push_run_ctl($action) {
+    $ps = bakery_auto_push_require_shell();
     $script = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR . 'auto_push_watcher_ctl.ps1';
     if (!is_file($script)) {
         throw new RuntimeException('Missing scripts/auto_push_watcher_ctl.ps1');
@@ -195,8 +265,7 @@ function bakery_auto_push_run_live_promotion($direct = false) {
     if (!bakery_user_can_control_auto_push()) {
         throw new RuntimeException('Only the local administrator can promote to Live.');
     }
-    $ps = bakery_auto_push_powershell();
-    if ($ps === null) throw new RuntimeException('PowerShell not found');
+    $ps = bakery_auto_push_require_shell();
     $script = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR
         . ($direct ? 'promote_local_direct.ps1' : 'promote_release.ps1');
     if (!is_file($script)) throw new RuntimeException('Missing Live promotion script');
@@ -362,11 +431,20 @@ function bakery_auto_push_last_record() {
 function bakery_auto_push_status($ensureWatcher = false) {
     $enabled = bakery_auto_push_is_enabled();
     $watcher = ['running' => bakery_auto_push_watcher_running()];
+    $blockedMessage = null;
     if ($ensureWatcher && $enabled && empty($watcher['running'])) {
-        try {
-            $watcher = bakery_auto_push_ensure_watcher();
-        } catch (Throwable $e) {
-            $watcher = ['running' => false, 'error' => $e->getMessage()];
+        if (!bakery_auto_push_proc_open_available()) {
+            $blockedMessage = bakery_auto_push_local_message('control_unavailable');
+            $watcher = ['running' => false, 'error' => $blockedMessage];
+        } elseif (bakery_auto_push_powershell() === null) {
+            $blockedMessage = bakery_auto_push_local_message('powershell_missing');
+            $watcher = ['running' => false, 'error' => $blockedMessage];
+        } else {
+            try {
+                $watcher = bakery_auto_push_ensure_watcher();
+            } catch (Throwable $e) {
+                $watcher = ['running' => false, 'error' => $e->getMessage()];
+            }
         }
     } elseif ($ensureWatcher && !$enabled && !empty($watcher['running'])) {
         try {
@@ -377,8 +455,8 @@ function bakery_auto_push_status($ensureWatcher = false) {
         }
     }
 
-    return [
-        'ok' => true,
+    $status = [
+        'ok' => $blockedMessage === null,
         'local' => defined('IS_LOCAL') && IS_LOCAL,
         'enabled' => $enabled,
         'watching' => !empty($watcher['running']),
@@ -387,6 +465,11 @@ function bakery_auto_push_status($ensureWatcher = false) {
         'live_url' => 'https://staging.sourflour.org/',
         'staging_url' => 'https://staging.sourflour.org/',
     ];
+    if ($blockedMessage !== null) {
+        $status['error'] = $blockedMessage;
+    }
+    return $status;
+
 }
 
 /**
@@ -403,10 +486,7 @@ function bakery_auto_push_run_sync() {
         throw new RuntimeException('Missing scripts/push_sftp_stage.ps1');
     }
 
-    $ps = bakery_auto_push_powershell();
-    if ($ps === null) {
-        throw new RuntimeException('PowerShell not found');
-    }
+    $ps = bakery_auto_push_require_shell();
 
     $cmd = [
         $ps,
