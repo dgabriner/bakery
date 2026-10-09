@@ -150,7 +150,9 @@ $page_title = bakery_t('page.baker_mix');
                         <article class="bm-feed">
                             <h3><?php bakery_te('production.feed_regular'); ?></h3>
                             <ul class="bm-feed__list">
+                                <?php if (isset($starterFeedings['starter']['seed_starter'])): ?>
                                 <li><span><?php bakery_te('production.seed_starter'); ?></span><strong><?php echo number_format($starterFeedings['starter']['seed_starter'], 0); ?>g</strong></li>
+                                <?php endif; ?>
                                 <li><span><?php bakery_te('production.flour'); ?></span><strong><?php echo number_format($starterFeedings['starter']['flour'], 0); ?>g</strong></li>
                                 <li><span><?php bakery_te('production.water'); ?></span><strong><?php echo number_format($starterFeedings['starter']['water'], 0); ?>g</strong></li>
                                 <li class="bm-feed__total"><span><?php bakery_te('production.total_starter'); ?></span><strong><?php echo number_format($starterFeedings['starter']['total_needed'], 0); ?>g</strong></li>
@@ -161,7 +163,9 @@ $page_title = bakery_t('page.baker_mix');
                         <article class="bm-feed">
                             <h3><?php bakery_te('production.feed_liquido'); ?></h3>
                             <ul class="bm-feed__list">
+                                <?php if (isset($starterFeedings['starter_liquido']['seed_starter'])): ?>
                                 <li><span><?php bakery_te('production.seed_starter'); ?></span><strong><?php echo number_format($starterFeedings['starter_liquido']['seed_starter'], 0); ?>g</strong></li>
+                                <?php endif; ?>
                                 <li><span><?php bakery_te('production.flour'); ?></span><strong><?php echo number_format($starterFeedings['starter_liquido']['flour'], 0); ?>g</strong></li>
                                 <li><span><?php bakery_te('production.water'); ?></span><strong><?php echo number_format($starterFeedings['starter_liquido']['water'], 0); ?>g</strong></li>
                                 <li class="bm-feed__total"><span><?php bakery_te('production.total_liquido'); ?></span><strong><?php echo number_format($starterFeedings['starter_liquido']['total_needed'], 0); ?>g</strong></li>
@@ -192,6 +196,16 @@ $page_title = bakery_t('page.baker_mix');
                             'units' => number_format((int)$batch['planned_units']),
                             'grams' => number_format((int)$batch['total_weight_grams']),
                         ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php if (!empty($batch['batch_multiplier_applied'])): ?>
+                            <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_multiplier', [
+                                'multiplier' => rtrim(rtrim(number_format((float) $batch['batch_multiplier'], 3), '0'), '.'),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($batch['dough_loss_applied_grams'])): ?>
+                            <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_loss', [
+                                'grams' => number_format((float) $batch['dough_loss_applied_grams'], 0),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
                         <?php if (!empty($batch['pan_dulce_hint'])): ?>
                             <p class="bm-batch__hint">
                                 <strong><?php bakery_te('production.batch_left'); ?></strong>
@@ -205,8 +219,16 @@ $page_title = bakery_t('page.baker_mix');
                     </header>
 
                     <?php if ($hasBatchFormula):
-                        $flour = $totalWeight / ($totalPct / 100);
-                        bakery_baker_mix_echo_formula($batch['ingredients'], (float)$flour, $totalWeight, true);
+                        $doughForFormula = (float) ($batch['formula_dough_grams'] ?? $totalWeight);
+                        $flour = $doughForFormula / ($totalPct / 100);
+                        bakery_baker_mix_echo_formula(
+                            $batch['ingredients'],
+                            (float) $flour,
+                            $doughForFormula,
+                            true,
+                            $batch['formula_structure'] ?? null,
+                            $batch['add_in_rows'] ?? []
+                        );
                     else: ?>
                         <p class="bm-batch__empty"><?php bakery_te('baker_mix.no_formula'); ?></p>
                     <?php endif; ?>
