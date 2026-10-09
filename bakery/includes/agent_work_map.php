@@ -288,6 +288,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_survey_store_verify_tests.php',
                 'tests/run_survey_interactions_tests.php',
                 'tests/run_survey_route_order_tests.php',
+                'tests/run_survey_sell_day_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [
@@ -576,6 +577,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_hosted_migration_worker_tests.php',
                 'tests/run_release_promotion_tests.php',
                 'tests/run_schema_compare_tests.php',
+                'tests/run_auto_push_quiet_fail_tests.php',
                 'tests/run_live_product_pack_yields_migration_tests.php',
             ],
             'invariants' => [
@@ -619,6 +621,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_driver_workflow_tests.php',
+                'tests/run_driver_route_ux_tests.php',
                 'tests/run_driver_photo_ui_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',
                 'tests/run_status_alignment_tests.php',

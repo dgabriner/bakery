@@ -211,7 +211,8 @@ $assert(!bakery_cost_margin_method_allowed('POST') && !bakery_cost_margin_method
 $assert(strpos($page, 'export') !== false && strpos($page, 'csv') !== false, 'page serves the csv export');
 $assert(strpos($manifest, "'cost_margin.php'") !== false, 'deploy manifest root list includes cost_margin.php');
 $assert(strpos($products, 'cost_margin.php') !== false, 'products page links to cost and margin');
-$assert(strpos($nav, 'cost_margin.php') === false, 'cost and margin is not a new top-level nav item');
+$assert(strpos($nav, "'href' => 'cost_margin.php'") === false, 'cost and margin is not a new top-level nav item');
+$assert(strpos($nav, "'cost_margin.php'") !== false, 'script registry allowlists cost and margin for the auth gate');
 $assert(strpos($page, 'bakery_ingredient_current_cost_per_kg') !== false || strpos((string)file_get_contents($include), 'bakery_ingredient_current_cost_per_kg') !== false, 'cost uses the current cost per kg helper');
 $assert(strpos((string)file_get_contents($include), 'bakery_formula_product_piece_grams') !== false, 'piece grams use the formula structure helper');
 
