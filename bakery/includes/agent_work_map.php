@@ -84,6 +84,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_production_plan_commit_tests.php',
+                'tests/run_daily_run_close_exact_tests.php',
                 'tests/run_production_assign_tests.php',
                 'tests/run_production_cut_tests.php',
                 'tests/run_production_cadence_tests.php',
