@@ -244,6 +244,12 @@
     break-inside: auto;
   }
 
+  .pack-route-sheet .pack-driver-product::details-content {
+    content-visibility: visible !important;
+    display: block !important;
+    height: auto !important;
+  }
+
   .pack-route-sheet .pack-driver-product > summary {
     align-items: center;
     border-bottom: 0.75pt solid #bbb;

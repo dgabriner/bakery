@@ -2131,6 +2131,25 @@ require_once 'includes/nav.php';
     // Check-offs persist server-side per date; initial state is rendered by PHP.
     var pending = {};
 
+    function openPackSheetsForPrint() {
+        root.querySelectorAll('.pack-driver-product').forEach(function (el) {
+            if (!el.open) {
+                el.setAttribute('data-print-closed', '1');
+                el.open = true;
+            }
+        });
+    }
+
+    function closePackSheetsAfterPrint() {
+        root.querySelectorAll('.pack-driver-product[data-print-closed]').forEach(function (el) {
+            el.open = false;
+            el.removeAttribute('data-print-closed');
+        });
+    }
+
+    window.addEventListener('beforeprint', openPackSheetsForPrint);
+    window.addEventListener('afterprint', closePackSheetsAfterPrint);
+
     root.querySelectorAll('.pack-line[data-check-key]').forEach(function (line) {
         var key = line.getAttribute('data-check-key');
         var btn = line.querySelector('.pack-check');
