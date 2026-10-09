@@ -7,6 +7,42 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+function bakery_order_line_no_charge_ready(PDO $db): bool
+{
+    return function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_no_charge');
+}
+
+function bakery_order_line_is_no_charge(array $item): bool
+{
+    return (int)($item['is_no_charge'] ?? 0) === 1;
+}
+
+/** @return list<string> */
+function bakery_no_charge_reasons(): array
+{
+    return ['comp', 'sample', 'replacement', 'donation'];
+}
+
+function bakery_no_charge_normalize_reason($reason): ?string
+{
+    $reason = strtolower(trim((string)$reason));
+    if ($reason === '') {
+        return null;
+    }
+    if (!in_array($reason, bakery_no_charge_reasons(), true)) {
+        throw new InvalidArgumentException('Unknown no-charge reason');
+    }
+    return $reason;
+}
+
+function bakery_order_line_no_charge_select(PDO $db): string
+{
+    if (bakery_order_line_no_charge_ready($db)) {
+        return 'doi.is_no_charge, doi.no_charge_reason';
+    }
+    return '0 AS is_no_charge, NULL AS no_charge_reason';
+}
+
 function bakery_daily_orders_update_order_total(PDO $db, int $orderId): void
 {
     bakery_daily_order_recompute_total($db, $orderId);
@@ -370,6 +406,127 @@ function bakery_daily_orders_action_clear_day(PDO $db, array $input, ?array $use
     }
 }
 
+function bakery_daily_orders_action_set_no_charge(PDO $db, array $input, ?array $user = null): array
+{
+    if (!function_exists('bakery_order_line_no_charge_ready') || !bakery_order_line_no_charge_ready($db)) {
+        throw new Exception('No-charge lines are not available until the database migration is applied');
+    }
+
+    $itemId = (int)($input['item_id'] ?? 0);
+    if ($itemId <= 0) {
+        throw new Exception('Order line is required');
+    }
+
+    $mark = (string)($input['is_no_charge'] ?? '0') === '1';
+    if (!$mark && array_key_exists('unit_price', $input)) {
+        $posted = trim((string)$input['unit_price']);
+        if ($posted !== '' && is_numeric($posted) && round((float)$posted, 2) <= 0) {
+            $mark = true;
+        }
+    }
+    $reason = null;
+    if ($mark) {
+        $reason = bakery_no_charge_normalize_reason($input['no_charge_reason'] ?? '');
+    }
+
+    $stmt = $db->prepare(
+        'SELECT doi.id, doi.daily_order_id, doi.product_id, doi.quantity, doi.unit_price,
+                doi.is_no_charge, doi.no_charge_reason,
+                do.order_date, do.customer_id, do.delivery_confirmed_at,
+                c.name AS customer_name, c.pricing_tier, c.default_pan_dulce_price,
+                p.name AS product_name, p.price, p.wholesale_price, pl.name AS product_line_name
+         FROM daily_order_items doi
+         JOIN daily_orders do ON do.id = doi.daily_order_id
+         JOIN customers c ON c.id = do.customer_id
+         JOIN products p ON p.id = doi.product_id
+         LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+         LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+         WHERE doi.id = ?'
+    );
+    $stmt->execute([$itemId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        throw new Exception('Order line not found');
+    }
+    if (!empty($row['delivery_confirmed_at'])) {
+        throw new Exception('This delivery is already confirmed');
+    }
+
+    $oldPrice = $row['unit_price'] === null ? null : round((float)$row['unit_price'], 2);
+    $oldFlag = (int)$row['is_no_charge'] === 1;
+    $oldReason = $row['no_charge_reason'] !== null ? (string)$row['no_charge_reason'] : null;
+
+    if ($mark) {
+        $newPrice = 0.0;
+        $lineTotal = 0.0;
+        $db->prepare(
+            'UPDATE daily_order_items
+             SET is_no_charge = 1, no_charge_reason = ?, unit_price = 0, line_total = 0
+             WHERE id = ?'
+        )->execute([$reason, $itemId]);
+    } else {
+        $newPrice = 0.0;
+        if (function_exists('bakery_resolve_customer_price')) {
+            $newPrice = round((float)bakery_resolve_customer_price($db, [
+                'id' => (int)$row['customer_id'],
+                'pricing_tier' => $row['pricing_tier'] ?? 'retail',
+                'default_pan_dulce_price' => $row['default_pan_dulce_price'] ?? null,
+            ], [
+                'id' => (int)$row['product_id'],
+                'price' => (float)($row['price'] ?? 0),
+                'wholesale_price' => $row['wholesale_price'] ?? null,
+                'product_line_name' => $row['product_line_name'] ?? '',
+            ]), 2);
+        }
+        $lineTotal = round((int)$row['quantity'] * $newPrice, 2);
+        $db->prepare(
+            'UPDATE daily_order_items
+             SET is_no_charge = 0, no_charge_reason = NULL, unit_price = ?, line_total = ?
+             WHERE id = ?'
+        )->execute([$newPrice, $lineTotal, $itemId]);
+        $reason = null;
+    }
+
+    bakery_daily_orders_update_order_total($db, (int)$row['daily_order_id']);
+
+    $changed = $oldFlag !== $mark
+        || $oldReason !== $reason
+        || ($oldPrice === null ? $newPrice !== 0.0 : abs($oldPrice - $newPrice) >= 0.005);
+    if ($changed && function_exists('bakery_record_operational_event')) {
+        $eventType = defined('BAKERY_OP_LINE_NO_CHARGE_SET')
+            ? BAKERY_OP_LINE_NO_CHARGE_SET
+            : 'line_no_charge_set';
+        bakery_record_operational_event(
+            $db,
+            $eventType,
+            ($mark ? 'Marked no-charge' : 'Cleared no-charge') . ' for ' . $row['customer_name'] . ' — ' . $row['product_name'],
+            [
+                'operational_date' => $row['order_date'],
+                'customer_id' => (int)$row['customer_id'],
+                'daily_order_id' => (int)$row['daily_order_id'],
+                'product_id' => (int)$row['product_id'],
+                'actor_user_id' => $user['id'] ?? null,
+                'actor_role' => $user['role_slug'] ?? null,
+                'metadata' => [
+                    'line_id' => $itemId,
+                    'old_price' => $oldPrice,
+                    'new_price' => $newPrice,
+                    'is_no_charge' => $mark ? 1 : 0,
+                    'no_charge_reason' => $reason,
+                    'source' => 'daily_orders',
+                ],
+            ]
+        );
+    }
+
+    return [
+        'success' => true,
+        'is_no_charge' => $mark ? 1 : 0,
+        'no_charge_reason' => $reason,
+        'unit_price' => $newPrice,
+    ];
+}
+
 function bakery_daily_orders_dispatch(PDO $db, array $input, ?array $user = null): array
 {
     $action = (string)($input['action'] ?? '');
@@ -390,6 +547,8 @@ function bakery_daily_orders_dispatch(PDO $db, array $input, ?array $user = null
             return bakery_daily_orders_action_apply_standing_to_dated($db, $input, $user);
         case 'update_quantity':
             return bakery_daily_orders_action_update_quantity($db, $input, $user);
+        case 'set_no_charge':
+            return bakery_daily_orders_action_set_no_charge($db, $input, $user);
         case 'update_status':
             return bakery_daily_orders_action_update_status($db, $input, $user);
         case 'add_item':

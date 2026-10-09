@@ -622,6 +622,98 @@ try {
         echo "NOTE  [skip] gating column not applied; migration 068 lifecycle asserts skipped\n";
     }
 
+    // ---- Double-submit: one click, one Square draft (089) ------------------------
+    // Local bakerysf_test only. Square is mocked; this block must not call the network.
+    $checkoutMigration = dirname(__DIR__) . '/database/schema/089_checkout_idempotency.sql';
+    if (!column_exists($db, 'sfb_offering_purchases', 'checkout_key') && is_file($checkoutMigration)) {
+        $migrationSql = (string)file_get_contents($checkoutMigration);
+        foreach (array_filter(array_map('trim', explode(';', $migrationSql))) as $migrationStmt) {
+            $migrationLines = [];
+            foreach (preg_split("/\r\n|\n|\r/", $migrationStmt) as $migrationLine) {
+                $migrationTrim = trim($migrationLine);
+                if ($migrationTrim === '' || strpos($migrationTrim, '--') === 0) {
+                    continue;
+                }
+                $migrationLines[] = $migrationLine;
+            }
+            $migrationStmt = trim(implode("\n", $migrationLines));
+            if ($migrationStmt === '') {
+                continue;
+            }
+            $db->exec($migrationStmt);
+        }
+        bakery_forget_column_exists('sfb_offering_purchases', 'checkout_key');
+    }
+    $assert(
+        column_exists($db, 'sfb_offering_purchases', 'checkout_key'),
+        '089 adds sfb_offering_purchases.checkout_key'
+    );
+
+    $donateKey = 'donate' . bin2hex(random_bytes(8));
+    $squareCalls = [];
+    $GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null) use (&$squareCalls): array {
+        if ($method !== 'POST' || $path !== '/v2/online-checkout/payment-links') {
+            throw new RuntimeException('refusing unexpected Square call ' . $method . ' ' . $path);
+        }
+        $squareCalls[] = $body ?? [];
+        $n = count($squareCalls);
+        return ['payment_link' => [
+            'id' => 'PL-ONCE-' . $n,
+            'url' => 'https://sandbox.square.link/u/once-' . $n,
+            'order_id' => 'ORDER-ONCE-' . $n,
+        ]];
+    };
+    $donateFirst = bakery_sfb_buy_offering($db, $customerB, $donateId, null, $donateKey);
+    $donateReplay = bakery_sfb_buy_offering($db, $customerB, $donateId, null, $donateKey);
+    unset($GLOBALS['bakery_square_api_handler']);
+    $assert((int)$donateFirst['purchase_id'] === (int)$donateReplay['purchase_id'], 'same donate click reuses one purchase');
+    $assert(count($squareCalls) === 1, 'same donate click creates one Square payment link');
+    $assert((string)($donateReplay['url'] ?? '') === 'https://sandbox.square.link/u/once-1', 'replay returns the original checkout url');
+    $donatePurchase = bakery_sfb_purchase($db, (int)$donateFirst['purchase_id']);
+    $donateIdem = (string)($squareCalls[0]['idempotency_key'] ?? '');
+    $assert(
+        $donateIdem !== '' && $donateIdem === bakery_sfb_square_idempotency_key($donatePurchase),
+        'Square idempotency key is the stored click key'
+    );
+
+    $GLOBALS['bakery_sfb_payments_disabled'] = true;
+    $otherClick = bakery_sfb_buy_offering($db, $customerB, $donateId, null, 'donate' . bin2hex(random_bytes(8)));
+    unset($GLOBALS['bakery_sfb_payments_disabled']);
+    $assert((int)$otherClick['purchase_id'] !== (int)$donateFirst['purchase_id'], 'a different click still records its own purchase');
+
+    $retryCalls = [];
+    $GLOBALS['bakery_square_api_handler'] = static function (string $method, string $path, ?array $body = null) use (&$retryCalls): array {
+        if ($method !== 'POST' || $path !== '/v2/online-checkout/payment-links') {
+            throw new RuntimeException('refusing unexpected Square call ' . $method . ' ' . $path);
+        }
+        $retryCalls[] = (string)($body['idempotency_key'] ?? '');
+        if (count($retryCalls) === 1) {
+            throw new RuntimeException('sandbox timeout');
+        }
+        return ['payment_link' => [
+            'id' => 'PL-RETRY',
+            'url' => 'https://sandbox.square.link/u/retry',
+            'order_id' => 'ORDER-RETRY',
+        ]];
+    };
+    $retryKey = 'retry' . bin2hex(random_bytes(8));
+    $retryFirst = bakery_sfb_buy_offering($db, $customerB, $donateId, null, $retryKey);
+    $retrySecond = bakery_sfb_buy_offering($db, $customerB, $donateId, null, $retryKey);
+    unset($GLOBALS['bakery_square_api_handler']);
+    $assert((int)$retryFirst['purchase_id'] === (int)$retrySecond['purchase_id'], 'failed checkout retry reuses the purchase');
+    $assert(count($retryCalls) === 2 && $retryCalls[0] !== '' && $retryCalls[0] === $retryCalls[1], 'retry posts the same Square idempotency key');
+    $assert((string)($retrySecond['url'] ?? '') === 'https://sandbox.square.link/u/retry', 'retry receives the checkout url');
+
+    $offeringsSrc = (string)file_get_contents(dirname(__DIR__) . '/sfb_offerings.php');
+    $checkoutHelper = (string)file_get_contents(dirname(__DIR__) . '/includes/sf_baker.php');
+    $assert(strpos($offeringsSrc, 'data-checkout-once') !== false, 'donate form locks after the first click');
+    $assert(strpos($offeringsSrc, 'name="checkout_key"') !== false || strpos($checkoutHelper, 'name="checkout_key"') !== false, 'donate form sends one checkout key');
+    $assert(strpos($checkoutHelper, 'button.disabled = true') !== false, 'checkout script disables the submit button');
+    $enLang = (string)file_get_contents(dirname(__DIR__) . '/lang/en.php');
+    $esLang = (string)file_get_contents(dirname(__DIR__) . '/lang/es.php');
+    $assert(strpos($enLang, "'sfb.checkout_opening'") !== false, 'English has the checkout opening label');
+    $assert(strpos($esLang, "'sfb.checkout_opening'") !== false, 'Spanish has the checkout opening label');
+
     // ---- Cleanup ----------------------------------------------------------------
     $db->prepare('DELETE FROM customers WHERE id IN (?, ?, ?)')->execute([$customerA, $customerB, $customerC]);
     $db->prepare('DELETE FROM sfb_offerings WHERE title IN (?, ?, ?)')

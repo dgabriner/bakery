@@ -28,12 +28,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit;
 }
 
+// Default to the next sell day (the day after today, including Saturday and Sunday).
+$nextSellDate = bakery_next_sell_date(date('Y-m-d'));
+$selectedDate = $_GET['date'] ?? $nextSellDate;
+if (!is_string($selectedDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+    $selectedDate = $nextSellDate;
+}
+$isNextSellDay = ($selectedDate === $nextSellDate);
+$dayName = bakery_day_names()[bakery_standing_day_from_date($selectedDate)] ?? date('l', strtotime($selectedDate));
+$selectedDateObj = DateTime::createFromFormat('!Y-m-d', $selectedDate) ?: new DateTime($selectedDate);
+$selectedDateLabel = trim(
+    (bakery_day_names()[bakery_standing_day_from_date($selectedDate)] ?? '')
+    . ', ' . bakery_localized_date_label($selectedDateObj, true)
+);
+$page_title = bakery_t('page.daily_orders') . ' - ' . $selectedDateLabel;
+
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
-
-// Get selected date (default to tomorrow)
-$selectedDate = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
-$dayName = date('l', strtotime($selectedDate));
 $selectedDriverId = isset($_GET['driver_id']) ? (int)$_GET['driver_id'] : 0;
 $selectedZone = isset($_GET['zone']) ? trim((string)$_GET['zone']) : '';
 $groupBy = ($_GET['group_by'] ?? 'driver') === 'zone' ? 'zone' : 'driver';
@@ -74,12 +85,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     }
 }
 $attentionLabels = [
-    'missing' => 'Showing customers missing dated orders',
-    'empty' => 'Showing dated orders with no line items',
-    'differences' => 'Showing customers with demand differences',
+    'missing' => bakery_t('ux.daily_orders.attention_missing'),
+    'empty' => bakery_t('ux.daily_orders.attention_empty'),
+    'differences' => bakery_t('ux.daily_orders.attention_differences'),
 ];
 $attentionLabel = $attentionLabels[$reviewFilter] ?? (
-    in_array($reviewFilter, ['missing', 'empty', 'changed', 'one_off'], true) ? 'Showing items requiring attention' : ''
+    in_array($reviewFilter, ['missing', 'empty', 'changed', 'one_off'], true) ? bakery_t('ux.daily_orders.attention_items') : ''
 );
 
 function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver', $extra = []) {
@@ -95,9 +106,6 @@ function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver', $
     }
     return '?' . http_build_query($params);
 }
-
-// Set page title
-$page_title = bakery_t('page.daily_orders') . ' - ' . date('M j, Y', strtotime($selectedDate));
 
 // Get daily orders for selected date
 $visitCompare = null;
@@ -275,27 +283,30 @@ $summary = $demandSummaryAll['summary'];
         </div>
     <?php endif; ?>
     <div class="page-header">
-        <h1>Daily Orders</h1>
+        <h1><?= htmlspecialchars(bakery_t('page.daily_orders')) ?></h1>
+        <?php if ($isNextSellDay): ?>
+            <p class="next-sell-day"><?= htmlspecialchars(bakery_t('ux.daily_orders.next_sell')) ?></p>
+        <?php endif; ?>
         <div class="button-group">
             <button type="button" class="btn btn-success" onclick="showCreateDatedOrderModal()"<?= $selectedDate < date('Y-m-d') ? ' disabled' : '' ?>>
                 <?= htmlspecialchars(bakery_t('daily_orders.create_dated_order')) ?>
             </button>
             <button type="button" class="btn btn-primary" onclick="showGenerateModal()">
-                Generate from Standing Orders
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.generate_standing')) ?>
             </button>
             <button type="button" class="btn btn-secondary" onclick="generateWeekFromStanding()">
-                Generate This Week
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.generate_week')) ?>
             </button>
             <button type="button" class="btn btn-secondary" onclick="showDatePicker()">
-                Change Date
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.change_date')) ?>
             </button>
             <button type="button" class="btn btn-danger" onclick="clearSelectedDay()">
-                Clear This Day
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.clear_day')) ?>
             </button>
-            <a class="btn btn-outline" href="standing_orders_manager.php">Edit Standing Forecast</a>
-            <a class="btn btn-outline" href="pan_dulce_quantities.php">Pan Dulce Standards</a>
-            <a class="btn btn-outline" href="production.php?date=<?= urlencode($selectedDate) ?>">Daily Production</a>
-            <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>">Driver Assignment</a>
+            <a class="btn btn-outline" href="standing_orders_manager.php"><?= htmlspecialchars(bakery_t('ux.daily_orders.edit_standing')) ?></a>
+            <a class="btn btn-outline" href="pan_dulce_quantities.php"><?= htmlspecialchars(bakery_t('nav.item.pan_dulce_quantities')) ?></a>
+            <a class="btn btn-outline" href="production.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.production_baker')) ?></a>
+            <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.driver_assignment')) ?></a>
         </div>
     </div>
 
@@ -306,34 +317,36 @@ $summary = $demandSummaryAll['summary'];
         </div>
         <div>
             <strong><?= htmlspecialchars(bakery_t('daily_orders.legend_dated')) ?></strong>
-            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_dated_help', ['date' => date('D, M j, Y', strtotime($selectedDate))])) ?></span>
+            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_dated_help', ['date' => $selectedDateLabel])) ?></span>
         </div>
         <div>
             <strong><?= htmlspecialchars(bakery_t('daily_orders.legend_prior')) ?></strong>
-            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_prior_help', ['date' => date('D, M j', strtotime($selectedDate . ' -1 day'))])) ?></span>
+            <span><?= htmlspecialchars(bakery_t('daily_orders.legend_prior_help', ['date' => bakery_localized_date_label((new DateTime($selectedDate))->modify('-1 day'), false)])) ?></span>
         </div>
     </div>
     
     <!-- Date Navigation -->
     <div class="date-navigation">
         <div class="date-info">
-            <h2><?= date('l, F j, Y', strtotime($selectedDate)) ?></h2>
+            <h2><?php if ($isNextSellDay): ?><?= htmlspecialchars(bakery_t('ux.daily_orders.next_sell')) ?> · <?php endif; ?><?= htmlspecialchars($selectedDateLabel) ?></h2>
             <span class="order-count">
                 <?php if ($viewMode === 'visit' && is_array($visitCompare)): ?>
                     <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_standing_route')) ?>: <?= (int)$visitCompare['summary']['today_standing'] ?>
                     · <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_prior_route')) ?>: <?= (int)$visitCompare['summary']['prior_assigned'] ?>
                     · <?= htmlspecialchars(bakery_t('daily_orders.visit_stat_look')) ?>: <?= (int)($visitCompare['summary']['look'] ?? 0) ?>
                 <?php else: ?>
-                    Standing expected: <?= (int)$summary['expected_customers'] ?> customers
-                    · Dated orders: <?= (int)$summary['customers_with_daily'] ?>
-                    · Exceptions: <?= (int)$summary['changed'] + (int)$summary['missing_daily'] + (int)$summary['one_off'] + (int)$summary['empty_daily'] ?>
+                    <?= htmlspecialchars(bakery_t('ux.daily_orders.stats', [
+                        'expected' => (int)$summary['expected_customers'],
+                        'dated' => (int)$summary['customers_with_daily'],
+                        'exceptions' => (int)$summary['changed'] + (int)$summary['missing_daily'] + (int)$summary['one_off'] + (int)$summary['empty_daily'],
+                    ])) ?>
                 <?php endif; ?>
             </span>
         </div>
         <div class="date-controls">
-            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' -1 day')), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-outline">← Previous Day</a>
-            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d'), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-primary">Today</a>
-            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' +1 day')), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-outline">Next Day →</a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' -1 day')), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-outline">← <?= htmlspecialchars(bakery_t('ux.daily_orders.prev_day')) ?></a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d'), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-primary"><?= htmlspecialchars(bakery_t('common.today')) ?></a>
+            <a href="<?= htmlspecialchars(daily_orders_filter_url(date('Y-m-d', strtotime($selectedDate . ' +1 day')), $selectedDriverId, $selectedZone, $groupBy, $filterExtra)) ?>" class="btn btn-outline"><?= htmlspecialchars(bakery_t('ux.daily_orders.next_day')) ?> →</a>
         </div>
     </div>
 
@@ -865,7 +878,7 @@ $summary = $demandSummaryAll['summary'];
                                     </button>
                                 <?php endif; ?>
                             <?php elseif ($rc['state'] === 'missing_daily'): ?>
-                                <span class="review-hint">No dated order yet — use Generate from Standing Orders to create dated demand from the forecast (paused customers are skipped).</span>
+                                <span class="review-hint"><?= htmlspecialchars(bakery_t('ux.daily_orders.missing_hint')) ?></span>
                             <?php endif; ?>
                             <a class="btn btn-small btn-outline" href="standing_orders_manager.php">Standing forecast (recurring)</a>
                         </div>
@@ -889,13 +902,15 @@ $summary = $demandSummaryAll['summary'];
     <!-- Orders List -->
     <?php if (empty($dailyOrders)): ?>
         <div class="empty-state">
-            <h3>No dated orders for this date</h3>
+            <h3><?= htmlspecialchars(bakery_t('ux.daily_orders.empty_title')) ?></h3>
             <p>
-                Standing forecast expects <?= (int)$summary['expected_customers'] ?> customer(s) on <?= htmlspecialchars($dayName) ?>s.
-                Generate dated orders from standing, or review the Demand Review panel above for who is missing.
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.empty_body', [
+                    'count' => (int)$summary['expected_customers'],
+                    'day' => $dayName,
+                ])) ?>
             </p>
             <button class="btn btn-primary" onclick="showGenerateModal()">
-                Generate from Standing Orders
+                <?= htmlspecialchars(bakery_t('ux.daily_orders.generate_standing')) ?>
             </button>
         </div>
     <?php else: ?>
@@ -1013,7 +1028,44 @@ $summary = $demandSummaryAll['summary'];
                                                         <strong><?= (int)$item['delivered_quantity'] ?></strong>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td>$<?= number_format($item['unit_price'], 2) ?></td>
+                                                <td>
+                                                    <?php
+                                                        $lineNoCharge = function_exists('bakery_order_line_is_no_charge') && bakery_order_line_is_no_charge($item);
+                                                        $lineReason = (string)($item['no_charge_reason'] ?? '');
+                                                        $canMarkNoCharge = function_exists('bakery_order_line_no_charge_ready')
+                                                            && bakery_order_line_no_charge_ready($db)
+                                                            && empty($order['delivery_confirmed_at']);
+                                                    ?>
+                                                    <?php if ($lineNoCharge): ?>
+                                                        <span class="source-tag"><?= htmlspecialchars(bakery_t('no_charge.label')) ?></span>
+                                                        $0.00
+                                                    <?php else: ?>
+                                                        $<?= number_format((float)$item['unit_price'], 2) ?>
+                                                    <?php endif; ?>
+                                                    <?php if ($canMarkNoCharge): ?>
+                                                        <div class="source-tag">
+                                                            <label>
+                                                                <input type="checkbox"
+                                                                       id="noChargeFlag<?= (int)$item['id'] ?>"
+                                                                       <?= $lineNoCharge ? 'checked' : '' ?>
+                                                                       onchange="setLineNoCharge(<?= (int)$item['id'] ?>, this.checked, document.getElementById('noChargeReason<?= (int)$item['id'] ?>').value, <?= $isAdvanced ? 'true' : 'false' ?>)">
+                                                                <?= htmlspecialchars(bakery_t('no_charge.mark')) ?>
+                                                            </label>
+                                                            <select id="noChargeReason<?= (int)$item['id'] ?>"
+                                                                    aria-label="<?= htmlspecialchars(bakery_t('no_charge.reason')) ?>"
+                                                                    onchange="setLineNoCharge(<?= (int)$item['id'] ?>, document.getElementById('noChargeFlag<?= (int)$item['id'] ?>').checked, this.value, <?= $isAdvanced ? 'true' : 'false' ?>)">
+                                                                <option value=""><?= htmlspecialchars(bakery_t('no_charge.reason.none')) ?></option>
+                                                                <?php foreach (bakery_no_charge_reasons() as $reasonCode): ?>
+                                                                    <option value="<?= htmlspecialchars($reasonCode) ?>" <?= $lineReason === $reasonCode ? 'selected' : '' ?>>
+                                                                        <?= htmlspecialchars(bakery_t('no_charge.reason.' . $reasonCode)) ?>
+                                                                    </option>
+                                                                <?php endforeach; ?>
+                                                            </select>
+                                                        </div>
+                                                    <?php elseif ($lineNoCharge && $lineReason !== ''): ?>
+                                                        <div class="source-tag"><?= htmlspecialchars(bakery_t('no_charge.reason.' . $lineReason)) ?></div>
+                                                    <?php endif; ?>
+                                                </td>
                                                 <td>$<?= number_format($item['line_total'], 2) ?></td>
                                                 <td>
                                                     <button class="btn btn-small btn-danger" 
@@ -2210,6 +2262,37 @@ function confirmAdvancedEdit(isAdvanced) {
         'This dated order already appears progressed in production or delivery.\n\n' +
         'Changing it updates demand for ' + selectedOrderDate + ' only (not standing).\n\nContinue?'
     );
+}
+
+function setLineNoCharge(itemId, checked, reason, isAdvanced) {
+    if (!confirmAdvancedEdit(!!isAdvanced)) {
+        location.reload();
+        return;
+    }
+    const body = new URLSearchParams({
+        action: 'set_no_charge',
+        item_id: String(itemId),
+        is_no_charge: checked ? '1' : '0',
+        no_charge_reason: reason || ''
+    });
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unable to update no-charge'));
+            location.reload();
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+        location.reload();
+    });
 }
 
 function updateQuantity(itemId, quantity, isAdvanced) {

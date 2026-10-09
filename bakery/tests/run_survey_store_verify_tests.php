@@ -385,7 +385,7 @@ $navCatalog = (string)file_get_contents($root . '/includes/navigation_catalog.ph
 $assert(strpos($navCatalog, "nav_key' => 'survey_center'") !== false, 'navigation catalog declares Survey Center nav_key');
 $assert(substr_count($navCatalog, "text_comms.php?view=surveys") >= 2, 'Survey Center appears in Workday and Delivery');
 $navSrc = (string)file_get_contents($root . '/includes/nav.php');
-$assert(strpos($navSrc, 'text_comms.php?view=surveys') !== false, 'manager More includes Survey Center shortcut');
+$assert(strpos($navSrc, 'text_comms.php?view=surveys') === false, 'manager navigation omits Survey Center');
 $assert(strpos($navSrc, 'survey.php') !== false, 'driver More includes tomorrow stores survey link');
 
 // ---- Coverage radar helpers -------------------------------------------------
@@ -482,6 +482,8 @@ $keys = [
     'survey.sibling_to_order',
     'survey.sibling_to_verify',
     'survey.hub_title',
+    'survey.hub_empty',
+    'survey.hub_open',
     'texts.survey_coverage_empty_drivers',
     'texts.survey_coverage_unassigned',
     'texts.survey_coverage_all_clear',

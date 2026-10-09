@@ -219,6 +219,66 @@ function bakery_daily_run_required_products(PDO $db, string $date, int $weekday)
 }
 
 /**
+ * Standing orders for this weekday that have no standing route or driver.
+ *
+ * @return list<array{customer_id:int, customer_name:string, products:list<array{name:string, quantity:int}>, summary:string}>
+ */
+function bakery_daily_run_unrouted_standing_orders(PDO $db, string $date): array
+{
+    if (!table_exists($db, 'standing_orders') || !table_exists($db, 'customers') || !table_exists($db, 'products')) {
+        return [];
+    }
+    $day = bakery_standing_day_from_date($date);
+    $dayClause = bakery_standing_day_in_clause($day);
+    $routeSql = '1 = 0';
+    $routeParams = [];
+    if (table_exists($db, 'standing_routes')) {
+        $routeSql = 'CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?';
+        $routeParams[] = $day;
+    }
+    $stmt = $db->prepare(
+        'SELECT c.id AS customer_id, c.name AS customer_name, p.name AS product_name, so.quantity
+         FROM standing_orders so
+         JOIN customers c ON c.id = so.customer_id AND c.is_active = 1
+         ' . bakery_sfb_ops_origin_clause('c', $db) . '
+         JOIN products p ON p.id = so.product_id
+         WHERE so.quantity > 0
+           AND so.day_of_week ' . $dayClause['sql'] . '
+           AND NOT EXISTS (
+               SELECT 1 FROM standing_routes sr
+               WHERE sr.customer_id = c.id AND ' . $routeSql . '
+           )
+         ORDER BY c.name, p.name'
+    );
+    $stmt->execute([...$dayClause['values'], ...$routeParams]);
+    $grouped = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $customerId = (int)$row['customer_id'];
+        if (!isset($grouped[$customerId])) {
+            $grouped[$customerId] = [
+                'customer_id' => $customerId,
+                'customer_name' => (string)$row['customer_name'],
+                'products' => [],
+            ];
+        }
+        $grouped[$customerId]['products'][] = [
+            'name' => (string)$row['product_name'],
+            'quantity' => (int)$row['quantity'],
+        ];
+    }
+    $rows = [];
+    foreach ($grouped as $row) {
+        $parts = [];
+        foreach ($row['products'] as $product) {
+            $parts[] = $product['name'] . ' × ' . $product['quantity'];
+        }
+        $row['summary'] = implode(', ', $parts);
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+/**
  * Build the full Daily Run payload for one operating date.
  *
  * @return array
@@ -280,12 +340,12 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $demandStage = [
         'key' => 'confirm_demand',
         'step' => 1,
-        'label' => 'Confirm Demand',
+        'label' => bakery_t('ux.stage.confirm_demand'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
         'blockers' => [],
-        'action_label' => 'Review Demand',
+        'action_label' => bakery_t('ux.action.review_demand'),
         'href' => $links['daily_orders'],
     ];
 
@@ -405,7 +465,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 if ($confirmState['confirmation'] === null) {
                     $demandStage['ui_state'] = 'needs_attention';
                     $demandStage['summary'] .= ' · awaiting manager confirmation';
-                    $demandStage['action_label'] = 'Confirm Demand';
+                    $demandStage['action_label'] = bakery_t('ux.stage.confirm_demand');
                     $demandStage['href'] = $links['daily_run'] . '#confirm_demand';
                     $blockers[] = bakery_ops_exception([
                         'type' => 'demand_unconfirmed',
@@ -415,11 +475,11 @@ function bakery_daily_run_build(PDO $db, string $date): array
                         'title' => 'Demand not confirmed',
                         'detail' => 'Dated orders are ready. Confirm demand before later stages can finish the day.',
                         'href' => $links['daily_run'] . '#confirm_demand',
-                        'action' => 'Confirm Demand',
+                        'action' => bakery_t('ux.stage.confirm_demand'),
                     ]);
                 } elseif ((int)$confirmState['changed_since']['count'] > 0) {
                     $demandStage['ui_state'] = 'needs_attention';
-                    $demandStage['action_label'] = 'Confirm again';
+                    $demandStage['action_label'] = bakery_t('ux.action.confirm_again');
                     $demandStage['href'] = $links['daily_run'] . '#confirm_demand';
                     $blockers[] = bakery_ops_exception([
                         'type' => 'demand_changed_since',
@@ -447,7 +507,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $planStage = [
         'key' => 'production_plan',
         'step' => 2,
-        'label' => 'Commit Production Plan',
+        'label' => bakery_t('daily_run.commit_plan'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -555,7 +615,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 $driftCount = (int)($commitState['changed_since']['count'] ?? 0);
                 if ($commitRow === null) {
                     $planStage['ui_state'] = 'needs_attention';
-                    $planStage['action_label'] = 'Commit Production Plan';
+                    $planStage['action_label'] = bakery_t('daily_run.commit_plan');
                     $planStage['href'] = $links['daily_run'] . '#production_plan';
                     $summaryBits = ['awaiting manager commit'];
                     if ($coverageBits !== []) {
@@ -571,16 +631,16 @@ function bakery_daily_run_build(PDO $db, string $date): array
                         'title' => 'Production plan not committed',
                         'detail' => 'Saved targets are a draft. Commit the plan so Daily Production bakes those numbers.',
                         'href' => $links['daily_run'] . '#production_plan',
-                        'action' => 'Commit Production Plan',
+                        'action' => bakery_t('daily_run.commit_plan'),
                         'inline_action' => [
                             'action' => 'commit_production_plan',
-                            'label' => 'Commit plan',
-                            'confirm' => 'Commit the last saved production targets for this delivery date? The baker will bake these numbers until you commit again.',
+                            'label' => bakery_t('daily_run.commit_plan'),
+                            'confirm' => bakery_t('daily_run.commit_plan_prompt'),
                         ],
                     ]);
                 } elseif ($driftCount > 0) {
                     $planStage['ui_state'] = 'needs_attention';
-                    $planStage['action_label'] = 'Commit again';
+                    $planStage['action_label'] = bakery_t('daily_run.commit_plan_again');
                     $planStage['href'] = $links['daily_run'] . '#production_plan';
                     $planStage['summary'] = 'Committed · ' . $driftCount . ' demand change'
                         . ($driftCount === 1 ? '' : 's')
@@ -599,7 +659,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                         'action' => 'Review and commit again',
                         'inline_action' => [
                             'action' => 'commit_production_plan',
-                            'label' => 'Commit again',
+                            'label' => bakery_t('daily_run.commit_plan_again'),
                             'confirm' => 'Re-commit the last saved production targets? This updates the baker\'s numbers. Demand stays visible beside them.',
                         ],
                     ]);
@@ -651,7 +711,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $produceStage = [
         'key' => 'produce',
         'step' => 3,
-        'label' => 'Produce',
+        'label' => bakery_t('ux.stage.produce'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -774,7 +834,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $packStage = [
         'key' => 'pack',
         'step' => 4,
-        'label' => 'Pack',
+        'label' => bakery_t('ux.stage.pack'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -822,10 +882,10 @@ function bakery_daily_run_build(PDO $db, string $date): array
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $invRows[(int)$row['product_id']] = $row;
             }
+            $coverage = bakery_inventory_finished_goods_coverage($db, $date, $productIds, $invRows);
             foreach ($requiredByProduct as $productId => $requiredQty) {
-                $inv = $invRows[$productId] ?? null;
-                $stock = $inv ? ((int)$inv['available_quantity'] + (int)$inv['loaded_quantity']) : 0;
-                if ($requiredQty > $stock) {
+                $covered = $coverage[(int)$productId] ?? 0;
+                if ((int)$requiredQty > $covered) {
                     $stockShortProducts++;
                 }
             }
@@ -852,7 +912,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 'title' => 'Insufficient finished goods to pack',
                 'detail' => $stockShortProducts . ' product'
                     . ($stockShortProducts === 1 ? '' : 's')
-                    . ' have less available+loaded stock than committed demand.',
+                    . ' have less on-hand or already-delivered stock than committed demand.',
                 'count' => $stockShortProducts,
                 'href' => bakery_ops_link_inventory($date, ['attention' => 'shortfall'], 'daily_run'),
                 'action' => 'Open Finished Goods',
@@ -887,7 +947,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $dispatchStage = [
         'key' => 'dispatch',
         'step' => 5,
-        'label' => 'Assign / Load / Dispatch',
+        'label' => bakery_t('ux.stage.assign_load'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -957,7 +1017,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $deliverStage = [
         'key' => 'deliver',
         'step' => 6,
-        'label' => 'Deliver & Reconcile',
+        'label' => bakery_t('ux.stage.deliver'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -1056,7 +1116,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $invoiceStage = [
         'key' => 'invoice',
         'step' => 7,
-        'label' => 'Invoice',
+        'label' => bakery_t('ux.stage.invoice'),
         'ui_state' => 'not_started',
         'summary' => '',
         'metrics' => [],
@@ -1092,7 +1152,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $invoiceStage['summary'] = 'Invoice data unavailable';
     } elseif ($deliveredOrders === 0 && $invoiced === 0) {
         $invoiceStage['ui_state'] = 'empty';
-        $invoiceStage['summary'] = 'Nothing to invoice yet';
+        $invoiceStage['summary'] = bakery_t('ux.cc.nothing_to_invoice');
     } elseif ($uninvoiced > 0 || $unconfirmed > 0) {
         $invoiceStage['ui_state'] = 'needs_attention';
         $invoiceStage['summary'] = $ccStages['invoice']['summary'] ?? ($uninvoiced . ' uninvoiced');
@@ -1160,7 +1220,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
     $closeStage = [
         'key' => 'closeout',
         'step' => 8,
-        'label' => 'Close the Day',
+        'label' => bakery_t('ux.stage.close_day'),
         'ui_state' => $isClosed ? ($staleCloseout ? 'needs_attention' : 'complete') : ($operationalComplete ? 'ready' : 'needs_attention'),
         'summary' => $isClosed
             ? ($staleCloseout ? 'Closed, but the day now has new exceptions' : 'Manager closeout recorded')
@@ -1199,6 +1259,13 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $nextAction = $closeStage;
     }
 
+    $unroutedStandingOrders = [];
+    try {
+        $unroutedStandingOrders = bakery_daily_run_unrouted_standing_orders($db, $date);
+    } catch (Throwable $e) {
+        error_log('daily_run unrouted standing: ' . $e->getMessage());
+    }
+
     return [
         'date' => $date,
         'weekday' => $weekday,
@@ -1222,5 +1289,6 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'links' => $links,
         'demand_review' => $demandReview,
         'inventory_ready' => $inventoryReady,
+        'unrouted_standing_orders' => $unroutedStandingOrders,
     ];
 }

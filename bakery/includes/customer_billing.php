@@ -224,13 +224,20 @@ function bakery_portal_billing_line_export_rows(PDO $db, $customerId, $startDate
             $lineTotal = $line['delivered_quantity'] !== null
                 ? round($unitPrice * (int)$line['delivered_quantity'], 2)
                 : (float)$line['line_total'];
-            if ($unitPrice <= 0 && $lineTotal <= 0) {
+            $noChargeLabel = function_exists('bakery_billing_line_no_charge_label')
+                ? bakery_billing_line_no_charge_label($line)
+                : '';
+            if ($unitPrice <= 0 && $lineTotal <= 0 && $noChargeLabel === '') {
                 continue;
+            }
+            $product = (string)$line['product_name'];
+            if ($noChargeLabel !== '') {
+                $product .= ' — ' . $noChargeLabel;
             }
             $rows[] = [
                 'invoice_id' => $inv['invoice_number'],
                 'delivery_date' => $inv['order_date'],
-                'product' => $line['product_name'],
+                'product' => $product,
                 'quantity' => (int)$qty,
                 'unit_price' => $unitPrice,
                 'line_amount' => $lineTotal,

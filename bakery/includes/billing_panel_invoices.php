@@ -584,11 +584,11 @@ $formAction = 'billing_center.php?panel=invoices';
                         <tbody>
                         <?php foreach ($selectedInvoice['items'] as $item): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($item['product_name']); ?></td>
+                                <td><?php echo htmlspecialchars($item['product_name']); ?><?php if (!empty($item['is_no_charge'])): ?><div><?php echo htmlspecialchars($item['no_charge_label'] !== '' ? $item['no_charge_label'] : bakery_t('no_charge.label')); ?></div><?php endif; ?></td>
                                 <td><?php echo (int)$item['quantity']; ?></td>
                                 <td><?php echo $item['delivered_quantity'] !== null ? (int)$item['delivered_quantity'] : '—'; ?></td>
-                                <td><?php echo $item['has_price'] ? '$' . number_format($item['unit_price'], 2) : '—'; ?></td>
-                                <td><?php echo $item['has_price'] ? '$' . number_format($item['line_total'], 2) : '—'; ?></td>
+                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['unit_price'], 2) : '—'; ?></td>
+                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['line_total'], 2) : '—'; ?></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>

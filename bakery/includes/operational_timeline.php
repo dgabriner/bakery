@@ -27,6 +27,8 @@ define('BAKERY_OP_DELIVERY_SKIPPED', 'delivery_skipped');
 define('BAKERY_OP_DELIVERY_UNSKIPPED', 'delivery_unskipped');
 define('BAKERY_OP_INVOICE_GENERATED', 'invoice_generated');
 define('BAKERY_OP_INVOICE_EMAILED', 'invoice_emailed');
+define('BAKERY_OP_LINE_PRICE_REPAIRED', 'line_price_repaired');
+define('BAKERY_OP_LINE_NO_CHARGE_SET', 'line_no_charge_set');
 define('BAKERY_OP_DAY_CLOSED', 'operating_day_closed');
 define('BAKERY_OP_DAY_REOPENED', 'operating_day_reopened');
 define('BAKERY_OP_PORTAL_STANDING_CHANGED', 'portal_standing_changed');
@@ -279,6 +281,8 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_DELIVERY_UNSKIPPED => 'delivery',
         BAKERY_OP_INVOICE_GENERATED => 'billing',
         BAKERY_OP_INVOICE_EMAILED => 'billing',
+        BAKERY_OP_LINE_PRICE_REPAIRED => 'billing',
+        BAKERY_OP_LINE_NO_CHARGE_SET => 'billing',
         BAKERY_OP_DAY_CLOSED => 'closeout',
         BAKERY_OP_DAY_REOPENED => 'closeout',
         BAKERY_OP_PORTAL_STANDING_CHANGED => 'demand',

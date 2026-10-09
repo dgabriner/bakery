@@ -16,12 +16,102 @@ require_once __DIR__ . '/customer_order_mutations.php';
 require_once __DIR__ . '/operational_timeline.php';
 
 /**
+ * Next free dated position for one standing stop.
+ *
+ * Uses the standing slot when that number is still open. Otherwise appends
+ * after the highest position already taken for the driver on this date.
+ *
+ * @param array<int,int> $maxRouteOrderByDriver
+ * @param array<int,array<int,bool>> $usedRouteOrdersByDriver
+ */
+function bakery_next_standing_route_order(
+    int $driverId,
+    int $standingRouteOrder,
+    array &$maxRouteOrderByDriver,
+    array &$usedRouteOrdersByDriver
+): int {
+    if ($standingRouteOrder > 0 && empty($usedRouteOrdersByDriver[$driverId][$standingRouteOrder])) {
+        $routeOrder = $standingRouteOrder;
+    } else {
+        $routeOrder = ($maxRouteOrderByDriver[$driverId] ?? 0) + 1;
+        while (!empty($usedRouteOrdersByDriver[$driverId][$routeOrder])) {
+            $routeOrder++;
+        }
+    }
+    $maxRouteOrderByDriver[$driverId] = max($maxRouteOrderByDriver[$driverId] ?? 0, $routeOrder);
+    $usedRouteOrdersByDriver[$driverId][$routeOrder] = true;
+    return $routeOrder;
+}
+
+/**
+ * True when an active standing-route stop for this date has no dated assignment.
+ * Paused and skipped customers are ignored. A cancelled assignment still counts
+ * as present. A hard-deleted assignment does not, because removal is not stored.
+ */
+function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date): bool
+{
+    if (!table_exists($db, 'standing_routes') || !table_exists($db, 'daily_orders') || !table_exists($db, 'daily_order_assignments')) {
+        return false;
+    }
+    $dayClause = bakery_standing_day_in_clause(bakery_standing_day_from_date($date));
+    $weekStart = bakery_week_start_monday($date);
+    $pauseSql = '';
+    $pauseParams = [];
+    if (table_exists($db, 'standing_order_pauses')) {
+        $pauseSql .= ' AND NOT EXISTS (
+            SELECT 1 FROM standing_order_pauses sop
+            WHERE sop.customer_id = sr.customer_id AND sop.week_start = ?
+        )';
+        $pauseParams[] = $weekStart;
+    }
+    if (table_exists($db, 'customer_delivery_skips')) {
+        $pauseSql .= ' AND NOT EXISTS (
+            SELECT 1 FROM customer_delivery_skips cds
+            WHERE cds.customer_id = sr.customer_id AND cds.skip_date = ?
+        )';
+        $pauseParams[] = $date;
+    }
+    if (table_exists($db, 'customer_delivery_pauses')) {
+        $pauseSql .= ' AND NOT EXISTS (
+            SELECT 1 FROM customer_delivery_pauses cdp
+            WHERE cdp.customer_id = sr.customer_id
+              AND cdp.pause_start <= ? AND cdp.pause_end >= ?
+        )';
+        $pauseParams[] = $date;
+        $pauseParams[] = $date;
+    }
+
+    $stmt = $db->prepare(
+        'SELECT 1
+         FROM standing_routes sr
+         JOIN customers c ON c.id = sr.customer_id AND c.is_active = 1
+         ' . bakery_sfb_ops_origin_clause('c', $db) . '
+         WHERE sr.day_of_week ' . $dayClause['sql'] . '
+           AND NOT EXISTS (
+               SELECT 1
+               FROM daily_orders do
+               JOIN daily_order_assignments doa
+                 ON doa.daily_order_id = do.id AND doa.delivery_date = ?
+               WHERE do.customer_id = sr.customer_id AND do.order_date = ?
+           )
+           ' . $pauseSql . '
+         LIMIT 1'
+    );
+    $stmt->execute([...$dayClause['values'], $date, $date, ...$pauseParams]);
+    return (bool)$stmt->fetchColumn();
+}
+
+/**
  * Generate dated daily orders from standing orders for one date.
  *
  * @param array{overwrite_changed?:bool, record_event?:bool, assign_routes?:bool} $options
  *   overwrite_changed — replace dated quantity edits with standing quantities (default false)
  *   record_event      — write an operational-timeline event (default true)
- *   assign_routes     — rebuild dated driver assignments from standing routes (default true)
+ *   assign_routes     — copy standing-route stops onto the dated route (default true).
+ *                       Stops with no standing order are included. An existing
+ *                       dated assignment is left where it is. A hard delete is
+ *                       not recorded, so the next fill copies that stop again.
+ *                       Cancelled assignments stay cancelled.
  *
  * @return array{db_day:int, standing_rows:int, orders_created:int, items_created:int,
  *               items_updated:int, items_preserved:int, overwrite_changed:bool,
@@ -147,7 +237,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
         $driversAssigned = 0;
         $routesPreserved = 0;
         $ordersWithoutRoute = 0;
-        $initialAssignmentsByDriver = [];
+        $standingRoutePlaced = [];
         $maxRouteOrderByDriver = [];
         $usedRouteOrdersByDriver = [];
         if ($assignRoutes) {
@@ -161,7 +251,6 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
             foreach ($datedRouteStmt->fetchAll(PDO::FETCH_ASSOC) as $datedRoute) {
                 $driverId = (int)$datedRoute['driver_id'];
                 $routeOrder = max(0, (int)$datedRoute['route_order']);
-                $initialAssignmentsByDriver[$driverId] = true;
                 $maxRouteOrderByDriver[$driverId] = max($maxRouteOrderByDriver[$driverId] ?? 0, $routeOrder);
                 if ($routeOrder > 0) {
                     $usedRouteOrdersByDriver[$driverId][$routeOrder] = true;
@@ -287,19 +376,17 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                             $datedDriverId = (int)$existingAssignments[0]['driver_id'];
                             $updateLegacyDriverStmt->execute([$datedDriverId, $dailyOrderId]);
                             $routesPreserved++;
+                            $standingRoutePlaced[(int)$customerId] = true;
                             continue;
                         }
 
                         $driverId = (int)$standingRoute['driver_id'];
-                        $standingRouteOrder = max(1, (int)$standingRoute['route_order']);
-                        if (empty($initialAssignmentsByDriver[$driverId])
-                            && empty($usedRouteOrdersByDriver[$driverId][$standingRouteOrder])) {
-                            $routeOrder = $standingRouteOrder;
-                        } else {
-                            $routeOrder = ($maxRouteOrderByDriver[$driverId] ?? 0) + 1;
-                        }
-                        $maxRouteOrderByDriver[$driverId] = max($maxRouteOrderByDriver[$driverId] ?? 0, $routeOrder);
-                        $usedRouteOrdersByDriver[$driverId][$routeOrder] = true;
+                        $routeOrder = bakery_next_standing_route_order(
+                            $driverId,
+                            (int)$standingRoute['route_order'],
+                            $maxRouteOrderByDriver,
+                            $usedRouteOrdersByDriver
+                        );
 
                         $assignmentParams = [
                             $dailyOrderId,
@@ -322,10 +409,75 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                             $dailyOrderId,
                         ]);
                         $driversAssigned++;
+                        $standingRoutePlaced[(int)$customerId] = true;
                     } elseif ($assignRoutes) {
                         $ordersWithoutRoute++;
                     }
                 }
+            }
+        }
+
+        // Standing-route stops are the route plan. Customers with no standing
+        // order (or whose order lines were filtered out of the product join)
+        // still belong on the dated route. Existing assignments, including
+        // cancelled ones, are left alone. A hard delete leaves no record, so
+        // this pass copies the stop again.
+        if ($assignRoutes && $standingRouteByCustomer !== []) {
+            $routeWeekStart = bakery_week_start_monday($date);
+            $routeOrderExists = $db->prepare(
+                'SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ? LIMIT 1'
+            );
+            foreach ($standingRouteByCustomer as $routeCustomerId => $standingRoute) {
+                $routeCustomerId = (int)$routeCustomerId;
+                if (isset($standingRoutePlaced[$routeCustomerId])) {
+                    continue;
+                }
+                if (bakery_customer_week_is_paused($db, $routeCustomerId, $routeWeekStart)
+                    || bakery_customer_delivery_is_skipped($db, $routeCustomerId, $date)
+                    || bakery_customer_delivery_in_pause_range($db, $routeCustomerId, $date)
+                ) {
+                    continue;
+                }
+
+                $routeOrderExists->execute([$routeCustomerId, $date]);
+                $routeExistedBefore = (int)$routeOrderExists->fetchColumn() > 0;
+                $dailyOrderId = bakery_daily_order_find_or_create($db, $routeCustomerId, $date);
+                if (!$routeExistedBefore) {
+                    $ordersCreated++;
+                }
+
+                $existingAssignmentStmt->execute([$dailyOrderId, $date]);
+                $existingAssignments = $existingAssignmentStmt->fetchAll();
+                if ($existingAssignments !== []) {
+                    $datedDriverId = (int)$existingAssignments[0]['driver_id'];
+                    $updateLegacyDriverStmt->execute([$datedDriverId, $dailyOrderId]);
+                    $routesPreserved++;
+                    continue;
+                }
+
+                $driverId = (int)$standingRoute['driver_id'];
+                $routeOrder = bakery_next_standing_route_order(
+                    $driverId,
+                    (int)$standingRoute['route_order'],
+                    $maxRouteOrderByDriver,
+                    $usedRouteOrdersByDriver
+                );
+                $assignmentParams = [
+                    $dailyOrderId,
+                    $driverId,
+                    $date,
+                    null,
+                    null,
+                    $routeOrder,
+                    null,
+                    'pending',
+                ];
+                if ($assignmentHasNotes) {
+                    $assignmentParams[] = null;
+                }
+                $insertAssignmentStmt->execute($assignmentParams);
+                $updateLegacyDriverStmt->execute([$driverId, $dailyOrderId]);
+                $driversAssigned++;
             }
         }
 
@@ -513,9 +665,11 @@ function bakery_ensure_daily_orders_for_date(PDO $db, string $date, array $optio
     $withDaily = (int)($summary['customers_with_daily'] ?? 0);
     $missing = (int)($summary['missing_daily'] ?? 0);
     $missingStandingLines = (int)($summary['missing_standing_lines'] ?? 0);
+    $missingRoutes = $assignRoutes && bakery_date_has_unassigned_standing_route_stops($db, $date);
     $needsGeneration = $missing > 0
         || $missingStandingLines > 0
-        || ($expected > 0 && $withDaily === 0);
+        || ($expected > 0 && $withDaily === 0)
+        || $missingRoutes;
 
     if (!$needsGeneration) {
         return $noop('already_generated');

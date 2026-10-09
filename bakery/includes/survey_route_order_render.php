@@ -21,7 +21,7 @@ if ($isHq) {
             continue;
         }
         try {
-            $linkSurvey = bakery_survey_ensure_route_order($db, $gid, $verifyDate, (int)($user['id'] ?? 0));
+            $linkSurvey = bakery_survey_find_route_order($db, $gid, $verifyDate);
             $driverLinkTokens[$gid] = (string)($linkSurvey['token'] ?? '');
         } catch (Throwable $e) {
             error_log('route_order driver link: ' . $e->getMessage());
@@ -31,7 +31,7 @@ if ($isHq) {
 $selfUrl = bakery_survey_link_url($token, $verifyDate);
 $siblingVerifyUrl = '';
 try {
-    $sib = bakery_survey_dual_hub_links($db, $driverId, $verifyDate, (int)($user['id'] ?? 0));
+    $sib = bakery_survey_dual_hub_existing($db, $driverId, $verifyDate);
     $siblingVerifyUrl = (string)($sib['verify_url'] ?? '');
 } catch (Throwable $e) {
     error_log('route_order sibling verify link: ' . $e->getMessage());

@@ -12,9 +12,24 @@
   var statusEl = document.getElementById('auto-push-status');
   var busy = false;
 
+  function copy(key) {
+    if (key === 'unavailable') {
+      return root.getAttribute('data-status-unavailable') || '';
+    }
+    return '';
+  }
+
+  function plainStatus(text) {
+    var value = String(text == null ? '' : text);
+    if (value.indexOf('<') !== -1 || value.indexOf('Warning:') !== -1) {
+      return copy('unavailable');
+    }
+    return value;
+  }
+
   function setStatus(text, kind) {
     if (!statusEl) return;
-    statusEl.textContent = text || '';
+    statusEl.replaceChildren(document.createTextNode(plainStatus(text)));
     statusEl.className = 'auto-push-status' + (kind ? ' auto-push-status--' + kind : '');
   }
 
@@ -45,22 +60,26 @@
     }).then(function (res) {
       return res.text().then(function (text) {
         var data = null;
+        var body = text ? String(text).replace(/^\uFEFF/, '').trim() : '';
+        if (body.charAt(0) === '<' || body.indexOf('<br') !== -1 || body.indexOf('<b>') !== -1) {
+          throw new Error(copy('unavailable'));
+        }
         try {
-          data = text ? JSON.parse(text) : null;
+          data = body ? JSON.parse(body) : null;
         } catch (parseErr) {
-          throw new Error('HTTP ' + res.status + (text ? ': ' + text.slice(0, 180) : ''));
+          throw new Error(copy('unavailable'));
         }
         if (!res.ok || (data && data.ok === false)) {
           var err =
             (data && (data.error || data.message)) ||
             ('HTTP ' + res.status);
-          if (data && data.output) {
+          if (data && data.output && String(data.output).indexOf('<') === -1) {
             var tail = String(data.output).trim().split(/\r?\n/).slice(-4).join(' | ');
             if (tail) {
-              err += (err ? ' — ' : '') + tail;
+              err += (err ? ': ' : '') + tail;
             }
           }
-          throw new Error(err);
+          throw new Error(plainStatus(err));
         }
         return data || {};
       });
@@ -120,7 +139,7 @@
           applyEnabled(!!data.enabled);
           var msg = data.message || 'Sync finished';
           if (data.output && /Nothing to upload/i.test(data.output)) {
-            msg = 'Already in sync — nothing new to upload';
+            msg = 'Already in sync: nothing new to upload';
           } else if (data.output && /Uploading\s+(\d+)/i.test(data.output)) {
             var m = data.output.match(/Uploading\s+(\d+)/i);
             msg = 'Uploaded ' + m[1] + ' file(s) to staging';

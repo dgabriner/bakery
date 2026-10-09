@@ -153,9 +153,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     // --- Demand ---
     $demand = [
         'key' => 'demand',
-        'label' => 'Demand',
+        'label' => bakery_t('ux.stage.demand'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['daily_orders'],
         'metrics' => [
             'daily_orders' => bakery_dashboard_metric(null, 'unavailable'),
@@ -174,7 +174,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     try {
         if (!table_exists($db, 'daily_orders')) {
             $sectionErrors['demand'] = 'Daily orders are not available in this database.';
-            $demand['summary'] = 'Not installed';
+            $demand['summary'] = bakery_t('ux.cc.not_installed');
         } else {
             $stmt = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE order_date = ?');
             $stmt->execute([$date]);
@@ -246,8 +246,11 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
 
             if ($missingDailyCustomers > 0) {
                 $demand['state'] = 'attention';
-                $demand['summary'] = $missingDailyCustomers . ' standing customer'
-                    . ($missingDailyCustomers === 1 ? '' : 's') . ' without daily orders';
+                $demand['summary'] = bakery_t_count(
+                    'ux.cc.standing_without_one',
+                    'ux.cc.standing_without_many',
+                    $missingDailyCustomers
+                );
                 $exceptions[] = bakery_ops_exception([
                     'type' => 'demand_missing_daily',
                     'severity' => 'critical',
@@ -262,7 +265,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 ]);
             } elseif ($dailyOrderCount === 0 && $standingLines > 0) {
                 $demand['state'] = 'attention';
-                $demand['summary'] = 'No daily orders yet · standing demand exists';
+                $demand['summary'] = bakery_t('ux.cc.no_orders_standing');
                 $exceptions[] = bakery_ops_exception([
                     'type' => 'demand_no_orders',
                     'severity' => 'warning',
@@ -277,20 +280,18 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 ]);
             } elseif ($dailyOrderCount === 0 && ($standingLines === 0 || $standingLines === null)) {
                 $demand['state'] = 'empty';
-                $demand['summary'] = 'No demand on file';
+                $demand['summary'] = bakery_t('ux.cc.no_demand');
             } else {
                 $demand['state'] = 'ok';
-                $demand['summary'] = $dailyOrderCount . ' daily order'
-                    . ($dailyOrderCount === 1 ? '' : 's')
-                    . ' · ' . $customersWithOrders . ' customer'
-                    . ($customersWithOrders === 1 ? '' : 's');
+                $demand['summary'] = bakery_t_count('ux.cc.daily_order_one', 'ux.cc.daily_order_many', (int)$dailyOrderCount)
+                    . ' · ' . bakery_t_count('ux.cc.customer_one', 'ux.cc.customer_many', (int)$customersWithOrders);
             }
         }
     } catch (Throwable $e) {
         error_log('dashboard demand: ' . $e->getMessage());
         $sectionErrors['demand'] = bakery_dashboard_safe_error_message($e);
         $demand['state'] = 'unknown';
-        $demand['summary'] = 'Unavailable';
+        $demand['summary'] = bakery_t('common.unavailable');
         $exceptions[] = bakery_ops_exception([
             'type' => 'demand_unavailable',
             'severity' => 'critical',
@@ -307,9 +308,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     // --- Production & finished goods ---
     $production = [
         'key' => 'production',
-        'label' => 'Production',
+        'label' => bakery_t('ux.stage.production'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['production'],
         'metrics' => [
             'required_units' => bakery_dashboard_metric(null, 'unavailable'),
@@ -319,9 +320,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     ];
     $pack = [
         'key' => 'pack',
-        'label' => 'Pack',
+        'label' => bakery_t('ux.stage.pack'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['pack'],
         'metrics' => [
             'item_lines' => bakery_dashboard_metric(null, 'unavailable'),
@@ -358,11 +359,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         $pack['metrics']['units'] = bakery_dashboard_metric($itemUnits, $itemUnits > 0 ? 'ready' : 'empty');
         if ($itemLines > 0) {
             $pack['state'] = 'ok';
-            $pack['summary'] = $itemLines . ' line' . ($itemLines === 1 ? '' : 's')
-                . ' · ' . number_format($itemUnits) . ' units to pack';
+            $pack['summary'] = bakery_t_count('ux.cc.pack_one', 'ux.cc.pack_many', $itemLines, [
+                'units' => number_format($itemUnits),
+            ]);
         } else {
             $pack['state'] = 'empty';
-            $pack['summary'] = 'Nothing to pack';
+            $pack['summary'] = bakery_t('ux.cc.nothing_to_pack');
         }
 
         $requiredUnits = array_sum($requiredByProduct);
@@ -392,12 +394,10 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $invRows[(int)$row['product_id']] = $row;
             }
 
+            $coverage = bakery_inventory_finished_goods_coverage($db, $date, $productIds, $invRows);
             foreach ($requiredByProduct as $productId => $required) {
-                $inv = $invRows[$productId] ?? null;
-                $stock = $inv
-                    ? ((int)$inv['available_quantity'] + (int)$inv['loaded_quantity'])
-                    : 0;
-                if ($required > $stock) {
+                $covered = $coverage[(int)$productId] ?? 0;
+                if ((int)$required > $covered) {
                     $shortProducts++;
                 }
             }
@@ -412,7 +412,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'title' => 'Finished-goods shortfall',
                     'detail' => $shortProducts . ' product'
                         . ($shortProducts === 1 ? '' : 's')
-                        . ' have less available+loaded stock than committed demand.',
+                        . ' have less on-hand or already-delivered stock than committed demand.',
                     'count' => $shortProducts,
                     'href' => bakery_ops_link_inventory($date, ['attention' => 'shortfall']),
                     'action' => 'Open Finished Goods',
@@ -475,11 +475,11 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                             'title' => 'Production plan not committed',
                             'detail' => 'Saved targets are a draft. Commit the plan so Daily Production bakes those numbers.',
                             'href' => bakery_ops_link_production_center($weekStart, ['date' => $date]),
-                            'action' => 'Commit Production Plan',
+                            'action' => bakery_t('daily_run.commit_plan'),
                             'inline_action' => [
                                 'action' => 'commit_production_plan',
-                                'label' => 'Commit plan',
-                                'confirm' => 'Commit the last saved production targets for this delivery date? The baker will bake these numbers until you commit again.',
+                                'label' => bakery_t('daily_run.commit_plan'),
+                                'confirm' => bakery_t('daily_run.commit_plan_prompt'),
                             ],
                         ]);
                     } elseif ((int)($commitState['changed_since']['count'] ?? 0) > 0) {
@@ -495,11 +495,11 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                                 . ' recorded after commit. The bake sheet still uses the committed plan.',
                             'count' => $driftCount,
                             'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date]),
-                            'action' => 'Review and commit again',
+                            'action' => bakery_t('daily_run.commit_plan_again'),
                             'inline_action' => [
                                 'action' => 'commit_production_plan',
-                                'label' => 'Commit again',
-                                'confirm' => 'Re-commit the last saved production targets? This updates the baker\'s numbers. Demand stays visible beside them.',
+                                'label' => bakery_t('daily_run.commit_plan_again'),
+                                'confirm' => bakery_t('daily_run.commit_plan_again_prompt'),
                             ],
                         ]);
                     }
@@ -517,22 +517,24 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             $production['state'] = 'attention';
             $bits = [];
             if ($shortProducts > 0) {
-                $bits[] = $shortProducts . ' short';
+                $bits[] = bakery_t_count('ux.cc.short_one', 'ux.cc.short_many', $shortProducts);
             }
             if ($planShortProducts > 0) {
-                $bits[] = $planShortProducts . ' under-planned';
+                $bits[] = bakery_t_count('ux.cc.under_planned_one', 'ux.cc.under_planned_many', $planShortProducts);
             }
             $production['summary'] = implode(' · ', $bits);
         } elseif ($requiredUnits === 0) {
             $production['state'] = 'empty';
-            $production['summary'] = 'No production demand';
+            $production['summary'] = bakery_t('ux.cc.no_production');
         } elseif (!$inventoryReady) {
             $production['state'] = 'ok';
-            $production['summary'] = number_format($requiredUnits) . ' units demanded'
-                . ($hasDailyItems ? '' : ' (standing forecast)');
+            $production['summary'] = bakery_t(
+                $hasDailyItems ? 'ux.cc.units_demanded' : 'ux.cc.units_demanded_standing',
+                ['units' => number_format($requiredUnits)]
+            );
         } else {
             $production['state'] = 'ok';
-            $production['summary'] = 'Stock covers demand · ' . number_format($requiredUnits) . ' units';
+            $production['summary'] = bakery_t('ux.cc.stock_covers', ['units' => number_format($requiredUnits)]);
         }
     } catch (Throwable $e) {
         error_log('dashboard production/pack: ' . $e->getMessage());
@@ -540,9 +542,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         $sectionErrors['production'] = $msg;
         $sectionErrors['pack'] = $msg;
         $production['state'] = 'unknown';
-        $production['summary'] = 'Unavailable';
+        $production['summary'] = bakery_t('common.unavailable');
         $pack['state'] = 'unknown';
-        $pack['summary'] = 'Unavailable';
+        $pack['summary'] = bakery_t('common.unavailable');
         $exceptions[] = bakery_ops_exception([
             'type' => 'production_unavailable',
             'severity' => 'critical',
@@ -559,9 +561,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     // --- Load ---
     $load = [
         'key' => 'load',
-        'label' => 'Load',
+        'label' => bakery_t('ux.stage.load'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['driver_load'],
         'metrics' => [
             'drivers_with_work' => bakery_dashboard_metric(null, 'unavailable'),
@@ -573,7 +575,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     try {
         if (!$inventoryReady || !table_exists($db, 'daily_order_assignments')) {
             $load['state'] = $inventoryReady ? 'empty' : 'unknown';
-            $load['summary'] = $inventoryReady ? 'No load data' : 'Loads unavailable';
+            $load['summary'] = $inventoryReady ? bakery_t('ux.cc.no_load_data') : bakery_t('ux.cc.loads_unavailable');
             $load['metrics']['drivers_with_work'] = bakery_dashboard_metric(null, $inventoryReady ? 'empty' : 'unavailable');
             $load['metrics']['incomplete_loads'] = bakery_dashboard_metric(null, $inventoryReady ? 'empty' : 'unavailable');
             if (!$inventoryReady) {
@@ -595,11 +597,13 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
 
             if ($driversWithWork === 0) {
                 $load['state'] = 'empty';
-                $load['summary'] = 'No driver loads yet';
+                $load['summary'] = bakery_t('ux.cc.no_loads');
             } elseif ($incomplete > 0) {
                 $load['state'] = 'attention';
-                $load['summary'] = $incomplete . ' of ' . $driversWithWork . ' driver load'
-                    . ($driversWithWork === 1 ? '' : 's') . ' incomplete';
+                $load['summary'] = bakery_t(
+                    $driversWithWork === 1 ? 'ux.cc.load_incomplete_one' : 'ux.cc.load_incomplete_many',
+                    ['count' => $incomplete, 'total' => $driversWithWork]
+                );
                 $loadParams = ['attention' => 'incomplete'];
                 $focusName = '';
                 if ($focusDriverId > 0) {
@@ -628,7 +632,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 ]);
             } else {
                 $load['state'] = 'ok';
-                $load['summary'] = $driversWithWork . ' driver' . ($driversWithWork === 1 ? '' : 's') . ' loaded';
+                $load['summary'] = bakery_t_count('ux.cc.drivers_loaded_one', 'ux.cc.drivers_loaded_many', $driversWithWork);
             }
 
             // Route closeout: loaded vans that are not yet reconciled block the day.
@@ -659,7 +663,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         error_log('dashboard load: ' . $e->getMessage());
         $sectionErrors['load'] = bakery_dashboard_safe_error_message($e);
         $load['state'] = 'unknown';
-        $load['summary'] = 'Unavailable';
+        $load['summary'] = bakery_t('common.unavailable');
         $exceptions[] = bakery_ops_exception([
             'type' => 'load_unavailable',
             'severity' => 'critical',
@@ -676,9 +680,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     // --- Delivery ---
     $delivery = [
         'key' => 'delivery',
-        'label' => 'Delivery',
+        'label' => bakery_t('ux.stage.delivery'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['driver_assignment'],
         'metrics' => [
             'unassigned' => bakery_dashboard_metric(null, 'unavailable'),
@@ -815,34 +819,37 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $delivery['state'] = 'attention';
                 $parts = [];
                 if ($unassignedCount > 0) {
-                    $parts[] = $unassignedCount . ' unassigned';
+                    $parts[] = bakery_t_count('ux.cc.unassigned_one', 'ux.cc.unassigned_many', $unassignedCount);
                 }
                 if ($failedCount > 0) {
-                    $parts[] = $failedCount . ' failed';
+                    $parts[] = bakery_t_count('ux.cc.failed_one', 'ux.cc.failed_many', $failedCount);
                 }
                 if ($openStops > 0) {
-                    $parts[] = $openStops . ' open';
+                    $parts[] = bakery_t_count('ux.cc.open_one', 'ux.cc.open_many', $openStops);
                 }
                 $delivery['summary'] = implode(' · ', $parts);
             } elseif (($dailyOrderCount ?? 0) === 0 && $deliveredCount === 0 && $openStops === 0) {
                 $delivery['state'] = 'empty';
-                $delivery['summary'] = 'No deliveries';
+                $delivery['summary'] = bakery_t('ux.cc.no_deliveries');
             } elseif ($openStops === 0 && $deliveredCount > 0) {
                 $delivery['state'] = 'ok';
-                $delivery['summary'] = $deliveredCount . ' delivered';
+                $delivery['summary'] = bakery_t_count('ux.cc.delivered_one', 'ux.cc.delivered_many', $deliveredCount);
             } elseif ($openStops > 0) {
                 $delivery['state'] = 'ok'; // in-progress is normal, not an exception by itself
-                $delivery['summary'] = $openStops . ' in progress · ' . $deliveredCount . ' delivered';
+                $delivery['summary'] = bakery_t('ux.cc.delivery_progress', [
+                    'open' => $openStops,
+                    'delivered' => $deliveredCount,
+                ]);
             } else {
                 $delivery['state'] = 'empty';
-                $delivery['summary'] = 'No deliveries';
+                $delivery['summary'] = bakery_t('ux.cc.no_deliveries');
             }
         }
     } catch (Throwable $e) {
         error_log('dashboard delivery: ' . $e->getMessage());
         $sectionErrors['delivery'] = bakery_dashboard_safe_error_message($e);
         $delivery['state'] = 'unknown';
-        $delivery['summary'] = 'Unavailable';
+        $delivery['summary'] = bakery_t('common.unavailable');
         $exceptions[] = bakery_ops_exception([
             'type' => 'delivery_unavailable',
             'severity' => 'critical',
@@ -859,9 +866,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     // --- Invoice ---
     $invoice = [
         'key' => 'invoice',
-        'label' => 'Invoice',
+        'label' => bakery_t('ux.stage.invoice'),
         'state' => 'unknown',
-        'summary' => 'Unavailable',
+        'summary' => bakery_t('common.unavailable'),
         'href' => $links['invoice'],
         'metrics' => [
             'delivered_orders' => bakery_dashboard_metric(null, 'unavailable'),
@@ -944,21 +951,24 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
 
             if ($uninvoiced > 0 || ($unconfirmed ?? 0) > 0) {
                 $invoice['state'] = 'attention';
-                $invoice['summary'] = $uninvoiced . ' uninvoiced'
-                    . (($unconfirmed ?? 0) > 0 ? ' · ' . $unconfirmed . ' unconfirmed' : '');
+                $invoiceBits = [bakery_t_count('ux.cc.uninvoiced_one', 'ux.cc.uninvoiced_many', $uninvoiced)];
+                if (($unconfirmed ?? 0) > 0) {
+                    $invoiceBits[] = bakery_t_count('ux.cc.unconfirmed_one', 'ux.cc.unconfirmed_many', (int)$unconfirmed);
+                }
+                $invoice['summary'] = implode(' · ', $invoiceBits);
             } elseif ($deliveredOrders === 0) {
                 $invoice['state'] = 'empty';
-                $invoice['summary'] = 'Nothing to invoice yet';
+                $invoice['summary'] = bakery_t('ux.cc.nothing_to_invoice');
             } else {
                 $invoice['state'] = 'ok';
-                $invoice['summary'] = $invoiced . ' invoiced';
+                $invoice['summary'] = bakery_t_count('ux.cc.invoiced_one', 'ux.cc.invoiced_many', $invoiced);
             }
         }
     } catch (Throwable $e) {
         error_log('dashboard invoice: ' . $e->getMessage());
         $sectionErrors['invoice'] = bakery_dashboard_safe_error_message($e);
         $invoice['state'] = 'unknown';
-        $invoice['summary'] = 'Unavailable';
+        $invoice['summary'] = bakery_t('common.unavailable');
         $exceptions[] = bakery_ops_exception([
             'type' => 'invoice_unavailable',
             'severity' => 'critical',
