@@ -4481,7 +4481,17 @@ return [
     'formula_structure.line_required' => 'Agrega al menos una línea de ingrediente.',
     'formula_structure.save_failed' => 'No se pudo guardar esa estructura de fórmula.',
 
-    // account_health — vista de solo lectura de salud de cuentas. Mantener este bloque junto.
+    // no_charge — líneas en $0 explícitas que se conservan al confirmar. Mantener este bloque junto.
+    'no_charge.label' => 'Sin cargo',
+    'no_charge.mark' => 'Sin cargo',
+    'no_charge.reason' => 'Motivo',
+    'no_charge.reason.none' => 'Sin motivo',
+    'no_charge.reason.comp' => 'Cortesía',
+    'no_charge.reason.sample' => 'Muestra',
+    'no_charge.reason.replacement' => 'Reposición',
+    'no_charge.reason.donation' => 'Donación',
+
+    // account_health — vista de solo lectura de salud de cuentas. Mantener este bloque junto. Último bloque: la suite lo exige al final.
     'account_health.link' => 'Salud de cuentas',
     'account_health.title' => 'Salud de cuentas',
     'account_health.subtitle' => 'Cuentas activas, con unidades entregadas, pedidos pasados que siguen Pendiente, y saldo. La cantidad recurrente no decide quién está sin movimiento.',
@@ -4513,14 +4523,4 @@ return [
     'account_health.csv_share_delivered' => 'Unidades entregadas, últimas 4 semanas',
     'account_health.csv_share_ordered' => 'Unidades pedidas, últimas 4 semanas',
     'account_health.balance_age' => 'el más antiguo :days d',
-
-    // no_charge — líneas en $0 explícitas que se conservan al confirmar. Mantener este bloque junto.
-    'no_charge.label' => 'Sin cargo',
-    'no_charge.mark' => 'Sin cargo',
-    'no_charge.reason' => 'Motivo',
-    'no_charge.reason.none' => 'Sin motivo',
-    'no_charge.reason.comp' => 'Cortesía',
-    'no_charge.reason.sample' => 'Muestra',
-    'no_charge.reason.replacement' => 'Reposición',
-    'no_charge.reason.donation' => 'Donación',
 ];

@@ -4484,7 +4484,17 @@ return [
     'formula_structure.line_required' => 'Add at least one ingredient line.',
     'formula_structure.save_failed' => 'Could not save that formula structure.',
 
-    // account_health — read-only wholesale account health. Keep this block together.
+    // no_charge — explicit $0 lines kept at confirm. Keep this block together.
+    'no_charge.label' => 'No charge',
+    'no_charge.mark' => 'No charge',
+    'no_charge.reason' => 'Reason',
+    'no_charge.reason.none' => 'No reason given',
+    'no_charge.reason.comp' => 'Comp',
+    'no_charge.reason.sample' => 'Sample',
+    'no_charge.reason.replacement' => 'Replacement',
+    'no_charge.reason.donation' => 'Donation',
+
+    // account_health — read-only wholesale account health. Keep this block together. Last block: the account-health suite requires it at the end.
     'account_health.link' => 'Account health',
     'account_health.title' => 'Account health',
     'account_health.subtitle' => 'Active accounts, with delivered units, past orders still Pending, and balance. Standing quantity does not decide who is lapsed.',
@@ -4516,14 +4526,4 @@ return [
     'account_health.csv_share_delivered' => 'Delivered units, last 4 weeks',
     'account_health.csv_share_ordered' => 'Ordered units, last 4 weeks',
     'account_health.balance_age' => 'oldest :days d',
-
-    // no_charge — explicit $0 lines kept at confirm. Keep this block together.
-    'no_charge.label' => 'No charge',
-    'no_charge.mark' => 'No charge',
-    'no_charge.reason' => 'Reason',
-    'no_charge.reason.none' => 'No reason given',
-    'no_charge.reason.comp' => 'Comp',
-    'no_charge.reason.sample' => 'Sample',
-    'no_charge.reason.replacement' => 'Replacement',
-    'no_charge.reason.donation' => 'Donation',
 ];

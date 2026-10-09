@@ -915,6 +915,7 @@ function bakery_agent_work_map_core(): array
             'files' => [
                 'daily_status_api.php',
                 'includes/daily_status.php',
+                'includes/navigation_catalog.php',
             ],
             'tests' => [
                 'tests/run_daily_status_tests.php',
