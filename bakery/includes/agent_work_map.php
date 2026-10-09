@@ -851,6 +851,33 @@ function bakery_agent_work_map_core(): array
             'bugs' => [],
             'prompt' => null,
         ],
+        'cost-margin' => [
+            'title' => 'Product cost and margin',
+            'aliases' => ['cost-and-margin', 'product-margin'],
+            'files' => [
+                'cost_margin.php',
+                'includes/cost_margin.php',
+                'products.php',
+                'scripts/deploy_manifest.ps1',
+                'lang/en.php',
+                'lang/es.php',
+            ],
+            'tests' => [
+                'tests/run_cost_margin_tests.php',
+                'tests/run_i18n_tests.php',
+                'tests/run_integrity_tests.php',
+                'tests/run_agent_work_map_tests.php',
+            ],
+            'invariants' => [
+                'Read only. GET and HEAD. Administrator and manager.',
+                'Empty formula or a missing ingredient price is blank, never zero.',
+                'Dough loss on this view is 50 g per mix, spread across the batch.',
+                'No new top-level nav item. The link stays on Products.',
+                'Tests use bakerysf_test only.',
+            ],
+            'bugs' => [],
+            'prompt' => null,
+        ],
         'general' => [
             'title' => 'Unscoped bakery coding mission',
             'aliases' => ['cursor-agent', 'anonymous-agent', 'admin', 'broken-windows'],

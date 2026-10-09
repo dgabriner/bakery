@@ -228,9 +228,14 @@ foreach ($products as $product) {
             <h1>Products</h1>
             <p class="page-description">Manage the items your bakery produces, prices, and assigns to dough types.</p>
         </div>
-        <button class="btn-primary primary-action" type="button" onclick="showProductModal()">
-            <span aria-hidden="true">+</span> Add product
-        </button>
+        <div class="products-header-actions">
+            <?php if (function_exists('bakery_user_has_role') && bakery_user_has_role(['administrator', 'manager'])): ?>
+                <a class="btn-secondary" href="cost_margin.php"><?php echo htmlspecialchars(bakery_t('cost_margin.link')); ?></a>
+            <?php endif; ?>
+            <button class="btn-primary primary-action" type="button" onclick="showProductModal()">
+                <span aria-hidden="true">+</span> Add product
+            </button>
+        </div>
     </header>
     
     <?php if (isset($error)): ?>
@@ -1286,6 +1291,8 @@ foreach ($products as $product) {
             outline-offset: 2px;
         }
 
+        .products-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .products-header-actions .btn-secondary { display: inline-flex; align-items: center; min-height: var(--sf-touch-min, 44px); text-decoration: none; }
         .primary-action { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
         .primary-action span { font-size: 1.25rem; line-height: .7; }
 
