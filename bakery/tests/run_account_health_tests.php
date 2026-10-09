@@ -176,17 +176,15 @@ $esKeys = array_keys($es);
 $enHealth = array_values(array_filter($enKeys, static fn(string $key): bool => strpos($key, 'account_health.') === 0));
 $esHealth = array_values(array_filter($esKeys, static fn(string $key): bool => strpos($key, 'account_health.') === 0));
 $assert($enHealth !== [] && $enHealth === $esHealth, 'account_health keys match in English and Spanish');
-$enTail = array_slice($enKeys, (int)array_search($enHealth[0], $enKeys, true));
-$esTail = array_slice($esKeys, (int)array_search($esHealth[0], $esKeys, true));
-$tailOk = static function (array $tail): bool {
-    foreach ($tail as $key) {
-        if (strpos((string)$key, 'account_health.') !== 0) {
-            return false;
-        }
-    }
-    return $tail !== [];
+$span = static function (array $keys, array $health): array {
+    $start = (int)array_search($health[0], $keys, true);
+    $end = (int)array_search($health[count($health) - 1], $keys, true);
+    return array_slice($keys, $start, $end - $start + 1);
 };
-$assert($tailOk($enTail) && $tailOk($esTail), 'account_health keys are one contiguous block at the end of each catalog');
+$assert(
+    $span($enKeys, $enHealth) === $enHealth && $span($esKeys, $esHealth) === $esHealth,
+    'account_health keys stay one contiguous block'
+);
 
 // ── Fixture rows on bakerysf_test ────────────────────────────────────────────
 $tag = 'AH' . substr(bin2hex(random_bytes(4)), 0, 8);

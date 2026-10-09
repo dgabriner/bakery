@@ -32,7 +32,8 @@ if ($isBaker && !isset($_GET['date'])) {
 $dayNames = bakery_day_names();
 $weekday = bakery_standing_day_from_date($selectedDate);
 $dayLabel = $dayNames[$weekday] ?? date('l', strtotime($selectedDate));
-$dateDisplay = date('l, F j, Y', strtotime($selectedDate));
+$selectedDateObj = DateTime::createFromFormat('!Y-m-d', $selectedDate) ?: new DateTime($selectedDate);
+$dateDisplay = trim($dayLabel . ', ' . bakery_localized_date_label($selectedDateObj, true));
 $isToday = ($selectedDate === $today);
 $prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
 $nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));

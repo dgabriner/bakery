@@ -182,6 +182,16 @@ function bakery_te(string $key, array $params = []): void {
     echo htmlspecialchars(bakery_t($key, $params), ENT_QUOTES, 'UTF-8');
 }
 
+/**
+ * Pick the singular or plural catalog string for a count.
+ *
+ * @param array<string, scalar|null> $params
+ */
+function bakery_t_count(string $oneKey, string $manyKey, int $count, array $params = []): string {
+    $params['count'] = $count;
+    return bakery_t($count === 1 ? $oneKey : $manyKey, $params);
+}
+
 function bakery_day_names(bool $short = false): array {
     if ($short) {
         return [
