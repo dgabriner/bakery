@@ -1443,6 +1443,7 @@ return [
     'sfb.donate_link' => 'Donate',
     'sfb.donate_title' => 'Donate',
     'sfb.donate_copy' => 'Every dollar keeps community bread education alive. Pick an amount that feels right.',
+    'sfb.checkout_opening' => 'Opening checkout…',
     'sfb.credit_balance_chip' => ':units Bread Education Credit(s) available',
     'sfb.credit_pack_units' => ':units credit(s)',
     'sfb.credit_use_one' => 'Use 1 credit',

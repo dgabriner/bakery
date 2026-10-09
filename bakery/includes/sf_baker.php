@@ -2481,8 +2481,173 @@ function bakery_sfb_assert_human_customer(PDO $db, $customerId, string $action) 
     }
 }
 
+/** Client checkout keys are one per form render: 8–64 url-safe characters. */
+function bakery_sfb_normalize_checkout_key($raw): string {
+    $key = trim((string)$raw);
+    if ($key === '' || !preg_match('/^[A-Za-z0-9_-]{8,64}$/', $key)) {
+        return '';
+    }
+    return $key;
+}
+
+/**
+ * Stable storage key for one click and one order fingerprint.
+ * The same form resubmit hashes the same; a changed cart does not,
+ * so Square is not asked to reuse a payment link for a different amount.
+ */
+function bakery_sfb_checkout_storage_key(string $clientKey, string $fingerprint): string {
+    $clientKey = bakery_sfb_normalize_checkout_key($clientKey);
+    $fingerprint = trim($fingerprint);
+    if ($clientKey === '' || $fingerprint === '') {
+        return '';
+    }
+    return substr(hash('sha256', $clientKey . '|' . $fingerprint), 0, 32);
+}
+
+function bakery_sfb_is_duplicate_key(Throwable $e): bool {
+    if ($e instanceof PDOException) {
+        $state = (string)($e->errorInfo[0] ?? $e->getCode());
+        if ($state === '23000') {
+            return true;
+        }
+    }
+    return stripos($e->getMessage(), 'Duplicate') !== false;
+}
+
+/** Square idempotency key for this purchase. A stored click key never includes the date. */
+function bakery_sfb_square_idempotency_key(array $purchase): string {
+    $stored = bakery_sfb_normalize_checkout_key($purchase['checkout_key'] ?? '');
+    if ($stored !== '') {
+        return 'os-edu-' . $stored;
+    }
+    return 'os-edu-purchase-' . (int)($purchase['id'] ?? 0) . '-' . date('Ymd');
+}
+
+function bakery_sfb_find_checkout_purchase(PDO $db, $customerId, string $storageKey): ?array {
+    if ($storageKey === '' || !column_exists($db, 'sfb_offering_purchases', 'checkout_key')) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT id, customer_id, offering_id, status, checkout_url
+         FROM sfb_offering_purchases WHERE checkout_key = ? LIMIT 1'
+    );
+    $stmt->execute([$storageKey]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return null;
+    }
+    if ((int)$row['customer_id'] !== (int)$customerId) {
+        throw new InvalidArgumentException('That checkout was already used');
+    }
+    return $row;
+}
+
+/**
+ * Return the checkout already started for this click, creating the Square
+ * link only when the first attempt never received one.
+ *
+ * @param array<string, mixed> $extra
+ * @return array<string, mixed>
+ */
+function bakery_sfb_finish_existing_checkout(PDO $db, int $purchaseId, $redirectUrl, bool $forceNoSquare, array $extra = []): array {
+    $base = array_merge(['purchase_id' => $purchaseId, 'reused' => true], $extra);
+    if ($forceNoSquare) {
+        return array_merge($base, ['configured' => false, 'url' => null]);
+    }
+    $purchase = bakery_sfb_purchase($db, $purchaseId);
+    if (!$purchase) {
+        throw new InvalidArgumentException('Purchase not found');
+    }
+    $url = trim((string)($purchase['checkout_url'] ?? ''));
+    $status = (string)$purchase['status'];
+    if ($url !== '' && !in_array($status, ['intent', 'failed'], true)) {
+        return array_merge($base, ['configured' => true, 'url' => $url]);
+    }
+    if (!in_array($status, ['intent', 'failed'], true)) {
+        return array_merge($base, [
+            'configured' => $url !== '',
+            'url' => $url !== '' ? $url : null,
+        ]);
+    }
+    try {
+        $checkout = bakery_sfb_create_purchase_checkout($db, $purchaseId, $redirectUrl);
+    } catch (Throwable $e) {
+        $again = bakery_sfb_purchase($db, $purchaseId);
+        $saved = trim((string)($again['checkout_url'] ?? ''));
+        if ($saved !== '') {
+            return array_merge($base, ['configured' => true, 'url' => $saved]);
+        }
+        return array_merge($base, ['configured' => false, 'url' => null, 'error' => $e->getMessage()]);
+    }
+    return array_merge($base, ['configured' => true, 'url' => $checkout['url']]);
+}
+
+function bakery_sfb_checkout_key_input(?string $key = null): string {
+    $key = bakery_sfb_normalize_checkout_key($key ?? '');
+    if ($key === '') {
+        $key = bin2hex(random_bytes(16));
+    }
+    return '<input type="hidden" name="checkout_key" value="'
+        . htmlspecialchars($key, ENT_QUOTES, 'UTF-8')
+        . '" autocomplete="off">';
+}
+
+/** Disable a checkout submit button on the first submit. Server dedupe still holds if JS is off. */
+function bakery_sfb_checkout_once_script(): string {
+    $label = json_encode(
+        bakery_t('sfb.checkout_opening'),
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+    );
+    if ($label === false) {
+        $label = '"Opening checkout..."';
+    }
+    return <<<HTML
+<script>
+(function () {
+  if (window.__sfbCheckoutOnce) return;
+  window.__sfbCheckoutOnce = true;
+  var fallback = {$label};
+  function lock(form) {
+    if (form.getAttribute('data-checkout-locked') === '1') return;
+    form.setAttribute('data-checkout-locked', '1');
+    var button = form.querySelector('button[type="submit"]');
+    if (!button) return;
+    if (!button.getAttribute('data-original-label')) {
+      button.setAttribute('data-original-label', button.textContent || '');
+    }
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = button.getAttribute('data-working-label') || fallback;
+  }
+  function unlock(form) {
+    form.removeAttribute('data-checkout-locked');
+    var button = form.querySelector('button[type="submit"]');
+    if (!button) return;
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    var original = button.getAttribute('data-original-label');
+    if (original) button.textContent = original;
+  }
+  document.querySelectorAll('form[data-checkout-once]').forEach(function (form) {
+    form.addEventListener('submit', function (event) {
+      if (form.getAttribute('data-checkout-locked') === '1') {
+        event.preventDefault();
+        return;
+      }
+      lock(form);
+    });
+  });
+  window.addEventListener('pageshow', function (event) {
+    if (!event.persisted) return;
+    document.querySelectorAll('form[data-checkout-once]').forEach(unlock);
+  });
+})();
+</script>
+HTML;
+}
+
 /** One purchase attempt with the offering's title and price frozen in. */
-function bakery_sfb_record_purchase_intent(PDO $db, $customerId, $offeringId) {
+function bakery_sfb_record_purchase_intent(PDO $db, $customerId, $offeringId, $checkoutKey = null) {
     if (!bakery_sfb_payments_ready($db)) {
         throw new RuntimeException('Education payments need a database update (migration 066)');
     }
@@ -2491,18 +2656,35 @@ function bakery_sfb_record_purchase_intent(PDO $db, $customerId, $offeringId) {
         throw new InvalidArgumentException('That offering is not available');
     }
     bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
-    $ins = $db->prepare(
-        'INSERT INTO sfb_offering_purchases
-            (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
-         VALUES (?, ?, ?, ?, ?, "intent")'
-    );
-    $ins->execute([
-        (int)$customerId,
-        (int)$offering['id'],
-        (string)$offering['title'],
-        (int)$offering['price_cents'],
-        (string)$offering['currency'],
-    ]);
+    $storedKey = bakery_sfb_normalize_checkout_key($checkoutKey);
+    if ($storedKey !== '' && column_exists($db, 'sfb_offering_purchases', 'checkout_key')) {
+        $ins = $db->prepare(
+            'INSERT INTO sfb_offering_purchases
+                (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status, checkout_key)
+             VALUES (?, ?, ?, ?, ?, "intent", ?)'
+        );
+        $ins->execute([
+            (int)$customerId,
+            (int)$offering['id'],
+            (string)$offering['title'],
+            (int)$offering['price_cents'],
+            (string)$offering['currency'],
+            $storedKey,
+        ]);
+    } else {
+        $ins = $db->prepare(
+            'INSERT INTO sfb_offering_purchases
+                (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
+             VALUES (?, ?, ?, ?, ?, "intent")'
+        );
+        $ins->execute([
+            (int)$customerId,
+            (int)$offering['id'],
+            (string)$offering['title'],
+            (int)$offering['price_cents'],
+            (string)$offering['currency'],
+        ]);
+    }
     return (int)$db->lastInsertId();
 }
 
@@ -2548,7 +2730,7 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId, $redirectUrl 
         : $defaultRedirect;
 
     $resp = square_api_request('POST', '/v2/online-checkout/payment-links', [
-        'idempotency_key' => 'os-edu-purchase-' . (int)$purchase['id'] . '-' . date('Ymd'),
+        'idempotency_key' => bakery_sfb_square_idempotency_key($purchase),
         'order' => [
             'location_id' => defined('SQUARE_LOCATION_ID') && SQUARE_LOCATION_ID !== '' ? SQUARE_LOCATION_ID : 'test-location',
             'reference_id' => 'os-edu-' . (int)$purchase['id'],
@@ -2598,10 +2780,32 @@ function bakery_sfb_create_purchase_checkout(PDO $db, $purchaseId, $redirectUrl 
  *
  * @return array{configured: bool, url: ?string, purchase_id: int}
  */
-function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId, $redirectUrl = null) {
+function bakery_sfb_buy_offering(PDO $db, $customerId, $offeringId, $redirectUrl = null, $checkoutKey = null) {
     require_once __DIR__ . '/square_config.php';
     $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
-    $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, $offeringId);
+    $offering = bakery_sfb_offering($db, $offeringId);
+    $fingerprint = ($offering && (int)$offering['is_active'] === 1)
+        ? ((int)$offering['id'] . ':' . (int)$offering['price_cents'])
+        : '';
+    $storageKey = bakery_sfb_checkout_storage_key((string)$checkoutKey, $fingerprint);
+    $existing = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+    if ($existing) {
+        if ((int)($existing['offering_id'] ?? 0) !== (int)$offeringId) {
+            throw new InvalidArgumentException('That checkout was already used');
+        }
+        return bakery_sfb_finish_existing_checkout($db, (int)$existing['id'], $redirectUrl, $forceNoSquare);
+    }
+    try {
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, $offeringId, $storageKey);
+    } catch (Throwable $e) {
+        if ($storageKey !== '' && bakery_sfb_is_duplicate_key($e)) {
+            $existing = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+            if ($existing && (int)($existing['offering_id'] ?? 0) === (int)$offeringId) {
+                return bakery_sfb_finish_existing_checkout($db, (int)$existing['id'], $redirectUrl, $forceNoSquare);
+            }
+        }
+        throw $e;
+    }
     if ($forceNoSquare) {
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId];
     }
@@ -2747,6 +2951,7 @@ function bakery_sfb_starter_jar_normalize_draft(array $input): array {
         'pickup_day' => $pickupDay,
         'contact_name' => $name,
         'notes' => $notes !== '' ? $notes : null,
+        'checkout_key' => bakery_sfb_normalize_checkout_key($input['checkout_key'] ?? ''),
     ], $ship);
 }
 
@@ -2807,6 +3012,27 @@ function bakery_sfb_buy_starter_jar(PDO $db, $customerId, array $draft) {
 
     bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
 
+    $fingerDraft = $draft;
+    unset($fingerDraft['checkout_key']);
+    ksort($fingerDraft);
+    $storageKey = bakery_sfb_checkout_storage_key(
+        (string)($draft['checkout_key'] ?? ''),
+        (string)json_encode($fingerDraft)
+    );
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirectFor = static function (int $purchaseId): string {
+        return rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+            . '/starter.php?purchased=' . $purchaseId;
+    };
+    $existing = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+    if ($existing) {
+        $purchaseId = (int)$existing['id'];
+        $jar = bakery_sfb_starter_jar_for_purchase($db, $purchaseId);
+        return bakery_sfb_finish_existing_checkout($db, $purchaseId, $redirectFor($purchaseId), $forceNoSquare, [
+            'order_id' => $jar ? (int)$jar['id'] : 0,
+        ]);
+    }
+
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
         $db->beginTransaction();
@@ -2822,7 +3048,7 @@ function bakery_sfb_buy_starter_jar(PDO $db, $customerId, array $draft) {
             }
         }
 
-        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id']);
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id'], $storageKey);
 
         $hasPackKind = column_exists($db, 'sfb_starter_jar_orders', 'pack_kind');
         if ($hasPackKind) {
@@ -2876,12 +3102,24 @@ function bakery_sfb_buy_starter_jar(PDO $db, $customerId, array $draft) {
         if ($ownTransaction && $db->inTransaction()) {
             $db->rollBack();
         }
+        if ($storageKey !== '' && bakery_sfb_is_duplicate_key($e)) {
+            $raced = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+            if ($raced) {
+                $purchaseId = (int)$raced['id'];
+                $jar = bakery_sfb_starter_jar_for_purchase($db, $purchaseId);
+                return bakery_sfb_finish_existing_checkout(
+                    $db,
+                    $purchaseId,
+                    $redirectFor($purchaseId),
+                    !empty($GLOBALS['bakery_sfb_payments_disabled']),
+                    ['order_id' => $jar ? (int)$jar['id'] : 0]
+                );
+            }
+        }
         throw $e;
     }
 
-    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
-        . '/starter.php?purchased=' . $purchaseId;
-    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirect = $redirectFor($purchaseId);
     if ($forceNoSquare) {
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'order_id' => $orderId];
     }
@@ -3022,7 +3260,7 @@ function bakery_sfb_private_workshop_normalize(array $input): array {
  * Record a custom-priced purchase attempt (title + cents frozen).
  * Optional offering_id links catalog metadata without using catalog price.
  */
-function bakery_sfb_record_custom_purchase(PDO $db, $customerId, string $title, int $priceCents, $offeringId = null, string $currency = 'USD') {
+function bakery_sfb_record_custom_purchase(PDO $db, $customerId, string $title, int $priceCents, $offeringId = null, string $currency = 'USD', $checkoutKey = null) {
     if (!bakery_sfb_payments_ready($db)) {
         throw new RuntimeException('Education payments need a database update (migration 066)');
     }
@@ -3038,18 +3276,36 @@ function bakery_sfb_record_custom_purchase(PDO $db, $customerId, string $title, 
     if ($offeringId !== null && $offeringId <= 0) {
         $offeringId = null;
     }
-    $ins = $db->prepare(
-        'INSERT INTO sfb_offering_purchases
-            (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
-         VALUES (?, ?, ?, ?, ?, "intent")'
-    );
-    $ins->execute([
-        (int)$customerId,
-        $offeringId,
-        $title,
-        $priceCents,
-        $currency !== '' ? strtoupper(substr($currency, 0, 3)) : 'USD',
-    ]);
+    $currencyCode = $currency !== '' ? strtoupper(substr($currency, 0, 3)) : 'USD';
+    $storedKey = bakery_sfb_normalize_checkout_key($checkoutKey);
+    if ($storedKey !== '' && column_exists($db, 'sfb_offering_purchases', 'checkout_key')) {
+        $ins = $db->prepare(
+            'INSERT INTO sfb_offering_purchases
+                (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status, checkout_key)
+             VALUES (?, ?, ?, ?, ?, "intent", ?)'
+        );
+        $ins->execute([
+            (int)$customerId,
+            $offeringId,
+            $title,
+            $priceCents,
+            $currencyCode,
+            $storedKey,
+        ]);
+    } else {
+        $ins = $db->prepare(
+            'INSERT INTO sfb_offering_purchases
+                (customer_id, offering_id, offering_title_snapshot, price_cents_snapshot, currency_snapshot, status)
+             VALUES (?, ?, ?, ?, ?, "intent")'
+        );
+        $ins->execute([
+            (int)$customerId,
+            $offeringId,
+            $title,
+            $priceCents,
+            $currencyCode,
+        ]);
+    }
     return (int)$db->lastInsertId();
 }
 
@@ -3062,6 +3318,23 @@ function bakery_sfb_buy_private_workshop(PDO $db, $customerId, array $input) {
     }
     $draft = bakery_sfb_private_workshop_normalize($input);
     bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+    $storageKey = bakery_sfb_checkout_storage_key(
+        (string)($input['checkout_key'] ?? ''),
+        'workshop:' . $draft['line_label'] . ':' . (int)$draft['price_cents'] . ':' . $draft['contact_name']
+    );
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirectFor = static function (int $purchaseId): string {
+        return rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+            . '/sfb_offerings.php?purchased=' . $purchaseId . '#private-workshop';
+    };
+    $existing = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+    if ($existing) {
+        $purchaseId = (int)$existing['id'];
+        $booking = bakery_sfb_private_workshop_for_purchase($db, $purchaseId);
+        return bakery_sfb_finish_existing_checkout($db, $purchaseId, $redirectFor($purchaseId), $forceNoSquare, [
+            'booking_id' => $booking ? (int)$booking['id'] : 0,
+        ]);
+    }
 
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
@@ -3072,7 +3345,10 @@ function bakery_sfb_buy_private_workshop(PDO $db, $customerId, array $input) {
             $db,
             $customerId,
             $draft['line_label'],
-            (int)$draft['price_cents']
+            (int)$draft['price_cents'],
+            null,
+            'USD',
+            $storageKey
         );
         $ins = $db->prepare(
             'INSERT INTO sfb_private_workshop_bookings
@@ -3100,12 +3376,24 @@ function bakery_sfb_buy_private_workshop(PDO $db, $customerId, array $input) {
         if ($ownTransaction && $db->inTransaction()) {
             $db->rollBack();
         }
+        if ($storageKey !== '' && bakery_sfb_is_duplicate_key($e)) {
+            $raced = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+            if ($raced) {
+                $purchaseId = (int)$raced['id'];
+                $booking = bakery_sfb_private_workshop_for_purchase($db, $purchaseId);
+                return bakery_sfb_finish_existing_checkout(
+                    $db,
+                    $purchaseId,
+                    $redirectFor($purchaseId),
+                    !empty($GLOBALS['bakery_sfb_payments_disabled']),
+                    ['booking_id' => $booking ? (int)$booking['id'] : 0]
+                );
+            }
+        }
         throw $e;
     }
 
-    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
-        . '/sfb_offerings.php?purchased=' . $purchaseId . '#private-workshop';
-    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirect = $redirectFor($purchaseId);
     if ($forceNoSquare) {
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'booking_id' => $bookingId];
     }
@@ -3166,13 +3454,32 @@ function bakery_sfb_buy_gift_certificate(PDO $db, $customerId, array $input = []
         throw new InvalidArgumentException('Recipient name is limited to 120 characters.');
     }
     bakery_sfb_assert_human_customer($db, $customerId, 'hold education purchases');
+    $storageKey = bakery_sfb_checkout_storage_key(
+        (string)($input['checkout_key'] ?? ''),
+        'gift:' . (int)$offering['id'] . ':' . (int)$offering['price_cents'] . ':' . $recipient
+    );
+    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirectFor = static function (int $purchaseId): string {
+        return rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
+            . '/sfb_offerings.php?purchased=' . $purchaseId . '#gift-certificate';
+    };
+    $existing = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+    if ($existing) {
+        $purchaseId = (int)$existing['id'];
+        $giftStmt = $db->prepare('SELECT id FROM sfb_gift_certificates WHERE purchase_id = ? LIMIT 1');
+        $giftStmt->execute([$purchaseId]);
+        $giftId = (int)$giftStmt->fetchColumn();
+        return bakery_sfb_finish_existing_checkout($db, $purchaseId, $redirectFor($purchaseId), $forceNoSquare, [
+            'gift_id' => $giftId,
+        ]);
+    }
 
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
         $db->beginTransaction();
     }
     try {
-        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id']);
+        $purchaseId = bakery_sfb_record_purchase_intent($db, $customerId, (int)$offering['id'], $storageKey);
         $code = bakery_sfb_gift_code_generate();
         $ins = $db->prepare(
             'INSERT INTO sfb_gift_certificates
@@ -3195,12 +3502,26 @@ function bakery_sfb_buy_gift_certificate(PDO $db, $customerId, array $input = []
         if ($ownTransaction && $db->inTransaction()) {
             $db->rollBack();
         }
+        if ($storageKey !== '' && bakery_sfb_is_duplicate_key($e)) {
+            $raced = bakery_sfb_find_checkout_purchase($db, $customerId, $storageKey);
+            if ($raced) {
+                $purchaseId = (int)$raced['id'];
+                $giftStmt = $db->prepare('SELECT id FROM sfb_gift_certificates WHERE purchase_id = ? LIMIT 1');
+                $giftStmt->execute([$purchaseId]);
+                $giftId = (int)$giftStmt->fetchColumn();
+                return bakery_sfb_finish_existing_checkout(
+                    $db,
+                    $purchaseId,
+                    $redirectFor($purchaseId),
+                    !empty($GLOBALS['bakery_sfb_payments_disabled']),
+                    ['gift_id' => $giftId]
+                );
+            }
+        }
         throw $e;
     }
 
-    $redirect = rtrim((string)(defined('BASE_URL') ? BASE_URL : '/'), '/')
-        . '/sfb_offerings.php?purchased=' . $purchaseId . '#gift-certificate';
-    $forceNoSquare = !empty($GLOBALS['bakery_sfb_payments_disabled']);
+    $redirect = $redirectFor($purchaseId);
     if ($forceNoSquare) {
         return ['configured' => false, 'url' => null, 'purchase_id' => $purchaseId, 'gift_id' => $giftId];
     }

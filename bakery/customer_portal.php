@@ -205,9 +205,10 @@ $portalCustomerName = $customer['name'];
     <section class="card" style="text-align:center;padding:20px 16px">
       <p style="font-size:1.1rem;font-weight:600;margin:0 0 4px"><?php bakery_te('portal.tip_heading'); ?></p>
       <p style="color:var(--muted);font-size:.88rem;margin:0 0 14px"><?php bakery_te('portal.tip_body'); ?></p>
-      <form method="post" action="customer_portal_tip.php">
+      <form method="post" action="customer_portal_tip.php" data-checkout-once>
         <?php echo bakery_csrf_field(); ?>
-        <button type="submit" class="btn" style="min-width:140px;font-size:1rem">
+        <?php echo bakery_sfb_checkout_key_input(); ?>
+        <button type="submit" class="btn" style="min-width:140px;font-size:1rem" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>">
           <?php bakery_te('portal.tip_button'); ?>
         </button>
       </form>
@@ -215,6 +216,7 @@ $portalCustomerName = $customer['name'];
 
   </main>
   <?php require __DIR__ . '/includes/portal_nav.php'; ?>
+  <?php echo bakery_sfb_checkout_once_script(); ?>
 </body>
 </html>
 

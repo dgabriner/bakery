@@ -1374,6 +1374,7 @@ return [
     'sfb.donate_link' => 'Donar',
     'sfb.donate_title' => 'Donar',
     'sfb.donate_copy' => 'Cada dólar mantiene viva la educación panadera comunitaria. Elige el monto que sientas.',
+    'sfb.checkout_opening' => 'Abriendo el pago…',
     'sfb.credit_balance_chip' => ':units Crédito(s) de Educación Panadera disponibles',
     'sfb.credit_pack_units' => ':units crédito(s)',
     'sfb.credit_use_one' => 'Usar 1 crédito',
