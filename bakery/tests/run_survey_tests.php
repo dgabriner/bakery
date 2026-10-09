@@ -236,6 +236,32 @@ try {
         'question' => 'Do you have truck keys?',
     ]);
     $assert(count($legacy) === 1 && $legacy[0]['type'] === 'text' && $legacy[0]['key'] === 'q1', 'legacy single question parses as one text question');
+
+    $probeDate = '2099-01-15';
+    $beforeLookup = (int)$db->query('SELECT COUNT(*) FROM surveys')->fetchColumn();
+    $missingHq = bakery_survey_find_store_verify($db, 0, $probeDate);
+    $missingOrder = bakery_survey_find_route_order($db, 0, $probeDate);
+    $afterLookup = (int)$db->query('SELECT COUNT(*) FROM surveys')->fetchColumn();
+    $assert($missingHq === [] && $missingOrder === [], 'lookup of a missing HQ day returns no row');
+    $assert($afterLookup === $beforeLookup, 'reading survey.php date does not insert HQ surveys');
+    $createdHq = bakery_survey_ensure_store_verify($db, 0, $probeDate, 0);
+    $surveyIds[] = (int)$createdHq['id'];
+    $foundHq = bakery_survey_find_store_verify($db, 0, $probeDate);
+    $assert((int)($foundHq['id'] ?? 0) === (int)$createdHq['id'], 'find returns the HQ store-verify row once it exists');
+    $again = bakery_survey_ensure_store_verify($db, 0, $probeDate, 0);
+    $assert((int)$again['id'] === (int)$createdHq['id'], 'ensure reuses the open HQ survey');
+    $stillNoOrder = bakery_survey_find_route_order($db, 0, $probeDate);
+    $assert($stillNoOrder === [], 'route-order lookup stays read-only');
+
+    $surveyPhp = (string)file_get_contents(dirname(__DIR__) . '/survey.php');
+    $routeOrderRender = (string)file_get_contents(dirname(__DIR__) . '/includes/survey_route_order_render.php');
+    $assert(strpos($surveyPhp, "=== 'open_hub'") !== false, 'HQ survey creation is the open_hub POST action');
+    $assert(strpos($surveyPhp, 'bakery_survey_dual_hub_existing') !== false, 'survey page renders from existing hub rows');
+    $assert(strpos($surveyPhp, 'bakery_survey_find_store_verify') !== false, 'driver copy links look up surveys');
+    $assert(strpos($surveyPhp, 'bakery_survey_record_interaction') === false, 'a survey page view does not write an open interaction');
+    $assert(substr_count($surveyPhp, 'bakery_survey_dual_hub_links') === 1, 'creating hub rows happens in one POST path');
+    $assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');
+    $assert(strpos($routeOrderRender, 'bakery_survey_dual_hub_existing') !== false, 'route-order sibling link is a lookup');
     } catch (Throwable $e) {
     echo 'FAIL  unexpected exception: ' . $e->getMessage() . "\n";
     $fail++;

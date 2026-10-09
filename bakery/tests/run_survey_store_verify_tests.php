@@ -482,6 +482,8 @@ $keys = [
     'survey.sibling_to_order',
     'survey.sibling_to_verify',
     'survey.hub_title',
+    'survey.hub_empty',
+    'survey.hub_open',
     'texts.survey_coverage_empty_drivers',
     'texts.survey_coverage_unassigned',
     'texts.survey_coverage_all_clear',

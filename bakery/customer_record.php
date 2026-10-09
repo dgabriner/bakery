@@ -511,15 +511,23 @@ require_once __DIR__ . '/includes/nav.php';
                     <span class="label"><?php echo htmlspecialchars(bakery_t('hub.balance_label')); ?></span>
                     <span class="value">
                         <a href="billing_center.php?panel=customer&amp;customer_id=<?php echo $customerId; ?>">
-                            <?php if ($hubBalance !== null && (int)$hubBalance['outstanding_count'] > 0): ?>
+                            <?php
+                                $balanceKnown = is_array($hubBalance)
+                                    && function_exists('bakery_billing_aging_snapshot_ready')
+                                    && bakery_billing_aging_snapshot_ready($db);
+                                $balanceOutstanding = $balanceKnown && (int)$hubBalance['outstanding_count'] > 0;
+                            ?>
+                            <?php if ($balanceOutstanding): ?>
                             <span class="cr-state-badge state-alert"><?php
                                 echo htmlspecialchars(bakery_t('hub.balance_due', [
-                                    ':total' => '$' . number_format((float)$hubBalance['outstanding_total'], 2),
-                                    ':days' => (int)$hubBalance['oldest_days'],
+                                    'total' => '$' . number_format((float)$hubBalance['outstanding_total'], 2),
+                                    'days' => (int)$hubBalance['oldest_days'],
                                 ]));
                             ?></span>
-                            <?php else: ?>
+                            <?php elseif ($balanceKnown): ?>
                             <span class="cr-state-badge state-muted"><?php echo htmlspecialchars(bakery_t('hub.balance_current')); ?></span>
+                            <?php else: ?>
+                            <span class="cr-state-badge state-muted"><?php echo htmlspecialchars(bakery_t('hub.balance_none')); ?></span>
                             <?php endif; ?>
                         </a>
                     </span>
