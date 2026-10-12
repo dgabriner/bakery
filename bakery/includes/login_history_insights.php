@@ -312,9 +312,6 @@ function bakery_login_history_url(array $replace = [], ?array $current = null): 
     if (!array_key_exists('page', $replace)) {
         unset($values['page']);
     }
-    if (!array_key_exists('timeline_offset', $replace) && !array_key_exists('timeline', $replace)) {
-        // Keep offset when only swapping unrelated filters via current GET.
-    }
     if (($values['view'] ?? '') === 'overview') {
         unset($values['view']);
     }
@@ -1744,7 +1741,7 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
             }
             $title = $activity['page_title'] ?: bakery_login_history_page_label($path);
             if ($eventType !== 'page_view' && $title === '') {
-                $title = ucwords(str_replace('_', ' ', $eventType));
+                $title = bakery_login_history_translate('login_history.activity_action', 'Recorded session activity');
             }
             $timeline[] = bakery_login_history_event([
                 'occurred_at' => $activity['occurred_at'],
@@ -1857,7 +1854,7 @@ function bakery_login_history_load_session_trail(PDO $db, int $auditId, array $r
         $path = (string)($row['page_path'] ?? '');
         $title = $row['page_title'] ?: bakery_login_history_page_label($path);
         if ($title === '') {
-            $title = ucwords(str_replace('_', ' ', (string)($row['event_type'] ?? 'activity')));
+            $title = bakery_login_history_translate('login_history.activity_action', 'Recorded session activity');
         }
         $trail[] = [
             'id' => (int)$row['id'],

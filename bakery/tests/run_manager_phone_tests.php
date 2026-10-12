@@ -168,7 +168,9 @@ $requiredKeys = [
     'manager_phone.mission_still_to_deliver',
     'manager_phone.mission_current_stop',
     'manager_phone.mission_now',
+    'manager_phone.mission_no_time',
     'manager_phone.cod_section',
+    'manager_phone.cod_collected_turnin_missing',
     'production_sheet.commit_diff_title',
     'production_sheet.commit_diff_chip',
     'nav.manager_today',
@@ -190,6 +192,13 @@ manager_phone_assert($mission['phase'] === 'in_progress', 'mission phase is in p
 manager_phone_assert($mission['done_count'] === 1 && $mission['left_count'] === 2, 'mission splits done and remaining stops');
 manager_phone_assert((string)($mission['current']['customer_name'] ?? '') === 'Cafe B', 'current stop prefers in_transit');
 manager_phone_assert($mission['last_done_time'] !== '', 'mission formats last delivered time');
+$outOfOrder = bakery_manager_phone_mission_from_stops([
+    ['daily_order_id' => 10, 'customer_name' => 'Late Cafe', 'delivery_status' => 'delivered', 'actual_delivery_time' => '10:40:00', 'scheduled_delivery_time' => null],
+    ['daily_order_id' => 11, 'customer_name' => 'Early Cafe', 'delivery_status' => 'delivered', 'actual_delivery_time' => '08:05:00', 'scheduled_delivery_time' => null],
+]);
+manager_phone_assert($outOfOrder['last_done_time'] === '10:40 AM', 'last stop time is the latest delivery, not the last row');
+manager_phone_assert(strpos($phone, 'manager_phone.mission_no_time') !== false, 'missing stop times use a translated label');
+manager_phone_assert(strpos($phone, 'manager_phone.cod_collected_turnin_missing') !== false, 'missing COD turn-in uses a translated sentence');
 manager_phone_assert(strpos($phone, 'bakery_manager_phone_mission_from_stops') !== false, 'routes render uses mission helper');
 manager_phone_assert(strpos($phone, 'manager_phone.mission_still_to_deliver') !== false, 'routes show remaining delivery order');
 manager_phone_assert(strpos($phoneCss, '.manager-phone__mission-list') !== false, 'mission timeline styles exist');

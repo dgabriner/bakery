@@ -252,22 +252,26 @@ function bakery_manager_phone_mission_from_stops(array $stops): array
     $left = [];
     $current = null;
     $lastDoneTime = '';
+    $lastDoneTs = null;
     foreach ($stops as $stop) {
         if (!is_array($stop)) {
             continue;
         }
         $status = strtolower(trim((string)($stop['delivery_status'] ?? 'pending')));
         $stop['delivery_status'] = $status;
-        $stop['actual_time_label'] = bakery_manager_phone_format_stop_time(
-            isset($stop['actual_delivery_time']) ? (string)$stop['actual_delivery_time'] : null
-        );
+        $actualRaw = isset($stop['actual_delivery_time']) ? trim((string)$stop['actual_delivery_time']) : '';
+        $stop['actual_time_label'] = bakery_manager_phone_format_stop_time($actualRaw !== '' ? $actualRaw : null);
         $stop['scheduled_time_label'] = bakery_manager_phone_format_stop_time(
             isset($stop['scheduled_delivery_time']) ? (string)$stop['scheduled_delivery_time'] : null
         );
         if (in_array($status, ['delivered', 'failed', 'cancelled', 'rescheduled'], true)) {
             $done[] = $stop;
             if ($status === 'delivered' && $stop['actual_time_label'] !== '') {
-                $lastDoneTime = $stop['actual_time_label'];
+                $ts = strtotime($actualRaw);
+                if ($ts !== false && ($lastDoneTs === null || $ts >= $lastDoneTs)) {
+                    $lastDoneTs = $ts;
+                    $lastDoneTime = $stop['actual_time_label'];
+                }
             }
             continue;
         }
@@ -761,7 +765,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
                       <strong><?php echo $h((string)$stop['customer_name']); ?></strong>
                       <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
                     </span>
-                    <time><?php echo $h($stop['actual_time_label'] !== '' ? $stop['actual_time_label'] : '—'); ?></time>
+                    <time><?php echo $h($stop['actual_time_label'] !== '' ? $stop['actual_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
                   </li>
                 <?php endforeach; ?>
               </ol>
@@ -786,7 +790,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
                         <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
                       <?php endif; ?>
                     </span>
-                    <time><?php echo $h($stop['scheduled_time_label'] !== '' ? $stop['scheduled_time_label'] : '—'); ?></time>
+                    <time><?php echo $h($stop['scheduled_time_label'] !== '' ? $stop['scheduled_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
                   </li>
                 <?php endforeach; ?>
               </ol>
@@ -825,10 +829,20 @@ function bakery_manager_phone_render_routes(array $ctx): void
           <details class="manager-phone__cash-details">
             <summary><?php bakery_te('manager_phone.cod_section'); ?></summary>
             <p class="manager-phone__counts manager-phone__counts--cash">
-              <?php echo htmlspecialchars(bakery_t('manager_phone.cod_collected_vs_turned_in', [
-                  'collected' => number_format((float)($codCollected ?? 0), 2),
-                  'turned_in' => $codTurnedIn !== null ? number_format((float)$codTurnedIn, 2) : '—',
-              ], 'COD $:collected collected · $:turned_in turned in'), ENT_QUOTES, 'UTF-8'); ?>
+              <?php
+                $collectedLabel = number_format((float)($codCollected ?? 0), 2);
+                if ($codTurnedIn !== null) {
+                    $cashLine = bakery_t('manager_phone.cod_collected_vs_turned_in', [
+                        'collected' => $collectedLabel,
+                        'turned_in' => number_format((float)$codTurnedIn, 2),
+                    ], 'COD $:collected collected · $:turned_in turned in');
+                } else {
+                    $cashLine = bakery_t('manager_phone.cod_collected_turnin_missing', [
+                        'collected' => $collectedLabel,
+                    ], 'COD $:collected collected. Turn-in not recorded yet.');
+                }
+                echo htmlspecialchars($cashLine, ENT_QUOTES, 'UTF-8');
+              ?>
             </p>
             <form method="post" class="manager-phone__cod-turnin">
               <?php echo bakery_csrf_field(); ?>

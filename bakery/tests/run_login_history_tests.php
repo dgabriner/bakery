@@ -151,6 +151,14 @@ login_history_assert($css !== false && strpos($css, '.login-history-briefing') !
 login_history_assert($css !== false && strpos($css, '.login-history-session-trail') !== false, 'CSS includes session trail chrome');
 login_history_assert($insights !== false && strpos($insights, 'bakery_login_history_load_dwell') !== false, 'dwell time is aggregated from consecutive page views');
 login_history_assert($insights !== false && strpos($insights, 'function bakery_login_history_load_session_trail') !== false, 'session trail helper exists');
+$trailAt = strpos((string)$insights, 'function bakery_login_history_load_session_trail');
+$dwellAt = strpos((string)$insights, 'function bakery_login_history_load_dwell');
+$trailSection = ($trailAt !== false && $dwellAt > $trailAt) ? substr((string)$insights, $trailAt, $dwellAt - $trailAt) : '';
+login_history_assert(
+    strpos($trailSection, "bakery_login_history_translate('login_history.activity_action'") !== false
+        && strpos($trailSection, 'ucwords(') === false,
+    'session trail titles without a page name use the translated activity label'
+);
 login_history_assert($insights !== false && strpos($insights, "'timeline' =>") !== false, 'filters parse timeline kind');
 
 $timelineFilters = bakery_login_history_parse_filters(['timeline' => 'action', 'timeline_offset' => 500, 'user_id' => 3], '2026-08-17');
