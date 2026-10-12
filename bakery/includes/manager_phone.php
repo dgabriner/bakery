@@ -204,6 +204,32 @@ function bakery_manager_phone_driver_stops(PDO $db, string $date): array
 }
 
 /**
+ * Clock time for the phone mission board.
+ * English keeps g:i A. Spanish follows Intl es_MX when the extension is
+ * present (24-hour or h:mm a. m.) and otherwise the same a. m. / p. m. style.
+ */
+function bakery_manager_phone_format_clock_timestamp(int $ts): string
+{
+    if (function_exists('bakery_locale') && bakery_locale() === 'es') {
+        if (class_exists('IntlDateFormatter')) {
+            $fmt = new IntlDateFormatter('es_MX', IntlDateFormatter::NONE, IntlDateFormatter::SHORT);
+            $label = $fmt ? $fmt->format($ts) : false;
+            if (is_string($label) && $label !== '' && !preg_match('/\b(AM|PM)\b/', $label)) {
+                return str_replace(["\u{202F}", "\u{00A0}"], ' ', $label);
+            }
+        }
+        $hour = (int)date('G', $ts);
+        $hour12 = $hour % 12;
+        if ($hour12 === 0) {
+            $hour12 = 12;
+        }
+        $suffix = $hour < 12 ? 'a. m.' : 'p. m.';
+        return $hour12 . ':' . date('i', $ts) . ' ' . $suffix;
+    }
+    return date('g:i A', $ts);
+}
+
+/**
  * Format a TIME/datetime-ish value for the phone mission board.
  */
 function bakery_manager_phone_format_stop_time(?string $time): string
@@ -213,21 +239,13 @@ function bakery_manager_phone_format_stop_time(?string $time): string
         return '';
     }
     $ts = strtotime($time);
+    if ($ts === false && preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $time, $m)) {
+        $ts = strtotime(sprintf('%02d:%02d:%02d', (int)$m[1], (int)$m[2], (int)($m[3] ?? 0)));
+    }
     if ($ts === false) {
-        // Accept bare HH:MM(:SS)
-        if (preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $time, $m)) {
-            $hour = (int)$m[1];
-            $min = (int)$m[2];
-            $ampm = $hour >= 12 ? 'PM' : 'AM';
-            $hour12 = $hour % 12;
-            if ($hour12 === 0) {
-                $hour12 = 12;
-            }
-            return sprintf('%d:%02d %s', $hour12, $min, $ampm);
-        }
         return $time;
     }
-    return date('g:i A', $ts);
+    return bakery_manager_phone_format_clock_timestamp($ts);
 }
 
 /**
@@ -898,7 +916,7 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
                 $committedTs = strtotime((string)($planState['commit']['committed_at'] ?? ''));
                 $committedAtLabel = bakery_t('manager_phone.plan_committed_at', [
                     'time' => $committedTs
-                        ? date('g:i A', $committedTs)
+                        ? bakery_manager_phone_format_clock_timestamp($committedTs)
                         : (string)($planState['commit']['committed_at'] ?? ''),
                 ]);
                 $driftCount = (int)($planState['changed_since']['count'] ?? 0);

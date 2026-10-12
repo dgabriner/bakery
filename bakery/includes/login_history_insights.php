@@ -442,6 +442,29 @@ function bakery_login_history_translate(string $key, string $fallback): string
     return $text === $key ? $fallback : $text;
 }
 
+/**
+ * Localized title for an operational or session event type.
+ * Unknown types keep the raw code in parentheses instead of English title case.
+ */
+function bakery_login_history_event_type_label(string $eventType): string
+{
+    $eventType = strtolower(trim($eventType));
+    if ($eventType !== '' && preg_match('/^[a-z0-9_]+$/', $eventType)) {
+        $key = 'login_history.event.' . $eventType;
+        $label = bakery_login_history_translate($key, '');
+        if ($label !== '') {
+            return $label;
+        }
+    }
+    if (function_exists('bakery_t')) {
+        $unknown = bakery_t('login_history.event_unknown', ['type' => $eventType]);
+        if ($unknown !== 'login_history.event_unknown') {
+            return $unknown;
+        }
+    }
+    return $eventType !== '' ? 'Recorded action (' . $eventType . ')' : 'Recorded action';
+}
+
 function bakery_login_history_page_meta(string $pathOrKey): array
 {
     $key = bakery_login_history_page_key($pathOrKey);
@@ -1504,7 +1527,7 @@ function bakery_login_history_load_actions(PDO $db, array $filters, array $ready
         $params
     );
     foreach ($rows as &$row) {
-        $row['label'] = ucwords(str_replace('_', ' ', (string)$row['event_type']));
+        $row['label'] = bakery_login_history_event_type_label((string)$row['event_type']);
     }
     unset($row);
     return $rows;
@@ -1798,7 +1821,7 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
             $timeline[] = bakery_login_history_event([
                 'occurred_at' => $action['occurred_at'],
                 'kind' => 'action',
-                'title' => $action['summary'] ?: ucwords(str_replace('_', ' ', (string)$action['event_type'])),
+                'title' => $action['summary'] ?: bakery_login_history_event_type_label((string)$action['event_type']),
                 'detail' => bakery_login_history_translate('login_history.op_action', 'Recorded operational action'),
                 'sort_id' => (int)$action['id'],
             ]);

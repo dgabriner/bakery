@@ -197,6 +197,27 @@ $outOfOrder = bakery_manager_phone_mission_from_stops([
     ['daily_order_id' => 11, 'customer_name' => 'Early Cafe', 'delivery_status' => 'delivered', 'actual_delivery_time' => '08:05:00', 'scheduled_delivery_time' => null],
 ]);
 manager_phone_assert($outOfOrder['last_done_time'] === '10:40 AM', 'last stop time is the latest delivery, not the last row');
+$_SESSION['locale'] = 'es';
+bakery_reset_locale_cache();
+$esMorning = bakery_manager_phone_format_stop_time('10:40:00');
+$esAfternoon = bakery_manager_phone_format_stop_time('14:05:00');
+manager_phone_assert(
+    ($esMorning === '10:40 a. m.' || $esMorning === '10:40')
+        && ($esAfternoon === '2:05 p. m.' || $esAfternoon === '14:05'),
+    'Spanish mission times use 24-hour or h:mm a. m. style, got ' . $esMorning . ' / ' . $esAfternoon
+);
+manager_phone_assert(strpos($esMorning, 'AM') === false && strpos($esAfternoon, 'PM') === false, 'Spanish mission times are not English AM/PM');
+$_SESSION['locale'] = 'en';
+bakery_reset_locale_cache();
+foreach (['manager_phone.do_not_interrupt', 'manager_phone.plan_not_committed'] as $dashKey) {
+    manager_phone_assert(
+        strpos((string)$en[$dashKey], "\u{2014}") === false
+            && strpos((string)$en[$dashKey], "\u{2013}") === false
+            && strpos((string)$es[$dashKey], "\u{2014}") === false
+            && strpos((string)$es[$dashKey], "\u{2013}") === false,
+        $dashKey . ' has no em dash or en dash'
+    );
+}
 manager_phone_assert(strpos($phone, 'manager_phone.mission_no_time') !== false, 'missing stop times use a translated label');
 manager_phone_assert(strpos($phone, 'manager_phone.cod_collected_turnin_missing') !== false, 'missing COD turn-in uses a translated sentence');
 manager_phone_assert(strpos($phone, 'bakery_manager_phone_mission_from_stops') !== false, 'routes render uses mission helper');

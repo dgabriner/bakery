@@ -183,6 +183,32 @@ foreach ($enKeys as $key) {
 }
 login_history_assert($missingEs === [], 'login history i18n keys exist in es.php' . ($missingEs ? (' missing: ' . implode(',', $missingEs)) : ''));
 login_history_assert(($en['page.login_history'] ?? '') === 'Login History', 'English page title exists');
+login_history_assert(bakery_login_history_event_type_label('delivery_completed') === 'Delivery completed', 'event type titles use the English lang key');
+$_SESSION['locale'] = 'es';
+bakery_reset_locale_cache();
+login_history_assert(bakery_login_history_event_type_label('delivery_completed') === 'Entrega completada', 'event type titles use the Spanish lang key');
+$unknownEvent = bakery_login_history_event_type_label('not_a_known_type');
+login_history_assert(
+    $unknownEvent === 'Acción registrada (not_a_known_type)' && strpos($unknownEvent, 'Not A Known') === false,
+    'unknown event types are not title-cased in English'
+);
+$_SESSION['locale'] = 'en';
+bakery_reset_locale_cache();
+foreach (['login_history.actions_lead', 'login_history.browser_errors_lead'] as $dashKey) {
+    login_history_assert(
+        strpos((string)($en[$dashKey] ?? ''), "\u{2014}") === false
+            && strpos((string)($en[$dashKey] ?? ''), "\u{2013}") === false
+            && strpos((string)($es[$dashKey] ?? ''), "\u{2014}") === false
+            && strpos((string)($es[$dashKey] ?? ''), "\u{2013}") === false,
+        $dashKey . ' has no em dash or en dash'
+    );
+}
+login_history_assert(
+    strpos((string)$insights, "ucwords(str_replace('_', ' ', (string)\$row['event_type']))") === false
+        && strpos((string)$insights, "ucwords(str_replace('_', ' ', (string)\$action['event_type']))") === false
+        && strpos((string)$insights, 'function bakery_login_history_event_type_label') !== false,
+    'event type titles go through lang keys'
+);
 
 $adminItems = [];
 foreach (bakery_navigation_groups_for_role('administrator') as $group) {

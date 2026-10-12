@@ -663,6 +663,7 @@ function bakery_agent_work_map_core(): array
             'aliases' => ['login', 'csrf'],
             'files' => [
                 'includes/auth.php',
+                'includes/login_history_insights.php',
                 'includes/google_analytics.php',
                 'includes/cashier_catalog.php',
                 'login.php',
