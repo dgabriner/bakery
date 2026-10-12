@@ -4,10 +4,17 @@
 -- 086 is ingredient price history (086_ingredient_prices.sql). This migration is 087.
 -- No recipe numbers are written here. Blank columns keep the old formula math.
 
+-- One column per statement so a retry can confirm each column already exists.
 ALTER TABLE dough_types
-  ADD COLUMN batch_size_mode VARCHAR(16) NULL DEFAULT NULL AFTER standard_batch_dough_grams,
-  ADD COLUMN standard_batch_pieces DECIMAL(12,3) NULL DEFAULT NULL AFTER batch_size_mode,
-  ADD COLUMN batch_multiplier DECIMAL(8,3) NULL DEFAULT NULL AFTER standard_batch_pieces,
+  ADD COLUMN batch_size_mode VARCHAR(16) NULL DEFAULT NULL AFTER standard_batch_dough_grams;
+
+ALTER TABLE dough_types
+  ADD COLUMN standard_batch_pieces DECIMAL(12,3) NULL DEFAULT NULL AFTER batch_size_mode;
+
+ALTER TABLE dough_types
+  ADD COLUMN batch_multiplier DECIMAL(8,3) NULL DEFAULT NULL AFTER standard_batch_pieces;
+
+ALTER TABLE dough_types
   ADD COLUMN dough_loss_grams DECIMAL(12,3) NULL DEFAULT NULL AFTER batch_multiplier;
 
 CREATE TABLE IF NOT EXISTS formula_subformulas (

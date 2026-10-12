@@ -6,6 +6,9 @@
 -- owner-approved-core-column: staff no-charge lines (comp, sample, replacement, donation) must not be repriced when a delivery is confirmed.
 -- schema_migrations tracks apply-once; do not re-run after recorded.
 
+-- One column per statement so a retry can confirm each column already exists.
 ALTER TABLE daily_order_items
-  ADD COLUMN is_no_charge TINYINT(1) NOT NULL DEFAULT 0,
+  ADD COLUMN is_no_charge TINYINT(1) NOT NULL DEFAULT 0;
+
+ALTER TABLE daily_order_items
   ADD COLUMN no_charge_reason VARCHAR(32) NULL DEFAULT NULL;

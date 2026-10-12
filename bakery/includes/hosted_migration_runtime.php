@@ -350,6 +350,14 @@ function bakery_hosted_migration_exec_statement(PDO $pdo, string $statement): bo
             $check->execute([$match[1], $match[2]]);
             if ($check->fetchColumn()) return false;
         }
+        if ($driverCode === 1061
+            && preg_match('/^\s*CREATE\s+(?:UNIQUE\s+)?(?:INDEX|KEY)\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s+ON\s+`?([A-Za-z0-9_]+)`?/i', $statement, $match)) {
+            $check = $pdo->prepare(
+                'SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1'
+            );
+            $check->execute([$match[2], $match[1]]);
+            if ($check->fetchColumn()) return false;
+        }
         throw $error;
     }
 }
