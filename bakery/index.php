@@ -197,6 +197,9 @@ require_once 'includes/nav.php';
                     <a class="ops-brief-link" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_brief.php?date=<?php echo urlencode($selectedDate); ?>">
                         <?php bakery_te('brief.view_brief'); ?> →
                     </a>
+                    <a class="ops-brief-link" href="<?php echo htmlspecialchars(BASE_URL); ?>today.php?date=<?php echo urlencode($selectedDate); ?>">
+                        <?php bakery_te('today.open'); ?> →
+                    </a>
                 </div>
                 <ol class="ops-flow-strip">
                     <?php foreach ($commandCenter['stages'] as $index => $stage): ?>

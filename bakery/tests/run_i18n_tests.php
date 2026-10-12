@@ -95,19 +95,47 @@ foreach ($uxKeys as $key) {
     i18n_assert('ux key present ' . $key, isset($en[$key], $es[$key]) && $en[$key] !== '' && $es[$key] !== '');
     i18n_assert('ux key translated ' . $key, ($es[$key] ?? '') !== ($en[$key] ?? $key));
 }
-if ($enUx !== []) {
-    $enTail = array_slice($enKeys, (int)array_search($enUx[0], $enKeys, true));
-    $esTail = array_slice($esKeys, (int)array_search($esUx[0], $esKeys, true));
-    $uxTail = static function (array $tail): bool {
-        foreach ($tail as $key) {
-            if (strpos((string)$key, 'ux.') !== 0) {
-                return false;
-            }
+$contiguousPrefix = static function (array $keys, string $prefix): bool {
+    $matched = array_values(array_filter($keys, static fn(string $key): bool => strpos($key, $prefix) === 0));
+    if ($matched === []) {
+        return false;
+    }
+    $first = array_search($matched[0], $keys, true);
+    $last = array_search($matched[count($matched) - 1], $keys, true);
+    if ($first === false || $last === false) {
+        return false;
+    }
+    for ($i = (int)$first; $i <= (int)$last; $i++) {
+        if (strpos((string)$keys[$i], $prefix) !== 0) {
+            return false;
         }
-        return $tail !== [];
-    };
-    i18n_assert('ux keys are one contiguous block at the end', $uxTail($enTail) && $uxTail($esTail));
-}
+    }
+    return true;
+};
+i18n_assert('ux keys are one contiguous block', $contiguousPrefix($enKeys, 'ux.') && $contiguousPrefix($esKeys, 'ux.'));
+$enToday = array_values(array_filter($enKeys, static fn(string $key): bool => strpos($key, 'today.') === 0));
+$esToday = array_values(array_filter($esKeys, static fn(string $key): bool => strpos($key, 'today.') === 0));
+i18n_assert('today keys match in English and Spanish', $enToday !== [] && $enToday === $esToday);
+$todayTail = static function (array $keys): bool {
+    $start = null;
+    foreach ($keys as $i => $key) {
+        if (strpos((string)$key, 'today.') === 0) {
+            $start = $i;
+            break;
+        }
+    }
+    if ($start === null) {
+        return false;
+    }
+    $tail = array_slice($keys, $start);
+    foreach ($tail as $key) {
+        if (strpos((string)$key, 'today.') !== 0) {
+            return false;
+        }
+    }
+    return $tail !== [];
+};
+i18n_assert('today keys are one contiguous block at the end', $todayTail($enKeys) && $todayTail($esKeys));
 
 i18n_assert(
     'English billing empty queue is guidance, not a 2099 fixture hunt',
