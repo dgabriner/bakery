@@ -38,7 +38,7 @@ $plain = function ($message) {
     return true;
 };
 
-$runChild = function ($disableProcOpen) use ($root) {
+$runChild = function ($disableProcOpen, $hidePowerShell = false) use ($root) {
     $probe = tempnam(sys_get_temp_dir(), 'apq');
     $script = $probe . '.php';
     @unlink($probe);
@@ -67,8 +67,23 @@ PHP
     }
     $cmd[] = $script;
     $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    putenv('AUTO_PUSH_CONTROL=' . $root . '/includes/auto_push_control.php');
-    $proc = proc_open($cmd, $descriptors, $pipes, $root, null);
+    $env = getenv();
+    if (!is_array($env)) {
+        $env = [];
+    }
+    $env['AUTO_PUSH_CONTROL'] = $root . '/includes/auto_push_control.php';
+    // GitHub-hosted Ubuntu includes pwsh. Hide every PowerShell name so this
+    // probe tests the missing-shell path instead of launching a real shell.
+    if ($hidePowerShell) {
+        $bare = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'apq-nops';
+        if (!is_dir($bare) && !@mkdir($bare, 0700, true) && !is_dir($bare)) {
+            @unlink($script);
+            return ['spawned' => false, 'stdout' => '', 'stderr' => '', 'data' => null];
+        }
+        $env['PATH'] = $bare;
+        $env['Path'] = $bare;
+    }
+    $proc = proc_open($cmd, $descriptors, $pipes, $root, $env);
     if (!is_resource($proc)) {
         @unlink($script);
         return ['spawned' => false, 'stdout' => '', 'stderr' => '', 'data' => null];
@@ -89,13 +104,15 @@ PHP
     ];
 };
 
-$missing = $runChild(false);
+$missing = $runChild(false, true);
+$missingMessage = is_array($missing['data']) ? (string)($missing['data']['message'] ?? '') : '';
 $assert($missing['spawned'] && is_array($missing['data']), 'missing PowerShell probe returned JSON');
 $assert(
     is_array($missing['data'])
         && !empty($missing['data']['threw'])
-        && ($missing['data']['message'] ?? '') === 'PowerShell not found',
+        && $missingMessage === 'PowerShell not found',
     'missing PowerShell fails with a plain message'
+        . ($missingMessage === 'PowerShell not found' ? '' : ' (got: ' . $missingMessage . ')')
 );
 $assert(
     is_array($missing['data']) && empty($missing['data']['warnings'])
