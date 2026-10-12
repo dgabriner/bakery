@@ -1748,7 +1748,7 @@ function bakery_demand_visit_date_label($date, array $dayLabels) {
  *
  * @return array{changed:bool,created:bool,daily_order_id:?int,quantity:int,item_id:?int}
  */
-function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date, int $productId, int $quantity): array {
+function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date, int $productId, int $quantity, array $context = []): array {
     if (!function_exists('bakery_customer_ensure_daily_order')) {
         require_once __DIR__ . '/customer_order_mutations.php';
     }
@@ -1832,10 +1832,18 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
             $product = bakery_customer_product_row($db, $productId) ?: [];
         }
         $productName = $product['name'] ?? ('#' . $productId);
+        $source = trim((string)($context['source'] ?? 'visit_compare'));
+        if ($source === '') {
+            $source = 'visit_compare';
+        }
+        $summary = trim((string)($context['summary'] ?? ''));
+        if ($summary === '') {
+            $summary = 'Visit compare set dated qty for ' . $customer['name'] . ' — ' . $productName;
+        }
         bakery_record_operational_event(
             $db,
             $oldQty === null ? BAKERY_OP_DAILY_ORDER_ITEM_ADDED : BAKERY_OP_DAILY_ORDER_QUANTITY_CHANGED,
-            'Visit compare set dated qty for ' . $customer['name'] . ' — ' . $productName,
+            $summary,
             [
                 'operational_date' => $date,
                 'customer_id' => $customerId,
@@ -1845,7 +1853,7 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
                     'product_name' => $productName,
                     'old_quantity' => $oldQty,
                     'new_quantity' => $quantity,
-                    'source' => 'visit_compare',
+                    'source' => $source,
                 ],
             ]
         );
