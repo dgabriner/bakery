@@ -54,8 +54,8 @@ if (!$survey && $token === '') {
     if ($selfDriverId <= 0 && !empty($user['driver_id'])) {
         $selfDriverId = (int)$user['driver_id'];
     }
-    $hubDriverId = $selfDriverId > 0 ? $selfDriverId : 0;
-    $hubSubjectId = ($isManager && $selfDriverId <= 0) ? 0 : $hubDriverId;
+    // Managers always open the all-drivers hub. Drivers open their own.
+    $hubSubjectId = $isManager ? 0 : ($selfDriverId > 0 ? $selfDriverId : 0);
     $hubDate = $nextDeliveryDate;
     $requestedHubDate = trim((string)($_REQUEST['date'] ?? ''));
     if ($requestedHubDate !== '') {
@@ -81,7 +81,9 @@ if (!$survey && $token === '') {
             $esc = static function ($s): string {
                 return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
             };
-            $pageTitle = bakery_survey_hub_page_title(date('Y-m-d'), (string)$hub['delivery_date']);
+            $pageTitle = $isManager
+                ? (string)bakery_t('survey.hub_title_manager')
+                : bakery_survey_hub_page_title(date('Y-m-d'), (string)$hub['delivery_date']);
             $page_title = $pageTitle;
             require __DIR__ . '/includes/header.php';
             require __DIR__ . '/includes/nav.php';
@@ -94,24 +96,37 @@ if (!$survey && $token === '') {
                 . '.survey-hub-date{display:flex;gap:8px;align-items:end;margin:0 0 14px;flex-wrap:wrap}'
                 . '.survey-hub-date label{font-size:12px;font-weight:700;display:grid;gap:4px}'
                 . '.survey-hub-date input[type=date]{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #d8d0c2;background:#fff}'
+                . '.survey-day-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}'
+                . '.survey-day-chips .btn{min-height:44px}'
                 . '</style>';
             echo '<header class="sf-page-header"><div>';
             echo '<h1>' . $esc($pageTitle) . '</h1>';
             echo '<p class="sf-meta">' . $esc(bakery_t('survey.hub_sub', ['date' => $hub['delivery_date']])) . '</p>';
             echo '</div></header>';
+            $hubToday = date('Y-m-d');
+            $hubTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+            $hubChipClass = static function (string $day) use ($hubDate): string {
+                return 'btn survey-day-chip ' . ($hubDate === $day ? 'btn-primary' : 'btn-outline');
+            };
+            echo '<div class="survey-day-chips" role="group" aria-label="' . $esc(bakery_t('survey.hub_day_aria')) . '">';
+            echo '<a class="' . $esc($hubChipClass($hubToday)) . '" href="' . $esc(BASE_URL . 'survey.php?date=' . rawurlencode($hubToday)) . '"' . ($hubDate === $hubToday ? ' aria-current="date"' : '') . '>' . $esc(bakery_t('common.today')) . '</a>';
+            echo '<a class="' . $esc($hubChipClass($hubTomorrow)) . '" href="' . $esc(BASE_URL . 'survey.php?date=' . rawurlencode($hubTomorrow)) . '"' . ($hubDate === $hubTomorrow ? ' aria-current="date"' : '') . '>' . $esc(bakery_t('common.tomorrow')) . '</a>';
+            echo '</div>';
             echo '<form class="survey-hub-date" method="get" action="survey.php">'
                 . '<label>' . $esc(bakery_t('survey.store_verify_date'))
                 . '<input type="date" name="date" value="' . $esc($hubDate) . '" required></label>'
                 . '<button type="submit" class="btn btn-outline">' . $esc(bakery_t('survey.store_verify_date_go')) . '</button>'
                 . '</form>';
             if ($hub['verify_url'] !== '') {
+                $step1Help = $isManager ? bakery_t('texts.survey_step1_help_hq') : bakery_t('texts.survey_step1_help');
                 echo '<a class="sf-card survey-hub-card" href="' . $esc($hub['verify_url']) . '"><strong class="sf-card__title">' . $esc(bakery_t('texts.survey_step1_title')) . '</strong>'
-                    . '<span class="sf-meta">' . $esc(bakery_t('texts.survey_step1_help')) . '</span>'
+                    . '<span class="sf-meta">' . $esc($step1Help) . '</span>'
                     . '<div class="survey-hub-actions"><span class="btn btn-primary">' . $esc(bakery_t('texts.survey_open_verify')) . '</span></div></a>';
             }
             if ($hub['order_url'] !== '') {
+                $step2Help = $isManager ? bakery_t('texts.survey_step2_help_hq') : bakery_t('texts.survey_step2_help');
                 echo '<a class="sf-card survey-hub-card" href="' . $esc($hub['order_url']) . '"><strong class="sf-card__title">' . $esc(bakery_t('texts.survey_step2_title')) . '</strong>'
-                    . '<span class="sf-meta">' . $esc(bakery_t('texts.survey_step2_help')) . '</span>'
+                    . '<span class="sf-meta">' . $esc($step2Help) . '</span>'
                     . '<div class="survey-hub-actions"><span class="btn btn-primary">' . $esc(bakery_t('texts.survey_open_order')) . '</span></div></a>';
             }
             if ($hub['verify_url'] === '' || $hub['order_url'] === '') {
@@ -693,6 +708,9 @@ if ($showStoreVerify || $isHqStoreVerify) {
   .date-bar { display: flex; gap: 8px; align-items: end; margin: 0 0 14px; flex-wrap: wrap; }
   .date-bar label { font-size: 12px; font-weight: 700; opacity: .7; display: grid; gap: 4px; flex: 1; min-width: 140px; }
   .date-bar input[type="date"] { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #d8d0c2; background: #fff; }
+  .survey-day-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; width: 100%; }
+  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; }
+  .survey-day-chip--active { background: #2c5aa0; border-color: #2c5aa0; color: #fff; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
   .toolbar .btn { font-size: 13px; padding: 8px 11px; }
   .toolbar .btn.active { background: #2c5aa0; color: #fff; }
@@ -756,6 +774,15 @@ if ($showStoreVerify || $isHqStoreVerify) {
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
 
   <?php if ($showStoreVerify): ?>
+  <?php
+    $chipToday = date('Y-m-d');
+    $chipTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+    $chipBase = 'survey.php?t=' . rawurlencode($token) . '&date=';
+  ?>
+  <div class="survey-day-chips" role="group" aria-label="<?php echo $esc(bakery_survey_text('survey.hub_day_aria', [], 'Choose delivery day')); ?>">
+    <a class="survey-day-chip<?php echo $verifyDate === $chipToday ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipToday)); ?>"<?php echo $verifyDate === $chipToday ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.today', [], 'Today')); ?></a>
+    <a class="survey-day-chip<?php echo $verifyDate === $chipTomorrow ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipTomorrow)); ?>"<?php echo $verifyDate === $chipTomorrow ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.tomorrow', [], 'Tomorrow')); ?></a>
+  </div>
   <form class="date-bar" method="get" action="survey.php">
     <input type="hidden" name="t" value="<?php echo $esc($token); ?>">
     <label><?php echo $esc(bakery_survey_text('survey.store_verify_date', [], 'Delivery day')); ?>
