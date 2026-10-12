@@ -116,10 +116,15 @@ i18n_assert('ux keys are one contiguous block', $contiguousPrefix($enKeys, 'ux.'
 $enToday = array_values(array_filter($enKeys, static fn(string $key): bool => strpos($key, 'today.') === 0));
 $esToday = array_values(array_filter($esKeys, static fn(string $key): bool => strpos($key, 'today.') === 0));
 i18n_assert('today keys match in English and Spanish', $enToday !== [] && $enToday === $esToday);
-$todayTail = static function (array $keys): bool {
+i18n_assert('today keys are one contiguous block', $contiguousPrefix($enKeys, 'today.') && $contiguousPrefix($esKeys, 'today.'));
+$enGaps = array_values(array_filter($enKeys, static fn(string $key): bool => strpos($key, 'catalog_gaps.') === 0));
+$esGaps = array_values(array_filter($esKeys, static fn(string $key): bool => strpos($key, 'catalog_gaps.') === 0));
+i18n_assert('catalog gaps keys match in English and Spanish', $enGaps !== [] && $enGaps === $esGaps);
+i18n_assert('catalog gaps keys are one contiguous block', $contiguousPrefix($enKeys, 'catalog_gaps.') && $contiguousPrefix($esKeys, 'catalog_gaps.'));
+$uxLast = static function (array $keys): bool {
     $start = null;
     foreach ($keys as $i => $key) {
-        if (strpos((string)$key, 'today.') === 0) {
+        if (strpos((string)$key, 'ux.') === 0) {
             $start = $i;
             break;
         }
@@ -127,15 +132,15 @@ $todayTail = static function (array $keys): bool {
     if ($start === null) {
         return false;
     }
-    $tail = array_slice($keys, $start);
-    foreach ($tail as $key) {
-        if (strpos((string)$key, 'today.') !== 0) {
+    foreach (array_slice($keys, $start) as $key) {
+        if (strpos((string)$key, 'ux.') !== 0) {
             return false;
         }
     }
-    return $tail !== [];
+    return true;
 };
-i18n_assert('today keys are one contiguous block at the end', $todayTail($enKeys) && $todayTail($esKeys));
+i18n_assert('ux keys are one contiguous block at the end', $uxLast($enKeys) && $uxLast($esKeys));
+
 
 i18n_assert(
     'English billing empty queue is guidance, not a 2099 fixture hunt',
