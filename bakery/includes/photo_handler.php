@@ -13,17 +13,56 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+/**
+ * Browser URL for a file under the app's uploads directory.
+ *
+ * Uses BASE_URL (Live `/bake/`, Staging `/`) so thumbnails are not rooted at
+ * `/uploads/...` on the host. A stored `/uploads/...` path or a legacy
+ * `https://bakery.sourflour.org/uploads/...` URL is rewritten onto that base.
+ * Pass $baseUrl in tests; web requests use the BASE_URL constant.
+ */
+function bakery_upload_display_url(string $bucket, string $storedPath, ?string $baseUrl = null): string
+{
+    $base = $baseUrl;
+    if ($base === null) {
+        $base = defined('BASE_URL') ? (string)BASE_URL : '/';
+    }
+    if ($base === '') {
+        $base = '/';
+    }
+    $prefix = rtrim($base, '/') . '/uploads/';
+    $storedPath = trim(str_replace('\\', '/', $storedPath));
+    if (preg_match('#^https?://#i', $storedPath)) {
+        $path = (string)(parse_url($storedPath, PHP_URL_PATH) ?? '');
+        if ($path !== '' && preg_match('#/uploads/(.+)$#', $path, $matches)) {
+            return $prefix . $matches[1];
+        }
+        return $storedPath;
+    }
+    if (preg_match('#(?:^|/)uploads/(.+)$#', $storedPath, $matches)) {
+        return $prefix . $matches[1];
+    }
+    $bucket = trim($bucket, '/');
+    $relative = ltrim($storedPath, '/');
+    if ($bucket === '') {
+        $tail = $relative;
+    } elseif ($relative === '') {
+        $tail = $bucket;
+    } else {
+        $tail = $bucket . '/' . $relative;
+    }
+    return $prefix . $tail;
+}
+
 class PhotoHandler {
     
     private $uploadDir;
-    private $uploadUrl;
     private $maxSize;
     private $allowedTypes;
     private $thumbSize;
     
     public function __construct() {
         $this->uploadDir = dirname(__FILE__) . '/../uploads/driver_photos/';
-        $this->uploadUrl = BASE_URL . 'uploads/driver_photos/';
         $this->maxSize = 10 * 1024 * 1024; // 10MB
         $this->allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
         $this->thumbSize = 300; // pixels
@@ -319,14 +358,8 @@ class PhotoHandler {
      * @return string Full URL to photo
      */
     public function getPhotoUrl($filePath, $thumbnail = false) {
-        // Always return main image - CSS will handle sizing
-        if (isDevelopment()) {
-            return $this->uploadUrl . $filePath;
-        }
-        
-        // In production, use production URLs
-        $productionBaseUrl = 'https://bakery.sourflour.org/uploads/driver_photos/';
-        return $productionBaseUrl . $filePath;
+        // CSS sizes the main image. The URL always follows the app base path.
+        return bakery_upload_display_url('driver_photos', (string)$filePath);
     }
     
     /**
@@ -337,21 +370,11 @@ class PhotoHandler {
      * @return array Array with primary URL and fallback URL
      */
     public function getPhotoUrlWithFallback($filePath, $thumbnail = false) {
-        // Always use main image - ignore thumbnail parameter
-        $localUrl = BASE_URL . 'uploads/driver_photos/' . $filePath;
-        $productionUrl = 'https://bakery.sourflour.org/uploads/driver_photos/' . $filePath;
-        
-        if (isDevelopment()) {
-            return [
-                'primary' => $localUrl,
-                'fallback' => $productionUrl
-            ];
-        } else {
-            return [
-                'primary' => $productionUrl,
-                'fallback' => $localUrl
-            ];
-        }
+        $url = $this->getPhotoUrl($filePath, $thumbnail);
+        return [
+            'primary' => $url,
+            'fallback' => $url,
+        ];
     }
     
     /**

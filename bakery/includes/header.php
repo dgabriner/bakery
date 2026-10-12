@@ -112,7 +112,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <span><?php echo htmlspecialchars(bakery_t('env.prod_db', ['db' => defined('DB_NAME') ? DB_NAME : 'unknown', 'host' => defined('DB_HOST') ? DB_HOST : 'unknown'])); ?></span>
     <button type="button" class="local-env-banner-dismiss" data-dismiss-prod-db-banner aria-label="<?php bakery_te('common.hide_warning'); ?>"><?php bakery_te('common.hide_warning'); ?></button>
     <?php if ($canControlAutoPush): ?>
-    <div id="auto-push-controls" class="auto-push-controls <?php echo $autoPushEnabled ? 'auto-push-on' : 'auto-push-off'; ?>" data-base-url="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>">
+    <div id="auto-push-controls" class="auto-push-controls <?php echo $autoPushEnabled ? 'auto-push-on' : 'auto-push-off'; ?>" data-base-url="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>" data-status-unavailable="<?php echo htmlspecialchars(bakery_t('auto_push.status_unavailable'), ENT_QUOTES, 'UTF-8'); ?>">
       <span class="auto-push-label"><?php bakery_te('env.auto_push'); ?></span>
       <label class="auto-push-switch" title="<?php bakery_te('env.auto_push_title'); ?>">
         <input type="checkbox" id="auto-push-toggle" <?php echo $autoPushEnabled ? 'checked' : ''; ?> aria-checked="<?php echo $autoPushEnabled ? 'true' : 'false'; ?>">
@@ -159,7 +159,7 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <span><?php bakery_te('env.demo_fixtures'); ?></span>
     <?php endif; ?>
     <?php if ($canControlAutoPush): ?>
-    <div id="auto-push-controls" class="auto-push-controls <?php echo $autoPushEnabled ? 'auto-push-on' : 'auto-push-off'; ?>" data-base-url="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>">
+    <div id="auto-push-controls" class="auto-push-controls <?php echo $autoPushEnabled ? 'auto-push-on' : 'auto-push-off'; ?>" data-base-url="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>" data-status-unavailable="<?php echo htmlspecialchars(bakery_t('auto_push.status_unavailable'), ENT_QUOTES, 'UTF-8'); ?>">
       <span class="auto-push-label"><?php bakery_te('env.auto_push'); ?></span>
       <label class="auto-push-switch" title="<?php bakery_te('env.auto_push_title'); ?>">
         <input type="checkbox" id="auto-push-toggle" <?php echo $autoPushEnabled ? 'checked' : ''; ?> aria-checked="<?php echo $autoPushEnabled ? 'true' : 'false'; ?>">

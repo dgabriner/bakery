@@ -821,7 +821,7 @@ body.driver-workflow-page .route-progress-fill {
 
 .route-dashboard {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(390px, 0.9fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
     gap: 24px;
 }
@@ -1165,9 +1165,15 @@ body.driver-workflow-page .stop-list-section {
 
 .stop-list-heading-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-end;
     justify-content: space-between;
     gap: 12px;
+    min-width: 0;
+}
+
+.stop-list-heading-row > * {
+    min-width: 0;
 }
 
 body.driver-workflow-page .stop-list-heading {
@@ -1176,6 +1182,7 @@ body.driver-workflow-page .stop-list-heading {
     font-size: 1.3rem;
     line-height: 1.1;
     letter-spacing: -0.035em;
+    overflow-wrap: break-word;
     text-transform: none;
 }
 
@@ -4966,6 +4973,7 @@ body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route 
     .route-dashboard:not(.route-dashboard--prep) {
         display: flex;
         flex-direction: column;
+        align-items: stretch;
         gap: 14px;
     }
 
@@ -5398,9 +5406,13 @@ body.skip-stop-modal-open {
 /* Compact remaining-stop reorder on My Route */
 .stop-list-heading-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-end;
     gap: 8px;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    max-width: 100%;
+    min-width: 0;
 }
 
 .route-adjust-toggle,

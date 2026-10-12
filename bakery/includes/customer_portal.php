@@ -1207,3 +1207,80 @@ function bakery_portal_add_to_standing_order(PDO $db, array $customer, $dayOfWee
         'new_quantity' => $newQty,
     ];
 }
+
+/** One tip form render: 8–64 url-safe characters, same shape as checkout keys. */
+function bakery_portal_tip_client_key(string $raw): string
+{
+    $key = trim($raw);
+    if ($key === '' || !preg_match('/^[A-Za-z0-9_-]{8,64}$/', $key)) {
+        return '';
+    }
+    return $key;
+}
+
+/** A test double counts as configured so tip checkout never needs a live Square call. */
+function bakery_portal_square_checkout_ready(): bool
+{
+    if (isset($GLOBALS['bakery_square_api_handler']) && is_callable($GLOBALS['bakery_square_api_handler'])) {
+        return true;
+    }
+    return function_exists('square_is_configured') && square_is_configured();
+}
+
+/**
+ * One $1 tip payment link per click.
+ * The Square idempotency key is the customer plus that click. It does not
+ * include the clock, so a double submit or a retry after a timeout reuses it.
+ * A cached URL in the session skips a second Square call for the same click.
+ *
+ * @return array{url:string,idempotency_key:string,reused:bool}
+ */
+function bakery_portal_create_tip_checkout(array $customer, string $clientKey, string $returnUrl): array
+{
+    $customerId = (int)($customer['id'] ?? 0);
+    $clientKey = bakery_portal_tip_client_key($clientKey);
+    if ($customerId <= 0 || $clientKey === '') {
+        throw new InvalidArgumentException('Tip checkout needs one key per click');
+    }
+    if (!bakery_portal_square_checkout_ready()) {
+        throw new RuntimeException('Square is not configured');
+    }
+
+    $idempotencyKey = 'tip-' . $customerId . '-' . $clientKey;
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $cached = $_SESSION['bakery_portal_tip_links'][$idempotencyKey] ?? null;
+        if (is_string($cached) && $cached !== '') {
+            return [
+                'url' => $cached,
+                'idempotency_key' => $idempotencyKey,
+                'reused' => true,
+            ];
+        }
+    }
+
+    $result = square_api_request('POST', '/v2/online-checkout/payment-links', [
+        'idempotency_key' => $idempotencyKey,
+        'quick_pay' => [
+            'name' => 'Tip — Sour Flour Bakery',
+            'price_money' => ['amount' => 100, 'currency' => 'USD'],
+            'location_id' => defined('SQUARE_LOCATION_ID') ? SQUARE_LOCATION_ID : '',
+        ],
+        'checkout_options' => [
+            'redirect_url' => $returnUrl,
+        ],
+    ]);
+
+    $url = $result['payment_link']['url'] ?? null;
+    if (!is_string($url) || $url === '') {
+        throw new RuntimeException('Square did not return a payment link URL.');
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['bakery_portal_tip_links'][$idempotencyKey] = $url;
+    }
+
+    return [
+        'url' => $url,
+        'idempotency_key' => $idempotencyKey,
+        'reused' => false,
+    ];
+}

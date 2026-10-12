@@ -229,6 +229,9 @@ $agingKeys = [
     'hub.balance_label',
     'hub.balance_due',
     'hub.balance_current',
+    'hub.balance_none',
+    'billing.export_bad_range',
+    'billing.export_failed',
 ];
 foreach ($agingKeys as $agingKey) {
     assert_true(isset($agingEn[$agingKey]) && trim((string)$agingEn[$agingKey]) !== '', "en key exists: {$agingKey}");
@@ -252,6 +255,133 @@ assert_true(
         && strpos((string)$agingEs['hub.balance_due'], ':days') !== false,
     'Hub balance-due key carries :total/:days params in both languages'
 );
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('en', false);
+$balanceColon = bakery_t('hub.balance_due', [':total' => '$12.50', ':days' => 6]);
+$balancePlain = bakery_t('hub.balance_due', ['total' => '$12.50', 'days' => 6]);
+assert_true($balanceColon === 'Balance due $12.50 · oldest 6 d', 'English balance-due line fills :total and :days');
+assert_true($balancePlain === $balanceColon, 'Balance params accept total and :total');
+assert_true(bakery_t('hub.balance_current') === 'Balance current', 'A known zero balance stays Balance current');
+assert_true(bakery_t('hub.balance_none') === 'No balance on file', 'Missing balance uses a clear English string');
+bakery_set_locale('es', false);
+$balanceEs = bakery_t('hub.balance_due', ['total' => '$12.50', 'days' => 6]);
+assert_true($balanceEs === 'Saldo pendiente $12.50 · más antiguo 6 d', 'Spanish balance-due line fills :total and :days');
+assert_true(bakery_t('hub.balance_current') === 'Saldo al día', 'Spanish zero balance stays current');
+$hubSrc = (string)file_get_contents($root . '/customer_record.php');
+assert_true(
+    strpos($hubSrc, "bakery_t('hub.balance_due'") !== false
+        && strpos($hubSrc, "'total' =>") !== false
+        && strpos($hubSrc, "'days' =>") !== false
+        && strpos($hubSrc, "':total'") === false
+        && strpos($hubSrc, 'hub.balance_current') !== false
+        && strpos($hubSrc, 'hub.balance_none') !== false,
+    'Customer Hub due branch passes total and days'
+);
+
+$badRange = bakery_billing_export_normalize_range('', '2026-10-07');
+assert_true($badRange['ok'] === false, 'Unconfirmed empty export dates are rejected');
+$swappedOk = bakery_billing_export_normalize_range('2026-13-01', '2026-10-07');
+assert_true($swappedOk['ok'] === false, 'Impossible calendar dates are rejected');
+$goodRange = bakery_billing_export_normalize_range('2098-01-01', '2098-01-02');
+assert_true($goodRange['ok'] === true, 'A real unused range is accepted');
+try {
+    $emptyUnconfirmed = bakery_billing_export_rows($db, [
+        'start_date' => '2098-01-01',
+        'end_date' => '2098-01-02',
+        'customer_id' => 0,
+        'status' => 'all',
+        'confirmed_only' => false,
+        'sort' => 'date_asc',
+    ]);
+    assert_true($emptyUnconfirmed === [], 'Unconfirmed empty range exports no rows and does not throw');
+    $badRows = bakery_billing_export_rows($db, [
+        'start_date' => 'not-a-date',
+        'end_date' => '2098-01-02',
+        'confirmed_only' => false,
+    ]);
+    assert_true($badRows === [], 'Invalid export dates return an empty row set');
+} catch (Throwable $e) {
+    assert_true(false, 'Export range handling threw: ' . $e->getMessage());
+}
+
+$zeroCustomerId = 0;
+$zeroOrderId = 0;
+$zeroProductIds = [];
+try {
+    $db->prepare('INSERT INTO customers (name, zone, payment_collection, is_active) VALUES (?, ?, ?, 1)')
+        ->execute(['Export Zero Lines', 'Test Zone', 'cod']);
+    $zeroCustomerId = (int)$db->lastInsertId();
+    $db->prepare('INSERT INTO products (name, price) VALUES (?, ?)')->execute(['Export Priced Loaf', 2.25]);
+    $zeroProductIds[] = (int)$db->lastInsertId();
+    $db->prepare('INSERT INTO products (name, price) VALUES (?, ?)')->execute(['Export Zero Sample', 0]);
+    $zeroProductIds[] = (int)$db->lastInsertId();
+    $db->prepare(
+        'INSERT INTO daily_orders (customer_id, order_date, status, total_amount, delivery_order_total, delivery_pricing_label, delivered_pieces, delivery_confirmed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    )->execute([$zeroCustomerId, '2097-04-04', 'delivered', 4.50, 4.50, 'export snapshot', 5, '2097-04-04 09:00:00']);
+    $zeroOrderId = (int)$db->lastInsertId();
+    $itemInsert = $db->prepare(
+        'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    $itemInsert->execute([$zeroOrderId, $zeroProductIds[0], 2, 2, 2.25, 4.50]);
+    $itemInsert->execute([$zeroOrderId, $zeroProductIds[1], 3, 3, 0, 0]);
+    $zeroRows = bakery_billing_export_rows($db, [
+        'start_date' => '2097-04-04',
+        'end_date' => '2097-04-04',
+        'customer_id' => $zeroCustomerId,
+        'status' => 'all',
+        'confirmed_only' => true,
+        'sort' => 'date_asc',
+    ]);
+    $zeroLineCount = 0;
+    foreach ($zeroRows as $zeroRow) {
+        if ((int)$zeroRow['daily_order_id'] === $zeroOrderId && (float)$zeroRow['line_total'] == 0.0) {
+            $zeroLineCount++;
+        }
+    }
+    assert_true(count($zeroRows) === 2, 'Export keeps every line, including the zero-dollar line');
+    assert_true($zeroLineCount === 1, 'The zero-dollar line is present so counts reconcile');
+
+    $db->prepare(
+        'INSERT INTO daily_orders (customer_id, order_date, status, total_amount, delivery_order_total, delivery_pricing_label)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    )->execute([$zeroCustomerId, '2097-04-05', 'pending', 0, 0, '']);
+    $openOrderId = (int)$db->lastInsertId();
+    $itemInsert->execute([$openOrderId, $zeroProductIds[1], 1, null, 0, 0]);
+    $openRows = bakery_billing_export_rows($db, [
+        'start_date' => '2097-04-05',
+        'end_date' => '2097-04-05',
+        'customer_id' => $zeroCustomerId,
+        'status' => 'all',
+        'confirmed_only' => false,
+        'sort' => 'date_asc',
+    ]);
+    assert_true(count($openRows) === 1 && (float)$openRows[0]['line_total'] == 0.0, 'Unconfirmed range exports its zero line without throwing');
+    $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$openOrderId]);
+} catch (Throwable $e) {
+    assert_true(false, 'Zero-line export fixture: ' . $e->getMessage());
+} finally {
+    if ($zeroOrderId > 0) {
+        $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id = ?')->execute([$zeroOrderId]);
+        $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$zeroOrderId]);
+    }
+    if ($zeroCustomerId > 0) {
+        $db->prepare('DELETE FROM daily_orders WHERE customer_id = ?')->execute([$zeroCustomerId]);
+        $db->prepare('DELETE FROM customers WHERE id = ?')->execute([$zeroCustomerId]);
+    }
+    if ($zeroProductIds !== []) {
+        $inProducts = implode(',', array_map('intval', $zeroProductIds));
+        $db->exec('DELETE FROM daily_order_items WHERE product_id IN (' . $inProducts . ')');
+        $db->exec('DELETE FROM products WHERE id IN (' . $inProducts . ')');
+    }
+}
+
+$exportSrc = (string)file_get_contents($root . '/billing_export.php');
+assert_true(strpos($exportSrc, 'http_response_code(500)') === false, 'billing_export.php never sets HTTP 500');
+assert_true(strpos($exportSrc, 'billing.export_bad_range') !== false, 'billing_export.php explains a bad date range');
+$billingSrc = (string)file_get_contents($root . '/includes/billing.php');
+assert_true(strpos($billingSrc, 'invoiceTotal <= 0') === false, 'export no longer drops zero-dollar invoices');
 $panelSrc = (string)file_get_contents($root . '/includes/billing_panel_invoices.php');
 assert_true(strpos($panelSrc, 'bakery_billing_settlement_row') !== false, 'Billing Center list renders settlement rows');
 assert_true(

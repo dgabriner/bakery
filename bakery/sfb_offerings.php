@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($_POST['action'] ?? '');
         if ($action === 'buy') {
             $offeringId = (int)($_POST['offering_id'] ?? 0);
-            $result = bakery_sfb_buy_offering($db, $customerId, $offeringId);
+            $result = bakery_sfb_buy_offering($db, $customerId, $offeringId, null, (string)($_POST['checkout_key'] ?? ''));
             if ($result['configured'] && $result['url']) {
                 header('Location: ' . $result['url']);
                 exit;
@@ -185,11 +185,12 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
         <?php if (!empty($offering['description'])): ?>
           <p><?php echo nl2br(htmlspecialchars($offering['description'], ENT_QUOTES, 'UTF-8')); ?></p>
         <?php endif; ?>
-        <form method="post" style="margin-top:8px;">
+        <form method="post" data-checkout-once style="margin-top:8px;">
           <?php echo bakery_csrf_field(); ?>
           <input type="hidden" name="action" value="buy">
           <input type="hidden" name="offering_id" value="<?php echo (int)$offering['id']; ?>">
-          <button type="submit" class="btn btn-block"><?php bakery_te('sfb.offerings_buy'); ?> — $<?php echo number_format((float)$offering['price_cents'] / 100, 2); ?></button>
+          <?php echo bakery_sfb_checkout_key_input(); ?>
+          <button type="submit" class="btn btn-block" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.offerings_buy'); ?> — $<?php echo number_format((float)$offering['price_cents'] / 100, 2); ?></button>
         </form>
         <?php if ($creditBalance > 0 && !in_array($kind, ['credits', 'donation', 'gift'], true)): ?>
           <form method="post" style="margin-top:8px;">
@@ -279,9 +280,10 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
         <div class="card-body">
           <h2 style="margin-top:0;"><?php bakery_te('sfb.private_ws_title'); ?></h2>
           <p class="muted"><?php bakery_te('sfb.private_ws_copy'); ?></p>
-          <form method="post">
+          <form method="post" data-checkout-once>
             <?php echo bakery_csrf_field(); ?>
             <input type="hidden" name="action" value="buy_private_workshop">
+            <?php echo bakery_sfb_checkout_key_input(); ?>
             <fieldset style="border:0;margin:0;padding:0;">
               <legend class="muted" style="padding:0;"><?php bakery_te('sfb.private_ws_type_label'); ?></legend>
               <label style="display:block;margin:6px 0;">
@@ -319,7 +321,7 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
             </label>
             <p><strong><?php bakery_te('sfb.private_ws_total'); ?>:
               $<?php echo number_format(((int)($wsQuote['price_cents'] ?? 0)) / 100, 2); ?></strong></p>
-            <button type="submit" class="btn btn-block"><?php bakery_te('sfb.private_ws_cta'); ?></button>
+            <button type="submit" class="btn btn-block" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.private_ws_cta'); ?></button>
           </form>
         </div>
       </section>
@@ -337,14 +339,15 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
             ?></p>
           <?php endif; ?>
           <?php if ($giftOffering): ?>
-            <form method="post" style="margin-bottom:16px;">
+            <form method="post" data-checkout-once style="margin-bottom:16px;">
               <?php echo bakery_csrf_field(); ?>
               <input type="hidden" name="action" value="buy_gift">
+              <?php echo bakery_sfb_checkout_key_input(); ?>
               <label style="display:block;margin:0 0 10px;">
                 <span><?php bakery_te('sfb.gift_recipient'); ?></span>
                 <input type="text" name="recipient_name" maxlength="120" value="<?php echo htmlspecialchars((string)($_POST['recipient_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" style="display:block;width:100%;margin-top:4px;padding:10px;">
               </label>
-              <button type="submit" class="btn btn-block"><?php
+              <button type="submit" class="btn btn-block" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php
                 echo bakery_t('sfb.gift_buy_cta', [
                     'price' => number_format((float)$giftOffering['price_cents'] / 100, 2),
                 ]);
@@ -437,5 +440,6 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
     <a class="btn btn-secondary btn-block" href="sfb_resources.php"><?php bakery_te('sfb.resources_back_to_center'); ?></a>
   </main>
   <?php require __DIR__ . '/includes/portal_nav.php'; ?>
+  <?php echo bakery_sfb_checkout_once_script(); ?>
 </body>
 </html>
