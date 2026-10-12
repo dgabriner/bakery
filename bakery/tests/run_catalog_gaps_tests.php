@@ -112,9 +112,15 @@ foreach (['en' => $root . '/lang/en.php', 'es' => $root . '/lang/es.php'] as $la
     }
     $contiguous = $indexes !== [] && ($indexes[count($indexes) - 1] - $indexes[0] + 1) === count($indexes);
     $assert($contiguous, $label . ' catalog_gaps strings are one contiguous block');
+    $uxLine = null;
+    foreach ($linesOf as $i => $line) {
+        if (strpos($line, "'ux.stage.demand'") !== false) {
+            $uxLine = $i;
+            break;
+        }
+    }
     $lastKeyLine = $indexes === [] ? -1 : $indexes[count($indexes) - 1];
-    $tail = implode('', array_slice($linesOf, $lastKeyLine + 1));
-    $assert($lastKeyLine >= 0 && !preg_match("/^\\s*'[^']+'\\s*=>/m", $tail), $label . ' catalog_gaps block is at the end of the catalog');
+    $assert($lastKeyLine >= 0 && $uxLine !== null && $lastKeyLine < $uxLine, $label . ' catalog_gaps block stays before the ux catalog');
     $block = implode('', array_slice($linesOf, $indexes[0], count($indexes)));
     $assert(strpos($block, "\u{2013}") === false && strpos($block, "\u{2014}") === false, $label . ' catalog_gaps copy has no en dash or em dash');
 }

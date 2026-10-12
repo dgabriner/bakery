@@ -343,22 +343,67 @@ function bakery_zazie_weekly_parse_rows(array $rows, ?string $weekStart = null):
 /**
  * @return list<list<string>>
  */
+function bakery_zazie_weekly_max_upload_bytes(): int
+{
+    return 2 * 1024 * 1024;
+}
+
 function bakery_zazie_weekly_read_file(string $path, string $originalName): array
 {
     if (!is_file($path) || !is_readable($path)) {
         throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
     }
-    if (filesize($path) > 2 * 1024 * 1024) {
+    $size = filesize($path);
+    if ($size === false || $size > bakery_zazie_weekly_max_upload_bytes()) {
         throw new BakeryZazieWeeklyException('zazie_weekly.file_too_large');
     }
     $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($ext !== 'csv' && $ext !== 'xlsx') {
+        throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+    }
+    if (!bakery_zazie_weekly_mime_ok($path, $ext)) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+    }
     if ($ext === 'csv') {
         return bakery_zazie_weekly_read_csv($path);
     }
-    if ($ext === 'xlsx') {
-        return bakery_zazie_weekly_read_xlsx($path);
+    return bakery_zazie_weekly_read_xlsx($path);
+}
+
+/**
+ * Extension is not enough: a renamed zip or a binary file must not parse as csv,
+ * and an xlsx must be a real zip. finfo is used when the extension is loaded.
+ */
+function bakery_zazie_weekly_mime_ok(string $path, string $ext): bool
+{
+    $head = (string)file_get_contents($path, false, null, 0, 8);
+    $isZip = str_starts_with($head, "PK\x03\x04")
+        || str_starts_with($head, "PK\x05\x06")
+        || str_starts_with($head, "PK\x07\x08");
+    if ($ext === 'xlsx' && !$isZip) {
+        return false;
     }
-    throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+    if ($ext === 'csv' && $isZip) {
+        return false;
+    }
+    if ($ext === 'csv') {
+        $sample = (string)file_get_contents($path, false, null, 0, 8192);
+        if (str_contains($sample, "\0")) {
+            return false;
+        }
+    }
+    if (!class_exists(finfo::class)) {
+        return true;
+    }
+    $mime = strtolower((string)(new finfo(FILEINFO_MIME_TYPE))->file($path));
+    if ($ext === 'csv') {
+        return in_array($mime, ['text/plain', 'text/csv', 'application/csv', 'text/x-csv'], true);
+    }
+    return in_array($mime, [
+        'application/zip',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/x-zip-compressed',
+    ], true);
 }
 
 /**
@@ -375,6 +420,9 @@ function bakery_zazie_weekly_read_csv(string $path): array
         while (($cells = fgetcsv($handle)) !== false) {
             if ($rows === [] && isset($cells[0])) {
                 $cells[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$cells[0]) ?? (string)$cells[0];
+            }
+            if (count($cells) > 64) {
+                throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
             }
             $rows[] = array_map(static fn($cell): string => trim((string)$cell), $cells);
             if (count($rows) > 500) {
@@ -400,9 +448,10 @@ function bakery_zazie_weekly_read_xlsx(string $path): array
         throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
     }
     try {
-        $shared = bakery_zazie_xlsx_shared_strings($zip->getFromName('xl/sharedStrings.xml') ?: '');
+        bakery_zazie_xlsx_guard($zip);
+        $shared = bakery_zazie_xlsx_shared_strings(bakery_zazie_xlsx_read_entry($zip, 'xl/sharedStrings.xml'));
         $sheetName = bakery_zazie_xlsx_first_sheet($zip);
-        $sheetXml = $sheetName !== null ? ($zip->getFromName($sheetName) ?: '') : '';
+        $sheetXml = $sheetName !== null ? bakery_zazie_xlsx_read_entry($zip, $sheetName) : '';
     } finally {
         $zip->close();
     }
@@ -412,9 +461,69 @@ function bakery_zazie_weekly_read_xlsx(string $path): array
     return bakery_zazie_xlsx_rows($sheetXml, $shared);
 }
 
+function bakery_zazie_xlsx_guard(ZipArchive $zip): void
+{
+    $count = $zip->numFiles;
+    if ($count < 1 || $count > 64) {
+        throw new BakeryZazieWeeklyException($count > 64 ? 'zazie_weekly.file_too_large' : 'zazie_weekly.bad_file');
+    }
+    $total = 0;
+    $limit = bakery_zazie_weekly_max_upload_bytes();
+    for ($i = 0; $i < $count; $i++) {
+        $stat = $zip->statIndex($i);
+        if ($stat === false) {
+            throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+        }
+        $name = str_replace('\\', '/', (string)($stat['name'] ?? ''));
+        if ($name === '' || str_contains($name, '..') || str_starts_with($name, '/')) {
+            throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+        }
+        $size = (int)($stat['size'] ?? 0);
+        if ($size < 0 || $size > $limit) {
+            throw new BakeryZazieWeeklyException('zazie_weekly.file_too_large');
+        }
+        $total += $size;
+        if ($total > $limit * 4) {
+            throw new BakeryZazieWeeklyException('zazie_weekly.file_too_large');
+        }
+    }
+}
+
+function bakery_zazie_xlsx_read_entry(ZipArchive $zip, string $name): string
+{
+    $name = str_replace('\\', '/', $name);
+    if ($name === '' || str_contains($name, '..') || str_starts_with($name, '/')) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+    }
+    $flags = defined('ZipArchive::FL_NOCASE') ? ZipArchive::FL_NOCASE : 0;
+    $stat = $zip->statName($name, $flags);
+    if ($stat === false) {
+        $stat = $zip->statName($name);
+    }
+    if ($stat === false) {
+        return '';
+    }
+    $size = (int)($stat['size'] ?? 0);
+    if ($size > bakery_zazie_weekly_max_upload_bytes()) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.file_too_large');
+    }
+    $stored = (string)($stat['name'] ?? $name);
+    $data = $zip->getFromName($stored);
+    if (!is_string($data)) {
+        $data = $zip->getFromName($name);
+    }
+    if (!is_string($data)) {
+        return '';
+    }
+    if (strlen($data) > bakery_zazie_weekly_max_upload_bytes()) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.file_too_large');
+    }
+    return $data;
+}
+
 function bakery_zazie_xlsx_first_sheet(ZipArchive $zip): ?string
 {
-    $rels = $zip->getFromName('xl/_rels/workbook.xml.rels') ?: '';
+    $rels = bakery_zazie_xlsx_read_entry($zip, 'xl/_rels/workbook.xml.rels');
     if ($rels !== '' && preg_match('/Target="([^"]*worksheets\/[^"]+\.xml)"/', $rels, $match)) {
         $target = str_replace('\\', '/', $match[1]);
         if (str_starts_with($target, '/')) {
@@ -543,10 +652,16 @@ function bakery_zazie_column_index(string $ref): int
         return 0;
     }
     $letters = strtoupper($match[1]);
+    if (strlen($letters) > 3) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
+    }
     $number = 0;
     $length = strlen($letters);
     for ($i = 0; $i < $length; $i++) {
         $number = $number * 26 + (ord($letters[$i]) - 64);
+    }
+    if ($number > 64) {
+        throw new BakeryZazieWeeklyException('zazie_weekly.bad_file');
     }
     return max(0, $number - 1);
 }

@@ -14,6 +14,7 @@ bakery_require_role(['administrator', 'manager']);
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $formError = null;
 if ($method === 'POST') {
+    bakery_require_csrf();
     $action = (string)($_POST['action'] ?? '');
     try {
         if ($action === 'preview') {
@@ -213,6 +214,9 @@ function bakery_zazie_weekly_date_heading(string $ymd): string
                                 $sheetQty = (int)$cell['sheet_qty'];
                                 $existingQty = (int)$cell['existing_qty'];
                                 $status = (string)$cell['status'];
+                                if (!in_array($status, ['new', 'changed', 'unchanged', 'unmapped'], true)) {
+                                    $status = 'unchanged';
+                                }
                                 $blank = $sheetQty === 0 && $existingQty === 0;
                                 ?>
                                 <td class="num<?php echo $blank ? '' : ' is-' . htmlspecialchars($status); ?>">

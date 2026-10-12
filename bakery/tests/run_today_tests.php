@@ -109,9 +109,16 @@ foreach (['en' => $root . '/lang/en.php', 'es' => $root . '/lang/es.php'] as $la
         }
     }
     $contiguous = $indexes !== [] && ($indexes[count($indexes) - 1] - $indexes[0] + 1) === count($indexes);
-    $atEnd = $indexes !== [] && $indexes[count($indexes) - 1] >= count($linesOf) - 3;
+    $uxLine = null;
+    foreach ($linesOf as $i => $line) {
+        if (strpos($line, "'ux.stage.demand'") !== false) {
+            $uxLine = $i;
+            break;
+        }
+    }
+    $beforeUx = $indexes !== [] && $uxLine !== null && $indexes[count($indexes) - 1] < $uxLine;
     assert_true($contiguous, $label . ' today strings are one contiguous block');
-    assert_true($atEnd, $label . ' today strings are at the end of the catalog');
+    assert_true($beforeUx, $label . ' today strings stay one block before the ux catalog');
     $block = implode('', array_slice($linesOf, $indexes[0], count($indexes)));
     assert_true(strpos($block, "\u{2013}") === false && strpos($block, "\u{2014}") === false, $label . ' today copy has no en dash or em dash');
 }

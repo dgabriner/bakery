@@ -58,6 +58,16 @@ if (!bakery_zazie_weekly_ready($db)) {
     }
 }
 $assert(bakery_zazie_weekly_ready($db), 'mapping table exists on bakerysf_test');
+$reran = true;
+try {
+    foreach (bakery_parse_sql_file($migrationPath) as $statement) {
+        bakery_hosted_migration_exec_statement($db, $statement);
+    }
+} catch (Throwable $e) {
+    $reran = false;
+    echo 'migration re-run error: ' . $e->getMessage() . PHP_EOL;
+}
+$assert($reran && bakery_zazie_weekly_ready($db), 'migration 090 can be applied again when the table already exists');
 
 echo "=== Parse ===\n";
 $csvPath = $root . '/tests/fixtures/zazie_weekly_order.csv';
@@ -158,6 +168,67 @@ try {
     $badFile = $e->messageKey === 'zazie_weekly.bad_file';
 }
 $assert($badFile, 'only xlsx and csv are accepted');
+
+$notXlsx = tempnam(sys_get_temp_dir(), 'zazie-txt-');
+$zipAsCsv = tempnam(sys_get_temp_dir(), 'zazie-zip-');
+$bombPath = tempnam(sys_get_temp_dir(), 'zazie-bomb-');
+$textRejected = false;
+$zipCsvRejected = false;
+$bombRejected = false;
+$wideRejected = false;
+try {
+    file_put_contents((string)$notXlsx, "Product,Monday\nLoaf,1\n");
+    try {
+        bakery_zazie_weekly_read_file((string)$notXlsx, 'week.xlsx');
+    } catch (BakeryZazieWeeklyException $e) {
+        $textRejected = $e->messageKey === 'zazie_weekly.bad_file';
+    }
+    copy($xlsxPath, (string)$zipAsCsv);
+    try {
+        bakery_zazie_weekly_read_file((string)$zipAsCsv, 'week.csv');
+    } catch (BakeryZazieWeeklyException $e) {
+        $zipCsvRejected = $e->messageKey === 'zazie_weekly.bad_file';
+    }
+    $bomb = new ZipArchive();
+    if ($bomb->open((string)$bombPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
+        $bomb->addFromString('xl/worksheets/sheet1.xml', str_repeat('A', (3 * 1024 * 1024)));
+        $bomb->close();
+        try {
+            bakery_zazie_weekly_read_file((string)$bombPath, 'week.xlsx');
+        } catch (BakeryZazieWeeklyException $e) {
+            $bombRejected = $e->messageKey === 'zazie_weekly.file_too_large';
+        }
+    }
+    try {
+        bakery_zazie_xlsx_rows(
+            '<?xml version="1.0"?><worksheet><sheetData><row><c r="ZZZZ1"><v>1</v></c></row></sheetData></worksheet>',
+            []
+        );
+    } catch (BakeryZazieWeeklyException $e) {
+        $wideRejected = $e->messageKey === 'zazie_weekly.bad_file';
+    }
+} finally {
+    @unlink((string)$notXlsx);
+    @unlink((string)$zipAsCsv);
+    @unlink((string)$bombPath);
+}
+$assert($textRejected, 'a text file renamed to xlsx is rejected');
+$assert($zipCsvRejected, 'a zip renamed to csv is rejected');
+$assert($bombRejected, 'an xlsx entry larger than 2 MB uncompressed is rejected');
+$assert($wideRejected, 'a sheet cell past column 64 is rejected');
+
+$page = (string)file_get_contents($root . '/zazie_weekly_sheet.php');
+$csrfAt = strpos($page, 'bakery_require_csrf()');
+$previewAt = strpos($page, 'bakery_zazie_weekly_begin_preview');
+$mapAt = strpos($page, 'bakery_zazie_weekly_save_mapping');
+$confirmAt = strpos($page, 'bakery_zazie_weekly_confirm');
+$assert(
+    $csrfAt !== false && $previewAt !== false && $mapAt !== false && $confirmAt !== false
+        && $csrfAt < $previewAt && $csrfAt < $mapAt && $csrfAt < $confirmAt,
+    'preview, mapping, and confirm POSTs are behind the CSRF check'
+);
+$assert(strpos($page, "htmlspecialchars((string)\$line['sheet_name'])") !== false, 'uploaded sheet names are escaped');
+$assert(strpos($page, "in_array(\$status, ['new', 'changed', 'unchanged', 'unmapped']") !== false, 'cell status is an allowlist before it reaches the class attribute');
 
 echo "=== Preview, mapping, apply ===\n";
 $assert(column_exists($db, 'customers', 'pricing_tier'), 'customer pricing tier is installed');
