@@ -1,5 +1,6 @@
 -- Cashier time clock. One open punch per person.
 -- Hosted-gate portable: CREATE TABLE IF NOT EXISTS only.
+-- Live already created this table as 083_time_clock_punches. A repeat is a no-op.
 
 CREATE TABLE IF NOT EXISTS time_clock_punches (
   id INT NOT NULL AUTO_INCREMENT,
