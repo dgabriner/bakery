@@ -947,9 +947,13 @@ function bakery_agent_work_map_core(): array
                 'daily_status_api.php',
                 'includes/daily_status.php',
                 'includes/navigation_catalog.php',
+                'today.php',
+                'includes/today_list.php',
+                'index.php',
             ],
             'tests' => [
                 'tests/run_daily_status_tests.php',
+                'tests/run_today_tests.php',
             ],
             'invariants' => [
                 'GET only; never write from the snapshot',
