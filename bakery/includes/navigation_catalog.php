@@ -96,6 +96,7 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator', 'manager'],
             'items' => [
                 ['href' => 'daily_orders.php', 'label' => 'Daily Orders', 'description' => 'Compare standing forecast with dated orders and adjust the selected day.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'zazie_weekly_sheet.php', 'label' => 'Zazie weekly sheet', 'description' => 'Upload the Zazie weekly order file and apply it to dated orders.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'counter_orders.php', 'nav_key' => 'counter_orders', 'label' => 'Counter orders', 'description' => 'Write a pickup: date, Capp, Panadería, or delivery, what they want, and whether it is paid. A photo of the slip is enough.', 'roles' => ['cashier', 'baker', 'administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'standing_orders_manager.php', 'label' => 'Standing Orders', 'description' => 'Manage recurring orders by customer and delivery day.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'customers.php', 'label' => 'Customers', 'description' => 'Customer records, contact information, and ordering details.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
