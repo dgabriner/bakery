@@ -6,6 +6,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/customer_portal.php';
+require_once 'includes/catalog_gaps.php';
 bakery_ensure_portal_schema($db);
 
 // Set page title
@@ -193,6 +194,14 @@ try {
 
 $product_count = count($products);
 $priced_product_count = count(array_filter($products, static fn($product) => $product['price'] !== null));
+$catalog_gap_count = 0;
+if (isset($db) && $db instanceof PDO && function_exists('bakery_catalog_gap_count')) {
+    try {
+        $catalog_gap_count = bakery_catalog_gap_count($db);
+    } catch (Throwable $e) {
+        $catalog_gap_count = 0;
+    }
+}
 $unassigned_dough_count = count(array_filter($products, static fn($product) => empty($product['dough_type_id'])));
 
 $product_groups = [];
@@ -230,6 +239,10 @@ foreach ($products as $product) {
         </div>
         <div class="products-header-actions">
             <?php if (function_exists('bakery_user_has_role') && bakery_user_has_role(['administrator', 'manager'])): ?>
+                <a class="btn-secondary catalog-gaps-link" href="catalog_gaps.php" aria-label="<?php echo htmlspecialchars(bakery_t('catalog_gaps.badge_label', ['count' => (string)(int)$catalog_gap_count])); ?>">
+                    <span><?php echo htmlspecialchars(bakery_t('catalog_gaps.link')); ?></span>
+                    <span class="catalog-gaps-badge"><?php echo number_format((int)$catalog_gap_count); ?></span>
+                </a>
                 <a class="btn-secondary" href="cost_margin.php"><?php echo htmlspecialchars(bakery_t('cost_margin.link')); ?></a>
             <?php endif; ?>
             <button class="btn-primary primary-action" type="button" onclick="showProductModal()">
@@ -1293,6 +1306,20 @@ foreach ($products as $product) {
 
         .products-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .products-header-actions .btn-secondary { display: inline-flex; align-items: center; min-height: var(--sf-touch-min, 44px); text-decoration: none; }
+        .catalog-gaps-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.5rem;
+            margin-left: 8px;
+            padding: 0 7px;
+            border-radius: 999px;
+            background: #9a3412;
+            color: #fff;
+            font-size: 0.78rem;
+            font-weight: 700;
+            line-height: 1.4rem;
+        }
         .primary-action { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
         .primary-action span { font-size: 1.25rem; line-height: .7; }
 

@@ -99,14 +99,23 @@ if ($enUx !== []) {
     $enTail = array_slice($enKeys, (int)array_search($enUx[0], $enKeys, true));
     $esTail = array_slice($esKeys, (int)array_search($esUx[0], $esKeys, true));
     $uxTail = static function (array $tail): bool {
+        $phase = 'ux';
+        $sawUx = false;
         foreach ($tail as $key) {
-            if (strpos((string)$key, 'ux.') !== 0) {
-                return false;
+            $key = (string)$key;
+            if ($phase === 'ux' && strpos($key, 'ux.') === 0) {
+                $sawUx = true;
+                continue;
             }
+            if (strpos($key, 'catalog_gaps.') === 0) {
+                $phase = 'catalog_gaps';
+                continue;
+            }
+            return false;
         }
-        return $tail !== [];
+        return $sawUx && $phase === 'catalog_gaps';
     };
-    i18n_assert('ux keys are one contiguous block at the end', $uxTail($enTail) && $uxTail($esTail));
+    i18n_assert('ux keys stay one block, with catalog gaps after them', $uxTail($enTail) && $uxTail($esTail));
 }
 
 i18n_assert(
