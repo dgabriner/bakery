@@ -14,13 +14,26 @@ if ($existingUser = bakery_current_user()) {
     exit;
 }
 
+/**
+ * Same-site path only. Rejects protocol-relative URLs and header injection.
+ */
+function bakery_login_safe_next(string $candidate, string $fallback): string
+{
+    if ($candidate === '' || strpbrk($candidate, "\r\n\0") !== false) {
+        return $fallback;
+    }
+    if ($candidate[0] !== '/' || (isset($candidate[1]) && ($candidate[1] === '/' || $candidate[1] === '\\'))) {
+        return $fallback;
+    }
+    if (strpos($candidate, '\\') !== false || strpos($candidate, '://') !== false) {
+        return $fallback;
+    }
+    return $candidate;
+}
+
 $error = '';
 $nextInput = $_GET['next'] ?? (BASE_URL . 'index.php');
-$next = is_string($nextInput) ? $nextInput : (BASE_URL . 'index.php');
-// Prevent open redirects
-if (strpos($next, '/') !== 0) {
-    $next = BASE_URL . 'index.php';
-}
+$next = bakery_login_safe_next(is_string($nextInput) ? $nextInput : '', BASE_URL . 'index.php');
 if (function_exists('bakery_served_at_app_root') && bakery_served_at_app_root() && strpos($next, '/bakery/') === 0) {
     $next = substr($next, 7) ?: '/';
 }
@@ -36,10 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db = check_mysql_connection();
             if (bakery_login($db, $code)) {
                 $destInput = $_POST['next'] ?? $next;
-                $dest = is_string($destInput) ? $destInput : (BASE_URL . 'index.php');
-                if (strpos($dest, '/') !== 0) {
-                    $dest = BASE_URL . 'index.php';
-                }
+                $dest = bakery_login_safe_next(is_string($destInput) ? $destInput : '', BASE_URL . 'index.php');
                 if (function_exists('bakery_served_at_app_root') && bakery_served_at_app_root() && strpos($dest, '/bakery/') === 0) {
                     $dest = substr($dest, 7) ?: '/';
                 }
