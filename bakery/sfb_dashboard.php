@@ -64,6 +64,21 @@ $portalCustomerName = $customer['name'];
   <main class="container sfb-app">
     <?php $sfbActiveTab = 'dashboard'; require __DIR__ . '/includes/sfb_tabs.php'; ?>
 
+    <?php
+    $intensiveCard = bakery_sfb_intensive_ready($db) ? bakery_sfb_intensive_home_card($db, $customerId) : null;
+    ?>
+    <?php if ($intensiveCard && $intensiveCard['prominence'] === 'primary'): ?>
+      <section class="card hero-card">
+        <div class="card-body">
+          <p class="hero-label"><?php bakery_te('sfb.intensive_kicker'); ?></p>
+          <h2 style="margin-top:0;"><?php bakery_te('sfb.intensive_title'); ?></h2>
+          <p class="muted"><?php echo htmlspecialchars(bakery_t('sfb.intensive_loaf_n', ['n' => (string)$intensiveCard['progress_n']]), ENT_QUOTES, 'UTF-8'); ?></p>
+          <p><?php echo htmlspecialchars((string)($intensiveCard['instruction'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
+          <a class="btn btn-block" href="sfb_intensive.php"><?php bakery_te('sfb.intensive_home_continue'); ?></a>
+        </div>
+      </section>
+    <?php endif; ?>
+
     <section class="card hero-card sfb-hero">
       <div class="card-body">
         <p class="hero-label"><?php bakery_te('sfb.journey_label'); ?></p>
@@ -204,6 +219,10 @@ $portalCustomerName = $customer['name'];
           </ul>
         </div>
       </section>
+    <?php endif; ?>
+
+    <?php if ($intensiveCard && $intensiveCard['prominence'] === 'quiet'): ?>
+      <p><a class="btn-link" href="sfb_intensive.php"><?php bakery_te('sfb.intensive_title'); ?></a> · <?php bakery_te('sfb.intensive_state_complete'); ?></p>
     <?php endif; ?>
 
     <?php if ($completedCourses): ?>

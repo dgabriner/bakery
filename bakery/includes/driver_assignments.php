@@ -342,6 +342,44 @@ function bakery_driver_remove_assignment(
 }
 
 /**
+ * Store label for a standing stop that is missing from a dated route.
+ *
+ * @param array{customer_name?:string, customer_id?:int, route_order?:int|null} $stop
+ */
+function bakery_driver_assignment_missing_store_label(array $stop): string
+{
+    $name = trim((string)($stop['customer_name'] ?? ''));
+    if ($name === '') {
+        $name = '#' . (int)($stop['customer_id'] ?? 0);
+    }
+    $order = (int)($stop['route_order'] ?? 0);
+    if ($order > 0) {
+        return $name . ' (#' . $order . ')';
+    }
+    return $name;
+}
+
+/**
+ * Button label such as "Restore 3 missing stops: Amigos (#9), Plaza (#11)".
+ *
+ * @param list<string> $storeLabels
+ */
+function bakery_driver_assignment_restore_label(int $count, array $storeLabels): string
+{
+    $stores = implode(', ', array_values(array_filter(
+        array_map(static fn($label): string => trim((string)$label), $storeLabels),
+        static fn(string $label): bool => $label !== ''
+    )));
+    if ($count === 1) {
+        return bakery_t('driver_assignment.restore_missing_one', ['stores' => $stores]);
+    }
+    return bakery_t('driver_assignment.restore_missing_many', [
+        'count' => $count,
+        'stores' => $stores,
+    ]);
+}
+
+/**
  * Build dated route from standing routes — ensures daily orders exist and assigns drivers.
  *
  * @return array{stop_count:int, assignments:list<array<string,mixed>>}

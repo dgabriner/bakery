@@ -519,7 +519,9 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                     <span>
                                         <?php echo number_format((int)$c['finished_units']); ?> units →
                                         <?php echo number_format((float)$c['required_grams'], 1); ?> g
+                                        <?php if ($c['formula_percentage'] !== null): ?>
                                         @ <?php echo rtrim(rtrim(number_format((float)$c['formula_percentage'], 2), '0'), '.'); ?>%
+                                        <?php endif; ?>
                                     </span>
                                 </li>
                             <?php endforeach; ?>

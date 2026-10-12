@@ -65,10 +65,19 @@ function bakery_billing_invoice_document_html(array $invoice, array $options = [
             continue;
         }
         $deliveredCell = $item['delivered_quantity'] !== null ? (string)(int)$item['delivered_quantity'] : '—';
-        $priceCell = !empty($item['has_price']) ? '$' . number_format((float)$item['unit_price'], 2) : '—';
-        $totalCell = !empty($item['has_price']) ? '$' . number_format((float)$item['line_total'], 2) : '—';
+        $noCharge = !empty($item['is_no_charge']);
+        $showPrice = $noCharge || !empty($item['has_price']);
+        $priceCell = $showPrice ? '$' . number_format((float)$item['unit_price'], 2) : '—';
+        $totalCell = $showPrice ? '$' . number_format((float)$item['line_total'], 2) : '—';
+        $name = $esc($item['product_name'] ?? '');
+        if ($noCharge) {
+            $noChargeLabel = function_exists('bakery_billing_line_no_charge_label')
+                ? bakery_billing_line_no_charge_label($item)
+                : (function_exists('bakery_t') ? bakery_t('no_charge.label') : 'No charge');
+            $name .= ' — ' . $esc($noChargeLabel);
+        }
         $itemRows .= '<tr>'
-            . '<td>' . $esc($item['product_name'] ?? '') . '</td>'
+            . '<td>' . $name . '</td>'
             . '<td class="num">' . (int)$item['quantity'] . '</td>'
             . '<td class="num">' . $esc($deliveredCell) . '</td>'
             . '<td class="num">' . $esc($priceCell) . '</td>'

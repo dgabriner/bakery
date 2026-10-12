@@ -69,6 +69,20 @@ function bakery_sfb_resources_render_card(array $piece): void {
     <?php endif; ?>
 
     <?php
+    $intensiveCard = bakery_sfb_intensive_ready($db) ? bakery_sfb_intensive_home_card($db, (int)$customer['id']) : null;
+    if ($intensiveCard):
+    ?>
+      <section class="card sfb-resource-hero">
+        <div class="card-body">
+          <p class="hero-label"><?php bakery_te('sfb.intensive_kicker'); ?></p>
+          <h2><?php bakery_te('sfb.intensive_title'); ?></h2>
+          <p><?php echo htmlspecialchars(bakery_t('sfb.intensive_state_' . $intensiveCard['state_key'], ['n' => (string)$intensiveCard['progress_n']]), ENT_QUOTES, 'UTF-8'); ?></p>
+          <a class="btn btn-block" href="sfb_intensive.php"><?php bakery_te($intensiveCard['complete'] ? 'sfb.intensive_state_complete' : 'sfb.intensive_home_continue'); ?></a>
+        </div>
+      </section>
+    <?php endif; ?>
+
+    <?php
     $learnCourses = bakery_sfb_courses($db);
     if ($learnCourses):
     ?>

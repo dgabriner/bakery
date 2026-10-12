@@ -739,7 +739,8 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
     <p><?php echo $remaining > 0
         ? htmlspecialchars(bakery_t('manager_phone.still_to_make', ['count' => $remaining]), ENT_QUOTES, 'UTF-8')
         : bakery_t('manager_phone.bake_covered'); ?></p>
-    <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h(bakery_ops_link_production($date, [], 'manager')); ?>"><?php bakery_te('manager_phone.open_bake'); ?></a>
+    <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('nav.item.production_center'); ?></a>
+    <a class="manager-phone__btn" href="<?php echo $h(bakery_ops_link_production($date, [], 'manager')); ?>"><?php bakery_te('manager_phone.open_bake'); ?></a>
   </section>
 
   <section class="manager-phone__panel">

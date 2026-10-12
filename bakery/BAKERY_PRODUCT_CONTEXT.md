@@ -242,7 +242,7 @@ Compact map — entry points only, not every file.
 | Pack List | `pack_list.php` | Packing checklist by product / customer / route; shared check-offs; FG shortage uses on-hand + loaded; made units + kitchen strip |
 | Finished Goods | `inventory.php`, `includes/product_inventory.php` | Counts, availability, movement ledger |
 | Ingredient Planner | `ingredient_requirements.php`, `includes/ingredient_requirements.php`, `includes/ingredient_purchase_notes.php` | Plan/demand → formula grams, batches, purchase *hints* + ordered/received notes (no PO). **Decided:** no on-hand stock adjust this phase. |
-| Cashier | `cashier_shop_photos.php`, `cashier_add_product.php`, `includes/cashier_catalog.php` | Photos + catalog only. **Decided:** retail Square sales stay out of scope — sales live in Square POS outside Sour Flour OS. |
+| Cashier | `counter_orders.php`, `includes/counter_orders.php`, `cashier_shop_photos.php`, `cashier_add_product.php`, `includes/cashier_catalog.php` | Counter pickup slips (date, Capp / Panadería / Delivery, what they want, paid / unpaid / other, contact, optional photo) for the manager’s pending list and bakers. Cashiers mark a slip done. **Decided:** these slips are operational notes — they do not write Square sales or finished goods. Retail Square sales stay out of scope. |
 | Driver Assignment | `driver_assignment.php`, `includes/driver_assignments.php` | Canonical route board: prepare demand + build from standing, drag, transfer, unassign without deleting demand |
 | Route tools (overlapping) | `standing_routes.php`, `route_manager.php` (also COD cash), `route_summary.php` (photo-first day review), `daily_route.php`, `drivers.php`, `map.php`, `zones.php` | Template routes, live monitoring, views |
 | Driver app | `driver.php`, `complete_delivery.php`, `upload_driver_photo.php`, `includes/driver_route_map.js` | Stops, remaining-stop map + reorder, confirm wizard, photos, GPS |
@@ -256,7 +256,7 @@ Compact map — entry points only, not every file.
 | Notifications | `includes/customer_notifications.php` | Automated customer in-app/email; staff side ships the alert bell + `scripts/staff_alert_digest.php` cron email (silent when clean) |
 | Texting Command Center | `text_comms.php`, `text_comms_api.php`, `includes/text_comms.php`, `includes/twilio_config.php`, `twilio_webhook.php`, schema 057 | One SMS ledger for outbound attempts (live, failed, or recorded-only without credentials), inbound replies linked to customers by phone tail, delivery health, and ops mix. Sending happens only on the Command Center page; the API is read-only. Status callbacks can advance but never regress a row; Twilio retries of recorded inbound messages answer success, not a second row. |
 | Timeline | `operational_timeline.php`, `includes/operational_timeline.php` | Audit/event feed per date/customer/order |
-| SF Baker / Bread Education (learner) | `sfb_join.php` (public door), `sfb_dashboard.php`, `sfb_resources.php`, `sfb_lesson.php`, `sfb_media.php`, `sfb_starters.php`, `sfb_formulas.php`, `sfb_batches.php`, `sfb_batch.php`, `sfb_community.php`, `sfb_community_topic.php`, `sfb_shared_batch.php`, `includes/sf_baker.php` | Learner home base on the portal identity: join/preview/sign-in door over phone-PIN signup + invites, courses/lessons/gated media/progress, batch-builder journal, community circles; every write goes through the `bakery_sfb_*` domain layer |
+| SF Baker / Bread Education (learner) | `sfb_join.php` (public door), `sfb_dashboard.php`, `sfb_resources.php`, `sfb_intensive.php`, `sfb_lesson.php`, `sfb_media.php`, `sfb_starters.php`, `sfb_formulas.php`, `sfb_batches.php`, `sfb_batch.php`, `sfb_community.php`, `sfb_community_topic.php`, `sfb_shared_batch.php`, `includes/sf_baker.php`, `includes/sfb_intensive.php` | Learner home base on the portal identity: join/preview/sign-in door over phone-PIN signup + invites, courses/lessons/gated media/progress, batch-builder journal, community circles, and the Full Week Intensive (one guided week of three ordinary batches). Every write goes through the `bakery_sfb_*` domain layer |
 | Bread Education (commerce / staff / static) | `sfb_offerings.php`, `square_webhook.php` (education routing), `sfb_admin_learn.php`, `breadeducation/` static zone pushed by `scripts/push_breadeducation_sftp.ps1` to `/breadeducation/` | Offerings bought via Square checkout or account credit; the signature-checked webhook is the only payment truth and unlocks entitlements; staff authoring of courses/lessons/invites; public curriculum pages deploy out-of-band from this app |
 
 ## 6. Known open loops
@@ -405,7 +405,7 @@ architecture, broad technical-debt cleanup.
 
 **Wave 4 wrap Decideds (2026-09-04):** AR/payments ledger = no (computed-only);
 weekly rollup invoices = no; ingredient stock adjust = no (notes + PC chip enough);
-retail cashier = out of scope (photos + catalog only; Square POS owns retail sales).
+retail Square sales = out of scope (Square POS owns the register). Counter pickup slips on `counter_orders.php` are operational notes for Laura and bakers — not sales and not finished goods.
 
 Mention one only if it directly blocks a feature you're changing — then flag it in your
 handoff and move on. Never let these become your deliverable.

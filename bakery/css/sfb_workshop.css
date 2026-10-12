@@ -1,0 +1,132 @@
+/* Intensive workshop: phone first, comfortable on a computer. */
+.workshop-body {
+  overflow-x: clip;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+.workshop-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 46rem;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    0
+    max(16px, env(safe-area-inset-left));
+}
+.workshop-bar img { height: 36px; width: auto; }
+.workshop-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: flex-end;
+}
+.workshop-tools a,
+.workshop-bar .bakery-lang-switch__btn {
+  align-items: center;
+  color: #6a5142;
+  display: inline-flex;
+  font-size: 1rem;
+  min-height: 44px;
+  padding: 0 4px;
+}
+.workshop-body .container { max-width: 40rem; }
+.workshop-body h2 { font-size: clamp(1.35rem, 4.2vw, 1.75rem); line-height: 1.25; }
+.workshop-body input,
+.workshop-body select,
+.workshop-body textarea {
+  box-sizing: border-box;
+  font-size: 16px;
+  max-width: 100%;
+  min-height: 48px;
+}
+.workshop-body textarea { min-height: 96px; }
+.workshop-body label .muted {
+  font-size: .95rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.workshop-body .btn-link {
+  align-items: center;
+  display: inline-flex;
+  min-height: 44px;
+  padding: 8px 0;
+}
+.workshop-body details > summary {
+  min-height: 48px;
+  padding: 16px;
+}
+.workshop-body .sfb-photos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workshop-body .sfb-photo-wrap .btn-link,
+.workshop-body .sfb-photo-del {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.ws-line {
+  align-items: center;
+  border-bottom: 1px solid rgba(83, 51, 32, .12);
+  display: grid;
+  gap: 8px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+}
+.ws-line__name { font-weight: 650; grid-column: 1 / -1; }
+.ws-line input { text-align: right; width: 7.5rem; }
+.ws-line__pct { font-variant-numeric: tabular-nums; min-width: 4.5rem; text-align: right; }
+
+.ws-dock {
+  background: #fffaf2;
+  border-top: 1px solid rgba(83, 51, 32, .16);
+  bottom: 0;
+  box-shadow: 0 -8px 24px rgba(53, 34, 25, .08);
+  display: flex;
+  gap: 8px;
+  left: 0;
+  padding:
+    10px
+    max(12px, env(safe-area-inset-right))
+    calc(10px + env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  position: fixed;
+  right: 0;
+  z-index: 30;
+}
+  .ws-dock form { flex: 1; margin: 0; }
+  .ws-dock > .btn { flex: 1; }
+  .ws-dock .btn { min-height: 52px; width: 100%; }
+.ws-dock form:first-child:not(:only-child) { flex: 0 0 38%; }
+
+@media (min-width: 480px) {
+  .workshop-body .sfb-photos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 800px) {
+  .workshop-body { padding-bottom: 32px; }
+  .workshop-body .container { max-width: 46rem; }
+  .ws-line { grid-template-columns: minmax(0, 1fr) 8rem 5rem; }
+  .ws-line__name { grid-column: auto; }
+  .ws-dock { display: none; }
+  .workshop-body .card-body form.ws-fields {
+    align-items: end;
+    column-gap: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .workshop-body .card-body form.ws-fields .btn,
+  .workshop-body .card-body form.ws-fields textarea,
+  .workshop-body .card-body form.ws-fields label:has(textarea),
+  .workshop-body .card-body form.ws-fields input[type="file"] {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 799px) {
+  .ws-flow-back,
+  .ws-flow-continue { display: none; }
+}

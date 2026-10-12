@@ -83,6 +83,8 @@ manager_phone_assert(strpos($phone, 'bakery_production_plan_state') !== false, '
 manager_phone_assert(strpos($phone, 'manager_phone.plan_committed_at') !== false, 'committed kitchen state shows the commit time label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_not_committed') !== false, 'uncommitted kitchen state is loud with its own label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_drift_count') !== false, 'post-commit drift count renders on the kitchen tab');
+manager_phone_assert(strpos($phone, 'production_center.php?date=') !== false, 'kitchen sends managers to Production Center first');
+manager_phone_assert(strpos($phone, "bakery_te('nav.item.production_center')") !== false, 'kitchen labels the primary action as Production Center');
 manager_phone_assert(strpos($phone, "sheet' => 'close'") !== false || strpos($phone, "['sheet' => 'close'") !== false, 'routes tab offers Close route sheet');
 manager_phone_assert(strpos($phone, 'manager_phone.close_route') !== false, 'close route copy is wired');
 manager_phone_assert(strpos($phone, 'bakery_inventory_closeout_lines') !== false, 'close sheet loads closeout lines');

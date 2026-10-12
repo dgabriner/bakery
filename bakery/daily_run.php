@@ -164,6 +164,22 @@ require_once 'includes/nav.php';
             </div>
         <?php endif; ?>
 
+        <?php if (!empty($dailyRun['unrouted_standing_orders'])): ?>
+            <section class="dr-unrouted-standing" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.unrouted_standing_title', ['count' => count($dailyRun['unrouted_standing_orders'])])); ?>">
+                <h2><?php echo htmlspecialchars(bakery_t('daily_run.unrouted_standing_title', ['count' => count($dailyRun['unrouted_standing_orders'])])); ?></h2>
+                <p><?php bakery_te('daily_run.unrouted_standing_help'); ?></p>
+                <ul>
+                    <?php foreach ($dailyRun['unrouted_standing_orders'] as $unrouted): ?>
+                        <li>
+                            <strong><?php echo htmlspecialchars((string)$unrouted['customer_name']); ?></strong>
+                            <span><?php echo htmlspecialchars((string)$unrouted['summary']); ?></span>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+                <a href="<?php echo htmlspecialchars(BASE_URL); ?>standing_routes.php"><?php bakery_te('daily_run.unrouted_standing_open'); ?></a>
+            </section>
+        <?php endif; ?>
+
         <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
 
         <section class="dr-hero" aria-label="<?php bakery_te('daily_run.progress_aria'); ?>">

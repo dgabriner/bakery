@@ -63,6 +63,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $dest = BASE_URL . 'sfb_batches.php?welcome=1';
                     }
                 }
+                $destBase = basename((string)(parse_url($dest, PHP_URL_PATH) ?: ''));
+                if ($destBase === 'customer_portal.php' || $destBase === '') {
+                    require_once __DIR__ . '/includes/sf_baker.php';
+                    $signedInId = function_exists('bakery_portal_customer_id') ? bakery_portal_customer_id() : 0;
+                    if ($signedInId > 0 && bakery_sfb_intensive_ready($db)) {
+                        $intensiveCard = bakery_sfb_intensive_home_card($db, $signedInId);
+                        if ($intensiveCard && ($intensiveCard['prominence'] ?? '') === 'primary') {
+                            $dest = BASE_URL . 'sfb_intensive.php';
+                        }
+                    }
+                }
                 header('Location: ' . $dest);
                 exit;
             }

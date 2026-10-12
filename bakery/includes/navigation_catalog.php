@@ -96,6 +96,8 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator', 'manager'],
             'items' => [
                 ['href' => 'daily_orders.php', 'label' => 'Daily Orders', 'description' => 'Compare standing forecast with dated orders and adjust the selected day.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'zazie_weekly_sheet.php', 'label' => 'Zazie weekly sheet', 'description' => 'Upload the Zazie weekly order file and apply it to dated orders.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'counter_orders.php', 'nav_key' => 'counter_orders', 'label' => 'Counter orders', 'description' => 'Write a pickup: date, Capp, Panadería, or delivery, what they want, and whether it is paid. A photo of the slip is enough.', 'roles' => ['cashier', 'baker', 'administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'standing_orders_manager.php', 'label' => 'Standing Orders', 'description' => 'Manage recurring orders by customer and delivery day.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'customers.php', 'label' => 'Customers', 'description' => 'Customer records, contact information, and ordering details.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'customer_record.php', 'label' => 'Customer Hub', 'description' => 'Find one customer and jump to their orders, standing pattern, pricing, billing, and issues.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -166,6 +168,7 @@ function bakery_navigation_catalog() {
             'roles' => ['administrator'],
             'items' => [
                 ['href' => 'sfb_admin_overview.php', 'label' => 'SF Baker Engagement', 'description' => 'Review SF Baker batches, respond to questions, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'sfb_admin_intensive.php', 'label' => 'Full Week Intensive', 'description' => 'Enroll a baker, follow three guided bakes, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'sfb_admin_studio.php', 'label' => 'Synthetic Manager', 'description' => 'Pace the synthetic baker clock, read the action log, and inspect a baker.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'agent_homebase.php', 'label' => 'Agent Homebase', 'description' => 'Learning studio, whiteboard, bug watchlist, and agent session log for Cursor missions.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'users.php', 'label' => 'User Management', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
@@ -395,10 +398,11 @@ function &bakery_navigation_script_registry(): array
         }
         $managerApiRoles = ['administrator', 'manager'];
         foreach ([
-            'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'text_comms_api.php', 'service_issues_api.php',
+            'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'daily_status_api.php', 'text_comms_api.php', 'service_issues_api.php',
             'staff_alerts_api.php', 'auto_push_api.php', 'ping.php',
             'billing_export.php', 'generate_invoice.php', 'invoice_center.php',
             'text_media.php', 'ai_photo_text.php', 'customer_statement.php',
+            'account_health.php', 'cost_margin.php', 'today.php', 'catalog_gaps.php',
         ] as $script) {
             $boot($registry, $script, $managerApiRoles);
         }
@@ -409,7 +413,7 @@ function &bakery_navigation_script_registry(): array
             'driver_pages_probe.php', 'trace_driver_list.php',
             'build_id.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
             'health_deploy.php', 'health_driver.php', 'health_prod.php',
-            'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php',
+            'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php', 'sfb_admin_intensive.php',
             'sfb_admin_studio_baker.php',
         ] as $script) {
             $boot($registry, $script, $adminOnly);

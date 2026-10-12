@@ -19,6 +19,9 @@ if (!defined('ACCESS_ALLOWED')) {
   .sfb-admin__panel { background: #fff; border: 1px solid #e8ddd2; border-radius: 15px; box-shadow: 0 8px 22px rgba(72, 45, 29, .05); padding: 19px; }
   .sfb-admin__panel h2 { color: #3a241a; font-family: Georgia, 'Times New Roman', serif; font-size: 1.25rem; font-weight: 500; margin-bottom: 4px; }
   .sfb-admin__panel > p { color: #78675b; font-size: .92rem; }
+  .sfb-admin__scroll { overflow-x: auto; }
+  .sfb-admin__table { border-collapse: collapse; width: 100%; }
+  .sfb-admin__table th, .sfb-admin__table td { border-bottom: 1px solid #eadfd4; padding: 8px 6px; text-align: left; vertical-align: top; }
   .sfb-admin__notice { border-radius: 11px; margin-bottom: 18px; padding: 12px 14px; }
   .sfb-admin__notice--success { background: #e8f4ea; color: #286244; }
   .sfb-admin__notice--error { background: #fbe9e6; color: #8b342c; }
