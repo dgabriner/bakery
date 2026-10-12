@@ -274,6 +274,11 @@ $nextSteps = [
 ];
 $nextStep = $editable ? ($nextSteps[$phase] ?? null) : null;
 
+if (bakery_sfb_intensive_ready($db) && bakery_sfb_intensive_batch_context($db, $customerId, (int)$batch['id'])) {
+    header('Location: sfb_intensive.php');
+    exit;
+}
+
 $page_title = 'SF Baker — ' . $batch['name'];
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
@@ -304,6 +309,17 @@ $portalCustomerName = $customer['name'];
       <div class="card-body">
         <p class="hero-label"><?php echo htmlspecialchars($batch['formula_name'] ?? bakery_t('sfb.tab_batches')); ?></p>
         <h2 class="hero-date"><?php echo htmlspecialchars($batch['name']); ?></h2>
+        <?php
+        $intensiveContext = bakery_sfb_intensive_ready($db)
+            ? bakery_sfb_intensive_batch_context($db, $customerId, (int)$batch['id'])
+            : null;
+        ?>
+        <?php if ($intensiveContext): ?>
+          <p class="muted"><?php echo htmlspecialchars(bakery_t('sfb.intensive_batch_badge', ['n' => (string)$intensiveContext['sequence']]), ENT_QUOTES, 'UTF-8'); ?></p>
+          <?php if (!empty($intensiveContext['checkpoint'])): ?>
+            <p><strong><?php bakery_te('sfb.intensive_checkin_label'); ?></strong><br><?php echo nl2br(htmlspecialchars((string)$intensiveContext['checkpoint']['instruction'], ENT_QUOTES, 'UTF-8')); ?></p>
+          <?php endif; ?>
+        <?php endif; ?>
         <div class="meta-row">
           <span class="badge <?php echo $batch['status'] === 'completed' ? 'badge-ok' : ($batch['status'] === 'abandoned' ? 'badge-muted' : 'badge-info'); ?>">
             <?php echo htmlspecialchars(bakery_sfb_phase_label($phase)); ?>

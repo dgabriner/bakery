@@ -71,7 +71,7 @@ function bakery_agent_program_work_map(): array
         'docs-truth' => $m(
             'Top-level docs describe the real stack; program missions registered',
             ['31-docs-truth', 'prompt-31', 'readme', 'architecture-doc'],
-            ['README.md', 'ARCHITECTURE.md', 'docs/archive/README.md', 'docs/prompts/README.md', 'docs/AGENT_PROGRAM_HANDOFF.md', 'includes/agent_program_map.php', 'includes/agent_work_map.php'],
+            ['README.md', 'ARCHITECTURE.md', 'docs/STUDENT_DEVELOPER_GUIDE.md', 'docs/intern/01-start-here.html', 'docs/intern/01-start-here.pdf', 'docs/intern/02-walk-the-day.html', 'docs/intern/02-walk-the-day.pdf', 'docs/intern/03-the-screens.html', 'docs/intern/03-the-screens.pdf', 'docs/intern/04-how-the-code-works.html', 'docs/intern/04-how-the-code-works.pdf', 'docs/intern/packet.css', 'docs/intern/build_pdfs.ps1', 'docs/archive/README.md', 'docs/prompts/README.md', 'docs/AGENT_PROGRAM_HANDOFF.md', 'includes/agent_program_map.php', 'includes/agent_work_map.php'],
             ['tests/run_agent_work_map_tests.php', 'tests/run_agent_homebase_tests.php', 'tests/run_deploy_surface_tests.php'],
             ['Code wins over a stale paragraph; then fix the paragraph', 'No Composer / PHPUnit / MVC claims in top-level docs'],
             'docs/prompts/31-docs-truth.md',
@@ -209,8 +209,8 @@ function bakery_agent_program_work_map(): array
         'extract-assets' => $m(
             'Move inline CSS/JS out of the six largest pages',
             ['50-extract-assets', 'prompt-50', 'inline-css', 'god-pages'],
-            ['route_manager.php', 'standing_orders_manager.php', 'driver_overview.php', 'driver_assignment.php', 'customer_schedule.php', 'standing_routes.php', 'css/route_manager.css', 'css/standing_orders_manager.css', 'css/driver_overview.css', 'css/driver_assignment.css', 'css/customer_schedule.css', 'css/standing_routes.css', 'includes/route_manager.js', 'includes/standing_orders_manager.js', 'includes/driver_overview.js', 'includes/driver_assignment.js', 'includes/customer_schedule.js', 'includes/standing_routes.js', 'scripts/deploy_manifest.ps1'],
-            ['tests/run_extract_assets_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_standing_orders_manager_tests.php'],
+            ['route_manager.php', 'standing_orders_manager.php', 'driver_overview.php', 'driver_assignment.php', 'customer_schedule.php', 'standing_routes.php', 'css/route_manager.css', 'css/standing_orders_manager.css', 'css/driver_overview.css', 'css/driver_assignment.css', 'css/customer_schedule.css', 'css/standing_routes.css', 'includes/route_manager.js', 'includes/standing_orders_manager.js', 'includes/driver_overview.js', 'includes/driver_assignment.js', 'includes/customer_schedule.js', 'includes/standing_routes.js', 'includes/standing_route_analysis.php', 'scripts/deploy_manifest.ps1'],
+            ['tests/run_extract_assets_tests.php', 'tests/run_standing_route_analysis_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_route_manager_pickup_tests.php', 'tests/run_deploy_surface_tests.php', 'tests/run_status_alignment_tests.php', 'tests/run_standing_orders_manager_tests.php'],
             ['Zero behavior change per extraction', 'New assets listed in scripts/deploy_manifest.ps1'],
             'docs/prompts/50-extract-assets.md',
             'shipped'

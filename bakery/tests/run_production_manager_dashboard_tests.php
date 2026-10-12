@@ -35,6 +35,11 @@ $assert(bakery_pmd_resolve_view('week') === 'week', 'resolve week view');
 $assert(bakery_pmd_resolve_view('ROUTES') === 'routes', 'resolve routes view case-insensitive');
 $assert(bakery_pmd_resolve_view('nope') === 'batches', 'resolve bad view → batches');
 $assert(bakery_pmd_resolve_view('') === 'batches', 'resolve empty view → batches');
+$assert(bakery_pmd_resolve_source('last_entered') === 'last_entered', 'resolve last_entered source');
+$assert(bakery_pmd_resolve_source('BAKE_LIST') === 'bake_list', 'resolve bake_list source case-insensitive');
+$assert(bakery_pmd_resolve_source('nope') === 'bake_list', 'resolve bad source → bake_list');
+$assert(strpos((string)file_get_contents($root . '/production_manager.php'), "'print' => '1'") !== false, 'print query is on production manager');
+$assert(strpos((string)file_get_contents($root . '/css/production_manager.css'), 'size: letter') !== false, 'print CSS uses letter page');
 
 $links = bakery_pmd_links('2026-08-27');
 $assert(strpos($links['production_center'], 'production_center.php') !== false, 'links include production center');
@@ -96,6 +101,16 @@ if (is_readable($envPath)) {
             $assert(is_array($board['doughs']), 'doughs is list');
             $assert(isset($board['summary']['pieces']), 'summary pieces');
             $assert(strpos($board['links']['production_center'], 'production_center.php') !== false, 'center link');
+
+            $entered = bakery_pmd_latest_entered_plan($db);
+            if ($entered !== null) {
+                $enteredBoard = bakery_pmd_build($db, $date, ['source' => 'last_entered']);
+                $assert($enteredBoard['bake_source'] === 'last_entered', 'last_entered board source');
+                $assert((int)$enteredBoard['summary']['pieces'] === (int)$entered['pieces'], 'last_entered pieces match saved plan');
+                $assert($enteredBoard['entered_plan']['date'] === $entered['date'], 'last_entered date stamped');
+            } else {
+                echo "SKIP  last_entered board (no saved production_plan_items)\n";
+            }
 
             $week = bakery_pmd_week_orders($db, $date);
             $assert(count($week['days']) === 7, 'week has 7 days');

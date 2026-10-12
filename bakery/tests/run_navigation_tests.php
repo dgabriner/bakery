@@ -96,19 +96,24 @@ $managerNav = navigation_test_render_nav('manager', 'production');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--manager') !== false, 'manager navigation uses the focused manager shell');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--focused') !== false, 'manager navigation is a focused workspace');
 navigation_test_assert(strpos($managerNav, 'bakery-nav__menu-toggle') === false, 'manager phone navigation has no hamburger');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps extras in More');
-navigation_test_assert(strpos($managerNav, 'data-nav-tools-filter') !== false, 'manager More has a searchable All tools filter');
-navigation_test_assert(strpos($managerNav, 'bakery-nav__more-catalog') === false, 'manager All tools is a flat searchable sheet, not nested details');
-$moreBeforeTools = strpos($managerNav, 'data-nav-tools-sheet');
-navigation_test_assert($moreBeforeTools !== false, 'manager More includes the All tools sheet');
-$primaryLinkCount = $moreBeforeTools === false ? 0 : substr_count(substr($managerNav, 0, $moreBeforeTools), 'bakery-nav__more-link');
-navigation_test_assert($primaryLinkCount === 8, 'manager More primary shortcuts stay at eight');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__more') !== false, 'manager navigation keeps critical operations and account controls in More');
+navigation_test_assert(strpos($managerNav, 'data-nav-tools-filter') === false, 'manager More does not reopen the all-tools catalog');
+navigation_test_assert(strpos($managerNav, 'bakery-nav__more-catalog') === false, 'manager navigation has no nested all-tools catalog');
 navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager navigation includes Routes');
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
-navigation_test_assert(strpos($managerNav, 'daily_orders.php') !== false, 'manager More includes Daily Orders');
-navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') !== false, 'manager More includes Survey Center');
-navigation_test_assert(strpos($managerNav, 'billing_center.php') !== false, 'manager More includes Billing Center');
+navigation_test_assert(strpos($managerNav, 'counter_orders.php?view=pending') !== false, 'manager navigation includes pending counter orders');
+foreach ([
+    'driver_assignment.php', 'route_manager.php', 'route_summary.php', 'daily_route.php',
+    'route_closeout.php', 'drivers.php', 'standing_routes.php', 'route_analysis.php', 'driver.php?change_driver=1',
+    'production_manager.php', 'production_center.php', 'product_manager_plan.php', 'production.php',
+    'pack_list.php', 'inventory.php', 'driver_load.php', 'ingredient_requirements.php',
+    'daily_run.php', 'daily_brief.php', 'index.php', 'daily_orders.php',
+] as $criticalManagerTool) {
+    navigation_test_assert(strpos($managerNav, $criticalManagerTool) !== false, 'manager More includes critical tool ' . $criticalManagerTool);
+}
+navigation_test_assert(strpos($managerNav, 'text_comms.php?view=surveys') === false, 'manager navigation omits Survey Center');
+navigation_test_assert(strpos($managerNav, 'billing_center.php') === false, 'manager navigation omits Billing Center');
 navigation_test_assert(strpos($managerNav, 'bakery-nav--ops') === false, 'manager focused nav is not the admin ops shell');
 
 $adminNav = navigation_test_render_nav('administrator', 'users');
@@ -164,6 +169,7 @@ navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashie
 navigation_test_assert(strpos($cashierNav, 'product_photos.php') !== false, 'cashier navigation links Product Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_shop_photos.php') !== false, 'cashier navigation links Shop Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_add_product.php') !== false, 'cashier navigation links Add Product');
+navigation_test_assert(strpos($cashierNav, 'counter_orders.php') !== false, 'cashier navigation links counter orders');
 navigation_test_assert(strpos($cashierNav, 'href="' . BASE_URL . 'index.php"') === false, 'cashier navigation does not link the ops dashboard');
 navigation_test_assert(strpos($cashierNav, 'manager.php') === false, 'cashier navigation does not link Manager Mode');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav__logout') !== false, 'cashier navigation includes logout in the focused bar');
@@ -176,7 +182,8 @@ navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
 navigation_test_assert(strpos($bakerNav, 'production.php') !== false, 'baker Today links to Daily Production home');
-navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 1, 'baker navigation has a single Today entry');
+navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 2, 'baker navigation has Today and Orders');
+navigation_test_assert(strpos($bakerNav, 'counter_orders.php?view=pending') !== false, 'baker navigation links counter orders');
 navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker navigation omits Production Center');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');

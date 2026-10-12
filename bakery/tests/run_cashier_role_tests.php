@@ -112,6 +112,7 @@ c_assert(in_array('product_photos.php', bakery_cashier_scripts(), true), 'produc
 c_assert(in_array('upload_product_photo.php', bakery_cashier_scripts(), true), 'upload_product_photo is a cashier script');
 c_assert(in_array('cashier_add_product.php', bakery_cashier_scripts(), true), 'cashier_add_product is a cashier script');
 c_assert(in_array('cashier_shop_photos.php', bakery_cashier_scripts(), true), 'cashier_shop_photos is a cashier script');
+c_assert(in_array('counter_orders.php', bakery_cashier_scripts(), true), 'counter_orders is a cashier script');
 c_assert(in_array('upload_shop_photo.php', bakery_cashier_scripts(), true), 'upload_shop_photo is a cashier script');
 c_assert(bakery_role_home('cashier') === 'product_photos.php', 'cashier home is product photos');
 c_assert(!in_array('products.php', bakery_cashier_scripts(), true), 'products.php is not a cashier script');

@@ -12,10 +12,11 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/photo_handler.php';
+
 class ShopPhotoHandler {
 
     private $uploadDir;
-    private $uploadUrl;
     private $maxSize;
     private $thumbSize;
 
@@ -30,7 +31,6 @@ class ShopPhotoHandler {
 
     public function __construct() {
         $this->uploadDir = dirname(__FILE__) . '/../uploads/shop_photos/';
-        $this->uploadUrl = BASE_URL . 'uploads/shop_photos/';
         $this->maxSize   = 10 * 1024 * 1024; // 10 MB
         $this->thumbSize = 300;
         $this->ensureDirectoriesExist();
@@ -204,10 +204,7 @@ class ShopPhotoHandler {
      * Build display-ready URL for a stored file path.
      */
     public function getPhotoUrl(string $filePath): string {
-        if (function_exists('isDevelopment') && isDevelopment()) {
-            return $this->uploadUrl . $filePath;
-        }
-        return 'https://bakery.sourflour.org/uploads/shop_photos/' . $filePath;
+        return bakery_upload_display_url('shop_photos', $filePath);
     }
 
     /**

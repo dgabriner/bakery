@@ -540,6 +540,20 @@ function bakery_ingredient_package_label(array $ingredient) {
 }
 
 /**
+ * Next sell day after a bake or calendar day.
+ * The bakery sells the following day, including Saturday and Sunday.
+ */
+function bakery_next_sell_date(?string $fromYmd = null): string {
+    $from = ($fromYmd === null || $fromYmd === '') ? date('Y-m-d') : $fromYmd;
+    $dt = DateTime::createFromFormat('!Y-m-d', $from);
+    if (!$dt || $dt->format('Y-m-d') !== $from) {
+        $dt = new DateTime('today');
+    }
+    $dt->modify('+1 day');
+    return $dt->format('Y-m-d');
+}
+
+/**
  * Resolve dashboard date from input or ?date=; defaults to today (Y-m-d).
  */
 function bakery_dashboard_resolve_date($input = null) {

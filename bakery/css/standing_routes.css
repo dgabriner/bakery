@@ -984,3 +984,118 @@
         color: #6c757d;
         font-style: italic;
     }
+
+.sr-view-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0 20px;
+}
+.sr-view-tab {
+    display: inline-block;
+    padding: 8px 14px;
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+    color: #212529;
+    text-decoration: none;
+    font-weight: 600;
+}
+.sr-view-tab.is-active {
+    background: #4e73df;
+    border-color: #4e73df;
+    color: #fff;
+}
+.sr-history-window,
+.sr-summary {
+    color: #6c757d;
+    font-size: 0.9em;
+    margin-bottom: 12px;
+}
+.sr-summary span {
+    display: inline-block;
+    margin-right: 16px;
+}
+.sr-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+    align-items: end;
+}
+.sr-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85em;
+    color: #495057;
+}
+.sr-filters input,
+.sr-filters select {
+    min-width: 180px;
+    padding: 6px 8px;
+}
+.sr-store-board {
+    overflow-x: auto;
+}
+.sr-store-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+.sr-store-table th,
+.sr-store-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px;
+    vertical-align: top;
+    min-width: 110px;
+}
+.sr-store-table th {
+    background: #f8f9fa;
+    position: sticky;
+    top: 0;
+}
+.sr-store-name {
+    min-width: 160px;
+    font-weight: 600;
+}
+.sr-orders-link {
+    display: block;
+    font-weight: 400;
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+.sr-driver-select {
+    width: 100%;
+    margin-bottom: 4px;
+}
+.sr-cell-usual,
+.sr-cell-reason {
+    color: #6c757d;
+    font-size: 0.85em;
+    line-height: 1.3;
+}
+.sr-apply,
+.sr-apply-store {
+    margin-top: 6px;
+    padding: 4px 8px;
+    border: 1px solid #4e73df;
+    background: #fff;
+    color: #4e73df;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+.sr-status-match { background: #f8fff9; }
+.sr-status-add { background: #fff8e8; }
+.sr-status-change { background: #fff4e8; }
+.sr-status-ask,
+.sr-status-fill { background: #f4f6fb; }
+.sr-status-orders { background: #fff0f0; }
+.sr-status-keep,
+.sr-status-empty { background: #fff; }
+.sr-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+}
+

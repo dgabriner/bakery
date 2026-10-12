@@ -189,5 +189,58 @@ $assert((float)$headerRow['total_amount'] > 0, 're-confirm delta still writes a 
 
 $wipe($db, $date);
 
+echo "\n=== Browser GET is a page, POST JSON stays the API ===\n";
+$assert(function_exists('bakery_complete_delivery_browser_get_plan'), 'browser GET plan helper exists');
+if (function_exists('bakery_complete_delivery_browser_get_plan')) {
+    $emptyPlan = bakery_complete_delivery_browser_get_plan($db, []);
+    $assert(($emptyPlan['kind'] ?? '') === 'page', 'GET without an order id plans a friendly page');
+    $assert(
+        strpos((string)($emptyPlan['body'] ?? ''), '{') !== 0,
+        'friendly page plan is not a JSON body'
+    );
+    $missingPlan = bakery_complete_delivery_browser_get_plan($db, ['order_id' => 99999999]);
+    $assert(($missingPlan['kind'] ?? '') === 'page', 'GET for an unknown order stays a page');
+    $knownId = (int)$db->query('SELECT id FROM daily_orders ORDER BY id DESC LIMIT 1')->fetchColumn();
+    if ($knownId > 0) {
+        $knownPlan = bakery_complete_delivery_browser_get_plan($db, ['order_id' => $knownId]);
+        $assert(($knownPlan['kind'] ?? '') === 'redirect', 'GET with an order id plans a redirect');
+        $assert(
+            strpos((string)($knownPlan['location'] ?? ''), 'driver.php?date=') !== false,
+            'GET redirect opens the driver route for that delivery date'
+        );
+    }
+}
+$_SERVER['SCRIPT_NAME'] = '/complete_delivery.php';
+$_SERVER['HTTP_ACCEPT'] = 'text/html,application/xhtml+xml';
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$assert(function_exists('bakery_wants_json') && bakery_wants_json() === false, 'browser GET to complete_delivery is not a JSON auth response');
+$_SERVER['REQUEST_METHOD'] = 'HEAD';
+$assert(bakery_wants_json() === false, 'browser HEAD to complete_delivery is not a JSON auth response');
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$assert(bakery_wants_json() === true, 'POST to complete_delivery stays a JSON API');
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$assert(bakery_wants_json() === true, 'explicit JSON Accept on GET still asks for JSON');
+$_SERVER['HTTP_ACCEPT'] = 'text/html';
+$_SERVER['SCRIPT_NAME'] = '/cli.php';
+
+$assert(function_exists('bakery_delivery_pricing_label_display'), 'pricing labels have a display translator');
+if (function_exists('bakery_delivery_pricing_label_display') && function_exists('bakery_set_locale')) {
+    bakery_set_locale('es', false);
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    $mixed = bakery_delivery_pricing_label_display('Mixed Pan Dulce pricing');
+    $assert($mixed === 'Precio mixto de pan dulce', 'Spanish confirm step translates mixed pan dulce pricing');
+    $assert(
+        bakery_delivery_pricing_label_display('Store price') === 'Precio de la tienda',
+        'Spanish confirm step translates store price'
+    );
+    bakery_set_locale('en', false);
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    $assert(
+        bakery_delivery_pricing_label_display('Mixed Pan Dulce pricing') === 'Mixed Pan Dulce pricing',
+        'English confirm step keeps the mixed pan dulce label'
+    );
+}
+
 echo "\n=== complete_delivery characterization: $pass passed, $fail failed ===\n";
 exit($fail > 0 ? 1 : 0);

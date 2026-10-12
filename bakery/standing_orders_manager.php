@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_orders_manager.css'); ?>">
 <?php
 // Security check
 define('ACCESS_ALLOWED', true);
@@ -27,6 +26,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/standing_orders_manager.css'); ?>">
+<script>
+window.standingOrdersEditorCopy = <?php echo json_encode([
+    'dayTotal' => bakery_t('standing_orders.day_total'),
+    'unsaved' => bakery_t('standing_orders.unsaved'),
+    'saved' => bakery_t('standing_orders.saved'),
+    'saveFailed' => bakery_t('standing_orders.save_failed'),
+    'leave' => bakery_t('standing_orders.leave_warning'),
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
+<script src="<?php echo bakery_asset_href('includes/standing_orders_editor.js'); ?>"></script>
+<?php
 
 // Fetch data
 try {
@@ -256,6 +268,35 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
     sort($days);
     return $days !== [] ? $days : $allWeekDays;
 };
+
+$somDayTotalLabel = bakery_t('standing_orders.day_total');
+
+/**
+ * Day column sums for one customer grid. Row totals stay on each product row.
+ *
+ * @param int $customerId
+ * @param int[] $activeDays
+ */
+$somRenderDayTotals = static function ($customerId, array $activeDays) use ($existingOrders, $somDayTotalLabel): void {
+    $byDay = [];
+    foreach ($activeDays as $dayNum) {
+        $byDay[(int)$dayNum] = 0;
+    }
+    foreach ($existingOrders[$customerId] ?? [] as $productDays) {
+        foreach ($activeDays as $dayNum) {
+            $dayNum = (int)$dayNum;
+            $byDay[$dayNum] += (int)($productDays[$dayNum]['quantity'] ?? 0);
+        }
+    }
+    echo '<div class="som-day-totals" role="row">';
+    echo '<div class="som-day-totals-label">' . htmlspecialchars($somDayTotalLabel, ENT_QUOTES, 'UTF-8') . '</div>';
+    foreach ($activeDays as $dayNum) {
+        $dayNum = (int)$dayNum;
+        echo '<div class="som-day-total" data-day="' . $dayNum . '">' . (int)$byDay[$dayNum] . '</div>';
+    }
+    echo '<div class="som-week-total">' . (int)array_sum($byDay) . '</div>';
+    echo '</div>';
+};
 ?>
 
 <div class="som-container" data-full-week="<?php echo $showFullWeek ? '1' : '0'; ?>">
@@ -281,6 +322,8 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
             <button id="changes-toggle" class="btn btn-info">📊 Changes</button>
         </div>
     </div>
+    <div id="som-dirty-banner" class="som-dirty-banner" role="status" hidden></div>
+    <div id="som-save-confirm" class="som-save-confirm" role="status" aria-live="assertive" hidden></div>
     <?php if ($showFullWeek): ?>
         <div class="som-week-mode-banner" role="status">
             Full week editing is on — every customer shows Monday–Sunday, matching the classic Standing Orders page. Route days stay marked for reference.
@@ -590,7 +633,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                                     </div>
                                 </div>
                                 
-                                <div class="customer-full-details" style="display: none;">
+                                <div class="customer-full-details" style="display: none; --som-days: <?php echo count($customerActiveDays); ?>;">
                                     <div class="days-header">
                                         <div class="product-column">Product</div>
                                         <?php foreach ($customerActiveDays as $dayNum): ?>
@@ -616,6 +659,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                                             </button>
                                         </div>
                                     </div>
+                                    <?php $somRenderDayTotals((int)$customer['id'], $customerActiveDays); ?>
                             
                                     <?php foreach ($productsByProductLine as $productLine => $lineData): ?>
                                         <div class="product-line-section" data-product-line="<?php echo htmlspecialchars($productLine); ?>">
@@ -678,6 +722,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                                                             <div class="quantity-cell is-non-route-day" data-day="<?php echo $dayNum; ?>" data-is-route-day="0">
                                                                 <input type="number" 
                                                                        class="quantity-input" 
+                                                                       inputmode="numeric"
                                                                        value="<?php echo $quantity; ?>"
                                                                        min="0"
                                                                        data-customer-id="<?php echo $customer['id']; ?>"
@@ -802,7 +847,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                             </button>
                         </div>
                         
-                        <div class="customer-orders" data-customer-id="<?php echo $customer['id']; ?>">
+                        <div class="customer-orders" data-customer-id="<?php echo $customer['id']; ?>" style="--som-days: <?php echo count($customerActiveDays); ?>;">
                             <div class="days-header">
                                 <div class="product-column">Product</div>
                                 <?php foreach ($customerActiveDays as $dayNum): 
@@ -830,6 +875,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                                     </button>
                                 </div>
                             </div>
+                            <?php $somRenderDayTotals((int)$customer['id'], $customerActiveDays); ?>
                     
                             <?php foreach ($productsByProductLine as $productLine => $lineData): ?>
                                 <div class="product-line-section" data-product-line="<?php echo htmlspecialchars($productLine); ?>">
@@ -895,6 +941,7 @@ $somEditDays = static function (array $routeDays, array $orderDays, array $allWe
                                                                 <div class="quantity-cell <?php echo $isRouteDay ? 'is-route-day' : 'is-non-route-day'; ?>" data-day="<?php echo $dayNum; ?>" data-is-route-day="<?php echo $isRouteDay ? '1' : '0'; ?>">
                                                                     <input type="number" 
                                                                            class="quantity-input" 
+                                                                           inputmode="numeric"
                                                                            value="<?php echo $quantity; ?>"
                                                                            min="0"
                                                                            data-customer-id="<?php echo $customer['id']; ?>"

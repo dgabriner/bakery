@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver_assignment.css'); ?>">
 <?php
 define('ACCESS_ALLOWED', true);
 define('BAKERY_PAGE_BUILD', 'driver-assignment-append-20260801');
@@ -59,6 +58,7 @@ $unassignedOrders = [];
 $otherUnassignedOrders = [];
 $standingCustomerIds = [];
 $routeSyncCountByDriver = [];
+$routeSyncLabelsByDriver = [];
 $standingRoutesByDriver = [];
 $weeklyStandingRoutesByCustomer = [];
 $driversById = [];
@@ -74,6 +74,9 @@ $driverColors = [
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
+?>
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver_assignment.css'); ?>">
+<?php
 
 try {
     $drivers = bakery_get_drivers($db);
@@ -209,6 +212,7 @@ try {
         $driverId = (int)$route['driver_id'];
         if (($assignedDriverByCustomer[$customerId] ?? 0) !== $driverId) {
             $routeSyncCountByDriver[$driverId] = ($routeSyncCountByDriver[$driverId] ?? 0) + 1;
+            $routeSyncLabelsByDriver[$driverId][] = bakery_driver_assignment_missing_store_label($route);
         }
     }
 
@@ -351,6 +355,9 @@ try {
                 <?php
                 $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
                 $missingRouteCount = $routeSyncCountByDriver[$driver['id']] ?? 0;
+                $restoreLabel = $missingRouteCount > 0
+                    ? bakery_driver_assignment_restore_label($missingRouteCount, $routeSyncLabelsByDriver[$driver['id']] ?? [])
+                    : '';
                 $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
                 ?>
                 <div class="driver-section" data-driver-id="<?= $driver['id'] ?>">
@@ -358,8 +365,8 @@ try {
                         <h3><?= htmlspecialchars($driver['name']) ?></h3>
                         <div class="driver-controls">
                             <?php if ($missingRouteCount > 0): ?>
-                                <button class="btn btn-sm btn-warning" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
-                                    Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?>
+                                <button class="btn btn-sm btn-warning restore-missing-stops" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
+                                    <?= htmlspecialchars($restoreLabel) ?>
                                 </button>
                             <?php endif; ?>
                             <?php if (!empty($driverOrders['orders'])): ?>
@@ -407,7 +414,7 @@ try {
                                         <?php if (empty($dailyOrders)): ?>
                                             <p>Click <strong>Build Route Plan</strong> above to create the dated route.</p>
                                         <?php elseif ($missingRouteCount > 0): ?>
-                                            <p>Use <strong>Restore <?= $missingRouteCount ?> missing stop<?= $missingRouteCount === 1 ? '' : 's' ?></strong> above to sync this route.</p>
+                                            <p><?= htmlspecialchars(bakery_t('driver_assignment.restore_missing_hint', ['label' => $restoreLabel])) ?></p>
                                         <?php else: ?>
                                             <p class="drop-hint">Drop stops here to assign to this driver</p>
                                         <?php endif; ?>
