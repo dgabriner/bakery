@@ -17,6 +17,7 @@ function bakery_ops_return_targets(): array
         'dashboard' => 'index.php',
         'daily_brief' => 'daily_brief.php',
         'manager' => 'manager.php',
+        'today' => 'today.php',
     ];
 }
 
@@ -28,6 +29,7 @@ function bakery_ops_return_labels(): array
         'dashboard' => 'Operations Dashboard',
         'daily_brief' => 'Daily Brief',
         'manager' => 'Manager Mode',
+        'today' => function_exists('bakery_t') ? bakery_t('today.return_label') : 'Today',
     ];
 }
 
