@@ -44,7 +44,9 @@
     completionMessage: '',
     stopFinished: false,
     sessionRefreshPromise: null,
-    scrollLockY: 0
+    scrollLockY: 0,
+    viewportBound: false,
+    onViewportChange: null
   };
 
   var STEPS = ['photo', 'delivery', 'invoice'];
@@ -314,20 +316,81 @@
     return window.innerWidth <= 768;
   }
 
+  function smallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (!probe) {
+      probe = document.createElement('div');
+      probe.id = 'deliverySvhProbe';
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:fixed;left:0;top:0;height:100svh;width:0;overflow:hidden;visibility:hidden;pointer-events:none;';
+      document.documentElement.appendChild(probe);
+    }
+    var measured = Math.round(probe.getBoundingClientRect().height);
+    return measured > 0 ? measured : 0;
+  }
+
+  function removeSmallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (probe && probe.parentNode) probe.parentNode.removeChild(probe);
+  }
+
+  function applyPhotoModalViewport() {
+    if (!usesCompactCapture()) return;
+    var modal = $('deliveryPhotoModal');
+    if (!modal || modal.getAttribute('aria-hidden') === 'true') return;
+    var visible = window.innerHeight || 0;
+    var viewport = window.visualViewport;
+    if (viewport && viewport.height > 0) {
+      visible = Math.round(viewport.height);
+    }
+    var small = smallViewportCap();
+    if (small > 0) visible = Math.min(visible, small);
+    if (visible > 0) {
+      modal.style.setProperty('--photo-modal-locked-height', Math.round(visible) + 'px');
+    }
+  }
+
+  function bindPhotoModalViewport() {
+    if (state.viewportBound) return;
+    state.viewportBound = true;
+    state.onViewportChange = function () {
+      applyPhotoModalViewport();
+    };
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', state.onViewportChange);
+      window.visualViewport.addEventListener('scroll', state.onViewportChange);
+    }
+    window.addEventListener('orientationchange', state.onViewportChange);
+  }
+
+  function unbindPhotoModalViewport() {
+    if (!state.viewportBound || !state.onViewportChange) {
+      state.viewportBound = false;
+      state.onViewportChange = null;
+      return;
+    }
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', state.onViewportChange);
+      window.visualViewport.removeEventListener('scroll', state.onViewportChange);
+    }
+    window.removeEventListener('orientationchange', state.onViewportChange);
+    state.viewportBound = false;
+    state.onViewportChange = null;
+  }
+
   function lockPhotoModalViewport() {
     if (!usesCompactCapture()) return;
     var modal = $('deliveryPhotoModal');
     if (!modal) return;
     state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
     document.body.style.top = '-' + state.scrollLockY + 'px';
-    var height = window.innerHeight;
-    if (window.visualViewport && window.visualViewport.height > 0) {
-      height = Math.round(window.visualViewport.height);
-    }
-    modal.style.setProperty('--photo-modal-locked-height', height + 'px');
+    applyPhotoModalViewport();
+    bindPhotoModalViewport();
   }
 
   function unlockPhotoModalViewport() {
+    unbindPhotoModalViewport();
+    removeSmallViewportCap();
     var modal = $('deliveryPhotoModal');
     if (modal) {
       modal.style.removeProperty('--photo-modal-locked-height');
@@ -1551,6 +1614,10 @@
     }
     state.pendingVarianceConfirm = onConfirm;
     panel.hidden = false;
+    var okBtn = $('deliveryVarianceOkBtn');
+    if (okBtn && typeof okBtn.focus === 'function') {
+      okBtn.focus({ preventScroll: false });
+    }
   }
 
   function hideVarianceConfirm() {
@@ -1749,6 +1816,14 @@
     if (!skipVarianceCheck && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
       var ack = $('deliveryVarianceAck');
       if (!ack || !ack.checked) {
+        if (state.currentStep === 'invoice') {
+          showVarianceConfirm(pieces, function () {
+            var ackBox = $('deliveryVarianceAck');
+            if (ackBox) ackBox.checked = true;
+            confirmDelivery(true);
+          });
+          return;
+        }
         var alertEl = $('deliveryVarianceAlert');
         if (alertEl) alertEl.hidden = false;
         openDeliveryAdjust();
