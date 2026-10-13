@@ -44,9 +44,7 @@
     completionMessage: '',
     stopFinished: false,
     sessionRefreshPromise: null,
-    scrollLockY: 0,
-    viewportBound: false,
-    onViewportChange: null
+    scrollLockY: 0
   };
 
   var STEPS = ['photo', 'delivery', 'invoice'];
@@ -350,34 +348,6 @@
     }
   }
 
-  function bindPhotoModalViewport() {
-    if (state.viewportBound) return;
-    state.viewportBound = true;
-    state.onViewportChange = function () {
-      applyPhotoModalViewport();
-    };
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', state.onViewportChange);
-      window.visualViewport.addEventListener('scroll', state.onViewportChange);
-    }
-    window.addEventListener('orientationchange', state.onViewportChange);
-  }
-
-  function unbindPhotoModalViewport() {
-    if (!state.viewportBound || !state.onViewportChange) {
-      state.viewportBound = false;
-      state.onViewportChange = null;
-      return;
-    }
-    if (window.visualViewport) {
-      window.visualViewport.removeEventListener('resize', state.onViewportChange);
-      window.visualViewport.removeEventListener('scroll', state.onViewportChange);
-    }
-    window.removeEventListener('orientationchange', state.onViewportChange);
-    state.viewportBound = false;
-    state.onViewportChange = null;
-  }
-
   function lockPhotoModalViewport() {
     if (!usesCompactCapture()) return;
     var modal = $('deliveryPhotoModal');
@@ -385,11 +355,9 @@
     state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
     document.body.style.top = '-' + state.scrollLockY + 'px';
     applyPhotoModalViewport();
-    bindPhotoModalViewport();
   }
 
   function unlockPhotoModalViewport() {
-    unbindPhotoModalViewport();
     removeSmallViewportCap();
     var modal = $('deliveryPhotoModal');
     if (modal) {

@@ -144,7 +144,7 @@ driver_photo_assert(
         && strpos($styles, '100svh') !== false
         && strpos($script, 'function lockPhotoModalViewport()') !== false
         && strpos($script, 'function smallViewportCap()') !== false
-        && strpos($script, "visualViewport.addEventListener('resize'") !== false
+        && strpos($script, "visualViewport.addEventListener('scroll'") === false
 );
 driver_photo_assert(
     'phone invoice shell cannot grow past the small viewport',
