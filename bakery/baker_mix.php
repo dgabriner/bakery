@@ -201,6 +201,18 @@ $page_title = bakery_t('page.baker_mix');
                                 'multiplier' => rtrim(rtrim(number_format((float) $batch['batch_multiplier'], 3), '0'), '.'),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
+                        <?php
+                        $batchMath = is_array($batch['batch_math'] ?? null) ? $batch['batch_math'] : [];
+                        $yieldPieces = $batchMath['pieces_per_batch'] ?? null;
+                        $batchesFromPieces = $batchMath['batches_from_pieces'] ?? null;
+                        ?>
+                        <?php if ($yieldPieces !== null && $batchesFromPieces !== null && !empty($batchMath['standard_batch_dough_grams'])): ?>
+                            <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_batch_yield', [
+                                'grams' => number_format((float) ($batchMath['standard_batch_dough_grams'] ?? 0), 0),
+                                'pieces' => rtrim(rtrim(number_format((float) $yieldPieces, 1), '0'), '.'),
+                                'batches' => rtrim(rtrim(number_format((float) $batchesFromPieces, 2), '0'), '.'),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
                         <?php if (!empty($batch['dough_loss_applied_grams'])): ?>
                             <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_loss', [
                                 'grams' => number_format((float) $batch['dough_loss_applied_grams'], 0),

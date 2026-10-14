@@ -818,11 +818,17 @@ function bakery_agent_work_map_core(): array
                 'includes/formula_structure.php',
                 'includes/formula_structure_ui.php',
                 'database/schema/087_formula_structure.sql',
+                'database/schema/102_formula_costing.sql',
+                'dough_types.php',
+                'baker_mix.php',
+                'includes/baker_mix.php',
             ],
             'tests' => [
                 'tests/run_ingredient_planner_tests.php',
                 'tests/run_formula_units_tests.php',
                 'tests/run_formula_structure_tests.php',
+                'tests/run_formula_costing_tests.php',
+                'tests/run_baker_mix_tests.php',
             ],
             'invariants' => [
                 'Purchase numbers are hints, not purchase orders',
@@ -920,6 +926,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_cost_margin_tests.php',
+                'tests/run_formula_costing_tests.php',
                 'tests/run_i18n_tests.php',
                 'tests/run_integrity_tests.php',
                 'tests/run_agent_work_map_tests.php',

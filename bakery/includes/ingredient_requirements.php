@@ -119,6 +119,32 @@ function bakery_ingredient_requirements_has_daily_orders(PDO $db, string $date):
  *
  * @return array<string, mixed>
  */
+/**
+ * Staff-entered pieces_per_batch replaces the grams/weight yield. Blank leaves it.
+ *
+ * @param array<string, mixed> $info
+ * @return array<string, mixed>
+ */
+function bakery_ingredient_requirements_apply_piece_yield(array $info, ?float $piecesPerBatch, int $quantity): array
+{
+    if ($piecesPerBatch === null || $piecesPerBatch <= 0) {
+        return $info;
+    }
+    if (($info['batch_size_mode'] ?? null) === 'pieces') {
+        return $info;
+    }
+    if ($info['reference_yield_units'] === null) {
+        return $info;
+    }
+    $info['pieces_per_batch'] = $piecesPerBatch;
+    $info['reference_yield_units'] = $piecesPerBatch;
+    if ($quantity > 0) {
+        $info['theoretical_product_batches'] = $quantity / $piecesPerBatch;
+        $info['suggested_whole_product_batches'] = (int) ceil($info['theoretical_product_batches']);
+    }
+    return $info;
+}
+
 function bakery_ingredient_requirements_product_batches(
     int $quantity,
     int $weightGrams,
@@ -126,8 +152,13 @@ function bakery_ingredient_requirements_product_batches(
     ?float $standardBatchDoughGrams,
     ?array $formulaStructure = null
 ): array {
+    $piecesPerBatch = null;
+    if (is_array($formulaStructure) && function_exists('bakery_formula_positive_or_null')) {
+        $piecesPerBatch = bakery_formula_positive_or_null($formulaStructure['pieces_per_batch'] ?? null);
+    }
     $info = [
         'standard_batch_dough_grams' => $standardBatchDoughGrams,
+        'pieces_per_batch' => $piecesPerBatch,
         'batch_reference_configured' => $standardBatchDoughGrams !== null && $standardBatchDoughGrams > 0,
         'reference_yield_units' => null,
         'theoretical_dough_batches' => null,
@@ -162,7 +193,7 @@ function bakery_ingredient_requirements_product_batches(
             $info['suggested_whole_dough_batches'] = (int) ceil($info['theoretical_dough_batches']);
             $info['theoretical_product_batches'] = $quantity / $info['reference_yield_units'];
             $info['suggested_whole_product_batches'] = (int) ceil($info['theoretical_product_batches']);
-            return $info;
+            return bakery_ingredient_requirements_apply_piece_yield($info, $piecesPerBatch, $quantity);
         }
     }
 
@@ -181,7 +212,7 @@ function bakery_ingredient_requirements_product_batches(
     $info['theoretical_product_batches'] = $theoreticalProduct;
     $info['suggested_whole_product_batches'] = (int)ceil($theoreticalProduct);
 
-    return $info;
+    return bakery_ingredient_requirements_apply_piece_yield($info, $piecesPerBatch, $quantity);
 }
 
 /**

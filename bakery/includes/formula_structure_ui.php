@@ -85,6 +85,13 @@ function bakery_formula_structure_render_batch(int $doughTypeId, array $structur
         (string) $doughTypeId
     );
     bakery_formula_structure_number('standard_batch_dough_grams', bakery_t('formula_structure.batch_grams'), $grams, '0.001', '');
+    bakery_formula_structure_number(
+        'pieces_per_batch',
+        bakery_t('formula_structure.pieces_per_batch'),
+        $structure['pieces_per_batch'] ?? null,
+        '0.001',
+        ''
+    );
     bakery_formula_structure_number('standard_batch_pieces', bakery_t('formula_structure.batch_pieces'), $pieces, '0.001', '');
     bakery_formula_structure_number(
         'batch_multiplier',
@@ -101,6 +108,7 @@ function bakery_formula_structure_render_batch(int $doughTypeId, array $structur
         (string) bakery_formula_default_dough_loss_grams()
     );
     echo '</div>';
+    echo '<p class="formula-structure-hint">' . bakery_formula_structure_h('formula_structure.pieces_per_batch_hint') . '</p>';
     echo '<p class="formula-structure-hint">' . bakery_formula_structure_h('formula_structure.batch_multiplier_hint') . '</p>';
     echo '<p class="formula-structure-hint">' . bakery_formula_structure_h('formula_structure.dough_loss_hint') . '</p>';
     if ($reference['configured']) {
@@ -157,20 +165,28 @@ function bakery_formula_structure_render_folded(array $ingredients, array $struc
         return;
     }
     $lines = [];
+    $hasLink = false;
     foreach ($ingredients as $ingredient) {
-        $lines[] = [
+        $line = [
             'ingredient_id' => (int) ($ingredient['ingredient_id'] ?? 0),
             'ingredient_name' => (string) ($ingredient['ingredient_name'] ?? ''),
             'unit' => (string) ($ingredient['unit'] ?? ''),
             'percentage' => (float) ($ingredient['percentage'] ?? 0),
         ];
+        if (!empty($ingredient['subformula']) && is_array($ingredient['subformula'])) {
+            $line['subformula'] = $ingredient['subformula'];
+            if (!empty($ingredient['subformula']['lines'])) {
+                $hasLink = true;
+            }
+        }
+        $lines[] = $line;
     }
     $totalPct = 0.0;
     foreach ($lines as $line) {
         $totalPct += $line['percentage'];
     }
     $hasStarter = $structure['starters'] !== [];
-    if (!$hasStarter) {
+    if (!$hasStarter && !$hasLink) {
         return;
     }
     $fold = bakery_formula_fold_formula($lines, $structure['starters'], $totalPct > 0 ? $totalPct : 0.0);
@@ -190,6 +206,8 @@ function bakery_formula_structure_render_folded(array $ingredients, array $struc
     echo '<p class="formula-structure-hint"><strong>' . bakery_formula_structure_h('formula_structure.total_water') . '</strong> '
         . htmlspecialchars(number_format((float) $fold['total_water_grams'], 1), ENT_QUOTES, 'UTF-8')
         . ' · ' . htmlspecialchars(number_format($waterPercent, 1), ENT_QUOTES, 'UTF-8') . '%</p>';
+    echo '<p class="formula-structure-hint"><strong>' . bakery_formula_structure_h('formula_structure.true_hydration') . '</strong> '
+        . htmlspecialchars(number_format($waterPercent, 1), ENT_QUOTES, 'UTF-8') . '%</p>';
     echo '<ul class="formula-structure-lines">';
     foreach ($fold['ingredients'] as $row) {
         $percent = $row['folded_bakers_percent'];
