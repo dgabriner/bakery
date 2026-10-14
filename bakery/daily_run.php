@@ -124,6 +124,9 @@ require_once 'includes/nav.php';
                     <span class="dr-stale-pill"><?php bakery_te('daily_run.stale_pill'); ?></span>
                 <?php endif; ?>
             </p>
+            <?php if (is_array($dailyRun) && is_array($dailyRun['demand_scheduler'] ?? null)): ?>
+                <?php bakery_render_demand_scheduler_status($dailyRun['demand_scheduler']); ?>
+            <?php endif; ?>
         </div>
         <div class="dr-header-links no-print">
             <a class="ops-brief-link" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_brief.php?date=<?php echo urlencode($selectedDate); ?>">

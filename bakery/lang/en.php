@@ -2145,7 +2145,12 @@ return [
 
     // Dashboard
     'dashboard.ops_title' => 'Operations Dashboard',
-    'dashboard.cron_overnight_stale' => 'Overnight generation stale (:hours h)',
+    'dashboard.cron_overnight_last_run' => 'Overnight generation last ran :when.',
+    'dashboard.cron_overnight_never' => 'Overnight generation has not recorded a run.',
+    'dashboard.cron_overnight_covered' => 'Overnight generation has not recorded a run. Tomorrow already has dated orders.',
+    'dashboard.cron_overnight_stale' => 'Overnight generation was missed',
+    'dashboard.cron_overnight_stale_detail' => 'No successful 2:30 AM PT run is recorded, and :date has no dated orders.',
+    'dashboard.cron_overnight_action' => 'Check the overnight cron',
     'dashboard.baker_title' => 'Baker Dashboard',
     'dashboard.ops_eyebrow' => 'Manager daily command center',
     'dashboard.baker_eyebrow' => 'Baker workspace',

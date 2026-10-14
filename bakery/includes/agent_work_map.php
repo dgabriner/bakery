@@ -647,6 +647,7 @@ function bakery_agent_work_map_core(): array
                 'includes/production_cadence.php',
                 'product_distribution.php',
                 'scripts/demand_scheduler.php',
+                'includes/cron_run.php',
             ],
             'tests' => [
                 'tests/run_tomorrow_confirmed_tests.php',
