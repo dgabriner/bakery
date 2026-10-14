@@ -62,8 +62,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . $dest);
                 exit;
             }
-            $error = bakery_t('login.error_wrong');
             bakery_login_audit_record_failure($db, 'staff', 'Staff login', $code);
+            $pressure = bakery_login_failure_pressure($db, 'staff');
+            if (!empty($pressure['locked'])) {
+                $error = bakery_t('login.lockout', ['minutes' => (int)$pressure['window_minutes']]);
+            } else {
+                $error = bakery_t('login.error_wrong');
+                if ((int)$pressure['failures'] >= 3) {
+                    $error .= ' ' . bakery_t('login.lockout_warning', [
+                        'failures' => (int)$pressure['failures'],
+                        'limit' => (int)$pressure['limit'],
+                        'minutes' => (int)$pressure['window_minutes'],
+                    ]);
+                }
+            }
             // Slow down brute force slightly
             usleep(300000);
         } catch (Exception $e) {

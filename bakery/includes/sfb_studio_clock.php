@@ -417,7 +417,7 @@ function bakery_sfb_studio_perform_action(PDO $db, array $state, $action) {
 
         case 'start_batch':
             $formulaId = bakery_sfb_agent_ensure_formula($db, $customerId, (string)($persona['template'] ?? ''));
-            $name = trim((string)($persona['name'] ?? 'Baker')) . ' loaf ' . date('M j g:ia');
+            $name = trim((string)($persona['name'] ?? 'Baker')) . ' loaf ' . bakery_format_user_stamp(time(), 'M j g:ia');
             if (strlen($name) > 120) {
                 $name = substr($name, 0, 120);
             }

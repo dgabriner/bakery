@@ -66,9 +66,9 @@ function bakery_login_history_when(?string $sqlTime, string $withTime = 'full'):
         return $date;
     }
     if ($withTime === 'time') {
-        return $dt->format('g:i A');
+        return bakery_locale_time($dt);
     }
-    return $date . ' · ' . $dt->format('g:i:s A');
+    return $date . ' · ' . bakery_locale_time($dt, true);
 }
 
 function bakery_login_history_ago(?string $sqlTime, ?int $now = null): string
@@ -214,12 +214,7 @@ function bakery_login_history_format_hour(?int $hour): string
     if ($hour === null || $hour < 0 || $hour > 23) {
         return '';
     }
-    $suffix = $hour >= 12 ? 'PM' : 'AM';
-    $display = $hour % 12;
-    if ($display === 0) {
-        $display = 12;
-    }
-    return $display . ' ' . $suffix;
+    return bakery_locale_hour_label($hour);
 }
 
 function bakery_login_history_credential_label(?string $method): string
@@ -315,6 +310,15 @@ function bakery_login_history_url(array $replace = [], ?array $current = null): 
     if (($values['view'] ?? '') === 'overview') {
         unset($values['view']);
     }
+    if (($values['timeline'] ?? 'all') === 'all') {
+        unset($values['timeline']);
+    }
+    if ((int)($values['timeline_offset'] ?? 0) <= 0) {
+        unset($values['timeline_offset']);
+    }
+    if (!array_key_exists('trail_id', $replace)) {
+        unset($values['trail_id']);
+    }
     if (!array_key_exists('export', $replace)) {
         unset($values['export']);
     }
@@ -323,7 +327,7 @@ function bakery_login_history_url(array $replace = [], ?array $current = null): 
             unset($values[$key]);
             continue;
         }
-        if (($value === 0 || $value === '0') && in_array((string)$key, ['user_id', 'customer_id', 'page'], true)) {
+        if (($value === 0 || $value === '0') && in_array((string)$key, ['user_id', 'customer_id', 'page', 'timeline_offset', 'trail_id'], true)) {
             unset($values[$key]);
         }
     }
@@ -431,6 +435,29 @@ function bakery_login_history_translate(string $key, string $fallback): string
     }
     $text = bakery_t($key);
     return $text === $key ? $fallback : $text;
+}
+
+/**
+ * Localized title for an operational or session event type.
+ * Unknown types keep the raw code in parentheses instead of English title case.
+ */
+function bakery_login_history_event_type_label(string $eventType): string
+{
+    $eventType = strtolower(trim($eventType));
+    if ($eventType !== '' && preg_match('/^[a-z0-9_]+$/', $eventType)) {
+        $key = 'login_history.event.' . $eventType;
+        $label = bakery_login_history_translate($key, '');
+        if ($label !== '') {
+            return $label;
+        }
+    }
+    if (function_exists('bakery_t')) {
+        $unknown = bakery_t('login_history.event_unknown', ['type' => $eventType]);
+        if ($unknown !== 'login_history.event_unknown') {
+            return $unknown;
+        }
+    }
+    return $eventType !== '' ? 'Recorded action (' . $eventType . ')' : 'Recorded action';
 }
 
 function bakery_login_history_page_meta(string $pathOrKey): array
@@ -695,6 +722,14 @@ function bakery_login_history_parse_filters(array $get, ?string $today = null): 
         $view = 'overview';
     }
     $page = max(1, (int)($get['page'] ?? 1));
+    $timeline = strtolower(trim((string)($get['timeline'] ?? 'all')));
+    if (!in_array($timeline, ['all', 'session', 'navigation', 'action'], true)) {
+        $timeline = 'all';
+    }
+    $timelineOffset = max(0, (int)($get['timeline_offset'] ?? 0));
+    if ($timelineOffset > 20000) {
+        $timelineOffset = 20000;
+    }
 
     return [
         'from' => $from,
@@ -713,6 +748,8 @@ function bakery_login_history_parse_filters(array $get, ?string $today = null): 
         'q' => $q,
         'view' => $view,
         'page' => $page,
+        'timeline' => $timeline,
+        'timeline_offset' => $timelineOffset,
         'today' => $today,
         'export' => (($get['export'] ?? '') === 'csv') ? 'csv' : '',
     ];
@@ -1485,7 +1522,7 @@ function bakery_login_history_load_actions(PDO $db, array $filters, array $ready
         $params
     );
     foreach ($rows as &$row) {
-        $row['label'] = ucwords(str_replace('_', ' ', (string)$row['event_type']));
+        $row['label'] = bakery_login_history_event_type_label((string)$row['event_type']);
     }
     unset($row);
     return $rows;
@@ -1585,10 +1622,17 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
         'last_active' => null,
         'unique_pages' => 0,
         'timeline' => [],
+        'timeline_total' => 0,
+        'timeline_has_more' => false,
+        'timeline_offset' => 0,
+        'timeline_filter' => 'all',
         'top_pages' => [],
     ];
     $userId = (int)$filters['user_id'];
     $customerId = (int)$filters['customer_id'];
+    $timelineFilter = (string)($filters['timeline'] ?? 'all');
+    $timelineOffset = max(0, (int)($filters['timeline_offset'] ?? 0));
+    $pageSize = 500;
     if ($userId <= 0 && $customerId <= 0) {
         return $empty;
     }
@@ -1614,6 +1658,8 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
     if (!$person || empty($ready['audit'])) {
         $empty['person'] = $person;
         $empty['kind'] = $kind;
+        $empty['timeline_filter'] = $timelineFilter;
+        $empty['timeline_offset'] = $timelineOffset;
         return $empty;
     }
 
@@ -1635,13 +1681,15 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
          LEFT JOIN users u ON u.id = la.user_id
          LEFT JOIN roles r ON r.id = u.role_id
          LEFT JOIN customers c ON c.id = la.customer_id
-         WHERE ' . $whereSql . ' ORDER BY la.login_at DESC, la.id DESC LIMIT 400',
+         WHERE ' . $whereSql . ' ORDER BY la.login_at DESC, la.id DESC LIMIT 800',
         $params
     );
 
     $investigation = $empty;
     $investigation['person'] = $person;
     $investigation['kind'] = $kind;
+    $investigation['timeline_filter'] = $timelineFilter;
+    $investigation['timeline_offset'] = $timelineOffset;
     $timeline = [];
     foreach ($sessions as $session) {
         $isSuccess = $session['outcome'] === 'success';
@@ -1680,38 +1728,46 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
     }
 
     $seenPaths = [];
-    if (!empty($ready['activity'])) {
+    $wantNav = in_array($timelineFilter, ['all', 'navigation'], true);
+    if (!empty($ready['activity']) && $wantNav) {
         [$actWhere, $actParams] = bakery_login_history_clause($sessionFilters, $ready, [
             'time_column' => 'laa.occurred_at',
         ]);
+        $navLimit = $timelineFilter === 'navigation' ? 2500 : 1500;
         $activities = bakery_login_history_query(
             $db,
-            "SELECT laa.id, laa.occurred_at, laa.page_path, laa.page_title
+            "SELECT laa.id, laa.occurred_at, laa.page_path, laa.page_title, laa.event_type
              FROM login_audit_activity laa
              JOIN login_audit la ON la.id = laa.login_audit_id
              LEFT JOIN users u ON u.id = la.user_id
              LEFT JOIN roles r ON r.id = u.role_id
              LEFT JOIN customers c ON c.id = la.customer_id
-             WHERE laa.event_type = 'page_view' AND {$actWhere}
+             WHERE {$actWhere}
              ORDER BY laa.occurred_at DESC, laa.id DESC
-             LIMIT 800",
+             LIMIT {$navLimit}",
             $actParams
         );
         $pageCounts = [];
         foreach ($activities as $activity) {
             $path = (string)($activity['page_path'] ?? '');
             $key = bakery_login_history_page_key($path);
-            if ($key !== '') {
+            $eventType = (string)($activity['event_type'] ?? 'page_view');
+            if ($key !== '' && $eventType === 'page_view') {
                 $seenPaths[$key] = true;
                 $pageCounts[$key] = ($pageCounts[$key] ?? 0) + 1;
+                $investigation['pages']++;
             }
-            $investigation['pages']++;
             $title = $activity['page_title'] ?: bakery_login_history_page_label($path);
+            if ($eventType !== 'page_view' && $title === '') {
+                $title = bakery_login_history_translate('login_history.activity_action', 'Recorded session activity');
+            }
             $timeline[] = bakery_login_history_event([
                 'occurred_at' => $activity['occurred_at'],
-                'kind' => 'navigation',
+                'kind' => $eventType === 'page_view' ? 'navigation' : 'action',
                 'title' => $title,
-                'detail' => bakery_login_history_translate('login_history.nav_recorded', 'Navigation recorded in this signed-in session'),
+                'detail' => $eventType === 'page_view'
+                    ? bakery_login_history_translate('login_history.nav_recorded', 'Navigation recorded in this signed-in session')
+                    : bakery_login_history_translate('login_history.activity_action', 'Recorded session activity'),
                 'path' => $path,
                 'sort_id' => (int)$activity['id'],
             ]);
@@ -1727,7 +1783,8 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
     }
     $investigation['unique_pages'] = count($seenPaths);
 
-    if (!empty($ready['operational'])) {
+    $wantActions = in_array($timelineFilter, ['all', 'action'], true);
+    if (!empty($ready['operational']) && $wantActions) {
         $actionWhere = ['1=1'];
         $actionParams = [];
         if ($userId > 0) {
@@ -1745,12 +1802,13 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
             $actionWhere[] = 'oe.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)';
             $actionParams[] = $filters['until'] . ' 00:00:00';
         }
+        $actionLimit = $timelineFilter === 'action' ? 2500 : 1200;
         $actions = bakery_login_history_query(
             $db,
             'SELECT oe.id, oe.occurred_at, oe.event_type, oe.summary
              FROM operational_events oe WHERE ' . implode(' AND ', $actionWhere) . '
              ORDER BY oe.occurred_at DESC, oe.id DESC
-             LIMIT 400',
+             LIMIT ' . $actionLimit,
             $actionParams
         );
         foreach ($actions as $action) {
@@ -1758,19 +1816,74 @@ function bakery_login_history_load_investigation(PDO $db, array $filters, array 
             $timeline[] = bakery_login_history_event([
                 'occurred_at' => $action['occurred_at'],
                 'kind' => 'action',
-                'title' => $action['summary'] ?: ucwords(str_replace('_', ' ', (string)$action['event_type'])),
+                'title' => $action['summary'] ?: bakery_login_history_event_type_label((string)$action['event_type']),
                 'detail' => bakery_login_history_translate('login_history.op_action', 'Recorded operational action'),
                 'sort_id' => (int)$action['id'],
             ]);
         }
     }
 
+    if ($timelineFilter === 'session') {
+        $timeline = array_values(array_filter($timeline, static function (array $event): bool {
+            return ($event['kind'] ?? '') === 'session';
+        }));
+    } elseif ($timelineFilter === 'navigation') {
+        $timeline = array_values(array_filter($timeline, static function (array $event): bool {
+            return ($event['kind'] ?? '') === 'navigation';
+        }));
+    } elseif ($timelineFilter === 'action') {
+        $timeline = array_values(array_filter($timeline, static function (array $event): bool {
+            return ($event['kind'] ?? '') === 'action';
+        }));
+    }
+
     usort($timeline, static function (array $a, array $b): int {
         return ($b['timestamp'] <=> $a['timestamp']) ?: ($b['sort_id'] <=> $a['sort_id']);
     });
     $investigation['timeline_total'] = count($timeline);
-    $investigation['timeline'] = array_slice($timeline, 0, 400);
+    $slice = array_slice($timeline, $timelineOffset, $pageSize);
+    $investigation['timeline'] = $slice;
+    $investigation['timeline_has_more'] = ($timelineOffset + count($slice)) < count($timeline);
     return $investigation;
+}
+
+/**
+ * Page/activity trail for one login_audit session id.
+ *
+ * @return list<array<string,mixed>>
+ */
+function bakery_login_history_load_session_trail(PDO $db, int $auditId, array $ready, int $limit = 200): array
+{
+    if ($auditId <= 0 || empty($ready['activity'])) {
+        return [];
+    }
+    $limit = max(1, min(500, $limit));
+    $rows = bakery_login_history_query(
+        $db,
+        "SELECT laa.id, laa.occurred_at, laa.event_type, laa.page_path, laa.page_title
+         FROM login_audit_activity laa
+         WHERE laa.login_audit_id = ?
+         ORDER BY laa.occurred_at ASC, laa.id ASC
+         LIMIT {$limit}",
+        [$auditId]
+    );
+    $trail = [];
+    foreach ($rows as $row) {
+        $path = (string)($row['page_path'] ?? '');
+        $title = $row['page_title'] ?: bakery_login_history_page_label($path);
+        if ($title === '') {
+            $title = bakery_login_history_translate('login_history.activity_action', 'Recorded session activity');
+        }
+        $trail[] = [
+            'id' => (int)$row['id'],
+            'occurred_at' => $row['occurred_at'],
+            'event_type' => $row['event_type'],
+            'page_path' => $path,
+            'title' => $title,
+            'time_label' => bakery_login_history_when((string)$row['occurred_at'], 'time'),
+        ];
+    }
+    return $trail;
 }
 
 function bakery_login_history_load_dwell(PDO $db, array $filters, array $ready): array
@@ -2018,9 +2131,40 @@ function bakery_login_history_active_chips(array $filters, array $options): arra
     return $chips;
 }
 
+function bakery_login_history_view_limit(): int
+{
+    return 100;
+}
+
+/**
+ * Every login row matching the date range and user filters. The on-screen
+ * lists stay capped; this export does not.
+ *
+ * @return list<array<string,mixed>>
+ */
+function bakery_login_history_export_rows(PDO $db, array $filters, array $ready): array
+{
+    if (empty($ready['audit'])) {
+        return [];
+    }
+    [$whereSql, $params] = bakery_login_history_clause($filters, $ready);
+    $fetched = bakery_login_history_query(
+        $db,
+        bakery_login_history_session_select() . ' FROM ' . bakery_login_history_from_sql()
+        . " WHERE {$whereSql} ORDER BY la.login_at ASC, la.id ASC",
+        $params
+    );
+    $now = time();
+    $rows = [];
+    foreach ($fetched as $row) {
+        $rows[] = bakery_login_history_decorate_session($row, $now);
+    }
+    return $rows;
+}
+
 function bakery_login_history_csv_headers(): array
 {
-    return ['login_at', 'name', 'role', 'type', 'outcome', 'duration_seconds', 'device', 'browser', 'ip', 'last_screen', 'location_status'];
+    return ['login_at', 'name', 'role', 'type', 'outcome', 'duration_seconds', 'device', 'browser', 'ip', 'user_agent', 'last_screen', 'location_status'];
 }
 
 function bakery_login_history_csv_row(array $row): array
@@ -2035,6 +2179,7 @@ function bakery_login_history_csv_row(array $row): array
         (string)($row['device_type'] ?? ''),
         (string)($row['browser'] ?? ''),
         (string)($row['ip_address'] ?? ''),
+        (string)($row['user_agent'] ?? ''),
         (string)($row['page_label'] ?? ''),
         (string)($row['location_status'] ?? ''),
     ];
@@ -2089,6 +2234,9 @@ function bakery_login_history_load_investigation_stub(): array
         'timeline' => [],
         'top_pages' => [],
         'timeline_total' => 0,
+        'timeline_has_more' => false,
+        'timeline_offset' => 0,
+        'timeline_filter' => 'all',
         'timeline_groups' => [],
     ];
 }
@@ -2151,7 +2299,7 @@ function bakery_login_history_load(PDO $db, array $filters, array $ready): array
     if (in_array($view, ['overview', 'records'], true) || $filters['export'] === 'csv') {
         $recordFilters = $filters;
         if ($filters['export'] === 'csv') {
-            $data['records'] = bakery_login_history_load_records($db, array_merge($recordFilters, ['page' => 1]), $ready, 1000);
+            $data['records'] = ['total' => 0, 'rows' => bakery_login_history_export_rows($db, $recordFilters, $ready), 'last_page' => 1, 'page' => 1];
         } elseif ($view === 'overview') {
             $recordFilters['page'] = 1;
             $data['recent'] = bakery_login_history_load_sessions($db, $filters, $ready, 6, 'recent');

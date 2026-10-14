@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
                 $name = trim((string)($_POST['name'] ?? ''));
                 if ($name === '') {
-                    $name = $formula['name'] . ' — ' . date('M j');
+                    $name = $formula['name'] . ' - ' . date('M j');
                 }
                 $batchId = bakery_sfb_start_batch(
                     $db,
@@ -74,11 +74,11 @@ $journey = bakery_sfb_journey($db, $customerId);
 
 $saved = (string)($_GET['saved'] ?? '');
 $savedMessages = [
-    'started' => 'Batch started — happy mixing!',
+    'started' => 'Batch started. Happy mixing!',
     'abandoned' => 'Batch set aside. It will not count toward your loaf total.',
 ];
 
-$page_title = 'SF Baker — Batches';
+$page_title = 'SF Baker. Batches';
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];
@@ -176,8 +176,8 @@ $portalCustomerName = $customer['name'];
                   </a>
                 </h3>
                 <p class="delivery-card-summary">
-                  <?php echo htmlspecialchars($batch['formula_name'] ?? '—'); ?>
-                  · <?php echo htmlspecialchars(date('D, M j · g:ia', strtotime($batch['started_at']))); ?>
+                  <?php echo htmlspecialchars($batch['formula_name'] ?? '-'); ?>
+                  · <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($batch['started_at']), 'D, M j · g:ia')); ?>
                   <?php if ($batch['status'] === 'completed'): ?>
                     · <?php echo (int)$batch['loaf_count']; ?> <?php echo (int)$batch['loaf_count'] === 1 ? bakery_t('sfb.loaf') : bakery_t('sfb.loaves'); ?>
                   <?php endif; ?>

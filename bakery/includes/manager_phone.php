@@ -154,11 +154,12 @@ function bakery_manager_phone_build(PDO $db, array $base): array
             error_log('manager phone plan state: ' . $e->getMessage());
         }
     }
+    $ctx['counter_pending'] = bakery_manager_phone_counter_pending($db, $date);
     $ctx['next_action'] = bakery_manager_phone_next_action($ctx);
     return $ctx;
 }
 
-/** @return array{key:string,href:string,tone:string} */
+/** @return array{key:string,href:string,tone:string,count:int} */
 function bakery_manager_phone_next_action(array $ctx): array
 {
     $date = (string)($ctx['date'] ?? date('Y-m-d'));
@@ -167,30 +168,51 @@ function bakery_manager_phone_next_action(array $ctx): array
     $remaining = (int)($ctx['productionSummary']['remaining'] ?? 0);
     $packRequired = (int)($ctx['packingSummary']['required_lines'] ?? 0);
     $packChecked = (int)($ctx['packingSummary']['checked_lines'] ?? 0);
+    $packOpen = max(0, $packRequired - $packChecked);
     $open = (int)($ctx['pending'] ?? 0) + (int)($ctx['inTransit'] ?? 0);
+    $step = static function (string $key, string $href, string $tone, int $count): array {
+        return ['key' => $key, 'href' => $href, 'tone' => $tone, 'count' => $count];
+    };
     if ($failed > 0) {
-        return ['key' => 'missed', 'href' => bakery_manager_phone_href($date, 'missed'), 'tone' => 'attention'];
+        return $step('missed', bakery_manager_phone_href($date, 'missed'), 'attention', $failed);
     }
     if ($unassigned > 0) {
-        return ['key' => 'unassigned', 'href' => bakery_manager_phone_href($date, 'routes'), 'tone' => 'attention'];
+        return $step('unassigned', bakery_manager_phone_href($date, 'routes'), 'attention', $unassigned);
     }
     $center = (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date);
     if (array_key_exists('plan_committed', $ctx) && $ctx['plan_committed'] === false) {
-        return ['key' => 'release', 'href' => $center, 'tone' => 'attention'];
+        return $step('release', $center, 'attention', 0);
     }
-    if ((int)($ctx['plan_drift'] ?? 0) > 0) {
-        return ['key' => 'drift', 'href' => $center, 'tone' => 'attention'];
+    $drift = (int)($ctx['plan_drift'] ?? 0);
+    if ($drift > 0) {
+        return $step('drift', $center, 'attention', $drift);
     }
     if ($remaining > 0) {
-        return ['key' => 'bake', 'href' => bakery_manager_phone_href($date, 'kitchen'), 'tone' => 'attention'];
+        return $step('bake', bakery_manager_phone_href($date, 'kitchen'), 'attention', $remaining);
     }
-    if ($packRequired > 0 && $packChecked < $packRequired) {
-        return ['key' => 'pack', 'href' => bakery_manager_phone_href($date, 'kitchen'), 'tone' => 'attention'];
+    if ($packOpen > 0) {
+        return $step('pack', bakery_manager_phone_href($date, 'kitchen'), 'attention', $packOpen);
     }
     if ($open > 0) {
-        return ['key' => 'in_progress', 'href' => bakery_manager_phone_href($date, 'routes'), 'tone' => 'ready'];
+        return $step('in_progress', bakery_manager_phone_href($date, 'routes'), 'ready', $open);
     }
-    return ['key' => 'clear', 'href' => bakery_manager_phone_href($date, 'missed'), 'tone' => 'ready'];
+    return $step('clear', bakery_manager_phone_href($date, 'missed'), 'ready', 0);
+}
+
+function bakery_manager_phone_counter_pending(PDO $db, string $date): int
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'counter_orders')) {
+        return 0;
+    }
+    if (!function_exists('bakery_counter_order_list')) {
+        require_once __DIR__ . '/counter_orders.php';
+    }
+    try {
+        return count(bakery_counter_order_list($db, 'pending', $date));
+    } catch (Throwable $e) {
+        error_log('manager phone pickups: ' . $e->getMessage());
+        return 0;
+    }
 }
 
 /** @return array<int,list<array<string,mixed>>> */
@@ -203,6 +225,7 @@ function bakery_manager_phone_driver_stops(PDO $db, string $date): array
     $stmt = $db->prepare(
         "SELECT doa.driver_id, do.id AS daily_order_id, c.name AS customer_name,
                 COALESCE(doa.delivery_status, 'pending') AS delivery_status, doa.route_order,
+                doa.scheduled_delivery_time, doa.actual_delivery_time,
                 do.amount_collected, COALESCE(c.payment_collection, 'cod') AS payment_collection,
                 do.delivery_order_total, do.total_amount
          FROM daily_order_assignments doa
@@ -218,6 +241,150 @@ function bakery_manager_phone_driver_stops(PDO $db, string $date): array
         $byDriver[(int)$row['driver_id']][] = $row;
     }
     return $byDriver;
+}
+
+/**
+ * Clock time for the phone mission board.
+ * English keeps g:i A. Spanish follows Intl es_MX when the extension is
+ * present (24-hour or h:mm a. m.) and otherwise the same a. m. / p. m. style.
+ */
+function bakery_manager_phone_format_clock_timestamp(int $ts): string
+{
+    if (function_exists('bakery_locale') && bakery_locale() === 'es') {
+        if (class_exists('IntlDateFormatter')) {
+            $fmt = new IntlDateFormatter('es_MX', IntlDateFormatter::NONE, IntlDateFormatter::SHORT);
+            $label = $fmt ? $fmt->format($ts) : false;
+            if (is_string($label) && $label !== '' && !preg_match('/\b(AM|PM)\b/', $label)) {
+                return str_replace(["\u{202F}", "\u{00A0}"], ' ', $label);
+            }
+        }
+        $hour = (int)date('G', $ts);
+        $hour12 = $hour % 12;
+        if ($hour12 === 0) {
+            $hour12 = 12;
+        }
+        $suffix = $hour < 12 ? 'a. m.' : 'p. m.';
+        return $hour12 . ':' . date('i', $ts) . ' ' . $suffix;
+    }
+    return date('g:i A', $ts);
+}
+
+/**
+ * Format a TIME/datetime-ish value for the phone mission board.
+ */
+function bakery_manager_phone_format_stop_time(?string $time): string
+{
+    $time = trim((string)$time);
+    if ($time === '' || $time === '00:00:00') {
+        return '';
+    }
+    $ts = strtotime($time);
+    if ($ts === false && preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $time, $m)) {
+        $ts = strtotime(sprintf('%02d:%02d:%02d', (int)$m[1], (int)$m[2], (int)($m[3] ?? 0)));
+    }
+    if ($ts === false) {
+        return $time;
+    }
+    return bakery_manager_phone_format_clock_timestamp($ts);
+}
+
+/**
+ * Shape a driver's stop rows into a simple mission view: done so far + remaining order.
+ *
+ * @param list<array<string,mixed>> $stops
+ * @return array{
+ *   phase:string,
+ *   done:list<array<string,mixed>>,
+ *   left:list<array<string,mixed>>,
+ *   current:?array<string,mixed>,
+ *   done_count:int,
+ *   left_count:int,
+ *   total:int,
+ *   last_done_time:string,
+ *   progress_label:string
+ * }
+ */
+function bakery_manager_phone_mission_from_stops(array $stops): array
+{
+    $done = [];
+    $left = [];
+    $current = null;
+    $lastDoneTime = '';
+    $lastDoneTs = null;
+    foreach ($stops as $stop) {
+        if (!is_array($stop)) {
+            continue;
+        }
+        $status = strtolower(trim((string)($stop['delivery_status'] ?? 'pending')));
+        $stop['delivery_status'] = $status;
+        $actualRaw = isset($stop['actual_delivery_time']) ? trim((string)$stop['actual_delivery_time']) : '';
+        $stop['actual_time_label'] = bakery_manager_phone_format_stop_time($actualRaw !== '' ? $actualRaw : null);
+        $stop['scheduled_time_label'] = bakery_manager_phone_format_stop_time(
+            isset($stop['scheduled_delivery_time']) ? (string)$stop['scheduled_delivery_time'] : null
+        );
+        if (in_array($status, ['delivered', 'failed', 'cancelled', 'rescheduled'], true)) {
+            $done[] = $stop;
+            if ($status === 'delivered' && $stop['actual_time_label'] !== '') {
+                $ts = strtotime($actualRaw);
+                if ($ts !== false && ($lastDoneTs === null || $ts >= $lastDoneTs)) {
+                    $lastDoneTs = $ts;
+                    $lastDoneTime = $stop['actual_time_label'];
+                }
+            }
+            continue;
+        }
+        $left[] = $stop;
+        if ($current === null && $status === 'in_transit') {
+            $current = $stop;
+        }
+    }
+    if ($current === null && $left !== []) {
+        $current = $left[0];
+    }
+    $doneCount = count($done);
+    $leftCount = count($left);
+    $total = $doneCount + $leftCount;
+    if ($total === 0) {
+        $phase = 'empty';
+    } elseif ($leftCount === 0) {
+        $phase = 'done';
+    } elseif ($doneCount === 0 && ($current === null || ($current['delivery_status'] ?? '') === 'pending')) {
+        $phase = 'not_started';
+    } else {
+        $phase = 'in_progress';
+    }
+    return [
+        'phase' => $phase,
+        'done' => $done,
+        'left' => $left,
+        'current' => $current,
+        'done_count' => $doneCount,
+        'left_count' => $leftCount,
+        'total' => $total,
+        'last_done_time' => $lastDoneTime,
+        'progress_label' => $total > 0 ? ($doneCount . ' / ' . $total) : '0 / 0',
+    ];
+}
+
+/**
+ * @param list<array<string,mixed>> $driverRows
+ * @param array<int,list<array<string,mixed>>> $driverStops
+ * @return list<array<string,mixed>>
+ */
+function bakery_manager_phone_sort_drivers_by_mission(array $driverRows, array $driverStops): array
+{
+    $rank = ['in_progress' => 0, 'not_started' => 1, 'done' => 2, 'empty' => 3];
+    usort($driverRows, static function (array $a, array $b) use ($driverStops, $rank): int {
+        $missionA = bakery_manager_phone_mission_from_stops($driverStops[(int)($a['id'] ?? 0)] ?? []);
+        $missionB = bakery_manager_phone_mission_from_stops($driverStops[(int)($b['id'] ?? 0)] ?? []);
+        $ra = $rank[$missionA['phase']] ?? 9;
+        $rb = $rank[$missionB['phase']] ?? 9;
+        if ($ra !== $rb) {
+            return $ra <=> $rb;
+        }
+        return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? ''));
+    });
+    return $driverRows;
 }
 
 /**
@@ -508,8 +675,23 @@ function bakery_manager_phone_render_today(array $ctx): void
   <section class="manager-phone__next manager-phone__next--<?php echo $h($action['tone']); ?>">
     <span><?php bakery_te('manager_phone.next'); ?></span>
     <strong><?php bakery_te('manager_phone.next_' . $action['key']); ?></strong>
+    <?php
+      $nextCount = (int)($action['count'] ?? 0);
+      $nextCountKey = 'manager_phone.next_count_' . (string)($action['key'] ?? '');
+      $nextCountText = $nextCount > 0 && function_exists('bakery_t') ? bakery_t($nextCountKey, ['count' => number_format($nextCount)]) : '';
+      if ($nextCountText !== '' && $nextCountText !== $nextCountKey):
+    ?>
+      <p><?php echo $h($nextCountText); ?></p>
+    <?php endif; ?>
     <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h($action['href']); ?>"><?php bakery_te('manager_phone.open'); ?></a>
   </section>
+  <?php $pickups = (int)($ctx['counter_pending'] ?? 0); ?>
+  <?php if ($pickups > 0): ?>
+    <a class="manager-phone__pickups" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'counter_orders.php?' . http_build_query(['view' => 'pending', 'date' => $date])); ?>">
+      <span><?php bakery_te('manager_phone.pickups'); ?></span>
+      <strong><?php echo htmlspecialchars(bakery_t('manager_phone.pickups_waiting', ['count' => number_format($pickups)]), ENT_QUOTES, 'UTF-8'); ?></strong>
+    </a>
+  <?php endif; ?>
 
   <section class="manager-phone__scores" aria-label="<?php bakery_te('manager_phone.scorecard'); ?>">
     <a class="manager-phone__score<?php echo $ctx['missingDaily'] > 0 ? ' is-loud' : ''; ?>" href="<?php echo $h(bakery_ops_link_daily_orders($date, [], 'manager')); ?>">
@@ -561,6 +743,12 @@ function bakery_manager_phone_render_routes(array $ctx): void
     $plan = $ctx['routePlan'] ?? [];
     $unassignedCount = (int)($plan['unassigned_count'] ?? $ctx['unassigned'] ?? 0);
     $driverStops = $ctx['driver_stops'] ?? [];
+    $restoreByDriver = $ctx['routeRestoreByDriver'] ?? [];
+    if ($restoreByDriver === [] && ($ctx['db'] ?? null) instanceof PDO && function_exists('bakery_route_missing_standing_by_driver')) {
+        foreach (bakery_route_missing_standing_by_driver($ctx['db'], $date) as $restoreGroup) {
+            $restoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
+        }
+    }
     ?>
   <?php if ($unassignedCount > 0): ?>
     <section class="manager-phone__panel manager-phone__panel--loud">
@@ -596,43 +784,104 @@ function bakery_manager_phone_render_routes(array $ctx): void
               $closeoutByDriver[(int)$row['driver_id']] = $row;
           }
       }
+      $sortedDrivers = bakery_manager_phone_sort_drivers_by_mission($ctx['driverRows'] ?? [], $driverStops);
     ?>
-    <?php foreach ($ctx['driverRows'] ?? [] as $driver): ?>
+    <?php foreach ($sortedDrivers as $driver): ?>
       <?php
         $id = (int)$driver['id'];
-        $open = (int)$driver['pending'] + (int)$driver['in_transit'];
         $failed = (int)$driver['failed'];
         $stops = $driverStops[$id] ?? [];
-        $loud = $failed > 0 || ((int)$driver['stops'] === 0);
+        $mission = bakery_manager_phone_mission_from_stops($stops);
+        $loud = $failed > 0 || $mission['phase'] === 'empty';
         $closeout = $closeoutByDriver[$id] ?? null;
         $loadedUnits = (int)($closeout['loaded_units'] ?? 0);
         $needsClose = !empty($closeout['needs_closeout']);
         $isClosed = !empty($closeout['is_reconciled']);
-        $done = (int)$driver['delivered'];
-        $left = $open;
+        $openMission = in_array($mission['phase'], ['in_progress', 'not_started'], true);
+        $currentName = (string)($mission['current']['customer_name'] ?? '');
+        $glanceNow = '';
+        if ($mission['phase'] === 'done') {
+            $glanceNow = bakery_t('manager_phone.mission_done');
+        } elseif ($mission['phase'] === 'empty') {
+            $glanceNow = bakery_t('manager_phone.mission_no_stops');
+        } elseif ($mission['phase'] === 'not_started') {
+            $glanceNow = $currentName !== ''
+                ? bakery_t('manager_phone.mission_next', ['stop' => $currentName])
+                : bakery_t('manager_phone.mission_not_started');
+        } else {
+            $glanceNow = $currentName !== ''
+                ? bakery_t('manager_phone.mission_now', ['stop' => $currentName])
+                : bakery_t('manager_phone.mission_in_progress');
+        }
       ?>
-      <article class="manager-phone__driver<?php echo $loud ? ' is-loud' : ''; ?>">
+      <article class="manager-phone__driver manager-phone__driver--mission<?php echo $loud ? ' is-loud' : ''; ?><?php echo $openMission ? ' is-open' : ''; ?>">
         <header>
           <h3><?php echo $h($driver['name']); ?></h3>
-          <?php if ((int)$driver['in_transit'] > 0): ?>
-            <span class="manager-phone__live"><?php bakery_te('manager_phone.do_not_interrupt'); ?></span>
-          <?php endif; ?>
+          <span class="manager-phone__mission-progress"><?php echo $h($mission['progress_label']); ?></span>
         </header>
-        <p class="manager-phone__counts">
-          <?php echo number_format($done); ?> <?php bakery_te('manager_phone.stops_done'); ?>
-          · <?php echo number_format($left); ?> <?php bakery_te('manager_phone.stops_left'); ?>
-          <?php if ($loadedUnits > 0): ?>
-            · <?php echo number_format($loadedUnits); ?> <?php bakery_te('manager_phone.loaded_units'); ?>
+        <p class="manager-phone__mission-glance">
+          <?php echo $h($glanceNow); ?>
+          <?php if ($mission['last_done_time'] !== ''): ?>
+            <span class="manager-phone__mission-last"><?php echo $h(bakery_t('manager_phone.mission_last_at', ['time' => $mission['last_done_time']])); ?></span>
           <?php endif; ?>
-          <?php if ($failed > 0): ?> · <strong><?php echo number_format($failed); ?> <?php bakery_te('manager_phone.failed'); ?></strong><?php endif; ?>
         </p>
+        <?php if ((int)$driver['in_transit'] > 0): ?>
+          <p class="manager-phone__live"><?php bakery_te('manager_phone.do_not_interrupt'); ?></p>
+        <?php endif; ?>
+        <?php if ($failed > 0): ?>
+          <p class="manager-phone__counts"><strong><?php echo number_format($failed); ?> <?php bakery_te('manager_phone.failed'); ?></strong></p>
+        <?php endif; ?>
+        <?php if ($stops): ?>
+          <details class="manager-phone__mission"<?php echo $openMission ? ' open' : ''; ?>>
+            <summary><?php bakery_te('manager_phone.mission_timeline'); ?></summary>
+            <?php if ($mission['done']): ?>
+              <h4 class="manager-phone__mission-label"><?php bakery_te('manager_phone.mission_done_so_far'); ?></h4>
+              <ol class="manager-phone__mission-list">
+                <?php foreach ($mission['done'] as $stop): ?>
+                  <?php $st = (string)$stop['delivery_status']; ?>
+                  <li class="is-<?php echo $h($st); ?>">
+                    <span class="manager-phone__mission-stop">
+                      <strong><?php echo $h((string)$stop['customer_name']); ?></strong>
+                      <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
+                    </span>
+                    <time><?php echo $h($stop['actual_time_label'] !== '' ? $stop['actual_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
+                  </li>
+                <?php endforeach; ?>
+              </ol>
+            <?php endif; ?>
+            <?php if ($mission['left']): ?>
+              <h4 class="manager-phone__mission-label"><?php bakery_te('manager_phone.mission_still_to_deliver'); ?></h4>
+              <ol class="manager-phone__mission-list" start="<?php echo (int)$mission['done_count'] + 1; ?>">
+                <?php foreach ($mission['left'] as $idx => $stop): ?>
+                  <?php
+                    $st = (string)$stop['delivery_status'];
+                    $isCurrent = $mission['current']
+                        && (int)($mission['current']['daily_order_id'] ?? 0) === (int)($stop['daily_order_id'] ?? 0);
+                  ?>
+                  <li class="is-<?php echo $h($st); ?><?php echo $isCurrent ? ' is-current' : ''; ?>">
+                    <span class="manager-phone__mission-stop">
+                      <strong><?php echo $h((string)$stop['customer_name']); ?></strong>
+                      <?php if ($isCurrent): ?>
+                        <small><?php bakery_te('manager_phone.mission_current_stop'); ?></small>
+                      <?php elseif ($stop['scheduled_time_label'] !== ''): ?>
+                        <small><?php echo $h(bakery_t('manager_phone.mission_scheduled', ['time' => $stop['scheduled_time_label']])); ?></small>
+                      <?php else: ?>
+                        <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
+                      <?php endif; ?>
+                    </span>
+                    <time><?php echo $h($stop['scheduled_time_label'] !== '' ? $stop['scheduled_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
+                  </li>
+                <?php endforeach; ?>
+              </ol>
+            <?php endif; ?>
+          </details>
+        <?php endif; ?>
         <?php
           $codCollected = null;
           $codTurnedIn = null;
           $dbPhone = $ctx['db'] ?? null;
           if ($dbPhone instanceof PDO && function_exists('route_manager_compute_cash_summary')) {
               $stopsForCash = $driverStops[$id] ?? [];
-              // Phone stop rows may lack payment fields; fall back to turn-in table only.
               if (!function_exists('bakery_cod_turnin_get') && is_readable(__DIR__ . '/cod_turnins.php')) {
                   require_once __DIR__ . '/cod_turnins.php';
               }
@@ -644,7 +893,6 @@ function bakery_manager_phone_render_routes(array $ctx): void
                   $codCollected = $cash['cash_on_hand'];
                   $codTurnedIn = $cash['cash_turned_in'];
               } elseif ($codTurnedIn !== null || (int)$driver['delivered'] > 0) {
-                  // Prefer amount_collected sum when phone stops lack COD flags.
                   $codCollected = 0.0;
                   foreach ($stopsForCash as $stopRow) {
                       if (($stopRow['delivery_status'] ?? '') === 'delivered'
@@ -657,41 +905,49 @@ function bakery_manager_phone_render_routes(array $ctx): void
           }
         ?>
         <?php if ($codCollected !== null || $codTurnedIn !== null): ?>
-          <p class="manager-phone__counts manager-phone__counts--cash">
-            <?php echo htmlspecialchars(bakery_t('manager_phone.cod_collected_vs_turned_in', [
-                'collected' => number_format((float)($codCollected ?? 0), 2),
-                'turned_in' => $codTurnedIn !== null ? number_format((float)$codTurnedIn, 2) : '—',
-            ], 'COD $:collected collected · $:turned_in turned in'), ENT_QUOTES, 'UTF-8'); ?>
-          </p>
-          <form method="post" class="manager-phone__cod-turnin">
-            <?php echo bakery_csrf_field(); ?>
-            <input type="hidden" name="manager_mutation" value="phone_cod_turnin">
-            <input type="hidden" name="view" value="routes">
-            <input type="hidden" name="driver_id" value="<?php echo $id; ?>">
-            <label><?php bakery_te('manager_phone.cod_turnin_amount', [], 'Turned in $'); ?>
-              <input type="number" step="0.01" min="0" name="amount" value="<?php echo htmlspecialchars($codTurnedIn !== null ? number_format((float)$codTurnedIn, 2, '.', '') : number_format((float)($codCollected ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8'); ?>">
-            </label>
-            <button class="manager-phone__btn" type="submit"><?php bakery_te('manager_phone.cod_turnin_save', [], 'Record turn-in'); ?></button>
-          </form>
+          <details class="manager-phone__cash-details">
+            <summary><?php bakery_te('manager_phone.cod_section'); ?></summary>
+            <p class="manager-phone__counts manager-phone__counts--cash">
+              <?php
+                $collectedLabel = number_format((float)($codCollected ?? 0), 2);
+                if ($codTurnedIn !== null) {
+                    $cashLine = bakery_t('manager_phone.cod_collected_vs_turned_in', [
+                        'collected' => $collectedLabel,
+                        'turned_in' => number_format((float)$codTurnedIn, 2),
+                    ], 'COD $:collected collected · $:turned_in turned in');
+                } else {
+                    $cashLine = bakery_t('manager_phone.cod_collected_turnin_missing', [
+                        'collected' => $collectedLabel,
+                    ], 'COD $:collected collected. Turn-in not recorded yet.');
+                }
+                echo htmlspecialchars($cashLine, ENT_QUOTES, 'UTF-8');
+              ?>
+            </p>
+            <form method="post" class="manager-phone__cod-turnin">
+              <?php echo bakery_csrf_field(); ?>
+              <input type="hidden" name="manager_mutation" value="phone_cod_turnin">
+              <input type="hidden" name="view" value="routes">
+              <input type="hidden" name="driver_id" value="<?php echo $id; ?>">
+              <label><?php bakery_te('manager_phone.cod_turnin_amount', [], 'Turned in $'); ?>
+                <input type="number" step="0.01" min="0" name="amount" value="<?php echo htmlspecialchars($codTurnedIn !== null ? number_format((float)$codTurnedIn, 2, '.', '') : number_format((float)($codCollected ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8'); ?>">
+              </label>
+              <button class="manager-phone__btn" type="submit"><?php bakery_te('manager_phone.cod_turnin_save', [], 'Record turn-in'); ?></button>
+            </form>
+          </details>
+        <?php endif; ?>
+        <?php if ($loadedUnits > 0): ?>
+          <p class="manager-phone__counts"><?php echo number_format($loadedUnits); ?> <?php bakery_te('manager_phone.loaded_units'); ?></p>
         <?php endif; ?>
         <?php if ($isClosed): ?>
           <p class="manager-phone__cadence"><?php bakery_te('manager_phone.route_closed'); ?></p>
         <?php endif; ?>
-        <?php if ($stops): ?>
-          <details>
-            <summary><?php bakery_te('manager_phone.show_stops'); ?></summary>
-            <ul class="manager-phone__list">
-              <?php foreach ($stops as $stop): ?>
-                <?php $st = (string)$stop['delivery_status']; ?>
-                <li class="is-<?php echo $h($st); ?>">
-                  <?php echo $h((string)$stop['customer_name']); ?>
-                  <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          </details>
-        <?php endif; ?>
         <div class="manager-phone__driver-actions">
+          <?php if (!empty($restoreByDriver[$id])): ?>
+            <?php bakery_route_restore_render_forms([$restoreByDriver[$id]], [
+                'manager_mutation' => 'restore_standing_stops',
+                'view' => 'routes',
+            ], 'manager-phone__btn route-restore-btn'); ?>
+          <?php endif; ?>
           <?php if ($needsClose && !$isClosed): ?>
             <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h(bakery_manager_phone_href($date, 'routes', ['sheet' => 'close', 'driver_id' => $id])); ?>"><?php bakery_te('manager_phone.close_route'); ?></a>
           <?php endif; ?>
@@ -701,6 +957,37 @@ function bakery_manager_phone_render_routes(array $ctx): void
     <?php endforeach; ?>
   </section>
   <?php
+}
+
+/**
+ * @return array{key:string,href:string,label_key:string}
+ */
+function bakery_manager_phone_kitchen_action(array $ctx): array
+{
+    $date = (string)($ctx['date'] ?? date('Y-m-d'));
+    $base = defined('BASE_URL') ? BASE_URL : '';
+    $center = $base . 'production_center.php?date=' . rawurlencode($date);
+    $bake = function_exists('bakery_ops_link_production')
+        ? bakery_ops_link_production($date, [], 'manager')
+        : $base . 'production.php?date=' . rawurlencode($date);
+    $pack = function_exists('bakery_ops_link_pack_list')
+        ? bakery_ops_link_pack_list($date, ['view' => 'product'], 'manager')
+        : $base . 'pack_list.php?' . http_build_query(['date' => $date, 'view' => 'product']);
+    $remaining = (int)($ctx['productionSummary']['remaining'] ?? 0);
+    $packRequired = (int)($ctx['packingSummary']['required_lines'] ?? 0);
+    $packChecked = (int)($ctx['packingSummary']['checked_lines'] ?? 0);
+    $committed = $ctx['plan_committed'] ?? null;
+    $drift = (int)($ctx['plan_drift'] ?? 0);
+    if ($committed !== true || $drift > 0) {
+        return ['key' => 'release', 'href' => $center, 'label_key' => 'nav.item.production_center'];
+    }
+    if ($remaining > 0) {
+        return ['key' => 'bake', 'href' => $bake, 'label_key' => 'manager_phone.open_bake'];
+    }
+    if ($packRequired > $packChecked) {
+        return ['key' => 'pack', 'href' => $pack, 'label_key' => 'manager_phone.open_pack'];
+    }
+    return ['key' => 'review', 'href' => $center, 'label_key' => 'nav.item.production_center'];
 }
 
 function bakery_manager_phone_render_kitchen(array $ctx): void
@@ -727,7 +1014,7 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
                 $committedTs = strtotime((string)($planState['commit']['committed_at'] ?? ''));
                 $committedAtLabel = bakery_t('manager_phone.plan_committed_at', [
                     'time' => $committedTs
-                        ? date('g:i A', $committedTs)
+                        ? bakery_locale_time($committedTs)
                         : (string)($planState['commit']['committed_at'] ?? ''),
                 ]);
                 $driftCount = (int)($planState['changed_since']['count'] ?? 0);
@@ -757,8 +1044,23 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
     <p><?php echo $remaining > 0
         ? htmlspecialchars(bakery_t('manager_phone.still_to_make', ['count' => $remaining]), ENT_QUOTES, 'UTF-8')
         : bakery_t('manager_phone.bake_covered'); ?></p>
-    <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('nav.item.production_center'); ?></a>
-    <a class="manager-phone__btn" href="<?php echo $h(bakery_ops_link_production($date, [], 'manager')); ?>"><?php bakery_te('manager_phone.open_bake'); ?></a>
+    <?php
+      $kitchenAction = bakery_manager_phone_kitchen_action([
+          'date' => $date,
+          'plan_committed' => $planStateAvailable ? ($committedAtLabel !== '') : null,
+          'plan_drift' => $driftCount,
+          'productionSummary' => $summary,
+          'packingSummary' => $pack,
+      ]);
+      $centerHref = (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date);
+      $bakeHref = bakery_ops_link_production($date, [], 'manager');
+    ?>
+    <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h($kitchenAction['href']); ?>"><?php bakery_te($kitchenAction['label_key']); ?></a>
+    <?php if ($kitchenAction['key'] === 'release' || $kitchenAction['key'] === 'review'): ?>
+      <a class="manager-phone__btn" href="<?php echo $h($bakeHref); ?>"><?php bakery_te('manager_phone.open_bake'); ?></a>
+    <?php else: ?>
+      <a class="manager-phone__btn" href="<?php echo $h($centerHref); ?>"><?php bakery_te('nav.item.production_center'); ?></a>
+    <?php endif; ?>
   </section>
 
   <section class="manager-phone__panel">
@@ -800,6 +1102,15 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
   <?php
 }
 
+function bakery_manager_phone_missed_route_href(string $date, int $driverId): string
+{
+    if ($driverId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return '';
+    }
+    $base = defined('BASE_URL') ? BASE_URL : '';
+    return $base . 'driver.php?driver_id=' . $driverId . '&date=' . rawurlencode($date);
+}
+
 function bakery_manager_phone_render_missed(array $ctx): void
 {
     $date = (string)$ctx['date'];
@@ -822,9 +1133,13 @@ function bakery_manager_phone_render_missed(array $ctx): void
     <?php else: ?>
       <ul class="manager-phone__list">
         <?php foreach ($missed['failed'] as $row): ?>
+          <?php $routeHref = bakery_manager_phone_missed_route_href($date, (int)($row['driver_id'] ?? 0)); ?>
           <li>
             <strong><?php echo $h($row['customer_name']); ?></strong>
             <small><?php echo $h((string)$row['driver_name']); ?></small>
+            <?php if ($routeHref !== ''): ?>
+              <a href="<?php echo $h($routeHref); ?>"><?php bakery_te('manager_phone.open_route'); ?></a>
+            <?php endif; ?>
           </li>
         <?php endforeach; ?>
       </ul>
@@ -838,9 +1153,13 @@ function bakery_manager_phone_render_missed(array $ctx): void
     <?php else: ?>
       <ul class="manager-phone__list">
         <?php foreach ($missed['pending'] as $row): ?>
+          <?php $routeHref = bakery_manager_phone_missed_route_href($date, (int)($row['driver_id'] ?? 0)); ?>
           <li>
             <strong><?php echo $h($row['customer_name']); ?></strong>
             <small><?php echo $h((string)$row['driver_name']); ?></small>
+            <?php if ($routeHref !== ''): ?>
+              <a href="<?php echo $h($routeHref); ?>"><?php bakery_te('manager_phone.open_route'); ?></a>
+            <?php endif; ?>
           </li>
         <?php endforeach; ?>
       </ul>

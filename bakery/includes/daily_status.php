@@ -349,20 +349,59 @@ function bakery_daily_status_stops(PDO $db, string $date): array
             }
             $customerId = (int)($delivery['customer_id'] ?? 0);
             $photos = $photosByStop[$driverId . ':' . $customerId] ?? [];
-            $hero = $photos !== [] ? bakery_route_summary_choose_hero_photo($photos) : null;
-            $photoUrl = is_array($hero) ? trim((string)($hero['url'] ?? '')) : '';
+            $classified = bakery_route_summary_classify_photos($photos);
+            $podHero = $classified['pod'] !== [] ? bakery_route_summary_choose_hero_photo($classified['pod']) : null;
+            $arrivalHero = $classified['arrival'][0] ?? null;
+            $podUrl = is_array($podHero) ? trim((string)($podHero['url'] ?? '')) : '';
+            $arrivalUrl = is_array($arrivalHero) ? trim((string)($arrivalHero['url'] ?? '')) : '';
+            $deliveryStatus = (string)($delivery['delivery_status'] ?? 'pending');
             $stops[] = [
                 'store_name' => (string)($delivery['customer_name'] ?? ''),
                 'driver_id' => $driverId,
                 'driver_name' => $driverName,
-                'delivery_status' => (string)($delivery['delivery_status'] ?? 'pending'),
+                'delivery_status' => $deliveryStatus,
                 'delivered_at' => bakery_daily_status_delivered_at($delivery),
-                'photo_present' => $photoUrl !== '',
-                'photo_url' => $photoUrl !== '' ? $photoUrl : null,
+                'photo_present' => $podUrl !== '',
+                'photo_url' => $podUrl !== '' ? $podUrl : null,
+                'pod_photo_present' => $podUrl !== '',
+                'arrival_photo_present' => $arrivalUrl !== '',
+                'arrival_photo_url' => $arrivalUrl !== '' ? $arrivalUrl : null,
+                'arrival_only' => $deliveryStatus === 'delivered' && $arrivalUrl !== '' && $podUrl === '',
             ];
         }
     }
     return $stops;
+}
+
+/**
+ * Delivered-stop proof coverage for the end-of-day snapshot.
+ *
+ * @param list<array<string,mixed>> $stops
+ * @return array{delivered:int,with_proof:int,arrival_only:int,missing_proof:int}
+ */
+function bakery_daily_status_photo_coverage(array $stops): array
+{
+    $delivered = 0;
+    $withProof = 0;
+    $arrivalOnly = 0;
+    foreach ($stops as $stop) {
+        if ((string)($stop['delivery_status'] ?? '') !== 'delivered') {
+            continue;
+        }
+        $delivered++;
+        if (!empty($stop['pod_photo_present'])) {
+            $withProof++;
+        }
+        if (!empty($stop['arrival_only'])) {
+            $arrivalOnly++;
+        }
+    }
+    return [
+        'delivered' => $delivered,
+        'with_proof' => $withProof,
+        'arrival_only' => $arrivalOnly,
+        'missing_proof' => $delivered - $withProof,
+    ];
 }
 
 /**
@@ -522,6 +561,7 @@ function bakery_daily_status_snapshot(PDO $db, string $date): array
         ];
     }
 
+    $statusStops = bakery_daily_status_stops($db, $date);
     return [
         'date' => $date,
         'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
@@ -532,7 +572,8 @@ function bakery_daily_status_snapshot(PDO $db, string $date): array
             'stops' => bakery_daily_status_unassigned_stops($routes['orders']),
             'standing_orders_without_route' => bakery_daily_status_standing_orders_without_route($db, $date),
         ],
-        'stops' => bakery_daily_status_stops($db, $date),
+        'stops' => $statusStops,
+        'photo_coverage' => bakery_daily_status_photo_coverage($statusStops),
         'survey' => bakery_daily_status_survey($db, $date, $assignedCounts),
     ];
 }

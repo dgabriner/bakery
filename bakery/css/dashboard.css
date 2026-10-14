@@ -60,6 +60,19 @@
     font-size: 1.05rem;
 }
 
+.ops-cron-status {
+    margin: 0.45rem 0 0;
+    max-width: 36rem;
+    color: var(--sf-text-secondary);
+    font-size: 0.92rem;
+    line-height: 1.35;
+}
+
+.ops-cron-status.is-missed {
+    color: var(--sf-warning, #9a6b12);
+    font-weight: 700;
+}
+
 .ops-date-strong {
     font-weight: 700;
     color: var(--sf-text);
@@ -567,6 +580,21 @@
     color: #9b2525;
 }
 
+.ops-admin-signin-list {
+    margin: 0.45rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.ops-admin-signin-list li {
+    margin: 0.35rem 0;
+}
+
+.ops-admin-signin-list button {
+    margin-left: 0.4rem;
+    font: inherit;
+    cursor: pointer;
+}
+
 @media (max-width: 900px) {
     .ops-flow-strip {
         flex-wrap: nowrap;
@@ -626,8 +654,13 @@
 }
 
 .ops-inline-action-btn {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 44px;
     padding: 0.35rem 0.65rem;
+    font-family: inherit;
     font-size: 0.82rem;
     font-weight: 600;
     color: var(--sf-text, #1a1a1a);

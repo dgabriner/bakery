@@ -59,6 +59,8 @@ function bakery_cost_margin_flag_text(array $flags): string
             <p class="cost-margin-kicker"><a href="products.php"><?php echo htmlspecialchars(bakery_t('cost_margin.back_to_products')); ?></a></p>
             <h1><?php echo htmlspecialchars(bakery_t('cost_margin.heading')); ?></h1>
             <p><?php echo htmlspecialchars(bakery_t('cost_margin.intro')); ?></p>
+            <p><?php echo htmlspecialchars(bakery_t('cost_margin.floor_note')); ?></p>
+            <p><?php echo htmlspecialchars(bakery_t('cost_margin.package_note')); ?></p>
             <p><?php echo htmlspecialchars(bakery_t('cost_margin.loss_note')); ?></p>
         </div>
         <a class="cost-margin-export" href="cost_margin.php?export=csv"><?php echo htmlspecialchars(bakery_t('cost_margin.export_csv')); ?></a>
@@ -75,6 +77,9 @@ function bakery_cost_margin_flag_text(array $flags): string
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_product')); ?></th>
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_piece_grams')); ?></th>
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_ingredient_cost')); ?></th>
+                        <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_floor')); ?></th>
+                        <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_upper')); ?></th>
+                        <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_priced_weight')); ?></th>
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_dough_loss')); ?></th>
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_unit_price')); ?></th>
                         <th scope="col"><?php echo htmlspecialchars(bakery_t('cost_margin.col_margin_dollars')); ?></th>
@@ -88,19 +93,28 @@ function bakery_cost_margin_flag_text(array $flags): string
                     <?php $flagText = bakery_cost_margin_flag_text($row['flags']); ?>
                     <tr<?php echo $flagText !== '' ? ' class="is-flagged"' : ''; ?>>
                         <th scope="row"><?php echo htmlspecialchars((string)$row['product_name']); ?></th>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_grams($row['piece_grams'])); ?></td>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['ingredient_cost'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_piece_grams')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_grams($row['piece_grams'])); ?></td>
                         <td class="num">
+                            <span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_ingredient_cost')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['ingredient_cost'])); ?>
+                            <?php foreach ($row['package_prices'] ?? [] as $packageNote): ?>
+                                <span class="cost-margin-share"><?php echo htmlspecialchars((string) $packageNote); ?></span>
+                            <?php endforeach; ?>
+                        </td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_floor')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['cost_floor'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_upper')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['cost_upper'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_priced_weight')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_percent($row['priced_dough_percent'])); ?></td>
+                        <td class="num">
+                            <span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_dough_loss')); ?></span>
                             <?php echo htmlspecialchars(bakery_cost_margin_format_money($row['dough_loss'])); ?>
                             <?php if ($row['loss_share_grams'] !== null): ?>
                                 <span class="cost-margin-share"><?php echo htmlspecialchars(bakery_cost_margin_format_grams($row['loss_share_grams'])); ?> g</span>
                             <?php endif; ?>
                         </td>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['unit_price'])); ?></td>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['margin_dollars'])); ?></td>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_percent($row['margin_percent'])); ?></td>
-                        <td class="num"><?php echo number_format((int)$row['delivered_90_days']); ?></td>
-                        <td><?php echo htmlspecialchars($flagText); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_unit_price')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['unit_price'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_margin_dollars')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['margin_dollars'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_margin_percent')); ?></span><?php echo htmlspecialchars(bakery_cost_margin_format_percent($row['margin_percent'])); ?></td>
+                        <td class="num"><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_delivered')); ?></span><?php echo number_format((int)$row['delivered_90_days']); ?></td>
+                        <td><span class="cost-margin-cell-label"><?php echo htmlspecialchars(bakery_t('cost_margin.col_flag')); ?></span><?php echo htmlspecialchars($flagText); ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -154,7 +168,9 @@ function bakery_cost_margin_flag_text(array $flags): string
         border: 1px solid var(--sf-border, #ddd4c6);
         border-radius: var(--sf-radius-md, 12px);
         background: var(--sf-surface, #fffefb);
+        container-type: inline-size;
     }
+    .cost-margin-cell-label { display: none; }
     .cost-margin-table {
         width: 100%;
         border-collapse: collapse;
@@ -201,6 +217,38 @@ function bakery_cost_margin_flag_text(array $flags): string
     @media (max-width: 720px) {
         .cost-margin-header { align-items: stretch; flex-direction: column; }
         .cost-margin-export { justify-content: center; }
+    }
+    @container (width < 720px) {
+        .cost-margin-table,
+        .cost-margin-table tbody,
+        .cost-margin-table tr,
+        .cost-margin-table th,
+        .cost-margin-table td { display: block; }
+        .cost-margin-table thead { display: none; }
+        .cost-margin-table tr {
+            margin: 0 0 12px;
+            border-bottom: 8px solid var(--sf-surface-muted, #f3eee6);
+        }
+        .cost-margin-table tbody th {
+            position: sticky;
+            inset-block-start: 0;
+            z-index: 1;
+            background: var(--sf-surface-muted, #f3eee6);
+        }
+        .cost-margin-table td {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            text-align: right;
+        }
+        .cost-margin-table .num { text-align: right; white-space: normal; }
+        .cost-margin-cell-label {
+            display: block;
+            color: var(--sf-text-secondary, #4a5c57);
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-align: left;
+        }
     }
 </style>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

@@ -6,6 +6,7 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/audit_log.php';
 require_once __DIR__ . '/photo_handler.php';
 require_once __DIR__ . '/route_manager_cash.php';
 require_once __DIR__ . '/cod_square_guard.php';
@@ -862,11 +863,8 @@ function route_manager_pickup_save_demand(
         throw new InvalidArgumentException('This stop is already on the van and cannot be edited here.');
     }
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : 0;
     $unitPrice = bakery_resolve_customer_price($db, $customer, $product);
     $lineTotal = round($quantity * $unitPrice, 2);
@@ -883,6 +881,7 @@ function route_manager_pickup_save_demand(
         $ins->execute([$dailyOrderId, $productId, $quantity, $unitPrice, $lineTotal]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
     if ($oldQty !== $quantity && function_exists('bakery_record_operational_event')) {
         bakery_record_operational_event(
             $db,

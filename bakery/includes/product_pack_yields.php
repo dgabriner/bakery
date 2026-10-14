@@ -1038,7 +1038,7 @@ function bakery_pack_normalize_count_unit($raw): ?int
         return null;
     }
     if ($value < 2 || $value > 500) {
-        throw new InvalidArgumentException('Use 2–500 pieces per tray or box, or leave blank.');
+        throw new InvalidArgumentException('Use 2 to 500 pieces per tray or box, or leave blank.');
     }
     return $value;
 }

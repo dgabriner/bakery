@@ -6,6 +6,10 @@
  *
  * CSV columns:
  *   ingredient name, vendor, SKU, pack grams, pack price, invoice number, invoice date
+ * Optional column: price_type (invoice, quote, or public_list).
+ * A missing price_type column, or a blank cell, counts as invoice. The original 7 columns still import.
+ * Only invoice rows are imported. A quote, public_list, or any other value is refused on that row
+ * and does not become the current cost.
  *
  * Usage:
  *   php scripts/import_ingredient_prices.php prices.csv
@@ -49,6 +53,9 @@ foreach (array_slice($argv, 1) as $arg) {
 if ($path === null) {
     fwrite(STDOUT, "Usage: php scripts/import_ingredient_prices.php <file.csv> [--apply]\n");
     fwrite(STDOUT, "Columns: ingredient name, vendor, SKU, pack grams, pack price, invoice number, invoice date\n");
+    fwrite(STDOUT, "Optional column: price_type (invoice, quote, or public_list).\n");
+    fwrite(STDOUT, "A missing price_type column, or a blank cell, counts as invoice. The original 7 columns still import.\n");
+    fwrite(STDOUT, "Only invoice rows are imported. A quote, public_list, or any other value is refused on that row and does not become the current cost.\n");
     fwrite(STDOUT, "Dry-run is the default. --apply writes price history on the local database.\n");
     exit($argv !== null && count($argv) > 1 && in_array('--help', $argv, true) ? 0 : 1);
 }
@@ -70,6 +77,10 @@ foreach ($result['unmatched'] as $row) {
 }
 fwrite(STDOUT, 'Invalid: ' . count($result['invalid']) . "\n");
 foreach ($result['invalid'] as $row) {
-    fwrite(STDOUT, '  line ' . (int)$row['line'] . ': ' . $row['ingredient_name'] . ' (' . $row['error'] . ")\n");
+    $reason = (string)($row['error'] ?? '');
+    if (strpos($reason, 'ingredient_prices.') === 0) {
+        $reason = bakery_t($reason, ['type' => (string)($row['price_type'] ?? '')]);
+    }
+    fwrite(STDOUT, '  line ' . (int)$row['line'] . ': ' . $row['ingredient_name'] . ' (' . $reason . ")\n");
 }
 exit(0);

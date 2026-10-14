@@ -12,6 +12,7 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/operational_exceptions.php';
 require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/sfb_origin.php';
+require_once __DIR__ . '/cron_run.php';
 
 /**
  * Strip credentials / SQL internals from exception messages shown to managers.
@@ -109,25 +110,20 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
     $sectionErrors = [];
     $exceptions = [];
 
-    if (!function_exists('bakery_cron_is_stale')) {
-        $cronFile = __DIR__ . '/cron_run.php';
-        if (is_readable($cronFile)) {
-            require_once $cronFile;
-        }
-    }
-    if (function_exists('bakery_cron_is_stale') && bakery_cron_is_stale('demand_scheduler', 26.0)) {
-        $ageHours = function_exists('bakery_cron_age_hours') ? bakery_cron_age_hours('demand_scheduler') : null;
-        $ageLabel = $ageHours === null ? '?' : (string)(int)ceil($ageHours);
+    $schedulerStatus = function_exists('bakery_demand_scheduler_board_status')
+        ? bakery_demand_scheduler_board_status($db)
+        : null;
+    if (is_array($schedulerStatus) && !empty($schedulerStatus['warn'])) {
         $exceptions[] = bakery_ops_exception([
             'type' => 'cron_overnight_stale',
             'severity' => 'warning',
             'category' => 'demand',
-            'title' => function_exists('bakery_t')
-                ? (string)bakery_t('dashboard.cron_overnight_stale', ['hours' => $ageLabel], 'Overnight generation stale (:hours h)')
-                : ('Overnight generation stale (' . $ageLabel . 'h)'),
-            'detail' => 'demand_scheduler last run is missing or older than 26 hours. Check docs/CRON_KIT.md and health_deploy.php cron.*.age_hours.',
+            'title' => bakery_t('dashboard.cron_overnight_stale'),
+            'detail' => bakery_t('dashboard.cron_overnight_stale_detail', [
+                'date' => (string)($schedulerStatus['tomorrow'] ?? ''),
+            ]),
             'href' => (defined('BASE_URL') ? BASE_URL : '') . 'health_deploy.php',
-            'action' => 'Verify overnight cron',
+            'action' => bakery_t('dashboard.cron_overnight_action'),
             'work_key' => 'cron-overnight-stale-' . $date,
         ]);
     }
@@ -1026,5 +1022,6 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         'has_blocking_error' => $sectionErrors !== [],
         'links' => $links,
         'inventory_ready' => $inventoryReady,
+        'demand_scheduler' => $schedulerStatus,
     ];
 }

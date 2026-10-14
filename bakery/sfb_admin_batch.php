@@ -97,7 +97,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
     <div>
       <p class="page-eyebrow"><?php bakery_te('sfb.admin_batch_detail'); ?></p>
       <h1><?php echo htmlspecialchars($batch['baker_name']); ?> · <?php echo htmlspecialchars($batch['name']); ?></h1>
-      <p><?php echo htmlspecialchars($batch['formula_name'] ?? '—'); ?> · Started <?php echo htmlspecialchars(date('M j, Y g:ia', strtotime($batch['started_at']))); ?></p>
+      <p><?php echo htmlspecialchars($batch['formula_name'] ?? '-'); ?> · Started <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($batch['started_at']), 'M j, Y g:ia')); ?></p>
     </div>
     <a href="sfb_admin_overview.php"><?php bakery_te('sfb.admin_back_to_overview'); ?></a>
   </header>
@@ -138,7 +138,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
                   <strong><?php echo htmlspecialchars($message['author_name']); ?></strong>
                   · <?php echo $message['author_type'] === 'admin' ? bakery_t('sfb.from_sour_flour') : bakery_t('sfb.from_baker'); ?>
                   <?php if ($isQuestion): ?>· <span class="sfb-admin__pill <?php echo $isResolved ? 'sfb-admin__pill--ok' : 'sfb-admin__pill--attention'; ?>"><?php echo $isResolved ? bakery_t('sfb.answered') : bakery_t('sfb.question'); ?></span><?php endif; ?>
-                  · <time datetime="<?php echo htmlspecialchars(date('c', strtotime($message['created_at']))); ?>"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($message['created_at']))); ?></time>
+                  · <time datetime="<?php echo htmlspecialchars(date('c', strtotime($message['created_at']))); ?>"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($message['created_at']), 'M j, g:ia')); ?></time>
                 </p>
                 <?php if ($isQuestion && !$isResolved): ?>
                   <form method="post">
@@ -152,7 +152,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
               <p class="sfb-admin__message-body"><?php echo nl2br(htmlspecialchars($message['body'])); ?></p>
               <?php foreach ($threads['replies'][$messageId] ?? [] as $reply): ?>
                 <article class="sfb-admin__message sfb-admin__message--reply sfb-admin__message--<?php echo htmlspecialchars($reply['author_type']); ?>">
-                  <p class="sfb-admin__message-meta"><strong><?php echo htmlspecialchars($reply['author_name']); ?></strong> · <?php echo $reply['author_type'] === 'admin' ? bakery_t('sfb.from_sour_flour') : bakery_t('sfb.from_baker'); ?> · <time datetime="<?php echo htmlspecialchars(date('c', strtotime($reply['created_at']))); ?>"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($reply['created_at']))); ?></time></p>
+                  <p class="sfb-admin__message-meta"><strong><?php echo htmlspecialchars($reply['author_name']); ?></strong> · <?php echo $reply['author_type'] === 'admin' ? bakery_t('sfb.from_sour_flour') : bakery_t('sfb.from_baker'); ?> · <time datetime="<?php echo htmlspecialchars(date('c', strtotime($reply['created_at']))); ?>"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($reply['created_at']), 'M j, g:ia')); ?></time></p>
                   <p class="sfb-admin__message-body"><?php echo nl2br(htmlspecialchars($reply['body'])); ?></p>
                 </article>
               <?php endforeach; ?>
@@ -176,9 +176,9 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <div class="sfb-admin__fact"><span>Baker</span><strong><?php echo htmlspecialchars($batch['baker_name']); ?></strong></div>
           <div class="sfb-admin__fact"><span>Current phase</span><strong><?php echo htmlspecialchars(bakery_sfb_phase_label($phase)); ?></strong></div>
           <div class="sfb-admin__fact"><span>Loaves</span><strong><?php echo (int)$batch['loaf_count']; ?></strong></div>
-          <div class="sfb-admin__fact"><span>Oven</span><strong><?php echo $batch['oven_temp_f'] !== null ? (float)$batch['oven_temp_f'] . '°F' : '—'; ?></strong></div>
-          <div class="sfb-admin__fact"><span>Mix</span><strong><?php echo $batch['mix_minutes'] !== null ? (int)$batch['mix_minutes'] . ' min' : '—'; ?></strong></div>
-          <div class="sfb-admin__fact"><span>Formula</span><strong><?php echo htmlspecialchars($batch['formula_name'] ?? '—'); ?></strong></div>
+          <div class="sfb-admin__fact"><span>Oven</span><strong><?php echo $batch['oven_temp_f'] !== null ? (float)$batch['oven_temp_f'] . '°F' : '-'; ?></strong></div>
+          <div class="sfb-admin__fact"><span>Mix</span><strong><?php echo $batch['mix_minutes'] !== null ? (int)$batch['mix_minutes'] . ' min' : '-'; ?></strong></div>
+          <div class="sfb-admin__fact"><span>Formula</span><strong><?php echo htmlspecialchars($batch['formula_name'] ?? '-'); ?></strong></div>
         </div>
       </section>
 
@@ -187,7 +187,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <h2 id="sfbTimelineHeading">Batch timeline</h2>
           <ul class="sfb-admin__timeline">
             <?php foreach ($timeline as $event): ?>
-              <li><strong><?php echo htmlspecialchars($event['label']); ?></strong><br><span class="text-muted"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($event['at']))); ?></span></li>
+              <li><strong><?php echo htmlspecialchars($event['label']); ?></strong><br><span class="text-muted"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($event['at']), 'M j, g:ia')); ?></span></li>
             <?php endforeach; ?>
           </ul>
         </section>

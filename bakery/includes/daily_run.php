@@ -490,7 +490,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                         'detail' => (int)$confirmState['changed_since']['count']
                             . ' demand-affecting change'
                             . ((int)$confirmState['changed_since']['count'] === 1 ? '' : 's')
-                            . ' recorded after confirmation — review and confirm again.',
+                            . ' recorded after confirmation. Review and confirm again.',
                         'count' => (int)$confirmState['changed_since']['count'],
                         'href' => bakery_ops_link_daily_orders($date, ['review' => 'differences'], 'daily_run'),
                         'action' => 'Review and confirm again',
@@ -644,7 +644,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
                     $planStage['href'] = $links['daily_run'] . '#production_plan';
                     $planStage['summary'] = 'Committed · ' . $driftCount . ' demand change'
                         . ($driftCount === 1 ? '' : 's')
-                        . ' since commit — baker numbers are unchanged';
+                        . ' since commit. Baker numbers are unchanged';
                     $blockers[] = bakery_ops_exception([
                         'type' => 'production_plan_drift',
                         'severity' => 'warning',
@@ -1052,8 +1052,8 @@ function bakery_daily_run_build(PDO $db, string $date): array
         ['label' => 'In transit', 'value' => $inTransit],
         ['label' => 'Delivered', 'value' => $deliveredStops],
         ['label' => 'Failed', 'value' => $failed],
-        ['label' => 'Routes open', 'value' => $closeoutReady ? $routesOpen : '—'],
-        ['label' => 'Routes closed', 'value' => $closeoutReady ? $routesClosed : '—'],
+        ['label' => 'Routes open', 'value' => $closeoutReady ? $routesOpen : '-'],
+        ['label' => 'Routes closed', 'value' => $closeoutReady ? $routesClosed : '-'],
     ];
 
     if (($ccStages['delivery']['state'] ?? '') === 'unknown') {
@@ -1290,5 +1290,6 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'demand_review' => $demandReview,
         'inventory_ready' => $inventoryReady,
         'unrouted_standing_orders' => $unroutedStandingOrders,
+        'demand_scheduler' => $commandCenter['demand_scheduler'] ?? null,
     ];
 }

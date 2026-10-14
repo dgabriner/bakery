@@ -32,14 +32,37 @@ $driverId = max(0, (int)($_GET['driver_id'] ?? 0));
 $actorUserId = max(0, (int)($_GET['user_id'] ?? 0));
 $category = trim((string)($_GET['category'] ?? ''));
 
-$filters = ['limit' => 150];
-if ($context === 'day' || $context === 'order') {
+$dateFrom = trim((string)($_GET['date_from'] ?? ''));
+$dateUntil = trim((string)($_GET['date_until'] ?? ''));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+    $dateFrom = '';
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateUntil)) {
+    $dateUntil = '';
+}
+if ($dateFrom !== '' && $dateUntil !== '' && $dateFrom > $dateUntil) {
+    $swap = $dateFrom;
+    $dateFrom = $dateUntil;
+    $dateUntil = $swap;
+}
+
+$filters = ['limit' => bakery_operational_timeline_view_limit()];
+if ($dateFrom !== '' || $dateUntil !== '') {
+    if ($dateFrom !== '') {
+        $filters['since'] = $dateFrom . ' 00:00:00';
+    }
+    if ($dateUntil !== '') {
+        $filters['until'] = $dateUntil . ' 23:59:59';
+    }
+} elseif ($context === 'day' || $context === 'order') {
     $filters['operational_date'] = $selectedDate;
 }
 if ($context === 'customer' && $customerId > 0) {
     $filters['customer_id'] = $customerId;
-    unset($filters['operational_date']);
-    $filters['since'] = date('Y-m-d H:i:s', strtotime('-90 days'));
+    if ($dateFrom === '' && $dateUntil === '') {
+        unset($filters['operational_date']);
+        $filters['since'] = date('Y-m-d H:i:s', strtotime('-90 days'));
+    }
 } elseif ($customerId > 0) {
     $filters['customer_id'] = $customerId;
 }
@@ -57,6 +80,21 @@ if ($category !== '') {
     $filters['category'] = $category;
 }
 
+if (($_GET['export'] ?? '') === 'csv') {
+    $rows = bakery_operational_timeline_export_rows($db, $filters);
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="operational-timeline.csv"');
+    $stream = fopen('php://output', 'w');
+    if ($stream) {
+        fputcsv($stream, bakery_operational_timeline_csv_headers());
+        foreach ($rows as $row) {
+            fputcsv($stream, bakery_operational_timeline_csv_row($row));
+        }
+        fclose($stream);
+    }
+    exit;
+}
+
 $entries = bakery_operational_timeline_fetch($db, $filters);
 
 $contextTitle = 'Daily timeline';
@@ -66,7 +104,7 @@ if ($context === 'customer' && $customerId > 0) {
     $custStmt->execute([$customerId]);
     $custName = (string)($custStmt->fetchColumn() ?: 'Customer');
     $contextTitle = 'Customer timeline';
-    $contextSubtitle = $custName . ' — recent activity';
+    $contextSubtitle = $custName . '. Recent activity';
 } elseif ($context === 'order' && $dailyOrderId > 0) {
     $ctx = bakery_operational_order_context($db, $dailyOrderId);
     if ($ctx) {
@@ -147,6 +185,7 @@ require_once __DIR__ . '/includes/nav.php';
 .ot-badge--inventory { background: #e9d8fd; color: #44337a; }
 .ot-badge--billing { background: #fed7d7; color: #742a2a; }
 .ot-badge--closeout { background: #e2e8f0; color: #2d3748; }
+.ot-badge--bot { background: #feebc8; color: #7b341e; text-transform: none; letter-spacing: 0; }
 .ot-empty { text-align: center; padding: 48px 20px; color: #718096; background: #fff; border-radius: 12px; }
 .ot-panel { background: #fff; border-radius: 12px; padding: 8px 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
 </style>
@@ -212,6 +251,14 @@ require_once __DIR__ . '/includes/nav.php';
             </select>
         </div>
         <div>
+            <label for="ot-from"><?php bakery_te('timeline.date_from'); ?></label>
+            <input type="date" id="ot-from" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
+        </div>
+        <div>
+            <label for="ot-until"><?php bakery_te('timeline.date_until'); ?></label>
+            <input type="date" id="ot-until" name="date_until" value="<?= htmlspecialchars($dateUntil) ?>">
+        </div>
+        <div>
             <label for="ot-category">Category</label>
             <select id="ot-category" name="category">
                 <option value="">All</option>
@@ -225,7 +272,11 @@ require_once __DIR__ . '/includes/nav.php';
         <div style="align-self: end;">
             <button type="submit" class="btn btn-primary" style="width:100%;padding:9px 12px;">Apply filters</button>
         </div>
+        <div style="align-self: end;">
+            <button type="submit" name="export" value="csv" class="btn" style="width:100%;padding:9px 12px;"><?php bakery_te('timeline.export_csv'); ?></button>
+        </div>
     </form>
+    <p class="ot-meta" style="margin: -8px 0 16px;"><?php echo htmlspecialchars(bakery_t('timeline.view_cap', ['count' => bakery_operational_timeline_view_limit()])); ?></p>
 
     <div class="ot-panel">
         <?php if (empty($entries)): ?>
@@ -247,6 +298,9 @@ require_once __DIR__ . '/includes/nav.php';
                     <p class="ot-meta">
                         <?= htmlspecialchars(bakery_operational_format_datetime($entry['occurred_at'])) ?>
                         · <?= htmlspecialchars(bakery_operational_actor_label($entry)) ?>
+                        <?php if (($entry['actor_type'] ?? '') === 'bot'): ?>
+                        <span class="ot-badge ot-badge--bot"><?php bakery_te('actor.bot'); ?></span>
+                        <?php endif; ?>
                         <?php if (!empty($entry['driver_name']) && !empty($entry['actor_name']) && $entry['driver_name'] !== $entry['actor_name']): ?>
                         · Driver: <?= htmlspecialchars($entry['driver_name']) ?>
                         <?php endif; ?>

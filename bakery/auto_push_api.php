@@ -53,15 +53,15 @@ try {
             $status = bakery_auto_push_status(true);
             echo json_encode(array_merge($status, [
                 'message' => !empty($status['watching'])
-                    ? 'Auto-push ON — watching all local file changes'
-                    : 'Auto-push ON — watcher failed to start; use Sync or check auto_push.log',
+                    ? 'Auto-push ON. Watching all local file changes'
+                    : 'Auto-push ON. Watcher failed to start; use Sync or check auto_push.log',
             ]));
             break;
 
         case 'disable':
             bakery_auto_push_set_enabled(false);
             echo json_encode(array_merge(bakery_auto_push_status(false), [
-                'message' => 'Auto-push OFF — watcher stopped; use Sync to staging when ready',
+                'message' => 'Auto-push OFF. Watcher stopped; use Sync to staging when ready',
             ]));
             break;
 

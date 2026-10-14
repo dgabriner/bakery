@@ -72,12 +72,32 @@ driver_photo_assert(
         && strpos($script, 'function useNativeCamera()') !== false
 );
 driver_photo_assert(
-    'the first stop tap opens the native camera picker synchronously',
+    'stop open shows Take / Library / Skip without auto-launching the camera',
     strpos($script, 'function openNativeCameraPicker()') !== false
-        && strpos($script, 'autoOpenCamera: true') !== false
+        && strpos($script, 'autoOpenCamera: false') !== false
         && strpos($script, "opts.autoOpenCamera && startStep === 'photo'") !== false
         && strpos($script, 'input.click();') !== false
-        && strpos($page, 'openStopDeliveryFromEl(stop, { autoOpenCamera: true })') !== false
+        && strpos($page, 'openStopDeliveryFromEl(stop, { autoOpenCamera: false })') !== false
+        && strpos($script, "setStatus(i18n('native_camera_hint'), '');") !== false
+);
+driver_photo_assert(
+    'Take photo still opens the native picker synchronously on tap',
+    strpos($script, "\$('deliveryFilePickerBtn').addEventListener('click'") !== false
+        && strpos(driver_photo_section($script, "\$('deliveryFilePickerBtn').addEventListener('click'", "\$('deliveryGalleryPickerBtn').addEventListener('click'"), 'openNativeCameraPicker()') !== false
+);
+driver_photo_assert(
+    'mobile photo actions stay in document flow so Library cannot clip off-screen',
+    strpos($styles, 'In-flow action stack') !== false
+        && strpos($styles, '#deliveryPhotoModal.delivery-step-photo .delivery-camera-controls') !== false
+        && strpos($styles, 'position: static') !== false
+        && strpos($styles, '#deliveryPhotoModal.delivery-step-photo .delivery-camera-controls .delivery-gallery-btn') !== false
+        && strpos($styles, 'overflow-y: auto') !== false
+        && strpos($styles, 'touch-action: pan-y') !== false
+);
+driver_photo_assert(
+    'viewport height re-syncs after OS camera returns',
+    strpos($script, 'function syncPhotoModalViewportHeight()') !== false
+        && strpos($script, "visualViewport.addEventListener('resize', syncPhotoModalViewportHeight)") !== false
 );
 driver_photo_assert(
     'driver session refresh returns and applies the current CSRF token',
@@ -143,6 +163,20 @@ driver_photo_assert(
     strpos($styles, '--photo-modal-locked-height') !== false
         && strpos($styles, '100svh') !== false
         && strpos($script, 'function lockPhotoModalViewport()') !== false
+        && strpos($script, 'function smallViewportCap()') !== false
+        && strpos($script, "visualViewport.addEventListener('scroll'") === false
+);
+driver_photo_assert(
+    'phone invoice shell cannot grow past the small viewport',
+    strpos($styles, 'min(var(--photo-modal-locked-height, 100svh), 100svh)') !== false
+);
+$confirmSection = driver_photo_section($script, 'async function confirmDelivery', 'function finishDeliveryUi');
+driver_photo_assert(
+    'invoice confirm offers save-anyway when the delivered count differs',
+    $confirmSection !== ''
+        && strpos($confirmSection, "state.currentStep === 'invoice'") !== false
+        && strpos($confirmSection, 'showVarianceConfirm(pieces') !== false
+        && strpos($confirmSection, 'confirmDelivery(true)') !== false
 );
 driver_photo_assert(
     'narrow delivery actions use a non-overflowing grid',

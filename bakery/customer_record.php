@@ -33,7 +33,7 @@ $error = null;
 if ($customerId > 0) {
     try {
         $record = bakery_customer_record_build($db, $customerId, $selectedDate);
-        $page_title = 'Customer Record — ' . $record['customer']['name'];
+        $page_title = 'Customer Record.' . $record['customer']['name'];
     } catch (Throwable $e) {
         $error = $e->getMessage();
     }
@@ -319,6 +319,7 @@ require_once __DIR__ . '/includes/nav.php';
 .cr-history-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .cr-variance-pos { color: #2f855a; }
 .cr-variance-neg { color: #c53030; }
+.cr-estimated { display: block; font-size: 0.75rem; font-weight: 700; color: #975a16; }
 .cr-empty {
     color: #718096;
     font-style: italic;
@@ -413,7 +414,7 @@ require_once __DIR__ . '/includes/nav.php';
                     <?php echo (int)$c['id'] === $customerId ? 'selected' : ''; ?>>
                     <?php echo htmlspecialchars($c['name']); ?>
                     <?php if (!(bool)$c['is_active']): ?> (inactive)<?php endif; ?>
-                    <?php if (!empty($c['zone'])): ?> — <?php echo htmlspecialchars($c['zone']); ?><?php endif; ?>
+                    <?php if (!empty($c['zone'])): ?> - <?php echo htmlspecialchars($c['zone']); ?><?php endif; ?>
                 </option>
                 <?php endforeach; ?>
             </select>
@@ -444,10 +445,10 @@ require_once __DIR__ . '/includes/nav.php';
         if (!empty($cust['deliver_by']) || !empty($cust['deliver_after'])) {
             $parts = [];
             if (!empty($cust['deliver_after'])) {
-                $parts[] = 'after ' . date('g:i A', strtotime($cust['deliver_after']));
+                $parts[] = 'after ' . bakery_locale_time(strtotime($cust['deliver_after']));
             }
             if (!empty($cust['deliver_by'])) {
-                $parts[] = 'by ' . date('g:i A', strtotime($cust['deliver_by']));
+                $parts[] = 'by ' . bakery_locale_time(strtotime($cust['deliver_by']));
             }
             $deliverWindow = implode(', ', $parts);
         }
@@ -480,15 +481,15 @@ require_once __DIR__ . '/includes/nav.php';
                 </div>
                 <div class="cr-meta-item">
                     <span class="label">Phone</span>
-                    <span class="value"><?php echo $cust['phone'] ? htmlspecialchars($cust['phone']) : '—'; ?></span>
+                    <span class="value"><?php echo $cust['phone'] ? htmlspecialchars($cust['phone']) : '-'; ?></span>
                 </div>
                 <div class="cr-meta-item">
                     <span class="label">Email</span>
-                    <span class="value"><?php echo $cust['email'] ? htmlspecialchars($cust['email']) : '—'; ?></span>
+                    <span class="value"><?php echo $cust['email'] ? htmlspecialchars($cust['email']) : '-'; ?></span>
                 </div>
                 <div class="cr-meta-item" style="grid-column: span 2;">
                     <span class="label">Address</span>
-                    <span class="value"><?php echo $cust['address'] ? htmlspecialchars($cust['address']) : '—'; ?></span>
+                    <span class="value"><?php echo $cust['address'] ? htmlspecialchars($cust['address']) : '-'; ?></span>
                 </div>
                 <div class="cr-meta-item">
                     <span class="label">Delivery pattern</span>
@@ -502,7 +503,7 @@ require_once __DIR__ . '/includes/nav.php';
                 </div>
                 <div class="cr-meta-item">
                     <span class="label">Delivery window</span>
-                    <span class="value"><?php echo $deliverWindow !== '' ? htmlspecialchars($deliverWindow) : '—'; ?></span>
+                    <span class="value"><?php echo $deliverWindow !== '' ? htmlspecialchars($deliverWindow) : '-'; ?></span>
                 </div>
                 <div class="cr-meta-item">
                     <span class="label">Pricing tier</span>
@@ -573,7 +574,7 @@ require_once __DIR__ . '/includes/nav.php';
     </nav>
 
     <div class="cr-card">
-        <h2>Normal schedule — standing orders by weekday</h2>
+ <h2>Normal schedule. Standing orders by weekday</h2>
         <p style="margin:0 0 14px;color:#718096;font-size:0.88rem;">
             Recurring expectation from <code>standing_orders</code> and recurring route from <code>standing_routes</code>.
             This is not the dated delivery for <?php echo date('M j, Y', strtotime($selectedDate)); ?>.
@@ -631,7 +632,7 @@ require_once __DIR__ . '/includes/nav.php';
     ?>
 
     <div class="cr-card">
-        <h2>Selected date — <?php echo date('l, M j, Y', strtotime($selectedDate)); ?></h2>
+        <h2>Selected date. <?php echo date('l, M j, Y', strtotime($selectedDate)); ?></h2>
         <span class="cr-state-badge <?php echo bakery_customer_record_state_class($ctx['state']); ?>">
             <?php echo htmlspecialchars(bakery_customer_record_state_label($ctx['state'])); ?>
         </span>
@@ -682,13 +683,23 @@ require_once __DIR__ . '/includes/nav.php';
                                 <?php
                                 if ($line['delivered_quantity'] !== null && $line['delivered_quantity'] !== '') {
                                     echo (int)$line['delivered_quantity'];
+                                    if (!empty($line['delivered_quantity_estimated'])) {
+                                        echo '<span class="cr-estimated">' . htmlspecialchars(bakery_t('billing.line_estimated'), ENT_QUOTES, 'UTF-8') . '</span>';
+                                    }
                                 } else {
-                                    echo '—';
+                                    echo '-';
                                 }
                                 ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
+                    <?php if (!empty($ctx['unallocated_delivered_pieces'])): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars(bakery_t('billing.unallocated_pieces'), ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="num">0</td>
+                            <td class="num"><?php echo (int)$ctx['unallocated_delivered_pieces']; ?></td>
+                        </tr>
+                    <?php endif; ?>
                     </tbody>
                     <tfoot>
                         <tr>
@@ -721,8 +732,8 @@ require_once __DIR__ . '/includes/nav.php';
             <?php foreach ($ctx['diff_lines'] as $diff): ?>
                 <tr>
                     <td><?php echo htmlspecialchars($diff['product_name']); ?></td>
-                    <td class="num"><?php echo $diff['standing_qty'] === null ? '—' : (int)$diff['standing_qty']; ?></td>
-                    <td class="num"><?php echo $diff['daily_qty'] === null ? '—' : (int)$diff['daily_qty']; ?></td>
+                    <td class="num"><?php echo $diff['standing_qty'] === null ? '-' : (int)$diff['standing_qty']; ?></td>
+                    <td class="num"><?php echo $diff['daily_qty'] === null ? '-' : (int)$diff['daily_qty']; ?></td>
                     <td class="diff">
                         <?php
                         if ($diff['kind'] === 'missing_on_daily') {
@@ -820,7 +831,7 @@ require_once __DIR__ . '/includes/nav.php';
             <li style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
                 <strong><?= htmlspecialchars(bakery_operational_format_time($tlEntry['occurred_at'])) ?></strong>
                 <?= htmlspecialchars(date('M j', strtotime($tlEntry['occurred_at']))) ?>
-                — <?= htmlspecialchars($tlEntry['summary']) ?>
+                - <?= htmlspecialchars($tlEntry['summary']) ?>
                 <?php if (!empty($tlEntry['detail_lines'])): ?>
                 <div style="font-size:0.85rem;color:#718096;margin-top:4px;">
                     <?= htmlspecialchars(implode(' · ', $tlEntry['detail_lines'])) ?>
@@ -874,7 +885,7 @@ require_once __DIR__ . '/includes/nav.php';
                                 <?php endif; ?>
                             </span>
                         <?php else: ?>
-                            —
+                            -
                         <?php endif; ?>
                     </td>
                     <td class="num">$<?php echo number_format($order['display_amount'], 2); ?></td>

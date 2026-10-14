@@ -245,7 +245,8 @@ function bakery_pacific_display_time(string $value): string {
     }
     try {
         $dt = new DateTimeImmutable($raw);
-        return $dt->setTimezone(new DateTimeZone('America/Los_Angeles'))->format('M j, Y g:i A T');
+        $pacific = $dt->setTimezone(new DateTimeZone('America/Los_Angeles'));
+        return bakery_format_user_stamp($pacific, 'M j, Y g:i A') . ' ' . $pacific->format('T');
     } catch (Throwable $e) {
         return $raw;
     }

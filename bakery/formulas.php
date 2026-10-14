@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                     $stmt->execute([$dough_type_id, $source_id]);
                     if ($stmt->rowCount() === 0) {
-                        throw new Exception('Nothing to copy — the source formula is empty or all ingredients are already present.');
+                        throw new Exception('Nothing to copy. The source formula is empty or all ingredients are already present.');
                     }
                     if ($wants_json) {
                         formulas_json_response([
@@ -209,6 +209,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = $e->getMessage();
                 }
                 break;
+
+            case 'save_ingredient_subformula':
+                try {
+                    $linkedDoughId = trim((string) ($_POST['subformula_dough_type_id'] ?? ''));
+                    bakery_formula_save_ingredient_subformula(
+                        $db,
+                        (int) ($_POST['ingredient_id'] ?? 0),
+                        $linkedDoughId === '' ? null : (int) $linkedDoughId
+                    );
+                    formulas_redirect($dough_type_id, 'formula_subformula_saved');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
         }
     }
 }
@@ -251,6 +265,9 @@ if (isset($_GET['success'])) {
         case 'formula_part_removed':
             $success_message = bakery_t('formula_structure.removed_part');
             break;
+        case 'formula_subformula_saved':
+            $success_message = bakery_t('formula_structure.subformula_saved');
+            break;
     }
 }
 
@@ -282,6 +299,10 @@ try {
     ")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($formula_rows as $formula_row) {
         $formulas_by_dough[(int)$formula_row['dough_type_id']][] = $formula_row;
+    }
+    $subformula_catalog = bakery_formula_subformula_catalog($db);
+    foreach ($formulas_by_dough as $formula_dough_id => $formula_lines) {
+        $formulas_by_dough[$formula_dough_id] = bakery_formula_decorate_subformulas($formula_lines, $subformula_catalog);
     }
     $product_rows = $db->query('SELECT id, name, weight_grams, dough_type_id FROM products ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
     foreach ($product_rows as $product_row) {
@@ -1017,7 +1038,7 @@ try {
                     <?php if (empty($ingredients)): ?>
                         <div class="formula-starter-panel">
                             <strong>Start this formula</strong>
-                            <span>Pick a starter template — we'll match ingredients from your catalogue by name.</span>
+ <span>Pick a starter template. We'll match ingredients from your catalogue by name.</span>
                             <div class="starter-template-grid">
                                 <?php foreach ($starter_templates as $template_key => $template): ?>
                                     <button type="button"
@@ -1037,6 +1058,27 @@ try {
                                     <div class="ingredient-identity">
                                         <strong><?php echo htmlspecialchars($ingredient['ingredient_name'] ?? ''); ?></strong>
                                         <small><?php echo htmlspecialchars($ingredient['unit'] ?? ''); ?></small>
+                                        <?php if (bakery_formula_subformula_link_ready($db)): ?>
+                                            <form method="POST" class="inline-percentage-form">
+                                                <?php echo bakery_csrf_field(); ?>
+                                                <input type="hidden" name="action" value="save_ingredient_subformula">
+                                                <input type="hidden" name="dough_type_id" value="<?php echo $dough_type_id; ?>">
+                                                <input type="hidden" name="ingredient_id" value="<?php echo (int) $ingredient['ingredient_id']; ?>">
+                                                <label>
+                                                    <span><?php echo htmlspecialchars(bakery_t('formula_structure.subformula_link'), ENT_QUOTES, 'UTF-8'); ?></span>
+                                                    <select name="subformula_dough_type_id">
+                                                        <option value=""><?php echo htmlspecialchars(bakery_t('formula_structure.subformula_none'), ENT_QUOTES, 'UTF-8'); ?></option>
+                                                        <?php foreach ($dough_types as $link_dough): ?>
+                                                            <?php $link_dough_id = (int) $link_dough['id']; ?>
+                                                            <option value="<?php echo $link_dough_id; ?>"<?php echo (int) ($ingredient['subformula']['dough_type_id'] ?? 0) === $link_dough_id ? ' selected' : ''; ?>>
+                                                                <?php echo htmlspecialchars((string) $link_dough['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                </label>
+                                                <button type="submit" class="formula-save-button"><?php echo htmlspecialchars(bakery_t('formula_structure.save_batch'), ENT_QUOTES, 'UTF-8'); ?></button>
+                                            </form>
+                                        <?php endif; ?>
                                     </div>
                                     <form method="POST" class="inline-percentage-form">
                                         <?php echo bakery_csrf_field(); ?>

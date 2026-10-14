@@ -120,7 +120,7 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
     <article class="time-clock__fix<?php echo $flags ? ' time-clock__fix--flag' : ''; ?>">
       <p class="time-clock__fix-when">
         <?php echo $h(bakery_time_clock_format_time((string)$punch['clock_in_at'])); ?>
-        –
+        <?php echo bakery_locale_range_word(); ?>
         <?php echo $h($punch['clock_out_at'] ? bakery_time_clock_format_time((string)$punch['clock_out_at']) : bakery_t('time_clock.still_in')); ?>
         <?php if (!empty($punch['original_clock_in_at'])): ?>
           <span class="time-clock__corrected"><?php echo $h(bakery_t('time_clock.corrected')); ?></span>
@@ -136,7 +136,7 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
       <?php if (!empty($punch['original_clock_in_at'])): ?>
         <p class="time-clock__was"><?php echo $h(bakery_t('time_clock.was', [
             'time' => bakery_time_clock_format_time((string)$punch['original_clock_in_at'])
-                . ' – '
+                . ' ' . bakery_locale_range_word() . ' '
                 . ($punch['original_clock_out_at'] ? bakery_time_clock_format_time((string)$punch['original_clock_out_at']) : bakery_t('time_clock.still_in')),
         ])); ?></p>
         <?php if (!empty($punch['override_note'])): ?>
@@ -278,7 +278,7 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
                 <?php $dayMinutes = (int)($person['days'][$day] ?? 0); ?>
                 <div class="time-clock__day<?php echo $dayMinutes > 12 * 60 ? ' time-clock__day--flag' : ''; ?>">
                   <span><?php echo $h(bakery_t($dayShort[(string)date('N', strtotime($day . ' 12:00:00'))])); ?></span>
-                  <strong><?php echo $dayMinutes > 0 ? $h(bakery_time_clock_format_duration($dayMinutes)) : '–'; ?></strong>
+                  <strong><?php echo $dayMinutes > 0 ? $h(bakery_time_clock_format_duration($dayMinutes)) : '-'; ?></strong>
                 </div>
               <?php endforeach; ?>
             </div>

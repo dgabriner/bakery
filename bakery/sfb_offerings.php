@@ -190,7 +190,7 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
           <input type="hidden" name="action" value="buy">
           <input type="hidden" name="offering_id" value="<?php echo (int)$offering['id']; ?>">
           <?php echo bakery_sfb_checkout_key_input(); ?>
-          <button type="submit" class="btn btn-block" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.offerings_buy'); ?> — $<?php echo number_format((float)$offering['price_cents'] / 100, 2); ?></button>
+          <button type="submit" class="btn btn-block" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.offerings_buy'); ?> ($<?php echo number_format((float)$offering['price_cents'] / 100, 2); ?>)</button>
         </form>
         <?php if ($creditBalance > 0 && !in_array($kind, ['credits', 'donation', 'gift'], true)): ?>
           <form method="post" style="margin-top:8px;">
@@ -420,7 +420,7 @@ function bakery_sfb_render_offering_card(array $offering, int $creditBalance, ar
                   <?php elseif (($purchase['paid_with'] ?? '') === 'gift'): ?>
                     <span class="badge badge-info"><?php bakery_te('sfb.paid_with_gift'); ?></span>
                   <?php endif; ?>
-                  <br><small class="muted"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($purchase['created_at'])), ENT_QUOTES, 'UTF-8'); ?></small>
+                  <br><small class="muted"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($purchase['created_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8'); ?></small>
                 </span>
                 <span class="line-qty">
                   <span class="badge <?php

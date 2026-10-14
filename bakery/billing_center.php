@@ -196,7 +196,7 @@ require_once __DIR__ . '/includes/nav.php';
     <?php elseif ($panel === 'customer'): ?>
         <section class="bc-panel">
             <h2 style="margin:0 0 8px;font-size:1.1rem">Customer billing account</h2>
-            <p style="margin:0 0 16px;color:#64748b;font-size:.86rem">Financial-operational history from delivery snapshots — trace any charge back to its delivery.</p>
+ <p style="margin:0 0 16px;color:#64748b;font-size:.86rem">Financial-operational history from delivery snapshots. Trace any charge back to its delivery.</p>
 
             <form class="bc-form" method="get">
                 <input type="hidden" name="panel" value="customer">
@@ -220,7 +220,7 @@ require_once __DIR__ . '/includes/nav.php';
             <?php elseif ($account): ?>
                 <?php $cust = $account['customer']; ?>
                 <?php if ($account['missing_billing_contact']): ?>
-                    <div class="bc-alert">Billing exception: this customer has no email or address on file — statements may be incomplete.</div>
+ <div class="bc-alert">Billing exception: this customer has no email or address on file. Statements may be incomplete.</div>
                 <?php endif; ?>
 
                 <div class="bc-grid">
@@ -269,7 +269,7 @@ require_once __DIR__ . '/includes/nav.php';
                             <td><?php echo htmlspecialchars($inv['category_meta']['short']); ?></td>
                             <td class="num">
                                 <?php if ($inv['pricing_issue'] && !$inv['amount_is_billable']): ?>
-                                    <span title="Pricing issue — amount not trusted">—</span>
+ <span title="Pricing issue. Amount not trusted">-</span>
                                 <?php else: ?>
                                     $<?php echo number_format($inv['amount_is_billable'] ? $inv['billable_amount'] : $inv['display_amount'], 2); ?>
                                 <?php endif; ?>
@@ -292,7 +292,7 @@ require_once __DIR__ . '/includes/nav.php';
                         <?php foreach ($account['statements'] as $st): ?>
                             <tr>
                                 <td><?php echo date('M j, Y', strtotime($st['statement_date'])); ?></td>
-                                <td><?php echo htmlspecialchars($st['period_start'] . ' – ' . $st['period_end']); ?></td>
+                                <td><?php echo htmlspecialchars($st['period_start'] . ' ' . bakery_locale_range_word() . ' ' . $st['period_end']); ?></td>
                                 <td class="num">$<?php echo number_format((float)$st['total_amount'], 2); ?></td>
                                 <td><?php echo $st['sent_at'] ? htmlspecialchars(date('M j, Y', strtotime($st['sent_at'])) . ($st['sent_to_email'] ? ' → ' . $st['sent_to_email'] : '')) : 'Generated only'; ?></td>
                             </tr>
@@ -374,12 +374,12 @@ require_once __DIR__ . '/includes/nav.php';
                     <tbody>
                     <?php foreach ($recentExports as $ex): ?>
                         <tr>
-                            <td><?php echo date('M j, Y g:i A', strtotime($ex['created_at'])); ?></td>
+                            <td><?php echo bakery_format_user_stamp(strtotime($ex['created_at']), 'M j, Y g:i A'); ?></td>
                             <td><code><?php echo htmlspecialchars($ex['export_key']); ?></code></td>
-                            <td><?php echo htmlspecialchars($ex['period_start'] . ' – ' . $ex['period_end']); ?></td>
+                            <td><?php echo htmlspecialchars($ex['period_start'] . ' ' . bakery_locale_range_word() . ' ' . $ex['period_end']); ?></td>
                             <td class="num"><?php echo number_format((int)$ex['row_count']); ?></td>
                             <td class="num"><?php echo number_format((int)$ex['invoice_count']); ?></td>
-                            <td><?php echo htmlspecialchars($ex['created_by_name'] ?? '—'); ?></td>
+                            <td><?php echo htmlspecialchars($ex['created_by_name'] ?? '-'); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

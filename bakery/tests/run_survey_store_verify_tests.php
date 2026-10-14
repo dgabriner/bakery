@@ -199,6 +199,44 @@ $assert(
     'closed store_verify is not public'
 );
 $assert(bakery_survey_token_allows_public([]) === false, 'missing survey is not public');
+$assert(function_exists('bakery_survey_token_is_expired'), 'survey tokens can expire');
+$assert(function_exists('bakery_survey_bound_delivery_date'), 'survey tokens bind to one delivery date');
+if (function_exists('bakery_survey_token_is_expired') && function_exists('bakery_survey_bound_delivery_date')) {
+    $todayToken = [
+        'kind' => 'store_verify',
+        'status' => 'open',
+        'delivery_date' => '2026-10-14',
+        'token' => 'aabbccddeeff00112233445566778899',
+    ];
+    $assert(
+        bakery_survey_token_is_expired($todayToken, '2026-10-14') === false,
+        'a today token is usable on its delivery day'
+    );
+    $assert(
+        bakery_survey_token_is_expired($todayToken, '2026-10-15') === true,
+        'a today token expires the next day'
+    );
+    $assert(
+        bakery_survey_token_is_expired([
+            'kind' => 'store_verify',
+            'status' => 'open',
+            'delivery_date' => '2026-10-15',
+        ], '2026-10-14') === false,
+        'a tomorrow token stays usable the morning before'
+    );
+    $assert(
+        bakery_survey_token_allows_public([
+            'kind' => 'store_verify',
+            'status' => 'open',
+            'delivery_date' => '2020-01-01',
+        ]) === false,
+        'an expired delivery-date token is not public auth'
+    );
+    $assert(
+        bakery_survey_bound_delivery_date($todayToken, '2026-10-15') === '2026-10-14',
+        'a today token cannot be retargeted to another date'
+    );
+}
 $assert(bakery_survey_page_needs_login('', []) === true, 'no token still requires login');
 $assert(
     bakery_survey_page_needs_login('nope', []) === true,
@@ -361,13 +399,13 @@ bakery_locale(true);
 $assert(bakery_locale() === 'es', 'anonymous survey locale resolves to Spanish');
 $GLOBALS['bakery_i18n_catalog'] = null;
 $assert(
-    bakery_t('survey.store_verify_hq_title') === 'Todos los repartidores — próximo día de entrega',
+    bakery_t('survey.store_verify_hq_title') === 'Todos los repartidores. Próximo día de entrega',
     'Spanish catalog is active for survey HQ title'
 );
 bakery_set_locale('en', false);
 $GLOBALS['bakery_i18n_catalog'] = null;
 $assert(
-    bakery_t('survey.store_verify_hq_title') === 'All drivers — next delivery day',
+    bakery_t('survey.store_verify_hq_title') === 'All drivers. Next delivery day',
     'English switch works for survey strings'
 );
 $_SERVER['SCRIPT_NAME'] = '/cli.php';
@@ -377,7 +415,11 @@ $assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'en
 $assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
 $assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
 $assert(strpos($commsSrc, 'survey_coverage') !== false || strpos($commsSrc, 'surveyCoverage') !== false, 'Survey Center shows coverage radar');
-$assert(strpos($commsSrc, 'bakery_survey_store_verify_unassigned_stores') !== false, 'coverage radar uses unassigned-store helper');
+$assert(strpos($commsSrc, 'bakery_unassigned_for_date') !== false, 'coverage radar uses the shared unassigned-for-date query');
+$assert(strpos($commsSrc, 'tc-unassigned-names') !== false, 'Survey Center lists every unassigned store name');
+$assert(strpos($commsSrc, 'texts.survey_today_link') !== false, 'Survey Center offers a today survey link for morning texts');
+$assignSrc = (string)file_get_contents($root . '/driver_assignment.php');
+$assert(strpos($assignSrc, 'bakery_unassigned_for_date') !== false, 'driver assignment uses the shared unassigned-for-date query');
 $assert(strpos($commsSrc, 'bakery_survey_store_verify_empty_drivers') !== false, 'coverage radar uses empty-driver helper');
 $assert(strpos($commsSrc, 'page.survey_center') !== false, 'surveys view uses Survey Center page title');
 
@@ -386,7 +428,12 @@ $assert(strpos($navCatalog, "nav_key' => 'survey_center'") !== false, 'navigatio
 $assert(substr_count($navCatalog, "text_comms.php?view=surveys") >= 2, 'Survey Center appears in Workday and Delivery');
 $navSrc = (string)file_get_contents($root . '/includes/nav.php');
 $assert(strpos($navSrc, 'text_comms.php?view=surveys') === false, 'manager navigation omits Survey Center');
-$assert(strpos($navSrc, 'survey.php') !== false, 'driver More includes tomorrow stores survey link');
+$assert(strpos($navSrc, 'survey.php') !== false, 'driver and manager nav include survey.php');
+$assert(preg_match("/currentPage === 'survey'/", $navSrc) === 1, 'primary nav lights Survey');
+$assert(strpos($surveyPhp, 'survey-day-chip') !== false, 'survey hub and store-verify expose Today/Tomorrow day chips');
+$assert(strpos($surveyPhp, '$isManager ? 0') !== false, 'manager hub always mints HQ all-drivers surveys');
+$assert(strpos($surveyPhp, 'includes/header.php') !== false, 'logged-in survey hub uses app chrome');
+$assert(strpos($surveyPhp, 'hub_title_manager') !== false, 'manager hub uses everyone title');
 
 // ---- Coverage radar helpers -------------------------------------------------
 $hqFixture = [
@@ -468,6 +515,12 @@ $keys = [
     'nav.item.survey_center',
     'nav.item_desc.survey_center',
     'nav.survey_tomorrow',
+    'nav.survey_route',
+    'common.tomorrow',
+    'survey.hub_title_manager',
+    'survey.hub_day_aria',
+    'texts.survey_step1_help_hq',
+    'texts.survey_step2_help_hq',
     'texts.view_surveys',
     'texts.survey_coverage_title',
     'texts.survey_coverage_help',
@@ -492,7 +545,8 @@ $keys = [
 $tcSrc = (string)file_get_contents($root . '/text_comms.php');
 $assert(strpos($tcSrc, 'survey_step1_title') !== false, 'Survey Center shows step 1 lock-stores card');
 $assert(strpos($tcSrc, 'survey_step2_title') !== false, 'Survey Center shows step 2 set-order card');
-$assert(strpos($tcSrc, 'bakery_survey_dual_hub_links') !== false, 'coverage board mints dual hub links');
+$assert(strpos($tcSrc, 'bakery_survey_dual_hub_existing') !== false, 'coverage board reads hub links without creating them');
+$assert(strpos($tcSrc, "=== 'create_today_link'") !== false, 'today link is created by an explicit POST');
 $assert(strpos($surveyPhp, 'sibling_to_order') !== false, 'store-verify page links forward to order');
 $assert(strpos((string)file_get_contents($root . '/includes/survey_route_order_render.php'), 'sibling_to_verify') !== false, 'order page links back to lock-stores');
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');

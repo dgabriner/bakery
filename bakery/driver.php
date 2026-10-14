@@ -258,7 +258,7 @@ function bakery_render_driver_stop_item(
         data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-ordered-pieces="<?php echo (int)($stop['ordered_pieces'] ?? 0); ?>"
         data-stop-notes="<?php echo htmlspecialchars(bakery_driver_stop_notes($stop), ENT_QUOTES, 'UTF-8'); ?>"
-        data-scheduled-time="<?php echo !empty($stop['scheduled_delivery_time']) ? htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8') : ''; ?>"
+        data-scheduled-time="<?php echo !empty($stop['scheduled_delivery_time']) ? htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8') : ''; ?>"
         data-deliver-after="<?php echo htmlspecialchars((string)($stop['deliver_after'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-deliver-by="<?php echo htmlspecialchars((string)($stop['deliver_by'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-lat="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
@@ -292,7 +292,7 @@ function bakery_render_driver_stop_item(
                 <div class="stop-item-meta">
                     <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
                     <?php if ($receivingHours !== ''): ?><span><?php echo htmlspecialchars($receivingHours); ?></span><?php endif; ?>
-                    <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+                    <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
                     <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
                 </div>
             </div>
@@ -847,7 +847,7 @@ document.body.classList.add('driver-route-prep');
         <div class="next-stop-meta" id="nextStopMeta">
             <?php if (!empty($nextStop['zone'])): ?><span><?php echo htmlspecialchars($nextStop['zone']); ?></span><?php endif; ?>
             <?php if ($nextReceivingHours !== ''): ?><span><?php echo htmlspecialchars($nextReceivingHours); ?></span><?php endif; ?>
-            <?php if (!empty($nextStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($nextStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+            <?php if (!empty($nextStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($nextStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
             <?php if ((int)($nextStop['ordered_pieces'] ?? 0) > 0): ?><span><?php echo htmlspecialchars(bakery_t('driver.pieces_ordered', ['count' => number_format((int)$nextStop['ordered_pieces'])])); ?></span><?php endif; ?>
         </div>
         <?php if ($stopNotes !== ''): ?>
@@ -1190,6 +1190,7 @@ document.body.classList.add('driver-route-prep');
                         <div><strong><?php bakery_te('driver.confirm_delivery'); ?></strong><span id="deliveryConfirmationHint"><?php bakery_te('driver.confirm_delivery_hint'); ?></span></div>
                         <span class="delivery-confirmation-total" id="deliveryConfirmationTotal">$0.00</span>
                     </div>
+                    <p id="deliveryWellOverWarning" class="delivery-well-over" hidden></p>
                     <div class="delivery-variance-alert" id="deliveryVarianceAlert" hidden role="alert">
                         <strong><?php bakery_te('driver.variance_title'); ?></strong>
                         <span id="deliveryVarianceText"></span>
@@ -1211,6 +1212,10 @@ document.body.classList.add('driver-route-prep');
                                         <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
                                     </div>
                                 </label>
+                                <div id="deliveryProductCounts" class="delivery-product-counts" hidden>
+                                    <p id="deliveryProductCountsPrompt"></p>
+                                    <div id="deliveryProductCountList"></div>
+                                </div>
                                 <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
                                     <div class="quantity-stepper quantity-stepper--large">
                                         <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
@@ -1534,6 +1539,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'credits_suffix' => bakery_t('driver.credits_suffix'),
     'delivering_more' => bakery_t('driver.delivering_more'),
     'delivering_fewer' => bakery_t('driver.delivering_fewer'),
+    'product_counts_prompt' => bakery_t('driver.product_counts_prompt'),
+    'product_count_ordered' => bakery_t('driver.product_count_ordered'),
+    'product_count_label' => bakery_t('driver.product_count_label'),
+    'well_over_ordered' => bakery_t('driver.well_over_ordered'),
+    'product_counts_mismatch' => bakery_t('driver.product_counts_mismatch'),
     'enter_cod_details' => bakery_t('driver.enter_cod_details'),
     'enter_delivery_details' => bakery_t('driver.enter_delivery_details'),
     'billable_pieces' => bakery_t('driver.billable_pieces'),
@@ -2308,7 +2318,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                 if (!el) return;
                 el.setAttribute('data-route-order', row.order);
                 var badge = el.querySelector('.stop-item-order');
-                if (badge) badge.textContent = row.order ? '#' + row.order : '#—';
+ if (badge) badge.textContent = row.order ? '#' + row.order : '#-';
             });
             routeAdjust.open = false;
             refreshRouteUi();
@@ -3066,7 +3076,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                 return;
             }
 
-            if (openStopDeliveryFromEl(stop, { autoOpenCamera: true })) {
+            if (openStopDeliveryFromEl(stop, { autoOpenCamera: false })) {
                 return;
             }
 

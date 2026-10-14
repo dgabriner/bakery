@@ -108,7 +108,7 @@ $savedMessages = [
     'undone' => bakery_t('sfb.learn_step_undone'),
 ];
 
-$page_title = $lesson['title'] . ' — ' . bakery_t('sfb.learn_title');
+$page_title = $lesson['title'] . ' - ' . bakery_t('sfb.learn_title');
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];

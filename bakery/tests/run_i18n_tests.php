@@ -200,4 +200,68 @@ i18n_assert('Spanish short count', bakery_t('ux.cc.short_many', ['count' => 2]) 
 i18n_assert('Spanish nothing to invoice', bakery_t('ux.cc.nothing_to_invoice') === 'Nada que facturar todavía');
 i18n_assert('Spanish mixed pan dulce pricing', bakery_t('ux.pricing.mixed') === 'Precio mixto de pan dulce');
 
+foreach (['en.php', 'es.php'] as $langFile) {
+    $langRaw = (string)file_get_contents($root . '/lang/' . $langFile);
+    i18n_assert($langFile . ' has no en dash U+2013', strpos($langRaw, "\u{2013}") === false);
+    i18n_assert($langFile . ' has no em dash U+2014', strpos($langRaw, "\u{2014}") === false);
+}
+
+i18n_assert('shared locale clock exists', function_exists('bakery_locale_time'));
+if (function_exists('bakery_locale_time')) {
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    bakery_set_locale('en', false);
+    i18n_assert('English clock is 8:12 AM', bakery_locale_time('2026-10-14 08:12:00') === '8:12 AM');
+    i18n_assert('English noon is 12:00 PM', bakery_locale_time('2026-10-14 12:00:00') === '12:00 PM');
+    i18n_assert('English midnight is 12:00 AM', bakery_locale_time('2026-10-14 00:00:00') === '12:00 AM');
+    i18n_assert('English clock keeps seconds', bakery_locale_time('2026-10-14 08:12:05', true) === '8:12:05 AM');
+    i18n_assert('English afternoon hour label', bakery_locale_hour_label(20) === '8 PM');
+
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    bakery_set_locale('es', false);
+    i18n_assert('Spanish clock is 8:12 a. m.', bakery_locale_time('2026-10-14 08:12:00') === '8:12 a. m.');
+    i18n_assert('Spanish afternoon is 3:05 p. m.', bakery_locale_time('2026-10-14 15:05:00') === '3:05 p. m.');
+    i18n_assert('Spanish noon is 12:00 p. m.', bakery_locale_time('2026-10-14 12:00:00') === '12:00 p. m.');
+    i18n_assert('Spanish clock keeps seconds', bakery_locale_time('2026-10-14 08:12:05', true) === '8:12:05 a. m.');
+    i18n_assert('Spanish morning hour label', bakery_locale_hour_label(8) === '8 a. m.');
+}
+
+require_once $root . '/includes/login_history_insights.php';
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('en', false);
+i18n_assert(
+    'Login History English time is 8:12 AM',
+    bakery_login_history_when('2026-10-14 08:12:05', 'time') === '8:12 AM'
+);
+i18n_assert(
+    'Login History English stamp includes 8:12:05 AM',
+    strpos(bakery_login_history_when('2026-10-14 08:12:05'), '8:12:05 AM') !== false
+);
+i18n_assert('Login History English peak hour', bakery_login_history_format_hour(8) === '8 AM');
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('es', false);
+i18n_assert(
+    'Login History Spanish time is 8:12 a. m.',
+    bakery_login_history_when('2026-10-14 08:12:05', 'time') === '8:12 a. m.'
+);
+i18n_assert(
+    'Login History Spanish stamp includes 8:12:05 a. m.',
+    strpos(bakery_login_history_when('2026-10-14 08:12:05'), '8:12:05 a. m.') !== false
+);
+i18n_assert('Login History Spanish peak hour', bakery_login_history_format_hour(8) === '8 a. m.');
+
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('en', false);
+i18n_assert(
+    'English environment banner has no dash glyphs',
+    strpos(bakery_t('env.local'), "\u{2013}") === false && strpos(bakery_t('env.local'), "\u{2014}") === false
+        && strpos(bakery_t('env.staging'), "\u{2014}") === false
+);
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('es', false);
+i18n_assert(
+    'Spanish environment banner has no dash glyphs',
+    strpos(bakery_t('env.local'), "\u{2013}") === false && strpos(bakery_t('env.local'), "\u{2014}") === false
+        && strpos(bakery_t('env.staging'), "\u{2014}") === false
+);
+
 exit($failures > 0 ? 1 : 0);

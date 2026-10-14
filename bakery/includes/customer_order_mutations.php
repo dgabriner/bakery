@@ -9,6 +9,7 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/audit_log.php';
 require_once __DIR__ . '/billing_header.php';
 
 /**
@@ -23,6 +24,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         ? bakery_normalize_standing_day($dayOfWeek)
         : (((int)$dayOfWeek === 0) ? 7 : (int)$dayOfWeek);
     $qty = (int)$qty;
+    $auditBefore = bakery_audit_standing_snapshot($db, $customerId, $productId, $dayOfWeek);
 
     // Reuse prepared statements across a request (copy-week / bulk save hot paths).
     static $boundDb = null;
@@ -53,6 +55,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
             }
             $deleteLegacySundayStmt->execute([$customerId, $productId]);
         }
+        bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
         return;
     }
 
@@ -62,6 +65,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
             'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $clause['sql']
         );
         $stmt->execute(array_merge([$customerId, $productId], $clause['values']));
+        bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
         return;
     }
 
@@ -71,6 +75,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         );
     }
     $deleteExactStmt->execute([$customerId, $productId, $dayOfWeek]);
+    bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
 }
 
 /**
@@ -431,6 +436,60 @@ function bakery_customer_delivery_state(PDO $db, $customerId, $date) {
 
 function bakery_customer_update_daily_total(PDO $db, $dailyOrderId) {
     bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
+}
+
+function bakery_daily_order_standing_fill_column_ready(PDO $db): bool
+{
+    return function_exists('column_exists') && column_exists($db, 'daily_orders', 'standing_fill_blocked');
+}
+
+function bakery_daily_order_standing_fill_is_blocked(PDO $db, int $orderId, ?bool $ready = null): bool
+{
+    if ($orderId <= 0) {
+        return false;
+    }
+    if ($ready === null) {
+        $ready = bakery_daily_order_standing_fill_column_ready($db);
+    }
+    if (!$ready) {
+        return false;
+    }
+    $stmt = $db->prepare('SELECT standing_fill_blocked FROM daily_orders WHERE id = ? LIMIT 1');
+    $stmt->execute([$orderId]);
+    return (int)$stmt->fetchColumn() === 1;
+}
+
+function bakery_daily_order_set_standing_fill_blocked(PDO $db, int $orderId, bool $blocked, ?bool $ready = null): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+    if ($ready === null) {
+        $ready = bakery_daily_order_standing_fill_column_ready($db);
+    }
+    if (!$ready) {
+        return;
+    }
+    $db->prepare('UPDATE daily_orders SET standing_fill_blocked = ? WHERE id = ?')
+        ->execute([$blocked ? 1 : 0, $orderId]);
+}
+
+/**
+ * Mark a dated order so standing generation will not refill it.
+ * Called when a person removes the last positive line on purpose.
+ */
+function bakery_daily_order_block_standing_fill_if_empty(PDO $db, int $orderId): void
+{
+    if ($orderId <= 0 || !bakery_daily_order_standing_fill_column_ready($db)) {
+        return;
+    }
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ? AND quantity > 0'
+    );
+    $stmt->execute([$orderId]);
+    if ((int)$stmt->fetchColumn() === 0) {
+        bakery_daily_order_set_standing_fill_blocked($db, $orderId, true, true);
+    }
 }
 
 function bakery_customer_product_row(PDO $db, $productId) {
@@ -884,7 +943,7 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
         throw new InvalidArgumentException('Deliveries are paused for this date');
     }
     if ($state['locked']) {
-        throw new InvalidArgumentException('This delivery is locked — use Request a Change');
+        throw new InvalidArgumentException('This delivery is locked. Use Request a Change');
     }
 
     $dayOfWeek = bakery_standing_day_from_date($date);
@@ -892,11 +951,8 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
     $product = bakery_customer_product_row($db, $productId);
 
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : $regularQty;
 
     if ($quantity > 0) {
@@ -919,6 +975,10 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
         $del->execute([(int)$existing['id']]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    if ($quantity <= 0) {
+        bakery_daily_order_block_standing_fill_if_empty($db, (int)$dailyOrderId);
+    }
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
 
     if ($oldQty !== $quantity) {
         bakery_portal_record_event($db, BAKERY_OP_PORTAL_DAILY_CHANGED,
@@ -966,7 +1026,7 @@ function bakery_customer_skip_delivery(PDO $db, array $customer, $date, $note = 
 
     $state = bakery_customer_delivery_state($db, $customerId, $date);
     if ($state['locked']) {
-        throw new InvalidArgumentException('This delivery is locked — use Request a Change');
+        throw new InvalidArgumentException('This delivery is locked. Use Request a Change');
     }
 
     $note = trim((string)$note);
@@ -979,7 +1039,13 @@ function bakery_customer_skip_delivery(PDO $db, array $customer, $date, $note = 
 
     $daily = bakery_customer_daily_order_row($db, $customerId, $date);
     if ($daily && !$state['locked']) {
+        $skippedLines = $db->prepare('SELECT id, quantity, unit_price FROM daily_order_items WHERE daily_order_id = ?');
+        $skippedLines->execute([(int)$daily['id']]);
+        $skippedRows = $skippedLines->fetchAll(PDO::FETCH_ASSOC);
         $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id = ?')->execute([(int)$daily['id']]);
+        foreach ($skippedRows as $skippedRow) {
+            bakery_audit_daily_line_diff($db, $skippedRow, null);
+        }
         $db->prepare(
             'UPDATE daily_orders SET total_amount = 0, notes = ? WHERE id = ?'
         )->execute(['Customer skipped delivery', (int)$daily['id']]);
@@ -1079,7 +1145,7 @@ function bakery_customer_remove_pause_range(PDO $db, array $customer, $pauseId) 
         ->execute([$pauseId, $customerId]);
 
     bakery_portal_record_event($db, BAKERY_OP_PORTAL_PAUSE_REMOVED,
-        $customer['name'] . ' resumed deliveries (removed pause ' . $row['pause_start'] . ' – ' . $row['pause_end'] . ')',
+        $customer['name'] . ' resumed deliveries (removed pause ' . $row['pause_start'] . ' ' . bakery_locale_range_word() . ' ' . $row['pause_end'] . ')',
         $customerId,
         [
             'metadata' => [

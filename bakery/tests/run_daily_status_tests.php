@@ -79,6 +79,7 @@ $names = [
     'three' => $prefix . ' Three',
     'four' => $prefix . ' Four',
     'five' => $prefix . ' Five',
+    'six' => $prefix . ' Six',
 ];
 $insertCustomer = $db->prepare(
     "INSERT INTO customers (name, address, is_active, sfb_origin) VALUES (?, '1 Test St', 1, 'human')"
@@ -126,6 +127,19 @@ $db->prepare(
         (driver_id, customer_id, delivery_date, filename, original_filename, file_path, file_size, mime_type, photo_type)
      VALUES (?, ?, ?, 'status-proof.jpg', 'status-proof.jpg', 'status-proof.jpg', 12, 'image/jpeg', 'After')"
 )->execute([$adaId, $customerIds['one'], $date]);
+
+$insertOrder->execute([$customerIds['six'], $date, 'delivered', $date . ' 10:05:00']);
+$arrivalOnlyOrderId = (int)$db->lastInsertId();
+$db->prepare(
+    "INSERT INTO daily_order_assignments
+        (daily_order_id, driver_id, delivery_date, route_order, delivery_status, actual_delivery_time, scheduled_delivery_time)
+     VALUES (?, ?, ?, 2, 'delivered', '10:04:00', '09:30:00')"
+)->execute([$arrivalOnlyOrderId, $adaId, $date]);
+$db->prepare(
+    "INSERT INTO driver_photos
+        (driver_id, customer_id, delivery_date, filename, original_filename, file_path, file_size, mime_type, photo_type)
+     VALUES (?, ?, ?, 'status-arrival.jpg', 'status-arrival.jpg', 'status-arrival.jpg', 12, 'image/jpeg', 'Before')"
+)->execute([$adaId, $customerIds['six'], $date]);
 
 $hqToken = bin2hex(random_bytes(16));
 $adaVerify = bin2hex(random_bytes(16));
@@ -220,7 +234,7 @@ foreach ($body['drivers'] ?? [] as $row) {
     $byDriver[(int)($row['driver_id'] ?? 0)] = $row;
 }
 assert_true(isset($byDriver[$adaId], $byDriver[$boId]), 'both seeded drivers are in the driver list');
-assert_eq(1, (int)($byDriver[$adaId]['dated_stop_count'] ?? -1), 'Ada dated stop count is 1');
+assert_eq(2, (int)($byDriver[$adaId]['dated_stop_count'] ?? -1), 'Ada dated stop count is 2');
 assert_eq(2, (int)($byDriver[$adaId]['standing_stop_count'] ?? -1), 'Ada standing stop count is 2');
 assert_eq([$names['two']], array_values($byDriver[$adaId]['missing_standing_stops'] ?? []), 'Ada is missing Store Two');
 assert_eq(0, (int)($byDriver[$boId]['dated_stop_count'] ?? -1), 'Bo dated stop count is 0');
@@ -250,12 +264,35 @@ assert_true(is_array($delivered), 'stops include the delivered store');
 assert_eq($prefix . ' Ada', $delivered['driver_name'] ?? null, 'stop names the driver');
 assert_eq('delivered', $delivered['delivery_status'] ?? null, 'stop delivery status matches the route');
 assert_eq('09:15:00', $delivered['delivered_at'] ?? null, 'delivered time uses the recorded delivery time');
-assert_eq(true, $delivered['photo_present'] ?? null, 'photo present is yes');
+assert_eq(true, $delivered['photo_present'] ?? null, 'proof photo present is yes');
+assert_eq(true, $delivered['pod_photo_present'] ?? null, 'pod photo present matches the proof photo');
+assert_eq(false, $delivered['arrival_only'] ?? null, 'a proof photo is not arrival only');
 $photoUrl = (string)($delivered['photo_url'] ?? '');
 assert_true(
     $photoUrl !== '' && strpos($photoUrl, 'status-proof.jpg') !== false && strpos($photoUrl, (string)BASE_URL) === 0,
     'photo URL is built with the app base path'
 );
+$arrivalOnly = null;
+foreach ($stops as $stop) {
+    if ((string)($stop['store_name'] ?? '') === $names['six']) {
+        $arrivalOnly = $stop;
+        break;
+    }
+}
+assert_true(is_array($arrivalOnly), 'stops include the arrival-only delivery');
+assert_eq(false, $arrivalOnly['photo_present'] ?? null, 'an arrival photo is not proof of delivery');
+assert_eq(false, $arrivalOnly['pod_photo_present'] ?? null, 'arrival-only stop has no pod photo');
+assert_eq(true, $arrivalOnly['arrival_photo_present'] ?? null, 'arrival photo is tracked separately');
+assert_eq(true, $arrivalOnly['arrival_only'] ?? null, 'delivered stop with only an arrival photo is flagged');
+assert_true(
+    array_key_exists('photo_url', $arrivalOnly) && $arrivalOnly['photo_url'] === null,
+    'proof photo URL stays empty when the only photo is arrival'
+);
+$arrivalUrl = (string)($arrivalOnly['arrival_photo_url'] ?? '');
+assert_true(strpos($arrivalUrl, 'status-arrival.jpg') !== false, 'arrival photo URL is returned on its own field');
+$coverage = $body['photo_coverage'] ?? [];
+assert_eq(1, (int)($coverage['arrival_only'] ?? -1), 'snapshot coverage counts arrival-only delivered stops');
+assert_eq(1, (int)($coverage['with_proof'] ?? -1), 'snapshot coverage counts delivered stops with a proof photo');
 $fourInStops = false;
 foreach ($stops as $stop) {
     if ((string)($stop['store_name'] ?? '') === $names['four']) {
@@ -392,11 +429,16 @@ $afterHttp = daily_status_table_counts($db);
 assert_eq($before, $afterHttp, 'HTTP reads do not write');
 
 $db->prepare('DELETE FROM surveys WHERE token IN (?, ?, ?)')->execute([$hqToken, $adaVerify, $adaOrder]);
-$db->prepare('DELETE FROM driver_photos WHERE customer_id = ? AND delivery_date = ?')->execute([$customerIds['one'], $date]);
-$db->prepare('DELETE FROM daily_orders WHERE order_date = ? AND customer_id IN (?, ?)')->execute([
+$db->prepare('DELETE FROM driver_photos WHERE delivery_date = ? AND customer_id IN (?, ?)')->execute([
+    $date,
+    $customerIds['one'],
+    $customerIds['six'],
+]);
+$db->prepare('DELETE FROM daily_orders WHERE order_date = ? AND customer_id IN (?, ?, ?)')->execute([
     $date,
     $customerIds['one'],
     $customerIds['four'],
+    $customerIds['six'],
 ]);
 $db->prepare('DELETE FROM standing_orders WHERE customer_id = ?')->execute([$customerIds['five']]);
 $db->prepare('DELETE FROM standing_routes WHERE customer_id IN (?, ?, ?)')->execute([

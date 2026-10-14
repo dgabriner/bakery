@@ -314,20 +314,52 @@
     return window.innerWidth <= 768;
   }
 
+  function smallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (!probe) {
+      probe = document.createElement('div');
+      probe.id = 'deliverySvhProbe';
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:fixed;left:0;top:0;height:100svh;width:0;overflow:hidden;visibility:hidden;pointer-events:none;';
+      document.documentElement.appendChild(probe);
+    }
+    var measured = Math.round(probe.getBoundingClientRect().height);
+    return measured > 0 ? measured : 0;
+  }
+
+  function removeSmallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (probe && probe.parentNode) probe.parentNode.removeChild(probe);
+  }
+
+  function syncPhotoModalViewportHeight() {
+    if (!usesCompactCapture()) return;
+    var modal = $('deliveryPhotoModal');
+    if (!modal || !document.body.classList.contains('photo-mode-open')) return;
+    var visible = window.innerHeight || 0;
+    if (window.visualViewport && window.visualViewport.height > 0) {
+      visible = Math.round(window.visualViewport.height);
+    }
+    var small = smallViewportCap();
+    if (small > 0) visible = Math.min(visible, small);
+    if (visible > 0) {
+      modal.style.setProperty('--photo-modal-locked-height', Math.round(visible) + 'px');
+    }
+  }
+
   function lockPhotoModalViewport() {
     if (!usesCompactCapture()) return;
     var modal = $('deliveryPhotoModal');
     if (!modal) return;
-    state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
-    document.body.style.top = '-' + state.scrollLockY + 'px';
-    var height = window.innerHeight;
-    if (window.visualViewport && window.visualViewport.height > 0) {
-      height = Math.round(window.visualViewport.height);
+    if (!document.body.style.top) {
+      state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+      document.body.style.top = '-' + state.scrollLockY + 'px';
     }
-    modal.style.setProperty('--photo-modal-locked-height', height + 'px');
+    syncPhotoModalViewportHeight();
   }
 
   function unlockPhotoModalViewport() {
+    removeSmallViewportCap();
     var modal = $('deliveryPhotoModal');
     if (modal) {
       modal.style.removeProperty('--photo-modal-locked-height');
@@ -997,7 +1029,7 @@
       var lines = [];
       if (photo.created_at) lines.push(formatTime(photo.created_at));
       if (photo.notes) lines.push(photo.notes);
-      meta.textContent = lines.join('\n');
+ meta.textContent = lines.join('\\n');
     }
     if (viewer) {
       viewer.style.display = 'flex';
@@ -1089,7 +1121,7 @@
     if (type.indexOf('image/') === 0) return true;
     // Some iPhone/Android picker versions omit File.type even for a real
     // camera image. The server still performs authoritative MIME validation.
-    return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
+ return /\\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
   }
 
   function canvasToJpeg(canvas, quality) {
@@ -1115,7 +1147,7 @@
     var height = image.naturalHeight || image.height || 0;
     var maxDimension = 1920;
     var largest = Math.max(width, height);
-    var isSmallJpeg = /^image\/jpe?g$/i.test(file.type || '')
+ var isSmallJpeg = /^image\\/jpe?g$/i.test(file.type || '')
       && file.size <= 1500 * 1024
       && largest > 0
       && largest <= maxDimension;
@@ -1138,7 +1170,7 @@
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     var blob = await canvasToJpeg(canvas, 0.82);
-    var baseName = (file.name || 'delivery-photo').replace(/\.[^.]+$/, '');
+ var baseName = (file.name || 'delivery-photo').replace(/\\.[^.]+$/, '');
     return { blob: blob, filename: baseName + '.jpg' };
   }
 
@@ -1376,6 +1408,61 @@
     updatePricingUi();
   }
 
+  function deliveryTotalIsWellOver(delivered, ordered) {
+    if (delivered < 0) delivered = 0;
+    if (ordered <= 0) return delivered > 0;
+    return delivered > ordered && (delivered - ordered) * 2 >= ordered;
+  }
+
+  function renderProductCounts() {
+    var list = $('deliveryProductCountList');
+    if (!list) return;
+    var items = state.invoiceItems || [];
+    var html = '';
+    items.forEach(function (item) {
+      var id = Number(item.id) || 0;
+      if (id <= 0) return;
+      var ordered = Number(item.quantity) || 0;
+      var name = item.product_name || i18n('product');
+      html += '<label class="delivery-product-count">'
+        + '<span><strong>' + escapeHtml(name) + '</strong>'
+        + '<small>' + escapeHtml(i18n('product_count_ordered').replace(':count', String(ordered))) + '</small></span>'
+        + '<input type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" data-line-id="' + id + '" aria-label="'
+        + escapeHtml(i18n('product_count_label').replace(':product', name)) + '">'
+        + '</label>';
+    });
+    list.innerHTML = html;
+  }
+
+  function readProductCounts(pieces) {
+    var panel = $('deliveryProductCounts');
+    if (!panel || panel.hidden) return { ok: true, body: '' };
+    var inputs = panel.querySelectorAll('input[data-line-id]');
+    if (!inputs.length) return { ok: true, body: '' };
+    var any = false;
+    var sum = 0;
+    var parts = [];
+    var bad = false;
+    inputs.forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      if (raw !== '') any = true;
+      var count = raw === '' ? null : parseInt(raw, 10);
+      if (raw !== '' && (!Number.isInteger(count) || count < 0)) bad = true;
+      if (count != null) sum += count;
+      parts.push({ id: input.getAttribute('data-line-id'), count: count, filled: raw !== '' });
+    });
+    if (!any) return { ok: true, body: '' };
+    var allFilled = parts.every(function (part) { return part.filled; });
+    if (bad || !allFilled || sum !== pieces) {
+      return { ok: false, body: '' };
+    }
+    var body = '';
+    parts.forEach(function (part) {
+      body += '&line_delivered[' + encodeURIComponent(part.id) + ']=' + encodeURIComponent(String(part.count));
+    });
+    return { ok: true, body: body };
+  }
+
   function updateVarianceUi() {
     var alertEl = $('deliveryVarianceAlert');
     var textEl = $('deliveryVarianceText');
@@ -1392,6 +1479,24 @@
     if (orderedRef) {
       orderedRef.textContent = ordered > 0
         ? i18n('ordered_recording').replace(':ordered', ordered).replace(':pieces', pieces).replace(':credits', credits > 0 ? i18n('credits_suffix').replace(':credits', credits) : '')
+        : '';
+    }
+
+    var countsPanel = $('deliveryProductCounts');
+    var wellOverEl = $('deliveryWellOverWarning');
+    var countsPrompt = $('deliveryProductCountsPrompt');
+    var askForCounts = ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
+    if (countsPanel) countsPanel.hidden = !askForCounts;
+    if (askForCounts) {
+      var adjust = $('deliveryAdjustDetails');
+      if (adjust) adjust.open = true;
+    }
+    if (countsPrompt && askForCounts) countsPrompt.textContent = i18n('product_counts_prompt');
+    var wellOver = deliveryTotalIsWellOver(pieces, ordered);
+    if (wellOverEl) {
+      wellOverEl.hidden = !wellOver;
+      wellOverEl.textContent = wellOver
+        ? i18n('well_over_ordered').replace(':delivered', String(pieces)).replace(':ordered', String(ordered))
         : '';
     }
 
@@ -1565,6 +1670,10 @@
     }
     state.pendingVarianceConfirm = onConfirm;
     panel.hidden = false;
+    var okBtn = $('deliveryVarianceOkBtn');
+    if (okBtn && typeof okBtn.focus === 'function') {
+      okBtn.focus({ preventScroll: false });
+    }
   }
 
   function hideVarianceConfirm() {
@@ -1597,9 +1706,9 @@
     var perPiece = getEffectivePricePerPiece();
     var total = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
     setInvoiceText('deliveryInvoiceDate', formatInvoiceDate(state.date));
-    setInvoiceText('deliveryInvoiceCustomer', state.customerName || '—');
+ setInvoiceText('deliveryInvoiceCustomer', state.customerName || '-');
     setInvoiceText('deliveryInvoiceAddress', state.address || i18n('no_address_invoice'));
-    setInvoiceText('deliveryInvoiceDriver', state.driverName || '—');
+ setInvoiceText('deliveryInvoiceDriver', state.driverName || '-');
     setInvoiceText('deliveryInvoiceOrderedPieces', String(state.orderedPieces));
     setInvoiceText('deliveryInvoicePieces', String(pieces));
     setInvoiceText('deliveryInvoiceCredits', String(credits));
@@ -1609,9 +1718,9 @@
       if (invoicePriceInput && state.pricePerPieceOverride != null) {
         invoicePriceInput.value = state.pricePerPieceOverride.toFixed(2);
       }
-      setInvoiceText('deliveryInvoicePrice', '—');
+ setInvoiceText('deliveryInvoicePrice', '-');
     } else {
-      setInvoiceText('deliveryInvoicePrice', perPiece > 0 ? '$' + perPiece.toFixed(2) : '—');
+ setInvoiceText('deliveryInvoicePrice', perPiece > 0 ? '$' + perPiece.toFixed(2) : '-');
     }
     setInvoiceText('deliveryInvoiceTotal', '$' + total.toFixed(2));
     var cashRow = $('deliveryInvoiceCashRow');
@@ -1697,6 +1806,7 @@
       if (data.order_date) state.date = data.order_date;
       if (data.driver_name) state.driverName = data.driver_name;
       state.invoiceItems = Array.isArray(data.items) ? data.items : [];
+      renderProductCounts();
       state.savedTotal = Number(data.saved_total) || 0;
       state.isSaved = data.is_saved === true;
       state.paymentCollection = data.payment_collection === 'cod' ? 'cod' : 'signature';
@@ -1763,10 +1873,24 @@
       setStatus(i18n('credits_exceed_pieces'), 'error');
       return;
     }
+    var productCounts = readProductCounts(pieces);
+    if (!productCounts.ok) {
+      openDeliveryAdjust();
+      setStatus(i18n('product_counts_mismatch'), 'error');
+      return;
+    }
 
     if (!skipVarianceCheck && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
       var ack = $('deliveryVarianceAck');
       if (!ack || !ack.checked) {
+        if (state.currentStep === 'invoice') {
+          showVarianceConfirm(pieces, function () {
+            var ackBox = $('deliveryVarianceAck');
+            if (ackBox) ackBox.checked = true;
+            confirmDelivery(true);
+          });
+          return;
+        }
         var alertEl = $('deliveryVarianceAlert');
         if (alertEl) alertEl.hidden = false;
         openDeliveryAdjust();
@@ -1819,7 +1943,8 @@
       var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('confirm') : '';
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
         '&delivered_pieces=' + encodeURIComponent(String(pieces)) +
-        '&credits_taken_back=' + encodeURIComponent(String(credits));
+        '&credits_taken_back=' + encodeURIComponent(String(credits)) +
+        productCounts.body;
       if (state.pricingMissing && canEditPricing() && state.pricePerPieceOverride != null) {
         body += '&price_per_piece=' + encodeURIComponent(String(state.pricePerPieceOverride));
       }
@@ -1888,7 +2013,7 @@
         setSubmitting(false);
         return;
       }
-      setStatus((err.message || i18n('could_not_complete_delivery')) + ' — ' + i18n('nothing_saved_retry'), 'error');
+ setStatus((err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry'), 'error');
       setSubmitting(false);
     }
   }
@@ -2010,8 +2135,11 @@
     } else {
       // goToStep('photo') starts the camera; other steps keep it off.
       goToStep(startStep);
+      // Do not auto-open the native camera. Drivers need Take / Library / Skip
+      // as peer choices; auto-launch hid Library on short screens and forced
+      // cancel-or-shoot. Take still opens the picker synchronously on tap.
       if (opts.autoOpenCamera && startStep === 'photo' && usesCompactCapture()) {
-        openNativeCameraPicker();
+        setStatus(i18n('native_camera_hint'), '');
       }
     }
     refreshRouteSession().then(function () {
@@ -2153,7 +2281,7 @@
       assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
       startStep: btn.getAttribute('data-start-step') || 'photo',
-      autoOpenCamera: true
+      autoOpenCamera: false
     });
   }
 
@@ -2366,4 +2494,10 @@
   // as it resumes, before the driver continues the photo-to-invoice workflow.
   window.addEventListener('focus', keepRouteSessionAlive);
   window.addEventListener('pageshow', keepRouteSessionAlive);
+  // Returning from the OS camera or keyboard can shrink the visual viewport.
+  // Re-sync locked height so Take / Library / Skip stay on-screen.
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncPhotoModalViewportHeight);
+  }
+  window.addEventListener('resize', syncPhotoModalViewportHeight);
 })();

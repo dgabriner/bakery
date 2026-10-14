@@ -1189,12 +1189,6 @@ function bakery_portal_add_to_standing_order(PDO $db, array $customer, $dayOfWee
     $existingQty = (int)$existingStmt->fetchColumn();
     $newQty = $existingQty + $quantity;
 
-    $deleteStmt = $db->prepare(
-        'DELETE FROM standing_orders
-         WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $dayClause['sql']
-    );
-    $deleteStmt->execute(array_merge([$customerId, $productId], $dayClause['values']));
-
     bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $newQty);
 
     $dayLabels = bakery_standing_day_labels();
@@ -1261,7 +1255,7 @@ function bakery_portal_create_tip_checkout(array $customer, string $clientKey, s
     $result = square_api_request('POST', '/v2/online-checkout/payment-links', [
         'idempotency_key' => $idempotencyKey,
         'quick_pay' => [
-            'name' => 'Tip — Sour Flour Bakery',
+            'name' => 'Tip. Sour Flour Bakery',
             'price_money' => ['amount' => 100, 'currency' => 'USD'],
             'location_id' => defined('SQUARE_LOCATION_ID') ? SQUARE_LOCATION_ID : '',
         ],

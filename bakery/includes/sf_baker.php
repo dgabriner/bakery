@@ -327,7 +327,7 @@ function bakery_sfb_render_not_ready() {
             . '<pre style="background:#faf6f1;padding:12px;border-radius:8px;overflow:auto">$env:USE_PROD_DB=\'true\'; php scripts/run_migrations.php</pre>'
             . '<p>Or set <code>USE_PROD_DB=false</code> in <code>.env</code> to use your local database for testing.</p>'
         : '<p>The baking journal needs a one-time database update on this server. '
-            . 'Your portal login is fine — staff can run <code>php scripts/run_migrations.php</code> on the server, then refresh this page.</p>';
+            . 'Your portal login is fine. Staff can run <code>php scripts/run_migrations.php</code> on the server, then refresh this page.</p>';
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         . '<title>SF Baker</title></head><body style="font-family:Georgia,serif;background:#fffdf8;color:#33251f;padding:24px;max-width:520px;margin:40px auto;">'
         . '<h1 style="font-weight:normal">SF Baker is almost ready</h1>'
@@ -594,7 +594,7 @@ function bakery_sfb_feeding_ratio(array $feeding) {
     $flour = (float)($feeding['flour_g'] ?? 0);
     $water = (float)($feeding['water_g'] ?? 0);
     if ($starter <= 0) {
-        return '—';
+        return '-';
     }
     $fmt = function ($v) {
         $r = round($v, 1);
@@ -972,7 +972,7 @@ function bakery_sfb_start_batch(PDO $db, $customerId, $formulaId, $name, $starte
 
     $name = trim((string)$name);
     if ($name === '') {
-        $name = $formula['name'] . ' — ' . date('M j');
+        $name = $formula['name'] . ' - ' . date('M j');
     }
     if (strlen($name) > 120) {
         throw new InvalidArgumentException('Batch name must be 120 characters or fewer');
@@ -1838,7 +1838,7 @@ function bakery_sfb_lesson_steps(PDO $db, $lessonId) {
  */
 function bakery_sfb_save_education_media($file) {
     if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        throw new InvalidArgumentException('Upload failed — try again');
+        throw new InvalidArgumentException('Upload failed. Try again');
     }
     if ($file['size'] <= 0 || $file['size'] > 256 * 1024 * 1024) {
         throw new InvalidArgumentException('Media must be between 1 byte and 256 MB');

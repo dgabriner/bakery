@@ -48,7 +48,7 @@ function bakery_billing_attention_meta() {
         'incomplete' => [
             'label' => 'Delivery incomplete',
             'short' => 'Incomplete',
-            'help' => 'Still open on the route — not delivered and not confirmed.',
+            'help' => 'Still open on the route. Not delivered and not confirmed.',
             'tone' => 'warn',
             'priority' => 20,
         ],
@@ -177,6 +177,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
                 'no_charge_reason' => $noChargeReason,
             ]) : '',
             'is_match' => $variance === null || $variance === 0,
+            'delivered_quantity_estimated' => (int)($item['delivered_quantity_estimated'] ?? 0) === 1 ? 1 : 0,
         ];
     }
 
@@ -276,7 +277,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
     if ($amountIsBillable && $billableAmount <= 0 && ($deliveredPieces ?? 0) > 0 && !$pricingIssue) {
         $amountIsBillable = false;
         $pricingIssue = true;
-        $pricingNotes[] = 'Billable amount is zero despite delivered pieces — review pricing snapshot.';
+        $pricingNotes[] = 'Billable amount is zero despite delivered pieces. Review pricing snapshot.';
         if (!in_array('pricing_issue', $flags, true)) {
             $flags[] = 'pricing_issue';
         }
@@ -318,6 +319,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
         'amount_is_billable' => $amountIsBillable,
         'variance_summary' => $varianceSummary,
         'category_meta' => $attentionMeta[$category] ?? $attentionMeta['incomplete'],
+        'unallocated_delivered_pieces' => max(0, (int)($order['unallocated_delivered_pieces'] ?? 0)),
     ];
 }
 
@@ -345,7 +347,7 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
         }
         return [
             'key' => 'cod_expected',
-            'label' => 'COD — collection not recorded',
+            'label' => 'COD. Collection not recorded',
             'detail' => 'Customer is COD; no amount_collected stored on this delivery.',
         ];
     }
@@ -398,7 +400,7 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
     return [
         'key' => 'not_billable',
         'label' => 'Not yet billable',
-        'detail' => 'Delivery invoice not confirmed — no external payment state applies.',
+        'detail' => 'Delivery invoice not confirmed. No external payment state applies.',
     ];
 }
 
@@ -486,11 +488,15 @@ function bakery_billing_load_items(PDO $db, array $orderIds) {
         ? 'doi.is_store_credit,'
         : '0 AS is_store_credit,';
     $removedName = function_exists('bakery_t') ? bakery_t('billing.removed_product') : 'Removed product';
+    $estimatedSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'delivered_quantity_estimated')
+        ? 'doi.delivered_quantity_estimated,'
+        : '0 AS delivered_quantity_estimated,';
     $itemStmt = $db->prepare(
         "SELECT doi.daily_order_id, doi.id AS item_id, doi.product_id, doi.quantity,
                 doi.delivered_quantity, doi.unit_price, doi.line_total,
                 {$noChargeSelect}
                 {$creditSelect}
+                {$estimatedSelect}
                 p.name AS product_name, pl.name AS product_line_name
          FROM daily_order_items doi
          LEFT JOIN products p ON p.id = doi.product_id
@@ -730,6 +736,9 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     $sendCols = '';
     if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
         $sendCols = ', do.invoice_sent_at, do.invoice_sent_to_email, do.invoice_sent_by_user_id, do.invoice_send_channel';
+    }
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'unallocated_delivered_pieces')) {
+        $sendCols .= ', do.unallocated_delivered_pieces';
     }
     if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'square_invoice_id')) {
         $sendCols .= ', do.square_invoice_id, do.square_order_id, do.square_public_url, do.square_status,

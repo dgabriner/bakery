@@ -130,7 +130,7 @@ $savedMessages = [
     'deleted' => 'Feeding removed.',
 ];
 
-$page_title = 'SF Baker — Starters';
+$page_title = 'SF Baker. Starters';
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];
@@ -219,7 +219,7 @@ $portalCustomerName = $customer['name'];
     <?php if ($selectedStarter): ?>
       <section class="card">
         <div class="card-header">
-          <h2><?php echo htmlspecialchars($selectedStarter['name']); ?> — <?php bakery_te('sfb.feedings'); ?></h2>
+          <h2><?php echo htmlspecialchars($selectedStarter['name']); ?> - <?php bakery_te('sfb.feedings'); ?></h2>
         </div>
         <div class="card-body">
           <?php if (!$feedings): ?>
@@ -228,7 +228,7 @@ $portalCustomerName = $customer['name'];
             <?php foreach ($feedings as $feeding): ?>
               <div class="sfb-feeding">
                 <div class="sfb-feeding__top">
-                  <strong><?php echo htmlspecialchars(date('D, M j · g:ia', strtotime($feeding['fed_at']))); ?></strong>
+                  <strong><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($feeding['fed_at']), 'D, M j · g:ia')); ?></strong>
                   <span class="sfb-ratio"><?php echo htmlspecialchars(bakery_sfb_feeding_ratio($feeding)); ?></span>
                 </div>
                 <p class="muted">

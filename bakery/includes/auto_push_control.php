@@ -22,7 +22,7 @@ function bakery_auto_push_live_fail_message($output) {
     $out = str_replace("\r\n", "\n", (string)$output);
     if (stripos($out, 'Deployable working tree is dirty') !== false
         || stripos($out, 'Local directly to Live needs a clean') !== false) {
-        return 'Local directly to Live needs a clean working tree. Use Promote approved to Live instead — it uploads the staging-tested candidate and ignores in-progress edits.';
+        return 'Local directly to Live needs a clean working tree. Use Promote approved to Live instead. It uploads the staging-tested candidate and ignores in-progress edits.';
     }
     if (preg_match('/Staging no longer has the tested bytes for:\s*([^\r\n.]+)/', $out, $m)) {
         return 'Live promotion failed: staging no longer has the tested bytes for ' . trim($m[1]) . '. A later incremental push overwrote them.';

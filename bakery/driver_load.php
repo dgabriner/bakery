@@ -218,7 +218,7 @@ if (!function_exists('bakery_load_readiness')) {
         if ($stopCount > 0 && !$hasRequired && !$anyLoaded) {
             return [
                 'key' => 'ready',
-                'label' => 'Ready — no pickup',
+                'label' => 'Ready. No pickup',
                 'detail' => $stopCount . ' assigned stop' . ($stopCount === 1 ? '' : 's')
                     . ' with no product quantities to load.',
             ];
@@ -525,7 +525,7 @@ if ($inventoryReady) {
             'name' => $driverName,
             'stop_count' => $stopCount,
             'customer_count' => $customerCount,
-            'zones' => $zones !== '' ? $zones : '—',
+            'zones' => $zones !== '' ? $zones : '-',
             'stops' => $stopsByDriver[$driverId] ?? [],
             'products' => $enriched,
             'notes' => $loadNotes,
@@ -710,7 +710,7 @@ try {
         <strong>Need</strong> = assigned order totals ·
         <strong>Loaded</strong> = saved on this driver’s pickup ·
         <strong>Remaining</strong> = still short of need ·
-        Yellow/red warnings mean stock may be short — you can still save if the product was physically loaded.
+ Yellow/red warnings mean stock may be short. You can still save if the product was physically loaded.
         Reducing a pickup returns units to finished goods.
     </p>
     <?php endif; ?>
@@ -1021,7 +1021,7 @@ try {
         <h3>Loading tips</h3>
         <p>
             <strong>Fill to need</strong> sets pickup to the full order amount for that product.
-            You can type any number to record what was actually loaded — even if production or warehouse stock looks short.
+ You can type any number to record what was actually loaded. Even if production or warehouse stock looks short.
             Warnings are informational only; saving always records what you enter.
             Assigned orders advance toward <em>out for delivery</em> when you save.
         </p>
@@ -1161,7 +1161,7 @@ try {
                 if (short > 0) {
                     hint.hidden = false;
                     hint.classList.add('is-warn');
-                    hint.textContent = 'Adding ' + projectedAdd + ' unit(s). Only ' + available + ' in finished goods — '
+ hint.textContent = 'Adding ' + projectedAdd + ' unit(s). Only ' + available + ' in finished goods, '
                         + short + ' will be saved as a confirmed load override.';
                 } else {
                     hint.classList.add('is-add');
