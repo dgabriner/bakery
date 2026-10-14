@@ -586,11 +586,20 @@ $formAction = 'billing_center.php?panel=invoices';
                             <tr>
                                 <td><?php echo htmlspecialchars($item['product_name']); ?><?php if (!empty($item['is_no_charge'])): ?><div><?php echo htmlspecialchars($item['no_charge_label'] !== '' ? $item['no_charge_label'] : bakery_t('no_charge.label')); ?></div><?php endif; ?></td>
                                 <td><?php echo (int)$item['quantity']; ?></td>
-                                <td><?php echo $item['delivered_quantity'] !== null ? (int)$item['delivered_quantity'] : '—'; ?></td>
+                                <td><?php echo $item['delivered_quantity'] !== null ? (int)$item['delivered_quantity'] : '—'; ?><?php if (!empty($item['delivered_quantity_estimated'])): ?><div><?php echo htmlspecialchars(bakery_t('billing.line_estimated'), ENT_QUOTES, 'UTF-8'); ?></div><?php endif; ?></td>
                                 <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['unit_price'], 2) : '—'; ?></td>
                                 <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['line_total'], 2) : '—'; ?></td>
                             </tr>
                         <?php endforeach; ?>
+                        <?php if (!empty($selectedInvoice['unallocated_delivered_pieces'])): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars(bakery_t('billing.unallocated_pieces'), ENT_QUOTES, 'UTF-8'); ?></td>
+                                <td>0</td>
+                                <td><?php echo (int)$selectedInvoice['unallocated_delivered_pieces']; ?></td>
+                                <td></td>
+                                <td></td>
+                            </tr>
+                        <?php endif; ?>
                         </tbody>
                     </table>
 

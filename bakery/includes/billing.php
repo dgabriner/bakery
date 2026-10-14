@@ -174,6 +174,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
                 'no_charge_reason' => $noChargeReason,
             ]) : '',
             'is_match' => $variance === null || $variance === 0,
+            'delivered_quantity_estimated' => (int)($item['delivered_quantity_estimated'] ?? 0) === 1 ? 1 : 0,
         ];
     }
 
@@ -315,6 +316,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
         'amount_is_billable' => $amountIsBillable,
         'variance_summary' => $varianceSummary,
         'category_meta' => $attentionMeta[$category] ?? $attentionMeta['incomplete'],
+        'unallocated_delivered_pieces' => max(0, (int)($order['unallocated_delivered_pieces'] ?? 0)),
     ];
 }
 
@@ -479,10 +481,14 @@ function bakery_billing_load_items(PDO $db, array $orderIds) {
     $noChargeSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_no_charge')
         ? 'doi.is_no_charge, doi.no_charge_reason,'
         : '0 AS is_no_charge, NULL AS no_charge_reason,';
+    $estimatedSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'delivered_quantity_estimated')
+        ? 'doi.delivered_quantity_estimated,'
+        : '0 AS delivered_quantity_estimated,';
     $itemStmt = $db->prepare(
         "SELECT doi.daily_order_id, doi.id AS item_id, doi.product_id, doi.quantity,
                 doi.delivered_quantity, doi.unit_price, doi.line_total,
                 {$noChargeSelect}
+                {$estimatedSelect}
                 p.name AS product_name, pl.name AS product_line_name
          FROM daily_order_items doi
          JOIN products p ON p.id = doi.product_id
@@ -708,6 +714,9 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     $sendCols = '';
     if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'invoice_sent_at')) {
         $sendCols = ', do.invoice_sent_at, do.invoice_sent_to_email, do.invoice_sent_by_user_id, do.invoice_send_channel';
+    }
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'unallocated_delivered_pieces')) {
+        $sendCols .= ', do.unallocated_delivered_pieces';
     }
     if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'square_invoice_id')) {
         $sendCols .= ', do.square_invoice_id, do.square_order_id, do.square_public_url, do.square_status,

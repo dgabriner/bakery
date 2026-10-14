@@ -20,6 +20,10 @@
  * Example for as-of 2026-10-07: recent is 2026-08-13 through 2026-10-07,
  * prior is 2026-06-18 through 2026-08-12, and a photo-confirmed delivery on
  * 2026-10-07 keeps the account out of lapsed even when standing quantity is 0.
+ *
+ * Shrinking and fill rate use the delivered order total
+ * (daily_orders.delivered_pieces). When that total is missing, the ordered
+ * piece total is the fallback. Per-product delivered quantities are not summed.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -329,17 +333,20 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
     );
     $customers->execute();
 
+    $hasDeliveredPieces = column_exists($db, 'daily_orders', 'delivered_pieces');
+    $deliveredSelect = $hasDeliveredPieces ? 'do.delivered_pieces' : 'NULL';
+    $deliveredGroup = $hasDeliveredPieces ? ', do.delivered_pieces' : '';
     $orders = $db->prepare(
         "SELECT do.customer_id, do.id, do.order_date, do.status, {$confirmedSelect} AS delivery_confirmed_at,
                 COALESCE(SUM(doi.quantity), 0) AS ordered_units,
-                COALESCE(SUM(COALESCE(doi.delivered_quantity, doi.quantity)), 0) AS line_units
+                {$deliveredSelect} AS delivered_order_pieces
          FROM daily_orders do
          INNER JOIN customers c ON c.id = do.customer_id
          LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
          WHERE {$where}
            AND do.order_date >= ?
            AND do.order_date <= ?
-         GROUP BY do.customer_id, do.id, do.order_date, do.status, delivery_confirmed_at"
+         GROUP BY do.customer_id, do.id, do.order_date, do.status, delivery_confirmed_at{$deliveredGroup}"
     );
     $orders->execute([$windows['prior_start'], $windows['as_of']]);
 
@@ -446,7 +453,11 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
                 $totals[$customerId]['evidence_dates'][$date] = true;
             }
         }
-        $units = (int)$order['line_units'];
+        $orderedUnits = (int)$order['ordered_units'];
+        $headerDelivered = $order['delivered_order_pieces'] ?? null;
+        $units = ($headerDelivered !== null && $headerDelivered !== '')
+            ? (int)$headerDelivered
+            : $orderedUnits;
         if ($delivered && $date >= $windows['recent_start'] && $date <= $windows['recent_end']) {
             $totals[$customerId]['recent'] += $units;
         }

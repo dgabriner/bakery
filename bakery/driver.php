@@ -1190,6 +1190,7 @@ document.body.classList.add('driver-route-prep');
                         <div><strong><?php bakery_te('driver.confirm_delivery'); ?></strong><span id="deliveryConfirmationHint"><?php bakery_te('driver.confirm_delivery_hint'); ?></span></div>
                         <span class="delivery-confirmation-total" id="deliveryConfirmationTotal">$0.00</span>
                     </div>
+                    <p id="deliveryWellOverWarning" class="delivery-well-over" hidden></p>
                     <div class="delivery-variance-alert" id="deliveryVarianceAlert" hidden role="alert">
                         <strong><?php bakery_te('driver.variance_title'); ?></strong>
                         <span id="deliveryVarianceText"></span>
@@ -1211,6 +1212,10 @@ document.body.classList.add('driver-route-prep');
                                         <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
                                     </div>
                                 </label>
+                                <div id="deliveryProductCounts" class="delivery-product-counts" hidden>
+                                    <p id="deliveryProductCountsPrompt"></p>
+                                    <div id="deliveryProductCountList"></div>
+                                </div>
                                 <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
                                     <div class="quantity-stepper quantity-stepper--large">
                                         <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
@@ -1530,6 +1535,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'credits_suffix' => bakery_t('driver.credits_suffix'),
     'delivering_more' => bakery_t('driver.delivering_more'),
     'delivering_fewer' => bakery_t('driver.delivering_fewer'),
+    'product_counts_prompt' => bakery_t('driver.product_counts_prompt'),
+    'product_count_ordered' => bakery_t('driver.product_count_ordered'),
+    'product_count_label' => bakery_t('driver.product_count_label'),
+    'well_over_ordered' => bakery_t('driver.well_over_ordered'),
+    'product_counts_mismatch' => bakery_t('driver.product_counts_mismatch'),
     'enter_cod_details' => bakery_t('driver.enter_cod_details'),
     'enter_delivery_details' => bakery_t('driver.enter_delivery_details'),
     'billable_pieces' => bakery_t('driver.billable_pieces'),

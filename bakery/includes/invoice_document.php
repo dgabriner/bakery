@@ -65,6 +65,9 @@ function bakery_billing_invoice_document_html(array $invoice, array $options = [
             continue;
         }
         $deliveredCell = $item['delivered_quantity'] !== null ? (string)(int)$item['delivered_quantity'] : '—';
+        if (!empty($item['delivered_quantity_estimated']) && function_exists('bakery_t')) {
+            $deliveredCell .= ' ' . bakery_t('billing.line_estimated');
+        }
         $noCharge = !empty($item['is_no_charge']);
         $showPrice = $noCharge || !empty($item['has_price']);
         $priceCell = $showPrice ? '$' . number_format((float)$item['unit_price'], 2) : '—';
@@ -82,6 +85,17 @@ function bakery_billing_invoice_document_html(array $invoice, array $options = [
             . '<td class="num">' . $esc($deliveredCell) . '</td>'
             . '<td class="num">' . $esc($priceCell) . '</td>'
             . '<td class="num">' . $esc($totalCell) . '</td>'
+            . '</tr>';
+    }
+    $unallocatedPieces = (int)($invoice['unallocated_delivered_pieces'] ?? 0);
+    if ($unallocatedPieces > 0) {
+        $unallocatedLabel = function_exists('bakery_t') ? bakery_t('billing.unallocated_pieces') : 'Unallocated extra pieces';
+        $itemRows .= '<tr>'
+            . '<td>' . $esc($unallocatedLabel) . '</td>'
+            . '<td class="num">0</td>'
+            . '<td class="num">' . $unallocatedPieces . '</td>'
+            . '<td class="num"></td>'
+            . '<td class="num"></td>'
             . '</tr>';
     }
 

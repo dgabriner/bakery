@@ -319,6 +319,7 @@ require_once __DIR__ . '/includes/nav.php';
 .cr-history-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .cr-variance-pos { color: #2f855a; }
 .cr-variance-neg { color: #c53030; }
+.cr-estimated { display: block; font-size: 0.75rem; font-weight: 700; color: #975a16; }
 .cr-empty {
     color: #718096;
     font-style: italic;
@@ -682,6 +683,9 @@ require_once __DIR__ . '/includes/nav.php';
                                 <?php
                                 if ($line['delivered_quantity'] !== null && $line['delivered_quantity'] !== '') {
                                     echo (int)$line['delivered_quantity'];
+                                    if (!empty($line['delivered_quantity_estimated'])) {
+                                        echo '<span class="cr-estimated">' . htmlspecialchars(bakery_t('billing.line_estimated'), ENT_QUOTES, 'UTF-8') . '</span>';
+                                    }
                                 } else {
                                     echo '—';
                                 }
@@ -689,6 +693,13 @@ require_once __DIR__ . '/includes/nav.php';
                             </td>
                         </tr>
                     <?php endforeach; ?>
+                    <?php if (!empty($ctx['unallocated_delivered_pieces'])): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars(bakery_t('billing.unallocated_pieces'), ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="num">0</td>
+                            <td class="num"><?php echo (int)$ctx['unallocated_delivered_pieces']; ?></td>
+                        </tr>
+                    <?php endif; ?>
                     </tbody>
                     <tfoot>
                         <tr>

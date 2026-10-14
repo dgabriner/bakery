@@ -189,6 +189,211 @@ $assert((float)$headerRow['total_amount'] > 0, 're-confirm delta still writes a 
 
 $wipe($db, $date);
 
+echo "\n=== Over the order does not invent per-product counts ===\n";
+$assert(function_exists('bakery_delivery_total_is_well_over_ordered'), 'well-over helper exists');
+if (function_exists('bakery_delivery_total_is_well_over_ordered')) {
+    $assert(bakery_delivery_total_is_well_over_ordered(155, 22) === true, '155 of 22 is well over the order');
+    $assert(bakery_delivery_total_is_well_over_ordered(59, 45) === false, '59 of 45 is over, but not well over');
+    $assert(bakery_delivery_total_is_well_over_ordered(45, 45) === false, 'an exact total is not well over');
+    $assert(bakery_delivery_total_is_well_over_ordered(12, 0) === true, 'pieces with nothing ordered are well over');
+}
+
+$pair = $db->query(
+    'SELECT id, price FROM products WHERE price > 0 ORDER BY id LIMIT 2'
+)->fetchAll(PDO::FETCH_ASSOC);
+if (count($pair) < 2) {
+    $db->prepare('INSERT INTO products (name, price) VALUES (?, ?)')->execute(['Delivery estimate extra', 2.50]);
+    $pair = $db->query(
+        'SELECT id, price FROM products WHERE price > 0 ORDER BY id LIMIT 2'
+    )->fetchAll(PDO::FETCH_ASSOC);
+}
+$assert(count($pair) >= 2, 'two priced products exist for the over-order case');
+$productA = (int)$pair[0]['id'];
+$priceA = round((float)$pair[0]['price'], 2);
+$productB = (int)$pair[1]['id'];
+$priceB = round((float)$pair[1]['price'], 2);
+
+$makeLines = static function (PDO $db, int $customerId, string $date, int $driverId, array $lines): int {
+    $total = 0.0;
+    foreach ($lines as $line) {
+        $total += round((int)$line['qty'] * (float)$line['price'], 2);
+    }
+    $db->prepare(
+        "INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, 'out_for_delivery', ?)"
+    )->execute([$customerId, $date, $total]);
+    $id = (int)$db->lastInsertId();
+    $item = $db->prepare(
+        'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    foreach ($lines as $line) {
+        $lineTotal = round((int)$line['qty'] * (float)$line['price'], 2);
+        $item->execute([$id, (int)$line['product_id'], (int)$line['qty'], (float)$line['price'], $lineTotal]);
+    }
+    $db->prepare(
+        "INSERT INTO daily_order_assignments
+         (daily_order_id, driver_id, delivery_date, route_order, scheduled_delivery_time, delivery_status)
+         VALUES (?, ?, ?, 1, '08:00:00', 'pending')"
+    )->execute([$id, $driverId, $date]);
+    return $id;
+};
+
+$hasEstimated = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'delivered_quantity_estimated');
+$hasUnallocated = function_exists('column_exists') && column_exists($db, 'daily_orders', 'unallocated_delivered_pieces');
+$assert($hasEstimated, 'delivered_quantity_estimated column exists');
+$assert($hasUnallocated, 'unallocated_delivered_pieces column exists');
+
+$lineRows = static function (PDO $db, int $orderId) use ($hasEstimated): array {
+    $estimatedSql = $hasEstimated ? ', delivered_quantity_estimated' : '';
+    $stmt = $db->prepare(
+        "SELECT product_id, quantity, delivered_quantity{$estimatedSql}
+         FROM daily_order_items WHERE daily_order_id = ? ORDER BY id"
+    );
+    $stmt->execute([$orderId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+};
+
+$overDate = '2099-11-19';
+$countedDate = '2099-11-20';
+$badDate = '2099-11-21';
+$shortDate = '2099-11-22';
+$overId = $makeLines($db, $customerId, $overDate, $driverId, [
+    ['product_id' => $productA, 'qty' => 45, 'price' => $priceA],
+    ['product_id' => $productB, 'qty' => 10, 'price' => $priceB],
+]);
+bakery_confirm_delivery($db, $overId, 80, 0, [
+    'amount_collected' => 0.00,
+    'price_per_piece' => $priceA,
+]);
+$overLines = $lineRows($db, $overId);
+$overByProduct = [];
+foreach ($overLines as $row) {
+    $overByProduct[(int)$row['product_id']] = $row;
+    $assert(
+        (int)$row['delivered_quantity'] <= (int)$row['quantity'],
+        'over-order product delivered_quantity stays at or under ordered'
+    );
+    if ($hasEstimated) {
+        $assert((int)$row['delivered_quantity_estimated'] === 0, 'capped product lines are not marked estimated');
+    }
+}
+$assert((int)$overByProduct[$productA]['delivered_quantity'] === 45, 'first product keeps its ordered count');
+$assert((int)$overByProduct[$productB]['delivered_quantity'] === 10, 'second product keeps its ordered count');
+if ($hasUnallocated) {
+    $unalloc = $db->prepare('SELECT unallocated_delivered_pieces FROM daily_orders WHERE id = ?');
+    $unalloc->execute([$overId]);
+    $assert_eq(25, (int)$unalloc->fetchColumn(), 'excess pieces are recorded as unallocated, not spread onto products');
+}
+
+$countedId = $makeLines($db, $customerId, $countedDate, $driverId, [
+    ['product_id' => $productA, 'qty' => 45, 'price' => $priceA],
+    ['product_id' => $productB, 'qty' => 10, 'price' => $priceB],
+]);
+$countItems = $db->prepare('SELECT id, product_id FROM daily_order_items WHERE daily_order_id = ? ORDER BY id');
+$countItems->execute([$countedId]);
+$countRows = $countItems->fetchAll(PDO::FETCH_ASSOC);
+$lineQuantities = [];
+foreach ($countRows as $row) {
+    $lineQuantities[(int)$row['id']] = (int)$row['product_id'] === $productA ? 50 : 30;
+}
+bakery_confirm_delivery($db, $countedId, 80, 0, [
+    'amount_collected' => 0.00,
+    'price_per_piece' => $priceA,
+    'line_quantities' => $lineQuantities,
+]);
+$countedLines = $lineRows($db, $countedId);
+$countedByProduct = [];
+foreach ($countedLines as $row) {
+    $countedByProduct[(int)$row['product_id']] = $row;
+}
+$assert_eq(50, (int)$countedByProduct[$productA]['delivered_quantity'], 'driver product count is stored for the first product');
+$assert_eq(30, (int)$countedByProduct[$productB]['delivered_quantity'], 'driver product count is stored for the second product');
+if ($hasEstimated) {
+    $assert((int)$countedByProduct[$productA]['delivered_quantity_estimated'] === 0, 'driver product counts are not estimated');
+}
+if ($hasUnallocated) {
+    $unalloc->execute([$countedId]);
+    $assert_eq(0, (int)$unalloc->fetchColumn(), 'driver product counts leave nothing unallocated');
+}
+
+$mismatch = false;
+try {
+    $badId = $makeLines($db, $customerId, $badDate, $driverId, [
+        ['product_id' => $productA, 'qty' => 45, 'price' => $priceA],
+        ['product_id' => $productB, 'qty' => 10, 'price' => $priceB],
+    ]);
+    $badItems = $db->prepare('SELECT id FROM daily_order_items WHERE daily_order_id = ? ORDER BY id');
+    $badItems->execute([$badId]);
+    $badMap = [];
+    foreach ($badItems->fetchAll(PDO::FETCH_COLUMN) as $itemId) {
+        $badMap[(int)$itemId] = 10;
+    }
+    bakery_confirm_delivery($db, $badId, 80, 0, [
+        'amount_collected' => 0.00,
+        'price_per_piece' => $priceA,
+        'line_quantities' => $badMap,
+    ]);
+} catch (Throwable $e) {
+    $mismatch = true;
+}
+$assert($mismatch, 'product counts that do not add up to the total are refused');
+
+$shortId = $makeLines($db, $customerId, $shortDate, $driverId, [
+    ['product_id' => $productA, 'qty' => 45, 'price' => $priceA],
+    ['product_id' => $productB, 'qty' => 10, 'price' => $priceB],
+]);
+bakery_confirm_delivery($db, $shortId, 40, 0, [
+    'amount_collected' => 0.00,
+    'price_per_piece' => $priceA,
+]);
+$shortLines = $lineRows($db, $shortId);
+$shortSum = 0;
+foreach ($shortLines as $row) {
+    $shortSum += (int)$row['delivered_quantity'];
+    $assert((int)$row['delivered_quantity'] <= (int)$row['quantity'], 'short spread does not exceed a product order');
+    if ($hasEstimated) {
+        $assert((int)$row['delivered_quantity_estimated'] === 1, 'short spread lines are marked estimated');
+    }
+}
+$assert_eq(40, $shortSum, 'short spread still sums to the delivered total');
+if ($hasUnallocated) {
+    $unalloc->execute([$shortId]);
+    $assert_eq(0, (int)$unalloc->fetchColumn(), 'a short total has no unallocated excess');
+}
+
+$recordPage = (string)file_get_contents($root . '/customer_record.php');
+$billingPanel = (string)file_get_contents($root . '/includes/billing_panel_invoices.php');
+$invoiceDoc = (string)file_get_contents($root . '/includes/invoice_document.php');
+$driverPage = (string)file_get_contents($root . '/driver.php');
+$assert(strpos($recordPage, "bakery_t('billing.line_estimated')") !== false, 'Customer Record shows the estimated label');
+$assert(strpos($billingPanel, "bakery_t('billing.line_estimated')") !== false, 'Billing shows the estimated label');
+$assert(strpos($invoiceDoc, "bakery_t('billing.line_estimated')") !== false, 'invoice document shows the estimated label');
+$assert(strpos($driverPage, 'id="deliveryProductCounts"') !== false, 'driver confirm asks for per-product counts');
+$assert(strpos($driverPage, 'id="deliveryWellOverWarning"') !== false, 'driver confirm can warn when the total is well over');
+
+$en = require $root . '/lang/en.php';
+$es = require $root . '/lang/es.php';
+$copyKeys = [
+    'billing.line_estimated',
+    'billing.unallocated_pieces',
+    'driver.product_counts_prompt',
+    'driver.product_count_ordered',
+    'driver.product_count_label',
+    'driver.well_over_ordered',
+    'driver.product_counts_mismatch',
+];
+foreach ($copyKeys as $key) {
+    $assert(isset($en[$key], $es[$key]) && $en[$key] !== '' && $es[$key] !== '', 'copy key exists in English and Spanish: ' . $key);
+    $assert($en[$key] !== $es[$key], 'Spanish copy differs from English: ' . $key);
+    $assert(strpos($en[$key], "\u{2014}") === false && strpos($en[$key], "\u{2013}") === false, 'English copy has no dash glyph: ' . $key);
+    $assert(strpos($es[$key], "\u{2014}") === false && strpos($es[$key], "\u{2013}") === false, 'Spanish copy has no dash glyph: ' . $key);
+}
+
+$wipe($db, $overDate);
+$wipe($db, $countedDate);
+$wipe($db, $badDate);
+$wipe($db, $shortDate);
+
 echo "\n=== Browser GET is a page, POST JSON stays the API ===\n";
 $assert(function_exists('bakery_complete_delivery_browser_get_plan'), 'browser GET plan helper exists');
 if (function_exists('bakery_complete_delivery_browser_get_plan')) {

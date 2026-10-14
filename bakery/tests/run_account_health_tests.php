@@ -65,6 +65,10 @@ $healthSource = (string)file_get_contents($root . '/includes/account_health.php'
 $assert(strpos($healthSource, 'Standing quantity is never an input') !== false, 'lapse note documents that standing quantity is ignored');
 $assert(stripos($healthSource, 'standing_orders') === false, 'health math does not read standing_orders');
 $assert(
+    strpos($healthSource, 'SUM(COALESCE(doi.delivered_quantity') === false,
+    'shrinking and fill rate do not sum per-product delivered quantities'
+);
+$assert(
     !preg_match('/\b(INSERT|UPDATE|DELETE|REPLACE|TRUNCATE)\b/', $healthSource),
     'account health include is read-only SQL'
 );
@@ -207,7 +211,7 @@ $insertCustomer = static function (PDO $db, string $name, int $active, ?string $
     $customerIds[] = $id;
     return $id;
 };
-$insertOrder = static function (PDO $db, int $customerId, string $date, string $status, ?string $confirmedAt, ?float $total) use (&$orderIds): int {
+$insertOrder = static function (PDO $db, int $customerId, string $date, string $status, ?string $confirmedAt, ?float $total, ?int $deliveredPieces = null) use (&$orderIds): int {
     $cols = 'customer_id, order_date, status, total_amount';
     $marks = '?, ?, ?, ?';
     $params = [$customerId, $date, $status, $total ?? 0];
@@ -226,6 +230,11 @@ $insertOrder = static function (PDO $db, int $customerId, string $date, string $
         $cols .= ', amount_collected';
         $marks .= ', ?';
         $params[] = 0;
+    }
+    if ($deliveredPieces !== null && column_exists($db, 'daily_orders', 'delivered_pieces')) {
+        $cols .= ', delivered_pieces';
+        $marks .= ', ?';
+        $params[] = $deliveredPieces;
     }
     $db->prepare("INSERT INTO daily_orders ($cols) VALUES ($marks)")->execute($params);
     $id = (int)$db->lastInsertId();
@@ -289,10 +298,16 @@ try {
     $recentEnd = $insertOrder($db, $compare, '2026-10-07', 'invoiced', '2026-10-07 09:00:00', 20);
     $insertItem($db, $recentEnd, $productId, 20, 20);
 
-    $shareOld = $insertOrder($db, $share, '2026-09-10', 'delivered', '2026-09-10 09:00:00', 10);
+    $shareOld = $insertOrder($db, $share, '2026-09-10', 'delivered', '2026-09-10 09:00:00', 10, 8);
     $insertItem($db, $shareOld, $productId, 10, 8);
-    $shareNew = $insertOrder($db, $share, '2026-10-07', 'delivered', '2026-10-07 09:00:00', 20);
+    $shareNew = $insertOrder($db, $share, '2026-10-07', 'delivered', '2026-10-07 09:00:00', 20, 10);
     $insertItem($db, $shareNew, $productId, 20, 10);
+
+    $inflated = $insertCustomer($db, $tag . ' inflated', 1, 'human');
+    $inflatedPrior = $insertOrder($db, $inflated, '2026-07-01', 'delivered', '2026-07-01 09:00:00', 40, 40);
+    $insertItem($db, $inflatedPrior, $productId, 40, 40);
+    $inflatedRecent = $insertOrder($db, $inflated, '2026-10-07', 'delivered', '2026-10-07 09:00:00', 22, 22);
+    $insertItem($db, $inflatedRecent, $productId, 22, 155);
 
     $balanceOrder = $insertOrder($db, $balanceCustomer, '2026-09-27', 'delivered', '2026-09-27 09:00:00', 80);
     $insertItem($db, $balanceOrder, $productId, 8, 8);
@@ -330,8 +345,15 @@ try {
 
     $shareRow = $byId[$share] ?? [];
     $assert((int)($shareRow['share_ordered_units'] ?? -1) === 30, '4-week ordered units are 10 + 20');
-    $assert((int)($shareRow['share_delivered_units'] ?? -1) === 18, '4-week delivered units are 8 + 10');
+    $assert((int)($shareRow['share_delivered_units'] ?? -1) === 18, '4-week delivered units are the order totals 8 + 10');
     $assert(($shareRow['delivered_share_percent'] ?? null) === 60.0, '4-week delivered share is 60%');
+
+    $inflatedRow = $byId[$inflated] ?? [];
+    $assert((int)($inflatedRow['recent_delivered_units'] ?? -1) === 22, 'shrinking uses the delivered order total, not the invented 155');
+    $assert((int)($inflatedRow['prior_delivered_units'] ?? -1) === 40, 'prior window uses the delivered order total');
+    $assert(($inflatedRow['status'] ?? '') === 'shrinking', 'a real drop stays shrinking when a product line was inflated');
+    $assert((int)($inflatedRow['share_delivered_units'] ?? -1) === 22, 'fill rate uses the delivered order total, not 155');
+    $assert((int)($inflatedRow['share_ordered_units'] ?? -1) === 22, 'fill rate ordered units stay the ordered total');
 
     $balanceExpected = bakery_billing_customer_balance($db, $balanceCustomer);
     $balanceRow = $byId[$balanceCustomer] ?? [];
