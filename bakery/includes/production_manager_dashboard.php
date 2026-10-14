@@ -279,6 +279,10 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
         $priorByProduct[(int)$item['product_id']] = (int)$item['bake_quantity'];
     }
 
+    $quantityDate = ($entered !== null && !empty($entered['date'])) ? (string)$entered['date'] : $date;
+    $quantityDateDisplay = date('l, F j, Y', strtotime($quantityDate));
+    $dateMismatch = $quantityDate !== $date;
+
     $inventoryReady = function_exists('bakery_inventory_ready') && bakery_inventory_ready($db);
     $onHandByProduct = [];
     $producedByProduct = [];
@@ -290,7 +294,7 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
              FROM product_inventory_days
              WHERE delivery_date = ?'
         );
-        $invStmt->execute([$date]);
+        $invStmt->execute([$quantityDate]);
         foreach ($invStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $pid = (int)$row['product_id'];
             $onHandByProduct[$pid] = (int)$row['available_quantity'];
@@ -304,6 +308,9 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
             'date' => $date,
             'prior_date' => $priorDate,
             'date_display' => date('l, F j, Y', strtotime($date)),
+            'quantity_date' => $quantityDate,
+            'quantity_date_display' => $quantityDateDisplay,
+            'date_mismatch' => $dateMismatch,
             'committed' => !empty($bakeList['committed']),
             'bake_source' => $entered !== null
                 ? 'last_entered'
@@ -525,6 +532,9 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
         'date' => $date,
         'prior_date' => $priorDate,
         'date_display' => date('l, F j, Y', strtotime($date)),
+        'quantity_date' => $quantityDate,
+        'quantity_date_display' => $quantityDateDisplay,
+        'date_mismatch' => $dateMismatch,
         'committed' => !empty($bakeList['committed']),
         'bake_source' => $entered !== null
             ? 'last_entered'
@@ -575,14 +585,35 @@ function bakery_pmd_links(string $date): array
 }
 
 /**
+ * Run one SELECT. $statementLoader replaces the query in tests so a retrieval
+ * failure can be distinguished from a real empty week.
+ *
+ * @param callable|null $statementLoader function(string $sql, array $params): array
+ * @return list<array<string,mixed>>
+ */
+function bakery_pmd_fetch_rows(PDO $db, string $sql, array $params, ?callable $statementLoader = null): array
+{
+    if ($statementLoader !== null) {
+        $rows = $statementLoader($sql, $params);
+        return is_array($rows) ? array_values($rows) : [];
+    }
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return is_array($rows) ? $rows : [];
+}
+
+/**
  * Past-week daily order volume + typical weekday sense for the selected day.
  *
  * Uses dated daily_orders / items (commercial commitment). Incomplete days
- * still show — zeros mean no dated orders on file yet.
+ * still show — zeros mean no dated orders on file yet. A failed query is
+ * load_state=unavailable and must not be read as an empty week.
  *
+ * @param callable|null $statementLoader test seam; production callers omit it
  * @return array<string,mixed>
  */
-function bakery_pmd_week_orders(PDO $db, string $date): array
+function bakery_pmd_week_orders(PDO $db, string $date, ?callable $statementLoader = null): array
 {
     $date = bakery_pmd_resolve_date($date);
     $start = date('Y-m-d', strtotime($date . ' -6 days'));
@@ -607,43 +638,62 @@ function bakery_pmd_week_orders(PDO $db, string $date): array
         ];
     }
 
+    // `lines` is a reserved word in MariaDB (1064). Keep the result key, not the alias.
+    $loadState = 'unavailable';
     if (table_exists($db, 'daily_orders') && table_exists($db, 'daily_order_items')) {
         try {
-            $stmt = $db->prepare(
+            $rows = bakery_pmd_fetch_rows(
+                $db,
                 'SELECT do.order_date,
                         COUNT(DISTINCT do.id) AS order_count,
                         COUNT(DISTINCT do.customer_id) AS customers,
-                        COUNT(doi.id) AS lines,
+                        COUNT(doi.id) AS line_count,
                         COALESCE(SUM(doi.quantity), 0) AS pieces
                  FROM daily_orders do
                  LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
                  WHERE do.order_date BETWEEN ? AND ?
-                 GROUP BY do.order_date'
+                 GROUP BY do.order_date',
+                [$start, $date],
+                $statementLoader
             );
-            $stmt->execute([$start, $date]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            foreach ($rows as $row) {
                 $d = (string)$row['order_date'];
                 if (!isset($byDate[$d])) {
                     continue;
                 }
                 $byDate[$d]['customers'] = (int)$row['customers'];
-                $byDate[$d]['lines'] = (int)$row['lines'];
+                $byDate[$d]['lines'] = (int)$row['line_count'];
                 $byDate[$d]['pieces'] = (int)$row['pieces'];
                 $byDate[$d]['has_orders'] = ((int)$row['order_count']) > 0;
             }
+            $loadState = 'ready';
         } catch (Throwable $e) {
             error_log('pmd week orders: ' . $e->getMessage());
+            $loadState = 'unavailable';
         }
     }
 
+    if ($loadState !== 'ready') {
+        foreach ($byDate as &$failedDay) {
+            $failedDay['customers'] = null;
+            $failedDay['lines'] = null;
+            $failedDay['pieces'] = null;
+            $failedDay['has_orders'] = false;
+        }
+        unset($failedDay);
+    }
+
     $days = array_values($byDate);
-    $pieceVals = array_map(static fn(array $d): int => (int)$d['pieces'], $days);
-    $activeDays = array_values(array_filter($days, static fn(array $d): bool => !empty($d['has_orders'])));
+    $activeDays = $loadState === 'ready'
+        ? array_values(array_filter($days, static fn(array $d): bool => !empty($d['has_orders'])))
+        : [];
     $activePieces = array_map(static fn(array $d): int => (int)$d['pieces'], $activeDays);
-    $weekTotal = array_sum($pieceVals);
-    $weekAvg = $activePieces !== []
-        ? (int)round(array_sum($activePieces) / count($activePieces))
-        : 0;
+    $weekTotal = $loadState === 'ready'
+        ? array_sum(array_map(static fn(array $d): int => (int)$d['pieces'], $days))
+        : null;
+    $weekAvg = $loadState === 'ready'
+        ? ($activePieces !== [] ? (int)round(array_sum($activePieces) / count($activePieces)) : 0)
+        : null;
 
     // Typical for this weekday: last 8 matching weekdays ending on selected date.
     $typicalPieces = [];
@@ -719,18 +769,19 @@ function bakery_pmd_week_orders(PDO $db, string $date): array
         'weekday' => $weekday,
         'weekday_label' => $dayLabel,
         'days' => $days,
+        'load_state' => $loadState,
         'summary' => [
             'week_pieces' => $weekTotal,
             'week_avg_active' => $weekAvg,
-            'active_days' => count($activeDays),
-            'selected_pieces' => (int)$selected['pieces'],
-            'selected_customers' => (int)$selected['customers'],
-            'typical_weekday_avg' => $typicalAvg,
-            'typical_sample_size' => count($typicalPieces),
-            'vs_typical' => $vsTypical,
+            'active_days' => $loadState === 'ready' ? count($activeDays) : null,
+            'selected_pieces' => $loadState === 'ready' ? (int)$selected['pieces'] : null,
+            'selected_customers' => $loadState === 'ready' ? (int)$selected['customers'] : null,
+            'typical_weekday_avg' => $loadState === 'ready' ? $typicalAvg : null,
+            'typical_sample_size' => $loadState === 'ready' ? count($typicalPieces) : null,
+            'vs_typical' => $loadState === 'ready' ? $vsTypical : null,
         ],
-        'top_products' => $topProducts,
-        'incomplete' => count($activeDays) < 7,
+        'top_products' => $loadState === 'ready' ? $topProducts : [],
+        'incomplete' => $loadState === 'ready' && count($activeDays) < 7,
         'links' => bakery_pmd_links($date),
     ];
 }

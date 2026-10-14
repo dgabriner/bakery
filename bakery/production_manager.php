@@ -18,9 +18,6 @@ $isPrint = (string)($_GET['print'] ?? '') === '1';
 $expandAll = (string)($_GET['expand'] ?? '') === '1' || $isPrint;
 if ($isPrint) {
     $view = 'batches';
-    if ((string)($_GET['source'] ?? '') === '') {
-        $sourceMode = 'last_entered';
-    }
 }
 
 $board = null;
@@ -61,12 +58,7 @@ $pmdHref = static function (string $date, string $viewName = 'batches', bool $ex
     }
     return 'production_manager.php?' . http_build_query($q);
 };
-$printHref = 'production_manager.php?' . http_build_query([
-    'date' => $selectedDate,
-    'view' => 'batches',
-    'source' => 'last_entered',
-    'print' => '1',
-]);
+$printLinks = bakery_pmd_print_links($selectedDate);
 
 $hubStages = [];
 try {
@@ -87,8 +79,8 @@ $fmtTime = static function (?string $t): string {
     return $ts ? date('g:i A', $ts) : htmlspecialchars($t);
 };
 
-$page_title = $isPrint
-    ? bakery_t('production_manager.print_title')
+$page_title = ($isPrint && $board)
+    ? bakery_t(bakery_pmd_print_title_key($board))
     : bakery_t('page.production_manager');
 require_once 'includes/header.php';
 if (!$isPrint) {
@@ -105,11 +97,17 @@ if (!$isPrint) {
     <header class="pmd-print-head">
         <div>
             <p class="pmd-print-kicker"><?php bakery_te('production_manager.print_kicker'); ?></p>
-            <h1><?php bakery_te('production_manager.print_title'); ?></h1>
-            <p class="pmd-print-sub"><?php echo htmlspecialchars($board['date_display']); ?></p>
+            <h1><?php bakery_te(bakery_pmd_print_title_key($board)); ?></h1>
+            <p class="pmd-print-sub"><?php echo htmlspecialchars((string)($board['quantity_date_display'] ?? $board['date_display'])); ?></p>
+            <?php if (!empty($board['date_mismatch'])): ?>
+                <p class="pmd-note"><?php echo htmlspecialchars(bakery_t('production_manager.print_date_mismatch', [
+                    'quantity_date' => (string)($board['quantity_date_display'] ?? ''),
+                    'selected_date' => (string)($board['date_display'] ?? ''),
+                ])); ?></p>
+            <?php endif; ?>
         </div>
         <div class="pmd-print-meta">
-            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_route_label($selectedDate)); ?></p>
+            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_route_label((string)($board['quantity_date'] ?? $selectedDate))); ?></p>
             <p><strong><?php bakery_te('production_manager.print_source'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_source_label($board)); ?></p>
             <p><strong><?php bakery_te('production_manager.metric_pieces'); ?></strong> <?php echo number_format((int)($board['summary']['pieces'] ?? 0)); ?>
                 · <strong><?php bakery_te('production_manager.metric_doughs'); ?></strong> <?php echo number_format((int)($board['summary']['dough_types'] ?? 0)); ?>
@@ -155,7 +153,7 @@ if (!$isPrint) {
         </table>
     <?php endif; ?>
     <footer class="pmd-print-foot">
-        <p><?php bakery_te('production_manager.print_not_demand'); ?></p>
+        <p><?php bakery_te(bakery_pmd_print_footer_key($board)); ?></p>
         <p><?php echo htmlspecialchars(bakery_t('production_manager.print_letter', [
             'date' => date('n/j/Y g:i A'),
         ])); ?></p>
@@ -187,8 +185,11 @@ if (!$isPrint) {
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($links['product_manager_plan']); ?>">
                 <?php bakery_te('production_manager.link_pmp'); ?>
             </a>
-            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printHref); ?>">
-                <?php bakery_te('production_manager.print_letter_link'); ?>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printLinks['bake_sheet']); ?>">
+                <?php bakery_te('production_manager.print_sheet_link'); ?>
+            </a>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printLinks['draft']); ?>">
+                <?php bakery_te('production_manager.print_draft_link'); ?>
             </a>
         </div>
     </header>
@@ -437,7 +438,14 @@ if (!$isPrint) {
 
     <?php elseif ($view === 'week' && $week): ?>
         <?php $ws = $week['summary']; ?>
+        <?php $weekUnavailable = (($week['load_state'] ?? 'ready') !== 'ready'); ?>
         <p class="pmd-view-lead"><?php bakery_te('production_manager.week_lead'); ?></p>
+        <?php if ($weekUnavailable): ?>
+            <p class="pmd-note" role="alert"><?php bakery_te('production_manager.week_unavailable'); ?></p>
+            <p class="pmd-muted">
+                <a href="<?php echo htmlspecialchars($links['daily_orders']); ?>"><?php bakery_te('production_manager.link_daily_orders'); ?></a>
+            </p>
+        <?php else: ?>
         <?php if (!empty($week['incomplete'])): ?>
             <p class="pmd-note"><?php bakery_te('production_manager.week_incomplete'); ?></p>
         <?php endif; ?>
@@ -523,6 +531,7 @@ if (!$isPrint) {
         <p class="pmd-muted">
             <a href="<?php echo htmlspecialchars($links['daily_orders']); ?>"><?php bakery_te('production_manager.link_daily_orders'); ?></a>
         </p>
+        <?php endif; ?>
 
     <?php elseif ($view === 'routes' && $routes): ?>
         <?php $rs = $routes['summary']; ?>

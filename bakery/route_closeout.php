@@ -130,11 +130,11 @@ require_once 'includes/nav.php';
     <div class="closeout-heading">
         <div>
             <h1><?php bakery_te('page.route_closeout'); ?></h1>
-            <p>Per-driver closeout for the operating date: loaded = delivered + returned + waste + door credits. Writes the finished-goods ledger.</p>
+            <p><?php bakery_te('closeout.lead'); ?></p>
         </div>
         <div class="closeout-heading-actions">
-            <a class="btn btn-outline" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>">Pickup loads</a>
-            <a class="btn btn-outline" href="daily_run.php?date=<?php echo urlencode($selectedDate); ?>#deliver">Daily Run</a>
+            <a class="btn btn-outline" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('closeout.pickup_loads'); ?></a>
+            <a class="btn btn-outline" href="daily_run.php?date=<?php echo urlencode($selectedDate); ?>#deliver"><?php bakery_te('closeout.daily_run'); ?></a>
         </div>
     </div>
 
@@ -142,13 +142,13 @@ require_once 'includes/nav.php';
     <?php if ($error): ?><div class="closeout-notice error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
     <form method="get" class="closeout-selector">
-        <label>Operating date
+        <label><?php bakery_te('closeout.operating_date'); ?>
             <input type="date" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
         </label>
         <?php if (!$isDriverOnly): ?>
-        <label>Driver
+        <label><?php bakery_te('closeout.driver'); ?>
             <select name="driver_id">
-                <option value="0">All drivers with work</option>
+                <option value="0"><?php bakery_te('closeout.all_drivers'); ?></option>
                 <?php foreach ($board as $row): ?>
                     <option value="<?php echo (int)$row['driver_id']; ?>" <?php echo $focusDriverId === (int)$row['driver_id'] ? 'selected' : ''; ?>>
                         <?php echo htmlspecialchars($row['driver_name']); ?>
@@ -159,24 +159,24 @@ require_once 'includes/nav.php';
         </label>
         <label class="closeout-check">
             <input type="checkbox" name="attention" value="open" <?php echo $attentionOpen ? 'checked' : ''; ?>>
-            Open routes only
+            <?php bakery_te('closeout.open_routes'); ?>
         </label>
         <?php endif; ?>
         <?php if ($returnTarget): ?>
             <input type="hidden" name="return" value="<?php echo htmlspecialchars($returnTarget['key']); ?>">
         <?php endif; ?>
-        <button class="btn btn-outline" type="submit">View</button>
+        <button class="btn btn-outline" type="submit"><?php bakery_te('closeout.view'); ?></button>
     </form>
 
     <?php if (!$inventoryReady): ?>
-        <div class="closeout-notice error">Finished-goods inventory is not installed. Run scripts/run_migrations.php first.</div>
+        <div class="closeout-notice error"><?php bakery_te('closeout.inventory_unavailable'); ?></div>
     <?php elseif (!$closeoutReady): ?>
-        <div class="closeout-notice error">Route closeout migration is not installed. Run scripts/run_migrations.php (037_route_closeout).</div>
+        <div class="closeout-notice error"><?php bakery_te('closeout.not_installed'); ?></div>
     <?php else: ?>
         <div class="closeout-day-summary">
             <div class="closeout-day-summary-main">
                 <strong><?php echo date('l, M j', strtotime($selectedDate)); ?></strong>
-                <span>Route closeout · loaded vs delivered vs returned vs waste vs door credits</span>
+                <span><?php bakery_te('closeout.summary'); ?></span>
             </div>
             <div class="closeout-day-pills">
                 <span class="closeout-pill"><?php echo (int)$stats['drivers']; ?> driver<?php echo $stats['drivers'] === 1 ? '' : 's'; ?></span>
@@ -283,7 +283,7 @@ require_once 'includes/nav.php';
                                     <td>
                                         <strong><?php echo htmlspecialchars($line['product_name']); ?></strong>
                                         <?php if ($shortLoaded && !$isClosed): ?>
-                                            <div class="closeout-line-warn">Delivered exceeds loaded — correct the pickup load first.</div>
+                                            <div class="closeout-line-warn"><?php bakery_te('closeout.delivered_exceeds'); ?></div>
                                         <?php endif; ?>
                                     </td>
                                     <td><?php echo number_format($loaded); ?></td>

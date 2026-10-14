@@ -41,6 +41,40 @@ function manager_phone_assert(bool $condition, string $message): void
     $failed++;
 }
 
+$releaseNext = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 0,
+    'plan_committed' => false,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 9],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+    'pending' => 0,
+    'inTransit' => 0,
+]);
+manager_phone_assert($releaseNext['key'] === 'release', 'unreleased plan is the next action after routes are covered');
+manager_phone_assert(strpos($releaseNext['href'], 'production_center.php?date=2099-08-07') !== false, 'release action opens Production Center for that date');
+$routesBeforePlan = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 2,
+    'plan_committed' => false,
+    'productionSummary' => ['remaining' => 9],
+]);
+manager_phone_assert($routesBeforePlan['key'] === 'unassigned', 'stops without a driver come before plan release');
+$driftNext = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 0,
+    'plan_committed' => true,
+    'plan_drift' => 3,
+    'productionSummary' => ['remaining' => 0],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+    'pending' => 0,
+    'inTransit' => 0,
+]);
+manager_phone_assert($driftNext['key'] === 'drift', 'post-release demand change points back to the plan');
+manager_phone_assert(strpos($driftNext['href'], 'production_center.php?date=2099-08-07') !== false, 'drift action keeps the selected date');
 manager_phone_assert(bakery_manager_phone_view('routes') === 'routes', 'routes view is accepted');
 manager_phone_assert(bakery_manager_phone_view('nope') === 'today', 'unknown view falls back to today');
 manager_phone_assert(bakery_manager_phone_sheet('qty') === 'qty', 'qty sheet is accepted');

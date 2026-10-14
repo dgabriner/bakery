@@ -143,6 +143,17 @@ function bakery_manager_phone_build(PDO $db, array $base): array
     }
     $ctx['dateDisplay'] = bakery_manager_phone_date_label($date);
     $ctx['run_finished'] = bakery_manager_phone_run_finished($ctx);
+    $ctx['plan_committed'] = $ctx['plan_committed'] ?? null;
+    $ctx['plan_drift'] = (int)($ctx['plan_drift'] ?? 0);
+    if (function_exists('bakery_production_plan_state')) {
+        try {
+            $planState = bakery_production_plan_state($db, $date);
+            $ctx['plan_committed'] = !empty($planState['commit']);
+            $ctx['plan_drift'] = (int)($planState['changed_since']['count'] ?? 0);
+        } catch (Throwable $e) {
+            error_log('manager phone plan state: ' . $e->getMessage());
+        }
+    }
     $ctx['next_action'] = bakery_manager_phone_next_action($ctx);
     return $ctx;
 }
@@ -162,6 +173,13 @@ function bakery_manager_phone_next_action(array $ctx): array
     }
     if ($unassigned > 0) {
         return ['key' => 'unassigned', 'href' => bakery_manager_phone_href($date, 'routes'), 'tone' => 'attention'];
+    }
+    $center = (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date);
+    if (array_key_exists('plan_committed', $ctx) && $ctx['plan_committed'] === false) {
+        return ['key' => 'release', 'href' => $center, 'tone' => 'attention'];
+    }
+    if ((int)($ctx['plan_drift'] ?? 0) > 0) {
+        return ['key' => 'drift', 'href' => $center, 'tone' => 'attention'];
     }
     if ($remaining > 0) {
         return ['key' => 'bake', 'href' => bakery_manager_phone_href($date, 'kitchen'), 'tone' => 'attention'];

@@ -961,7 +961,7 @@ document.body.classList.add('driver-route-prep');
             <?php if ($remainingStops === 0 && $totalStops > 0): ?>
                 <p class="route-closeout-cta">
                     <a class="route-btn route-btn--primary" href="route_closeout.php?date=<?php echo urlencode($selectedDate); ?>&amp;driver_id=<?php echo (int)$selectedDriverId; ?>">
-                        Close out this route
+                        <?php bakery_te('driver.close_route'); ?>
                     </a>
                 </p>
             <?php endif; ?>

@@ -103,6 +103,8 @@ navigation_test_assert(strpos($managerNav, 'view=routes') !== false, 'manager na
 navigation_test_assert(strpos($managerNav, 'view=kitchen') !== false, 'manager navigation includes Kitchen');
 navigation_test_assert(strpos($managerNav, 'view=missed') !== false, 'manager navigation includes Missed');
 navigation_test_assert(strpos($managerNav, 'counter_orders.php?view=pending') !== false, 'manager navigation includes pending counter orders');
+navigation_test_assert(preg_match_all('/class="bakery-nav__direct /', $managerNav) === 6, 'manager phone bar is Today, Routes, Kitchen, Missed, Clock, and More');
+navigation_test_assert(preg_match('/<a class="bakery-nav__direct [^"]*" href="[^"]*time_clock\.php"/', $managerNav) === 1, 'manager navigation has a direct time clock button');
 foreach ([
     'driver_assignment.php', 'route_manager.php', 'route_summary.php', 'daily_route.php',
     'route_closeout.php', 'drivers.php', 'standing_routes.php', 'route_analysis.php', 'driver.php?change_driver=1',
@@ -121,6 +123,10 @@ navigation_test_assert(strpos($adminNav, 'bakery-nav--ops') !== false, 'administ
 navigation_test_assert(strpos($adminNav, 'bakery-nav__billing-shortcut') !== false, 'administrator navigation includes a Billing Center shortcut');
 navigation_test_assert(strpos($adminNav, 'billing_center.php') !== false, 'administrator navigation links to Billing Center');
 navigation_test_assert(strpos($adminNav, 'User Management') !== false, 'administrator navigation still includes User Management');
+navigation_test_assert(strpos($adminNav, 'Shop Photos') !== false, 'administrator navigation labels Shop Photos');
+navigation_test_assert(strpos($adminNav, 'nav.item.cashier_shop_photos') === false, 'administrator navigation does not show the Shop Photos translation key');
+navigation_test_assert(strpos($adminNav, 'call_headquarters.php') !== false, 'administrator navigation includes Call Headquarters');
+navigation_test_assert(strpos($adminNav, 'sfb_admin_learn.php') !== false, 'administrator navigation includes Learning Center');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__section--primary') !== false, 'administrator navigation marks Primary work');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__section--extras') !== false, 'administrator navigation marks Extras & setup');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__usage-legend') !== false, 'administrator navigation includes usage legend');
@@ -132,6 +138,10 @@ navigation_test_assert(strpos($adminNav, 'bakery-nav__item--usage-moderate') !==
 navigation_test_assert(strpos($adminNav, 'bakery-nav__item--usage-occasional') !== false, 'administrator navigation marks occasional items');
 navigation_test_assert(strpos($adminNav, 'Everyday') === false && strpos($adminNav, 'Moderate') === false && strpos($adminNav, 'Occasional') === false, 'administrator navigation omits usage words');
 $navCss = file_get_contents(dirname(__DIR__) . '/css/nav.css');
+navigation_test_assert(preg_match('/\.bakery-nav--manager \.bakery-nav__more-sheet \{\s*position: absolute;/', $navCss) === 1, 'manager More opens as an overlay instead of stretching the bar');
+navigation_test_assert(preg_match('/\.bakery-nav--manager \.bakery-nav__groups \{\s*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\);/', $navCss) === 1, 'manager phone bar keeps Clock on one row with the other tabs');
+navigation_test_assert(strpos($navCss, '.bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut') !== false, 'ops phone bar can hide shortcuts that crowd out Menu');
+navigation_test_assert(strpos($navCss, '.bakery-nav__alerts-toggle[hidden]') !== false, 'alert bell stays hidden until it has something to show');
 navigation_test_assert(strpos($navCss, '.bakery-nav--ops .bakery-nav__usage-mark') !== false, 'nav.css styles the usage mark for ops nav');
 navigation_test_assert(strpos($navCss, '.bakery-nav--ops .bakery-nav__item--usage-everyday') !== false, 'nav.css tints everyday ops items');
 navigation_test_assert(strpos($navCss, '.bakery-nav__group[open] > .bakery-nav__panel') !== false, 'nav.css only shows panels when a group is open');
@@ -152,10 +162,10 @@ navigation_test_assert($usageCounts['everyday'] >= 10, 'everyday bucket includes
 navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket includes setup and admin tabs');
 
 navigation_test_assert(function_exists('bakery_role_home'), 'role home helper exists');
-navigation_test_assert(bakery_role_home('cashier') === 'product_photos.php', 'cashier home is product photos catalog');
+navigation_test_assert(bakery_role_home('cashier') === 'time_clock.php', 'cashier home is the time clock');
 navigation_test_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
 navigation_test_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
-navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'product_photos.php', 'cashiers hitting the ops dashboard are sent to product photos');
+navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'time_clock.php', 'cashiers hitting the ops dashboard are sent to the time clock');
 navigation_test_assert(bakery_ops_index_bypass_home('administrator') === null, 'administrators may open the ops dashboard');
 navigation_test_assert(isset(bakery_assignable_role_labels()['cashier']), 'User Management can assign the cashier type');
 $loginSrc = (string)file_get_contents(dirname(__DIR__) . '/login.php');
@@ -166,6 +176,7 @@ navigation_test_assert(strpos($usersSrc, 'bakery_assignable_role_labels') !== fa
 $cashierNav = navigation_test_render_nav('cashier', 'product_photos');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav bakery-nav--focused bakery-nav--cashier') !== false, 'cashier navigation uses the focused cashier shell');
 navigation_test_assert(strpos($cashierNav, 'bakery-nav--ops') === false, 'cashier navigation is not the admin ops shell');
+navigation_test_assert(strpos($cashierNav, 'time_clock.php') !== false, 'cashier navigation links Time Clock');
 navigation_test_assert(strpos($cashierNav, 'product_photos.php') !== false, 'cashier navigation links Product Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_shop_photos.php') !== false, 'cashier navigation links Shop Photos');
 navigation_test_assert(strpos($cashierNav, 'cashier_add_product.php') !== false, 'cashier navigation links Add Product');
@@ -188,6 +199,35 @@ navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker 
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__label-short') !== false, 'baker navigation includes compact mobile labels');
+require_once dirname(__DIR__) . '/includes/kitchen_segments.php';
+navigation_test_assert(strpos(bakery_role_home('baker'), bakery_baker_home_delivery_date()) !== false, 'baker login opens tomorrow\'s delivery');
+$navDateBefore = $_GET['date'] ?? null;
+$_GET['date'] = '2099-08-07';
+$_GET['line'] = '4';
+$bakerKept = navigation_test_render_nav('baker', 'baker_mix');
+navigation_test_assert(strpos($bakerKept, 'production.php?date=2099-08-07') !== false, 'baker workspace keeps the selected delivery date');
+navigation_test_assert(strpos($bakerKept, 'production.php?date=' . bakery_baker_home_delivery_date()) !== false, 'baker Today brand resets to tomorrow\'s delivery');
+navigation_test_assert(strpos($bakerKept, 'counter_orders.php?view=pending&amp;date=2099-08-07') !== false || strpos($bakerKept, 'counter_orders.php?view=pending&date=2099-08-07') !== false, 'baker orders link keeps the delivery date');
+$bakerSegments = bakery_kitchen_segments_html('mix', '2099-08-07');
+navigation_test_assert(strpos($bakerSegments, 'baker_mix.php?') !== false && strpos($bakerSegments, 'date=2099-08-07') !== false, 'mix segment keeps the selected date');
+navigation_test_assert(strpos($bakerSegments, 'production.php?') !== false && substr_count($bakerSegments, 'date=2099-08-07') >= 3, 'bake and pack segments keep the selected date');
+navigation_test_assert(strpos($bakerSegments, 'line=4') !== false, 'segment hop keeps the line filter');
+$saturdayAria = bakery_baker_delivery_aria('2026-10-17');
+navigation_test_assert(strpos($saturdayAria, 'Oct 17') !== false && strpos($saturdayAria, 'Oct 16') !== false, 'Saturday delivery names the Friday pan dulce bake');
+$_GET['date'] = '2099-08-08';
+$driverKept = navigation_test_render_nav('driver', 'driver');
+navigation_test_assert(strpos($driverKept, 'driver.php?date=2099-08-08') !== false, 'driver My Route keeps the selected date');
+navigation_test_assert(strpos($driverKept, 'pack_list.php?date=2099-08-08') !== false, 'driver pack shortcut uses the selected route date');
+navigation_test_assert(strpos($driverKept, 'pack_list.php?date=' . date('Y-m-d')) === false, 'driver pack shortcut does not open calendar today');
+$_GET['date'] = 'not-a-date';
+$driverBad = navigation_test_render_nav('driver', 'driver');
+navigation_test_assert(strpos($driverBad, 'pack_list.php?date=' . rawurlencode(date('Y-m-d'))) !== false, 'invalid driver date falls back to today');
+if ($navDateBefore === null) {
+    unset($_GET['date']);
+} else {
+    $_GET['date'] = $navDateBefore;
+}
+unset($_GET['line']);
 
 $driverNav = navigation_test_render_nav('driver', 'driver');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--driver') !== false, 'driver navigation uses the compact mobile bar');
@@ -198,6 +238,8 @@ navigation_test_assert(strpos($driverNav, 'bakery-nav__live-dot') !== false, 'dr
 navigation_test_assert(strpos($driverNav, 'routeDateNavToggle') !== false, 'driver My Route navigation includes a date toggle');
 navigation_test_assert(strpos($driverNav, 'bakery-nav--with-date') !== false, 'driver My Route navigation marks the date-capable bar');
 navigation_test_assert(strpos($driverNav, 'bakery-nav__more') !== false, 'driver navigation parks Pack, Stops, and QR behind More');
+navigation_test_assert(strpos($driverNav, 'time_clock.php') !== false, 'driver More includes the time clock');
+navigation_test_assert(strpos($adminNav, 'time_clock.php') !== false, 'administrator navigation includes Time Clock');
 navigation_test_assert(strpos($driverNav, 'survey.php') !== false, 'driver More includes Tomorrow\'s stores survey');
 navigation_test_assert(strpos($driverNav, 'driver_stops.php') !== false, 'Stops remains reachable from More');
 navigation_test_assert(strpos($navCss, 'repeat(4, minmax(0, 1fr))') !== false, 'driver date bar keeps My Route, Date, Call HQ, and More');
@@ -222,12 +264,30 @@ foreach (glob($rootDir . '/*.php') as $path) {
     if (in_array($script, $exemptScripts, true) || strpos($script, 'customer_portal_') === 0) {
         continue;
     }
+    if (in_array($script, bakery_navigation_disabled_scripts(), true)) {
+        continue;
+    }
     if (bakery_navigation_roles_for_script($script) === []) {
         $unresolved[] = $script;
     }
 }
 navigation_test_assert($unresolved === [], 'every non-public/portal root page resolves to at least one catalog or registry role' . ($unresolved ? (': ' . implode(', ', $unresolved)) : ''));
 navigation_test_assert(bakery_navigation_roles_for_script('users.php') === ['administrator'], 'User Management stays administrator-only from the catalog');
+navigation_test_assert(bakery_navigation_roles_for_script('generate_invoice_simple.php') === ['administrator', 'manager'], 'simple invoice bookmark redirects for billing roles');
+navigation_test_assert(bakery_navigation_roles_for_script('simple_invoice.php') === ['administrator', 'manager'], 'printable invoice bookmark redirects for billing roles');
+navigation_test_assert(bakery_navigation_roles_for_script('products_new.php') === ['administrator'], 'old product editor stays administrator-only');
+navigation_test_assert(bakery_navigation_roles_for_script('get_customers_no_address.php') === [], 'disabled address utility is not granted a role');
+navigation_test_assert(in_array('get_customers_no_address.php', bakery_navigation_disabled_scripts(), true), 'disabled address utility is an explicit coverage exception');
+$catalogHrefs = [];
+foreach (bakery_navigation_catalog() as $section) {
+    foreach ($section['items'] ?? [] as $item) {
+        $catalogHrefs[] = (string)($item['href'] ?? '');
+    }
+}
+navigation_test_assert(!in_array('products_new.php', $catalogHrefs, true), 'old product editor stays off the menu');
+navigation_test_assert(!in_array('get_customers_no_address.php', $catalogHrefs, true), 'disabled address utility stays off the menu');
+navigation_test_assert(!in_array('generate_invoice_simple.php', $catalogHrefs, true), 'quarantined invoice generator stays off the menu');
+navigation_test_assert(!in_array('simple_invoice.php', $catalogHrefs, true), 'quarantined printable invoice stays off the menu');
 navigation_test_assert(in_array('baker_mix.php', bakery_navigation_scripts_for_role('baker'), true), 'catalog grants bakers Mix Today');
 navigation_test_assert(!in_array('daily_orders.php', bakery_navigation_scripts_for_role('driver'), true), 'catalog does not grant drivers Daily Orders');
 
