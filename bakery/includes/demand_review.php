@@ -1815,8 +1815,19 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
 
     if ($quantity <= 0) {
         if ($itemId) {
-            $db->prepare('DELETE FROM daily_order_items WHERE id = ?')->execute([$itemId]);
-            $itemId = null;
+            $db->prepare('UPDATE daily_order_items SET quantity = 0, line_total = 0 WHERE id = ?')
+                ->execute([$itemId]);
+        } else {
+            $product = bakery_customer_product_row($db, $productId);
+            if (!$product) {
+                throw new RuntimeException('Product not found');
+            }
+            $unitPrice = bakery_resolve_customer_price($db, $customer, $product);
+            $db->prepare(
+                'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+                 VALUES (?, ?, 0, ?, 0)'
+            )->execute([$dailyOrderId, $productId, $unitPrice]);
+            $itemId = (int)$db->lastInsertId();
         }
     } else {
         $product = bakery_customer_product_row($db, $productId);
@@ -1841,6 +1852,8 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
     bakery_customer_update_daily_total($db, $dailyOrderId);
     if ($quantity <= 0 && function_exists('bakery_daily_order_block_standing_fill_if_empty')) {
         bakery_daily_order_block_standing_fill_if_empty($db, $dailyOrderId);
+    } elseif ($quantity > 0 && function_exists('bakery_daily_order_set_standing_fill_blocked')) {
+        bakery_daily_order_set_standing_fill_blocked($db, (int)$dailyOrderId, false);
     }
     $changed = $created || $oldQty === null || $oldQty !== $quantity;
     if ($changed) {

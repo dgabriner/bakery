@@ -4932,4 +4932,6 @@ return [
     'ux.daily_orders.missing_hint' => 'Aún no hay pedido con fecha. Genera desde pedidos recurrentes para crear la demanda de esta fecha. Los clientes en pausa se omiten.',
     'ux.daily_orders.empty_title' => 'No hay pedidos con fecha para este día',
     'ux.daily_orders.empty_body' => 'El pronóstico recurrente espera :count cliente(s) los :day. Genera pedidos con fecha desde lo recurrente, o revisa a quién le falta.',
+    'ux.daily_orders.removed_one_day' => 'Quitado solo este día. El pedido fijo no cambia.',
+    'ux.daily_orders.undo_removal' => 'Deshacer el quitado',
 ];

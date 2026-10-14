@@ -111,6 +111,26 @@ $es = require $root . '/lang/es.php';
 $assert(($en['ux.daily_orders.generate_standing'] ?? '') === 'Build from standing', 'English button says Build from standing');
 $assert(($es['ux.daily_orders.generate_standing'] ?? '') !== '' && ($es['ux.daily_orders.generate_standing'] ?? '') !== ($en['ux.daily_orders.generate_standing'] ?? ''), 'Spanish button is translated');
 $assert(!empty($en['orders.built_from_standing']) && !empty($es['orders.built_from_standing']), 'build result copy exists in EN and ES');
+$assert(
+    strpos($ordersSrc, 'ux.daily_orders.removed_one_day') !== false
+        && strpos($ordersSrc, 'ux.daily_orders.undo_removal') !== false,
+    'Daily Orders explains a one-day removal and offers undo'
+);
+$assert(
+    ($en['ux.daily_orders.removed_one_day'] ?? '') === 'Removed for this day only. Standing order is unchanged.',
+    'English removal copy says this day only'
+);
+$assert(
+    ($es['ux.daily_orders.removed_one_day'] ?? '') !== ''
+        && ($es['ux.daily_orders.removed_one_day'] ?? '') !== ($en['ux.daily_orders.removed_one_day'] ?? ''),
+    'Spanish removal copy is translated'
+);
+$assert(
+    ($en['ux.daily_orders.undo_removal'] ?? '') === 'Undo removal'
+        && ($es['ux.daily_orders.undo_removal'] ?? '') !== ''
+        && ($es['ux.daily_orders.undo_removal'] ?? '') !== ($en['ux.daily_orders.undo_removal'] ?? ''),
+    'Undo removal is labeled in English and Spanish'
+);
 
 echo "\n=== Emptied dated order stays empty ===\n";
 
@@ -208,10 +228,22 @@ $itemId = (int)$db->query(
 )->fetchColumn();
 $assert($orderId > 0 && $itemId > 0, 'generated order has the standing line');
 
+$neighborItemId = (int)$db->query(
+    'SELECT doi.id FROM daily_order_items doi
+     JOIN daily_orders do ON do.id = doi.daily_order_id
+     WHERE do.customer_id = ' . $neighborId . ' AND do.order_date = ' . $db->quote($date) . ' AND doi.product_id = ' . $productId
+)->fetchColumn();
+bakery_daily_orders_action_update_quantity($db, [
+    'item_id' => $neighborItemId,
+    'quantity' => 9,
+]);
+
 bakery_daily_orders_action_update_quantity($db, [
     'item_id' => $itemId,
     'quantity' => 0,
 ]);
+$zeroQty = $db->query('SELECT quantity FROM daily_order_items WHERE id = ' . $itemId)->fetchColumn();
+$assert($zeroQty !== false && (int)$zeroQty === 0, 'remove keeps a dated override of quantity 0');
 $left = (int)$db->query(
     'SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ' . $orderId . ' AND quantity > 0'
 )->fetchColumn();
@@ -248,6 +280,25 @@ $neighborItems = (int)$db->query(
      WHERE do.customer_id = ' . $neighborId . ' AND do.order_date = ' . $db->quote($date) . ' AND doi.quantity > 0'
 )->fetchColumn();
 $assert($neighborItems >= 1, 'a neighbor who was never emptied still has dated lines');
+$neighborQty = (int)$db->query(
+    'SELECT doi.quantity FROM daily_order_items doi
+     JOIN daily_orders do ON do.id = doi.daily_order_id
+     WHERE do.customer_id = ' . $neighborId . ' AND do.order_date = ' . $db->quote($date) . ' AND doi.product_id = ' . $productId
+)->fetchColumn();
+$assert($neighborQty === 9, 'removing one order does not re-sync another order on the same date');
+$demandLines = bakery_operating_demand_customers_for_product($db, $date, $productId);
+$removedDemand = null;
+$neighborDemand = null;
+foreach ($demandLines as $demandLine) {
+    if ((int)$demandLine['id'] === $customerId) {
+        $removedDemand = (int)$demandLine['quantity'];
+    }
+    if ((int)$demandLine['id'] === $neighborId) {
+        $neighborDemand = (int)$demandLine['quantity'];
+    }
+}
+$assert($removedDemand === null, 'a one-day removal is not baked as standing demand');
+$assert($neighborDemand === 9, 'the other order still contributes its dated quantity');
 
 if (is_array($ensured) && !empty($ensured['ran'])) {
     $again = bakery_ensure_daily_orders_for_date($db, $date, [
@@ -272,6 +323,30 @@ $blockedAfter = (int)$db->query(
 )->fetchColumn();
 $assert($restored === 4 && $blockedAfter === 0, 'overwrite generate is the explicit way to refill an emptied order');
 $assert((int)($overwrite['items_created'] ?? 0) + (int)($overwrite['items_updated'] ?? 0) >= 1, 'overwrite writes the standing line');
+
+bakery_daily_orders_action_update_quantity($db, [
+    'item_id' => $itemId,
+    'quantity' => 0,
+]);
+bakery_daily_orders_action_update_quantity($db, [
+    'item_id' => $itemId,
+    'quantity' => 4,
+]);
+$undone = (int)$db->query('SELECT quantity FROM daily_order_items WHERE id = ' . $itemId)->fetchColumn();
+$assert($undone === 4, 'undo writes the standing quantity back onto the dated line');
+
+$visitZero = bakery_demand_set_dated_quantity($db, $customerId, $date, $productId, 0);
+$visitQty = $db->query('SELECT quantity FROM daily_order_items WHERE id = ' . (int)$visitZero['item_id'])->fetchColumn();
+$assert($visitQty !== false && (int)$visitQty === 0, 'setting a dated quantity to 0 keeps the line');
+bakery_generate_daily_orders_from_standing($db, $date, [
+    'overwrite_changed' => false,
+    'record_event' => false,
+    'assign_routes' => false,
+]);
+$afterVisitSync = (int)$db->query(
+    'SELECT quantity FROM daily_order_items WHERE daily_order_id = ' . $orderId . ' AND product_id = ' . $productId
+)->fetchColumn();
+$assert($afterVisitSync === 0, 'standing sync keeps a visit quantity of 0');
 } finally {
     $cleanup();
 }

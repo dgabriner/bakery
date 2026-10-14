@@ -4935,4 +4935,6 @@ return [
     'ux.daily_orders.missing_hint' => 'No dated order yet. Use generate from standing orders to create dated demand from the forecast. Paused customers are skipped.',
     'ux.daily_orders.empty_title' => 'No dated orders for this date',
     'ux.daily_orders.empty_body' => 'Standing forecast expects :count customer(s) on :day. Generate dated orders from standing, or review who is missing.',
+    'ux.daily_orders.removed_one_day' => 'Removed for this day only. Standing order is unchanged.',
+    'ux.daily_orders.undo_removal' => 'Undo removal',
 ];

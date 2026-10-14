@@ -325,7 +325,8 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                         $standingQty = (int)$order['quantity'];
                         if (isset($existingQtyByProduct[$productId])) {
                             if ($existingQtyByProduct[$productId] !== $standingQty && !$overwriteChanged) {
-                                // Keep the manager's dated change instead of silently resetting it.
+                                // Keep the manager's dated change, including a
+                                // one-day removal stored as quantity 0.
                                 $itemsPreserved++;
                                 continue;
                             }

@@ -144,7 +144,9 @@ Violating these breaks operations even if the code "works."
    Opening Daily Run, Daily Orders, the dashboard, Daily Production, Baker Mix,
    Driver Assignment, or a survey does not create dated orders. An order a
    manager emptied stays empty (`daily_orders.standing_fill_blocked`) until
-   overwrite generation or Apply standing.
+   overwrite generation or Apply standing. Removing one dated line writes
+   quantity 0 for that customer, product, and date. Standing sync keeps that 0.
+   Daily Orders calls it a one-day removal and can undo it.
    Cadence from calendar today: default mid-week lookahead is bake tomorrow
    (`today+1`) for the route the day after (`today+2`). That matches pan dulce
    Monday→Tuesday through Thursday→Friday. Friday's pan dulce bake covers

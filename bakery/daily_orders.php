@@ -816,6 +816,8 @@ $summary = $demandSummaryAll['summary'];
                                         $note = 'Matches';
                                         if ($s !== null && $d === null) {
                                             $note = 'On standing only';
+                                        } elseif ($s !== null && $d !== null && (int)$d === 0 && (int)$s > 0) {
+                                            $note = bakery_t('ux.daily_orders.removed_one_day');
                                         } elseif ($s === null && $d !== null) {
                                             $note = 'Dated only (this date)';
                                         } elseif ($s !== null && $d !== null && (int)$s !== (int)$d) {
@@ -975,13 +977,16 @@ $summary = $demandSummaryAll['summary'];
                                         <?php foreach ($orderItems[$order['id']] as $item): ?>
                                             <?php
                                                 $standingQty = $standingByProduct[(int)$item['product_id']] ?? null;
+                                                $removedForDay = $standingQty !== null && (int)$standingQty > 0 && (int)$item['quantity'] === 0;
                                                 $differs = $standingQty !== null && (int)$standingQty !== (int)$item['quantity'];
                                                 $dailyOnly = $standingQty === null;
                                             ?>
                                             <tr class="<?= $differs || $dailyOnly ? 'row-diff' : 'row-match' ?>">
                                                 <td>
                                                     <?= htmlspecialchars($item['product_name']) ?>
-                                                    <?php if ($dailyOnly): ?>
+                                                    <?php if ($removedForDay): ?>
+                                                        <div class="source-tag"><?= htmlspecialchars(bakery_t('ux.daily_orders.removed_one_day')) ?></div>
+                                                    <?php elseif ($dailyOnly): ?>
                                                         <div class="source-tag">Dated only</div>
                                                     <?php elseif ($differs): ?>
                                                         <div class="source-tag">Changed vs standing</div>
@@ -1051,10 +1056,17 @@ $summary = $demandSummaryAll['summary'];
                                                 </td>
                                                 <td>$<?= number_format($item['line_total'], 2) ?></td>
                                                 <td>
+                                                    <?php if ($removedForDay): ?>
+                                                        <button type="button" class="btn btn-small btn-outline"
+                                                                onclick="updateQuantity(<?= (int)$item['id'] ?>, <?= (int)$standingQty ?>, <?= $isAdvanced ? 'true' : 'false' ?>)">
+                                                            <?= htmlspecialchars(bakery_t('ux.daily_orders.undo_removal')) ?>
+                                                        </button>
+                                                    <?php else: ?>
                                                     <button class="btn btn-small btn-danger" 
                                                             onclick="updateQuantity(<?= $item['id'] ?>, 0, <?= $isAdvanced ? 'true' : 'false' ?>)">
                                                         Remove
                                                     </button>
+                                                    <?php endif; ?>
                                                 </td>
                                             </tr>
                                         <?php endforeach; ?>

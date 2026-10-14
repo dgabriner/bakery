@@ -178,7 +178,13 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
     $oldQty = $itemRow ? (int)$itemRow['quantity'] : null;
 
     if ($quantity <= 0) {
-        $stmt = $db->prepare('DELETE FROM daily_order_items WHERE id = ?');
+        // A removed dated line stays as quantity 0. Deleting it looks like a
+        // missing standing line, and the next sync copies standing back.
+        $stmt = $db->prepare('
+            UPDATE daily_order_items
+            SET quantity = 0, line_total = 0
+            WHERE id = ?
+        ');
         $stmt->execute([$itemId]);
     } else {
         $stmt = $db->prepare('
@@ -193,6 +199,8 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
         bakery_daily_orders_update_order_total($db, $dailyOrderId);
         if ($quantity <= 0) {
             bakery_daily_order_block_standing_fill_if_empty($db, (int)$dailyOrderId);
+        } elseif (function_exists('bakery_daily_order_set_standing_fill_blocked')) {
+            bakery_daily_order_set_standing_fill_blocked($db, (int)$dailyOrderId, false);
         }
     }
 
