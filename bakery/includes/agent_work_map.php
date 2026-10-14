@@ -624,6 +624,7 @@ function bakery_agent_work_map_core(): array
                 'includes/driver_delivery.js',
                 'css/driver.css',
                 'complete_delivery.php',
+                'database/schema/096_delivery_line_estimated.sql',
                 'driver_assignment.php',
                 'css/driver.css',
                 'css/driver_assignment.css',

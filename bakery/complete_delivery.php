@@ -125,7 +125,7 @@ if (PHP_SAPI !== 'cli') {
  * Mark assignment and parent daily_order as delivered in one transaction.
  * Safe to call when caller already holds an open transaction.
  */
-function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId): void {
+function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId, array $lineQuantities = []): void {
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) {
         $db->beginTransaction();
@@ -144,7 +144,7 @@ function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId): void {
         );
         $orderStmt->execute([$dailyOrderId]);
 
-        bakery_apply_delivery_line_quantities($db, $dailyOrderId);
+        bakery_apply_delivery_line_quantities($db, $dailyOrderId, $lineQuantities);
 
         if ($ownTransaction) {
             $db->commit();
@@ -158,60 +158,132 @@ function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId): void {
 }
 
 /**
- * Align line delivered_quantity with header delivered_pieces when drivers confirm piece counts.
+ * A total is well over the order at half again the ordered pieces, or any
+ * pieces when nothing was ordered.
  */
-function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId): void {
-    $orderStmt = $db->prepare(
-        'SELECT delivered_pieces FROM daily_orders WHERE id = ?'
-    );
-    $orderStmt->execute([$dailyOrderId]);
-    $headerPieces = $orderStmt->fetchColumn();
-    $headerPieces = ($headerPieces !== false && $headerPieces !== null && $headerPieces !== '')
-        ? (int)$headerPieces
-        : null;
-
-    $itemStmt = $db->prepare(
-        'SELECT id, quantity, delivered_quantity, unit_price
-         FROM daily_order_items
-         WHERE daily_order_id = ?
-         ORDER BY id'
-    );
-    $itemStmt->execute([$dailyOrderId]);
-    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
-    if (!$items) {
-        return;
+function bakery_delivery_total_is_well_over_ordered(int $delivered, int $ordered): bool
+{
+    if ($delivered < 0) {
+        $delivered = 0;
     }
+    if ($ordered <= 0) {
+        return $delivered > 0;
+    }
+    return $delivered > $ordered && ($delivered - $ordered) * 2 >= $ordered;
+}
 
+function bakery_delivery_product_count_mismatch_message(): string
+{
+    $fallback = 'Product counts must add up to the delivered total, or leave every product blank.';
+    if (!function_exists('bakery_t')) {
+        return $fallback;
+    }
+    $text = bakery_t('driver.product_counts_mismatch');
+    if ($text === '' || $text === 'driver.product_counts_mismatch') {
+        return $fallback;
+    }
+    return $text;
+}
+
+/**
+ * Decide line counts for one confirmed total.
+ *
+ * Counts the driver entered are stored as given. A total above the order does
+ * not invent a per-product overage: each product stays at its ordered count
+ * and the extra pieces are unallocated. A short total is still split in
+ * proportion, and those lines are estimated.
+ *
+ * @param list<array<string, mixed>> $items
+ * @param array<int, int> $lineQuantities
+ * @return array{lines:list<array{id:int,delivered:int,estimated:int}>,unallocated:int}
+ */
+function bakery_delivery_quantity_plan(array $items, int $targetPieces, array $lineQuantities = []): array
+{
+    $targetPieces = max(0, $targetPieces);
     $orderedTotal = 0;
-    $hasExplicitDelivered = false;
+    $knownIds = [];
     foreach ($items as $item) {
-        $orderedTotal += (int)$item['quantity'];
-        if ($item['delivered_quantity'] !== null && $item['delivered_quantity'] !== '') {
-            $hasExplicitDelivered = true;
+        $id = (int)$item['id'];
+        $orderedTotal += max(0, (int)$item['quantity']);
+        $knownIds[$id] = true;
+    }
+
+    if ($lineQuantities !== []) {
+        $sum = 0;
+        $counts = [];
+        foreach ($lineQuantities as $id => $count) {
+            $id = (int)$id;
+            if (!isset($knownIds[$id]) || filter_var($count, FILTER_VALIDATE_INT) === false || (int)$count < 0) {
+                throw new Exception(bakery_delivery_product_count_mismatch_message());
+            }
+            $counts[$id] = (int)$count;
+            $sum += (int)$count;
         }
+        if ($sum !== $targetPieces) {
+            throw new Exception(bakery_delivery_product_count_mismatch_message());
+        }
+        $lines = [];
+        foreach ($items as $item) {
+            $id = (int)$item['id'];
+            $lines[] = [
+                'id' => $id,
+                'delivered' => (int)($counts[$id] ?? 0),
+                'estimated' => 0,
+            ];
+        }
+        return ['lines' => $lines, 'unallocated' => 0];
     }
 
-    if ($hasExplicitDelivered) {
-        return;
+    if ($targetPieces > $orderedTotal) {
+        $lines = [];
+        foreach ($items as $item) {
+            $lines[] = [
+                'id' => (int)$item['id'],
+                'delivered' => max(0, (int)$item['quantity']),
+                'estimated' => 0,
+            ];
+        }
+        return ['lines' => $lines, 'unallocated' => $targetPieces - $orderedTotal];
     }
 
-    $targetPieces = $headerPieces ?? $orderedTotal;
     if ($targetPieces === $orderedTotal || $orderedTotal <= 0) {
-        $upd = $db->prepare(
-            'UPDATE daily_order_items
-             SET delivered_quantity = quantity,
-                 line_total = ROUND(quantity * unit_price, 2)
-             WHERE daily_order_id = ?'
-        );
-        $upd->execute([$dailyOrderId]);
-        return;
+        $lines = [];
+        foreach ($items as $item) {
+            $lines[] = [
+                'id' => (int)$item['id'],
+                'delivered' => max(0, (int)$item['quantity']),
+                'estimated' => 0,
+            ];
+        }
+        return ['lines' => $lines, 'unallocated' => 0];
     }
 
+    $allocations = bakery_delivery_spread_short_quantities($items, $orderedTotal, $targetPieces);
+    $lines = [];
+    foreach ($items as $idx => $item) {
+        $lines[] = [
+            'id' => (int)$item['id'],
+            'delivered' => (int)($allocations[$idx] ?? 0),
+            'estimated' => 1,
+        ];
+    }
+    return ['lines' => $lines, 'unallocated' => 0];
+}
+
+/**
+ * Largest-remainder split of a short delivered total. Each share stays at or
+ * under that product's ordered quantity.
+ *
+ * @param list<array<string, mixed>> $items
+ * @return array<int, int>
+ */
+function bakery_delivery_spread_short_quantities(array $items, int $orderedTotal, int $targetPieces): array
+{
     $allocations = [];
     $allocated = 0;
     foreach ($items as $idx => $item) {
-        $ordered = (int)$item['quantity'];
-        if ($ordered <= 0) {
+        $ordered = max(0, (int)$item['quantity']);
+        if ($ordered <= 0 || $orderedTotal <= 0) {
             $allocations[$idx] = 0;
             continue;
         }
@@ -222,10 +294,10 @@ function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId): void
     }
 
     $remainder = $targetPieces - $allocated;
-    if ($remainder > 0) {
+    if ($remainder > 0 && $orderedTotal > 0) {
         $fractions = [];
         foreach ($items as $idx => $item) {
-            $ordered = (int)$item['quantity'];
+            $ordered = max(0, (int)$item['quantity']);
             if ($ordered <= 0) {
                 continue;
             }
@@ -245,15 +317,68 @@ function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId): void
         }
     }
 
-    $upd = $db->prepare(
-        'UPDATE daily_order_items
-         SET delivered_quantity = ?, line_total = ROUND(? * unit_price, 2)
-         WHERE id = ? AND daily_order_id = ?'
-    );
-    foreach ($items as $idx => $item) {
-        $delivered = (int)($allocations[$idx] ?? 0);
-        $upd->execute([$delivered, $delivered, (int)$item['id'], $dailyOrderId]);
+    return $allocations;
+}
+
+function bakery_delivery_set_unallocated_pieces(PDO $db, int $dailyOrderId, int $pieces): void
+{
+    if (!function_exists('column_exists') || !column_exists($db, 'daily_orders', 'unallocated_delivered_pieces')) {
+        return;
     }
+    $stmt = $db->prepare('UPDATE daily_orders SET unallocated_delivered_pieces = ? WHERE id = ?');
+    $stmt->execute([max(0, $pieces), $dailyOrderId]);
+}
+
+/**
+ * Align line delivered_quantity with the confirmed total.
+ *
+ * @param array<int, int> $lineQuantities
+ */
+function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId, array $lineQuantities = []): void {
+    $orderStmt = $db->prepare(
+        'SELECT delivered_pieces FROM daily_orders WHERE id = ?'
+    );
+    $orderStmt->execute([$dailyOrderId]);
+    $headerPieces = $orderStmt->fetchColumn();
+    $headerPieces = ($headerPieces !== false && $headerPieces !== null && $headerPieces !== '')
+        ? (int)$headerPieces
+        : null;
+
+    $itemStmt = $db->prepare(
+        'SELECT id, quantity, delivered_quantity, unit_price
+         FROM daily_order_items
+         WHERE daily_order_id = ?
+         ORDER BY id'
+    );
+    $itemStmt->execute([$dailyOrderId]);
+    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $orderedTotal = 0;
+    foreach ($items as $item) {
+        $orderedTotal += max(0, (int)$item['quantity']);
+    }
+    $targetPieces = $headerPieces ?? $orderedTotal;
+    $plan = bakery_delivery_quantity_plan($items, $targetPieces, $lineQuantities);
+
+    $hasEstimated = function_exists('column_exists')
+        && column_exists($db, 'daily_order_items', 'delivered_quantity_estimated');
+    $sql = 'UPDATE daily_order_items
+            SET delivered_quantity = ?, line_total = ROUND(? * unit_price, 2)';
+    if ($hasEstimated) {
+        $sql .= ', delivered_quantity_estimated = ?';
+    }
+    $sql .= ' WHERE id = ? AND daily_order_id = ?';
+    $upd = $db->prepare($sql);
+    foreach ($plan['lines'] as $line) {
+        $params = [(int)$line['delivered'], (int)$line['delivered']];
+        if ($hasEstimated) {
+            $params[] = (int)$line['estimated'];
+        }
+        $params[] = (int)$line['id'];
+        $params[] = $dailyOrderId;
+        $upd->execute($params);
+    }
+    bakery_delivery_set_unallocated_pieces($db, $dailyOrderId, (int)$plan['unallocated']);
 }
 
 /**
@@ -920,7 +1045,11 @@ function bakery_confirm_delivery(
         if (!$verify->fetchColumn()) {
             throw new Exception('Could not save the delivery invoice');
         }
-        bakery_mark_delivery_delivered($db, $dailyOrderId);
+        $lineQuantities = [];
+        if (isset($options['line_quantities']) && is_array($options['line_quantities'])) {
+            $lineQuantities = $options['line_quantities'];
+        }
+        bakery_mark_delivery_delivered($db, $dailyOrderId, $lineQuantities);
         if (function_exists('bakery_billing_apply_confirm_credit_and_header')
             && function_exists('column_exists')
             && column_exists($db, 'daily_order_items', 'is_store_credit')) {
@@ -1080,6 +1209,19 @@ try {
             $clientRequestId = bakery_normalize_client_request_id($_POST['client_request_id'] ?? '');
             if ($clientRequestId !== '') {
                 $confirmOptions['client_request_id'] = $clientRequestId;
+            }
+            if (isset($_POST['line_delivered']) && is_array($_POST['line_delivered'])) {
+                $lineQuantities = [];
+                foreach ($_POST['line_delivered'] as $itemId => $qty) {
+                    $count = filter_var($qty, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+                    if ($count === false) {
+                        throw new Exception(bakery_delivery_product_count_mismatch_message());
+                    }
+                    $lineQuantities[(int)$itemId] = (int)$count;
+                }
+                if ($lineQuantities !== []) {
+                    $confirmOptions['line_quantities'] = $lineQuantities;
+                }
             }
             $confirmed = bakery_confirm_delivery(
                 $db,

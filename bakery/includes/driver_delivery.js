@@ -1408,6 +1408,61 @@
     updatePricingUi();
   }
 
+  function deliveryTotalIsWellOver(delivered, ordered) {
+    if (delivered < 0) delivered = 0;
+    if (ordered <= 0) return delivered > 0;
+    return delivered > ordered && (delivered - ordered) * 2 >= ordered;
+  }
+
+  function renderProductCounts() {
+    var list = $('deliveryProductCountList');
+    if (!list) return;
+    var items = state.invoiceItems || [];
+    var html = '';
+    items.forEach(function (item) {
+      var id = Number(item.id) || 0;
+      if (id <= 0) return;
+      var ordered = Number(item.quantity) || 0;
+      var name = item.product_name || i18n('product');
+      html += '<label class="delivery-product-count">'
+        + '<span><strong>' + escapeHtml(name) + '</strong>'
+        + '<small>' + escapeHtml(i18n('product_count_ordered').replace(':count', String(ordered))) + '</small></span>'
+        + '<input type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" data-line-id="' + id + '" aria-label="'
+        + escapeHtml(i18n('product_count_label').replace(':product', name)) + '">'
+        + '</label>';
+    });
+    list.innerHTML = html;
+  }
+
+  function readProductCounts(pieces) {
+    var panel = $('deliveryProductCounts');
+    if (!panel || panel.hidden) return { ok: true, body: '' };
+    var inputs = panel.querySelectorAll('input[data-line-id]');
+    if (!inputs.length) return { ok: true, body: '' };
+    var any = false;
+    var sum = 0;
+    var parts = [];
+    var bad = false;
+    inputs.forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      if (raw !== '') any = true;
+      var count = raw === '' ? null : parseInt(raw, 10);
+      if (raw !== '' && (!Number.isInteger(count) || count < 0)) bad = true;
+      if (count != null) sum += count;
+      parts.push({ id: input.getAttribute('data-line-id'), count: count, filled: raw !== '' });
+    });
+    if (!any) return { ok: true, body: '' };
+    var allFilled = parts.every(function (part) { return part.filled; });
+    if (bad || !allFilled || sum !== pieces) {
+      return { ok: false, body: '' };
+    }
+    var body = '';
+    parts.forEach(function (part) {
+      body += '&line_delivered[' + encodeURIComponent(part.id) + ']=' + encodeURIComponent(String(part.count));
+    });
+    return { ok: true, body: body };
+  }
+
   function updateVarianceUi() {
     var alertEl = $('deliveryVarianceAlert');
     var textEl = $('deliveryVarianceText');
@@ -1424,6 +1479,24 @@
     if (orderedRef) {
       orderedRef.textContent = ordered > 0
         ? i18n('ordered_recording').replace(':ordered', ordered).replace(':pieces', pieces).replace(':credits', credits > 0 ? i18n('credits_suffix').replace(':credits', credits) : '')
+        : '';
+    }
+
+    var countsPanel = $('deliveryProductCounts');
+    var wellOverEl = $('deliveryWellOverWarning');
+    var countsPrompt = $('deliveryProductCountsPrompt');
+    var askForCounts = ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
+    if (countsPanel) countsPanel.hidden = !askForCounts;
+    if (askForCounts) {
+      var adjust = $('deliveryAdjustDetails');
+      if (adjust) adjust.open = true;
+    }
+    if (countsPrompt && askForCounts) countsPrompt.textContent = i18n('product_counts_prompt');
+    var wellOver = deliveryTotalIsWellOver(pieces, ordered);
+    if (wellOverEl) {
+      wellOverEl.hidden = !wellOver;
+      wellOverEl.textContent = wellOver
+        ? i18n('well_over_ordered').replace(':delivered', String(pieces)).replace(':ordered', String(ordered))
         : '';
     }
 
@@ -1733,6 +1806,7 @@
       if (data.order_date) state.date = data.order_date;
       if (data.driver_name) state.driverName = data.driver_name;
       state.invoiceItems = Array.isArray(data.items) ? data.items : [];
+      renderProductCounts();
       state.savedTotal = Number(data.saved_total) || 0;
       state.isSaved = data.is_saved === true;
       state.paymentCollection = data.payment_collection === 'cod' ? 'cod' : 'signature';
@@ -1799,6 +1873,12 @@
       setStatus(i18n('credits_exceed_pieces'), 'error');
       return;
     }
+    var productCounts = readProductCounts(pieces);
+    if (!productCounts.ok) {
+      openDeliveryAdjust();
+      setStatus(i18n('product_counts_mismatch'), 'error');
+      return;
+    }
 
     if (!skipVarianceCheck && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
       var ack = $('deliveryVarianceAck');
@@ -1863,7 +1943,8 @@
       var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('confirm') : '';
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
         '&delivered_pieces=' + encodeURIComponent(String(pieces)) +
-        '&credits_taken_back=' + encodeURIComponent(String(credits));
+        '&credits_taken_back=' + encodeURIComponent(String(credits)) +
+        productCounts.body;
       if (state.pricingMissing && canEditPricing() && state.pricePerPieceOverride != null) {
         body += '&price_per_piece=' + encodeURIComponent(String(state.pricePerPieceOverride));
       }

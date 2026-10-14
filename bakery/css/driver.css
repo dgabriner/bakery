@@ -5239,6 +5239,60 @@ body.route-has-sticky-dock .route-success-toast {
 }
 
 /* Delivery modal variance + submit note */
+#deliveryPhotoModal .delivery-product-counts {
+    margin: 10px 0 0;
+    display: grid;
+    gap: 8px;
+}
+
+#deliveryPhotoModal .delivery-product-counts[hidden] {
+    display: none;
+}
+
+#deliveryPhotoModal .delivery-product-counts p {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #334155;
+}
+
+#deliveryPhotoModal .delivery-well-over {
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #f97316;
+    background: #fff7ed;
+    color: #9a3412;
+    font-weight: 700;
+}
+
+#deliveryPhotoModal .delivery-product-count {
+    display: grid;
+    grid-template-columns: 1fr 96px;
+    gap: 8px;
+    align-items: center;
+    min-height: 48px;
+}
+
+#deliveryPhotoModal .delivery-product-count span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+#deliveryPhotoModal .delivery-product-count small {
+    color: #64748b;
+    font-size: 0.75rem;
+}
+
+#deliveryPhotoModal .delivery-product-count input {
+    min-height: 48px;
+    font-size: 1.15rem;
+    font-weight: 800;
+    width: 100%;
+}
+
 #deliveryPhotoModal .delivery-variance-alert {
     margin: 10px 0 0;
     padding: 10px 12px;
