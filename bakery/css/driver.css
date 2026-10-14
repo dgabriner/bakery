@@ -4215,6 +4215,11 @@ body.photo-mode-open {
     flex-direction: column;
     min-height: 0;
     flex-shrink: 0;
+    position: relative;
+    z-index: 4;
+    max-height: 52svh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 #deliveryPhotoModal.delivery-invoice-open .photo-finish-hint,
@@ -4593,11 +4598,16 @@ body.photo-mode-open {
         align-items: stretch;
     }
 
+    /* Cap at the small viewport. A one-shot visualViewport lock can be the
+       large height, and Safari's bottom toolbar then covers Confirmar. */
     #deliveryPhotoModal .delivery-photo-modal-content {
         width: 100%;
         max-width: none;
+        align-self: start;
         height: var(--photo-modal-locked-height, 100svh);
         max-height: var(--photo-modal-locked-height, 100svh);
+        height: min(var(--photo-modal-locked-height, 100svh), 100svh);
+        max-height: min(var(--photo-modal-locked-height, 100svh), 100svh);
         border-radius: 0;
         transform: none;
         opacity: 0;

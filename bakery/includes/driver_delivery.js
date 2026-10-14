@@ -314,15 +314,37 @@
     return window.innerWidth <= 768;
   }
 
+  function smallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (!probe) {
+      probe = document.createElement('div');
+      probe.id = 'deliverySvhProbe';
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:fixed;left:0;top:0;height:100svh;width:0;overflow:hidden;visibility:hidden;pointer-events:none;';
+      document.documentElement.appendChild(probe);
+    }
+    var measured = Math.round(probe.getBoundingClientRect().height);
+    return measured > 0 ? measured : 0;
+  }
+
+  function removeSmallViewportCap() {
+    var probe = document.getElementById('deliverySvhProbe');
+    if (probe && probe.parentNode) probe.parentNode.removeChild(probe);
+  }
+
   function syncPhotoModalViewportHeight() {
     if (!usesCompactCapture()) return;
     var modal = $('deliveryPhotoModal');
     if (!modal || !document.body.classList.contains('photo-mode-open')) return;
-    var height = window.innerHeight;
+    var visible = window.innerHeight || 0;
     if (window.visualViewport && window.visualViewport.height > 0) {
-      height = Math.round(window.visualViewport.height);
+      visible = Math.round(window.visualViewport.height);
     }
-    modal.style.setProperty('--photo-modal-locked-height', height + 'px');
+    var small = smallViewportCap();
+    if (small > 0) visible = Math.min(visible, small);
+    if (visible > 0) {
+      modal.style.setProperty('--photo-modal-locked-height', Math.round(visible) + 'px');
+    }
   }
 
   function lockPhotoModalViewport() {
@@ -337,6 +359,7 @@
   }
 
   function unlockPhotoModalViewport() {
+    removeSmallViewportCap();
     var modal = $('deliveryPhotoModal');
     if (modal) {
       modal.style.removeProperty('--photo-modal-locked-height');
@@ -1560,6 +1583,10 @@
     }
     state.pendingVarianceConfirm = onConfirm;
     panel.hidden = false;
+    var okBtn = $('deliveryVarianceOkBtn');
+    if (okBtn && typeof okBtn.focus === 'function') {
+      okBtn.focus({ preventScroll: false });
+    }
   }
 
   function hideVarianceConfirm() {
@@ -1758,6 +1785,14 @@
     if (!skipVarianceCheck && state.orderedPieces > 0 && pieces !== state.orderedPieces) {
       var ack = $('deliveryVarianceAck');
       if (!ack || !ack.checked) {
+        if (state.currentStep === 'invoice') {
+          showVarianceConfirm(pieces, function () {
+            var ackBox = $('deliveryVarianceAck');
+            if (ackBox) ackBox.checked = true;
+            confirmDelivery(true);
+          });
+          return;
+        }
         var alertEl = $('deliveryVarianceAlert');
         if (alertEl) alertEl.hidden = false;
         openDeliveryAdjust();
@@ -2349,7 +2384,6 @@
   // Re-sync locked height so Take / Library / Skip stay on-screen.
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', syncPhotoModalViewportHeight);
-    window.visualViewport.addEventListener('scroll', syncPhotoModalViewportHeight);
   }
   window.addEventListener('resize', syncPhotoModalViewportHeight);
 })();

@@ -163,6 +163,20 @@ driver_photo_assert(
     strpos($styles, '--photo-modal-locked-height') !== false
         && strpos($styles, '100svh') !== false
         && strpos($script, 'function lockPhotoModalViewport()') !== false
+        && strpos($script, 'function smallViewportCap()') !== false
+        && strpos($script, "visualViewport.addEventListener('scroll'") === false
+);
+driver_photo_assert(
+    'phone invoice shell cannot grow past the small viewport',
+    strpos($styles, 'min(var(--photo-modal-locked-height, 100svh), 100svh)') !== false
+);
+$confirmSection = driver_photo_section($script, 'async function confirmDelivery', 'function finishDeliveryUi');
+driver_photo_assert(
+    'invoice confirm offers save-anyway when the delivered count differs',
+    $confirmSection !== ''
+        && strpos($confirmSection, "state.currentStep === 'invoice'") !== false
+        && strpos($confirmSection, 'showVarianceConfirm(pieces') !== false
+        && strpos($confirmSection, 'confirmDelivery(true)') !== false
 );
 driver_photo_assert(
     'narrow delivery actions use a non-overflowing grid',
