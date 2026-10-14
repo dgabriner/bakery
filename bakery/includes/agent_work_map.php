@@ -854,6 +854,7 @@ function bakery_agent_work_map_core(): array
                 'includes/ingredient_prices.php',
                 'scripts/import_ingredient_prices.php',
                 'database/schema/086_ingredient_prices.sql',
+                'database/schema/093_ingredient_price_type.sql',
                 'lang/en.php',
                 'lang/es.php',
             ],
@@ -863,7 +864,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_agent_work_map_tests.php',
             ],
             'invariants' => [
-                'Current cost per kg is the latest ingredient_price_history row by invoice date',
+                'Current cost per kg is the latest invoice price row by invoice date. Quote and public_list never become current cost.',
                 'Draft purchase order is printable only and never emails, texts, or sends',
                 'Reorder point is ingredients.reorder_level; reorder_qty is the suggested order quantity',
                 'No new top-level nav module — prices and the draft order stay on ingredients.php',

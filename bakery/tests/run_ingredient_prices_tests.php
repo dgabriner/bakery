@@ -266,6 +266,132 @@ $assert($afterCliApply === $afterApply + 1, 'CLI --apply writes one more history
 
 @unlink($csvPath);
 
+echo "\n=== Optional price_type: only invoice rows import ===\n";
+$helpOut = [];
+$helpCode = 0;
+exec(
+    escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/import_ingredient_prices.php') . ' --help 2>&1',
+    $helpOut,
+    $helpCode
+);
+$helpText = implode("\n", $helpOut);
+$assert($helpCode === 0, 'importer help exits 0');
+$assert(strpos($helpText, 'price_type') !== false, 'importer help names the optional price_type column');
+$assert(strpos($helpText, 'quote') !== false && strpos($helpText, 'public_list') !== false, 'importer help names quote and public_list');
+$assert(stripos($helpText, 'blank') !== false && stripos($helpText, 'invoice') !== false, 'importer help treats a missing price_type as invoice');
+$assert(stripos($helpText, 'refus') !== false, 'importer help says a non-invoice row is refused');
+$scriptDoc = (string)file_get_contents($root . '/scripts/import_ingredient_prices.php');
+$assert(strpos($scriptDoc, 'price_type') !== false && strpos($scriptDoc, 'public_list') !== false, 'importer file header documents price_type');
+
+$migration093 = $root . '/database/schema/093_ingredient_price_type.sql';
+$assert(is_file($migration093), '093_ingredient_price_type.sql stores non-invoice prices');
+$migration093Sql = (string)file_get_contents($migration093);
+[$safe093, $safe093Message] = bakery_hosted_migration_sql_safe($migration093Sql);
+$assert($safe093, '093 is an additive hosted migration: ' . $safe093Message);
+$assert(strpos($migration093Sql, 'price_type') !== false, '093 adds price_type');
+$assert(strpos($migration093Sql, '091') !== false && strpos($migration093Sql, '092') !== false, '093 notes that 091 and 092 stay with the time clock');
+if (!column_exists($db, 'ingredient_price_history', 'price_type')) {
+    bakery_run_sql_file($db, $migration093);
+    bakery_forget_column_exists('ingredient_price_history', 'price_type');
+}
+$assert(column_exists($db, 'ingredient_price_history', 'price_type'), 'price_type column exists on bakerysf_test');
+
+$typeCsv = tempnam(sys_get_temp_dir(), 'ingtype');
+$typeCsvPath = $typeCsv . '.csv';
+rename($typeCsv, $typeCsvPath);
+file_put_contents($typeCsvPath, implode("\n", [
+    'ingredient name,vendor,SKU,pack grams,pack price,invoice number,invoice date,price_type',
+    $prefix . 'flour,KGBS,KG-INV,20000,20.00,T-INV,2026-07-01,invoice',
+    $prefix . 'flour,KGBS,KG-BLANK,20000,22.00,T-BLANK,2026-07-02,',
+    $prefix . 'flour,KGBS,KG-CASE,20000,26.00,T-CASE,2026-07-03,Invoice',
+    $prefix . 'salt,KGBS,KG-QUOTE,10000,80.00,T-QUOTE,2026-08-01,quote',
+    $prefix . 'yeast,BakeMark,KG-LIST,500,9.00,T-LIST,2026-08-02,public_list',
+    $prefix . 'oil,KGBS,KG-BAD,1000,5.00,T-BAD,2026-08-03,catalog',
+    'Not A Real Ingredient,BakeMark,BM-Q,5000,10.00,T-MISS,2026-08-04,quote',
+]) . "\n");
+$beforeType = (int)$db->query('SELECT COUNT(*) FROM ingredient_price_history')->fetchColumn();
+$typed = bakery_ingredient_prices_import_csv($db, $typeCsvPath, true);
+$afterType = (int)$db->query('SELECT COUNT(*) FROM ingredient_price_history')->fetchColumn();
+$assert(($typed['applied'] ?? 0) === 3, 'invoice, blank, and Invoice rows are applied');
+$assert($afterType === $beforeType + 3, 'quote, public_list, and other types write nothing');
+$assert(count($typed['unmatched'] ?? []) === 0, 'a quote for an unknown ingredient is refused, not unmatched');
+$invalidByInvoice = [];
+foreach ($typed['invalid'] ?? [] as $invalidRow) {
+    $invalidByInvoice[(string)($invalidRow['invoice_number'] ?? '')] = (string)($invalidRow['error'] ?? '');
+}
+$assert(($invalidByInvoice['T-QUOTE'] ?? '') === 'ingredient_prices.not_invoice', 'a quote row is refused with a per-row reason');
+$assert(($invalidByInvoice['T-LIST'] ?? '') === 'ingredient_prices.not_invoice', 'a public_list row is refused with a per-row reason');
+$assert(($invalidByInvoice['T-BAD'] ?? '') === 'ingredient_prices.not_invoice', 'an unknown price_type is refused');
+$assert(($invalidByInvoice['T-MISS'] ?? '') === 'ingredient_prices.not_invoice', 'a non-invoice row is refused even when the name does not match');
+$near(1.3, bakery_ingredient_current_cost_per_kg($flourId), 'the latest invoice cell becomes current cost');
+$flourCurrent = bakery_ingredient_current_price($db, $flourId);
+$assert(($flourCurrent['price_type'] ?? '') === 'invoice', 'a capitalized Invoice cell is stored as invoice');
+$assert(($flourCurrent['invoice_number'] ?? '') === 'T-CASE', 'Invoice is accepted and wins on date');
+
+$quoteStored = bakery_ingredient_price_add($db, [
+    'ingredient_id' => $flourId,
+    'vendor' => 'Quote Mill',
+    'vendor_sku' => 'Q-1',
+    'pack_size_grams' => 10000,
+    'pack_price' => 100,
+    'invoice_number' => 'Q-LATER',
+    'invoice_date' => '2026-09-01',
+    'price_type' => 'quote',
+    'entered_by' => $enteredBy,
+]);
+$listStored = bakery_ingredient_price_add($db, [
+    'ingredient_id' => $flourId,
+    'vendor' => 'List Mill',
+    'vendor_sku' => 'L-1',
+    'pack_size_grams' => 10000,
+    'pack_price' => 120,
+    'invoice_number' => 'L-LATER',
+    'invoice_date' => '2026-09-15',
+    'price_type' => 'public_list',
+    'entered_by' => $enteredBy,
+]);
+$assert(($quoteStored['ok'] ?? false) && ($listStored['ok'] ?? false), 'quote and public_list can be stored for the upper bound');
+$near(1.3, bakery_ingredient_current_cost_per_kg($flourId), 'a later quote or public list does not become current cost');
+$near(12.0, bakery_ingredient_fill_cost_per_kg($db, $flourId), 'the fill price is the latest quote or public list');
+$poAfterQuote = bakery_ingredient_draft_purchase_order($db, [$flourId]);
+$poPack = null;
+foreach ($poAfterQuote['vendors'] as $group) {
+    foreach ($group['lines'] as $line) {
+        if ((int)$line['ingredient_id'] === $flourId) {
+            $poPack = $line['pack_price'];
+        }
+    }
+}
+$near(26.0, $poPack ?? -1, 'the draft order keeps the invoice pack price');
+
+$sevenCsv = tempnam(sys_get_temp_dir(), 'ingseven');
+$sevenPath = $sevenCsv . '.csv';
+rename($sevenCsv, $sevenPath);
+file_put_contents($sevenPath, implode("\n", [
+    'ingredient name,vendor,SKU,pack grams,pack price,invoice number,invoice date',
+    $prefix . 'oil,KGBS,OIL-7,1000,3.50,SEVEN-1,2026-07-04',
+]) . "\n");
+$seven = bakery_ingredient_prices_import_csv($db, $sevenPath, true);
+$assert(($seven['applied'] ?? 0) === 1, 'the original 7 columns still import when price_type is absent');
+$oilCurrent = bakery_ingredient_current_price($db, $oilId);
+$assert(($oilCurrent['price_type'] ?? '') === 'invoice', 'a missing price_type column is stored as invoice');
+$near(3.5, bakery_ingredient_current_cost_per_kg($oilId), 'a 7 column invoice becomes current cost');
+
+$typeCli = [];
+$typeCliCode = 0;
+exec(
+    escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/import_ingredient_prices.php') . ' ' . escapeshellarg($typeCsvPath) . ' 2>&1',
+    $typeCli,
+    $typeCliCode
+);
+$typeCliText = implode("\n", $typeCli);
+$assert($typeCliCode === 0, 'CLI dry-run of a typed file exits 0');
+$assert(strpos($typeCliText, 'Only invoice prices can become the current cost') !== false, 'CLI prints the refusal reason in words');
+$assert(strpos($typeCliText, $prefix . 'salt') !== false, 'CLI names the refused row');
+
+@unlink($typeCsvPath);
+@unlink($sevenPath);
+
 echo "\n=== Page stays on ingredients and does not send ===\n";
 $page = (string)file_get_contents($root . '/ingredients.php');
 $script = (string)file_get_contents($root . '/scripts/import_ingredient_prices.php');
