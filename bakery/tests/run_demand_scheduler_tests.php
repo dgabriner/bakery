@@ -172,11 +172,12 @@ if ($probeCustomerId <= 0) {
 $probeOrderId = 0;
 $clearProbeOrder = static function () use ($db, &$probeOrderId, $tomorrowProbe, $probeCustomerId): void {
     if ($probeOrderId > 0) {
-        $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$probeOrderId]);
         $probeOrderId = 0;
     }
-    $db->prepare('DELETE FROM daily_orders WHERE customer_id = ? AND order_date = ?')
-        ->execute([$probeCustomerId, $tomorrowProbe]);
+    $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id IN (SELECT id FROM daily_orders WHERE order_date=?)')
+        ->execute([$tomorrowProbe]);
+    $db->prepare('DELETE FROM daily_order_assignments WHERE delivery_date=?')->execute([$tomorrowProbe]);
+    $db->prepare('DELETE FROM daily_orders WHERE order_date=?')->execute([$tomorrowProbe]);
 };
 $clearProbeHeartbeat = static function () use ($db, $root): void {
     @unlink($root . '/storage/cron/demand_scheduler.json');
