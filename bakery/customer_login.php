@@ -80,6 +80,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = (string)($result['error'] ?? 'That 4-digit code does not match an account.');
             $failurePrincipal = $mode === 'create' ? 'Customer portal signup' : 'Customer portal login';
             bakery_login_audit_record_failure($db, 'customer', $failurePrincipal, (string)$code);
+            $pressure = function_exists('bakery_login_failure_pressure')
+                ? bakery_login_failure_pressure($db, 'customer')
+                : ['locked' => false, 'failures' => 0];
+            if (!empty($pressure['locked'])) {
+                $error = bakery_t('login.lockout', ['minutes' => (int)$pressure['window_minutes']]);
+            } elseif ((int)($pressure['failures'] ?? 0) >= 3) {
+                $error .= ' ' . bakery_t('login.lockout_warning', [
+                    'failures' => (int)$pressure['failures'],
+                    'limit' => (int)$pressure['limit'],
+                    'minutes' => (int)$pressure['window_minutes'],
+                ]);
+            }
             usleep(300000);
         } catch (Exception $e) {
             $error = bakery_t('portal.error_unavailable');

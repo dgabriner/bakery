@@ -16,6 +16,20 @@ require_once 'includes/demand_confirmation.php';
 require_once 'includes/operational_exceptions.php';
 
 $user = bakery_current_user();
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_POST['action'] ?? '') === 'dismiss_admin_signin_alert') {
+    bakery_require_csrf();
+    if ($user && ($user['role_slug'] ?? '') === 'administrator') {
+        require_once __DIR__ . '/includes/admin_signin_alerts.php';
+        bakery_admin_signin_dismiss($db, (int)($_POST['alert_id'] ?? 0), (int)$user['id']);
+    }
+    $back = BASE_URL . 'index.php';
+    $postedDate = trim((string)($_GET['date'] ?? ''));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedDate)) {
+        $back .= '?date=' . urlencode($postedDate);
+    }
+    header('Location: ' . $back);
+    exit;
+}
 $isDriver = $user && bakery_is_driver_route_role($user['role_slug'] ?? '');
 $isBaker = $user && $user['role_slug'] === 'baker';
 if ($isDriver) {
@@ -131,6 +145,13 @@ require_once 'includes/nav.php';
         </nav>
         <?php endif; ?>
     </header>
+
+    <?php if ($user && ($user['role_slug'] ?? '') === 'administrator'): ?>
+        <?php
+        require_once __DIR__ . '/includes/admin_signin_alerts.php';
+        echo bakery_admin_signin_alerts_html($db);
+        ?>
+    <?php endif; ?>
 
     <?php if ($isBaker): ?>
         <section class="ops-section">

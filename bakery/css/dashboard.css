@@ -580,6 +580,21 @@
     color: #9b2525;
 }
 
+.ops-admin-signin-list {
+    margin: 0.45rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.ops-admin-signin-list li {
+    margin: 0.35rem 0;
+}
+
+.ops-admin-signin-list button {
+    margin-left: 0.4rem;
+    font: inherit;
+    cursor: pointer;
+}
+
 @media (max-width: 900px) {
     .ops-flow-strip {
         flex-wrap: nowrap;

@@ -42,6 +42,10 @@ function bakery_users_save(PDO $db, array $input): array
     $email = strtolower(trim((string)($input['email'] ?? '')));
     $driverId = (int)($input['driver_id'] ?? 0);
     $isActive = isset($input['is_active']) ? 1 : 0;
+    $hasBot = function_exists('column_exists') && column_exists($db, 'users', 'is_bot');
+    $knownBot = function_exists('bakery_known_bot_display_names')
+        && in_array($displayName, bakery_known_bot_display_names(), true);
+    $isBot = ($knownBot || isset($input['is_bot'])) ? 1 : 0;
     $roleLabels = bakery_assignable_role_labels();
 
     if ($displayName === '') {
@@ -107,11 +111,19 @@ function bakery_users_save(PDO $db, array $input): array
 
     if ($action === 'create') {
         $hash = password_hash($code, PASSWORD_DEFAULT);
-        $stmt = $db->prepare(
-            'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, 1)'
-        );
-        $stmt->execute([$email, $hash, $code, $displayName, $roleId, $driverIdValue]);
+        if ($hasBot) {
+            $stmt = $db->prepare(
+                'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active, is_bot)
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+            );
+            $stmt->execute([$email, $hash, $code, $displayName, $roleId, $driverIdValue, $isBot]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, 1)'
+            );
+            $stmt->execute([$email, $hash, $code, $displayName, $roleId, $driverIdValue]);
+        }
         $id = (int)$db->lastInsertId();
         bakery_audit_write($db, 'user', $id, 'create', 'role', null, $roleName);
         bakery_audit_write($db, 'user', $id, 'create', 'is_active', null, '1');
@@ -120,22 +132,42 @@ function bakery_users_save(PDO $db, array $input): array
     } else {
         $hash = $codeChanged ? password_hash($code, PASSWORD_DEFAULT) : (string)$existing['password_hash'];
         $storedCode = $codeChanged ? $code : (string)$existing['login_code'];
-        $stmt = $db->prepare(
-            'UPDATE users
-             SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
-                 role_id = ?, driver_id = ?, is_active = ?
-             WHERE id = ?'
-        );
-        $stmt->execute([
-            $email,
-            $hash,
-            $storedCode,
-            $displayName,
-            $roleId,
-            $driverIdValue,
-            $isActive,
-            $id,
-        ]);
+        if ($hasBot) {
+            $stmt = $db->prepare(
+                'UPDATE users
+                 SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
+                     role_id = ?, driver_id = ?, is_active = ?, is_bot = ?
+                 WHERE id = ?'
+            );
+            $stmt->execute([
+                $email,
+                $hash,
+                $storedCode,
+                $displayName,
+                $roleId,
+                $driverIdValue,
+                $isActive,
+                $isBot,
+                $id,
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                'UPDATE users
+                 SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
+                     role_id = ?, driver_id = ?, is_active = ?
+                 WHERE id = ?'
+            );
+            $stmt->execute([
+                $email,
+                $hash,
+                $storedCode,
+                $displayName,
+                $roleId,
+                $driverIdValue,
+                $isActive,
+                $id,
+            ]);
+        }
         if ((string)$existing['role_name'] !== $roleName) {
             bakery_audit_write($db, 'user', $id, 'update', 'role', (string)$existing['role_name'], $roleName);
         }
@@ -188,7 +220,7 @@ function bakery_users_save(PDO $db, array $input): array
     return ['id' => $id, 'message' => $message];
 }
 
-function bakery_users_set_active(PDO $db, int $id, int $active): string
+function bakery_users_set_active(PDO $db, int $id, int $active, string $reason = 'admin'): string
 {
     if ($id <= 0) {
         throw new Exception('Invalid user.');
@@ -216,6 +248,20 @@ function bakery_users_set_active(PDO $db, int $id, int $active): string
             (string)(int)$existing['is_active'],
             (string)$active
         );
+        if ($active === 0 && function_exists('bakery_record_operational_event')) {
+            $reason = $reason === 'inactive_60_days' ? 'inactive_60_days' : 'admin';
+            bakery_record_operational_event(
+                $db,
+                'user_deactivated',
+                'Deactivated ' . (string)$existing['display_name'],
+                [
+                    'metadata' => [
+                        'target_user_id' => $id,
+                        'reason' => $reason,
+                    ],
+                ]
+            );
+        }
     }
     return $active === 1 ? 'User activated.' : 'User deactivated.';
 }

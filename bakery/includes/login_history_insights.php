@@ -2136,9 +2136,40 @@ function bakery_login_history_active_chips(array $filters, array $options): arra
     return $chips;
 }
 
+function bakery_login_history_view_limit(): int
+{
+    return 100;
+}
+
+/**
+ * Every login row matching the date range and user filters. The on-screen
+ * lists stay capped; this export does not.
+ *
+ * @return list<array<string,mixed>>
+ */
+function bakery_login_history_export_rows(PDO $db, array $filters, array $ready): array
+{
+    if (empty($ready['audit'])) {
+        return [];
+    }
+    [$whereSql, $params] = bakery_login_history_clause($filters, $ready);
+    $fetched = bakery_login_history_query(
+        $db,
+        bakery_login_history_session_select() . ' FROM ' . bakery_login_history_from_sql()
+        . " WHERE {$whereSql} ORDER BY la.login_at ASC, la.id ASC",
+        $params
+    );
+    $now = time();
+    $rows = [];
+    foreach ($fetched as $row) {
+        $rows[] = bakery_login_history_decorate_session($row, $now);
+    }
+    return $rows;
+}
+
 function bakery_login_history_csv_headers(): array
 {
-    return ['login_at', 'name', 'role', 'type', 'outcome', 'duration_seconds', 'device', 'browser', 'ip', 'last_screen', 'location_status'];
+    return ['login_at', 'name', 'role', 'type', 'outcome', 'duration_seconds', 'device', 'browser', 'ip', 'user_agent', 'last_screen', 'location_status'];
 }
 
 function bakery_login_history_csv_row(array $row): array
@@ -2153,6 +2184,7 @@ function bakery_login_history_csv_row(array $row): array
         (string)($row['device_type'] ?? ''),
         (string)($row['browser'] ?? ''),
         (string)($row['ip_address'] ?? ''),
+        (string)($row['user_agent'] ?? ''),
         (string)($row['page_label'] ?? ''),
         (string)($row['location_status'] ?? ''),
     ];
@@ -2272,7 +2304,7 @@ function bakery_login_history_load(PDO $db, array $filters, array $ready): array
     if (in_array($view, ['overview', 'records'], true) || $filters['export'] === 'csv') {
         $recordFilters = $filters;
         if ($filters['export'] === 'csv') {
-            $data['records'] = bakery_login_history_load_records($db, array_merge($recordFilters, ['page' => 1]), $ready, 1000);
+            $data['records'] = ['total' => 0, 'rows' => bakery_login_history_export_rows($db, $recordFilters, $ready), 'last_page' => 1, 'page' => 1];
         } elseif ($view === 'overview') {
             $recordFilters['page'] = 1;
             $data['recent'] = bakery_login_history_load_sessions($db, $filters, $ready, 6, 'recent');
