@@ -4798,6 +4798,12 @@ return [
     'catalog_gaps.group' => ':label (:count)',
     'catalog_gaps.method_not_allowed' => 'This page accepts GET and POST only.',
 
+    'texts.not_connected' => 'Not connected, nothing delivered',
+    'texts.survey_today_link' => 'Today survey link',
+    'texts.survey_today_help' => 'Morning texts can carry this link for today. It expires at the end of the day.',
+    'survey.token_expired_title' => 'Survey link expired',
+    'survey.token_expired_body' => 'This survey link has expired. Ask the bakery to send a new one.',
+
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Zazie weekly sheet',
     'nav.item_desc.zazie_weekly_sheet' => 'Upload the Zazie weekly order file and apply it to dated orders.',

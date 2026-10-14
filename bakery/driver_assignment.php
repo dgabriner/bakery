@@ -131,7 +131,16 @@ try {
     $stmt->execute([$dayOfWeek]);
     $standingRoutes = $stmt->fetchAll();
 
+    $unassignedOrderIds = [];
+    foreach (bakery_unassigned_for_date($db, $selectedDate) as $gap) {
+        $unassignedOrderIds[(int)$gap['daily_order_id']] = true;
+    }
+
     foreach ($dailyOrders as $order) {
+        if (isset($unassignedOrderIds[(int)$order['id']])) {
+            $unassignedOrders[] = $order;
+            continue;
+        }
         if ($order['assigned_driver_id']) {
             $driverId = $order['assigned_driver_id'];
             if (!isset($ordersByDriver[$driverId])) {
@@ -141,8 +150,6 @@ try {
                 ];
             }
             $ordersByDriver[$driverId]['orders'][] = $order;
-        } else {
-            $unassignedOrders[] = $order;
         }
     }
 

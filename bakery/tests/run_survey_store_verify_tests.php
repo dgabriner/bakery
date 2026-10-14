@@ -199,6 +199,44 @@ $assert(
     'closed store_verify is not public'
 );
 $assert(bakery_survey_token_allows_public([]) === false, 'missing survey is not public');
+$assert(function_exists('bakery_survey_token_is_expired'), 'survey tokens can expire');
+$assert(function_exists('bakery_survey_bound_delivery_date'), 'survey tokens bind to one delivery date');
+if (function_exists('bakery_survey_token_is_expired') && function_exists('bakery_survey_bound_delivery_date')) {
+    $todayToken = [
+        'kind' => 'store_verify',
+        'status' => 'open',
+        'delivery_date' => '2026-10-14',
+        'token' => 'aabbccddeeff00112233445566778899',
+    ];
+    $assert(
+        bakery_survey_token_is_expired($todayToken, '2026-10-14') === false,
+        'a today token is usable on its delivery day'
+    );
+    $assert(
+        bakery_survey_token_is_expired($todayToken, '2026-10-15') === true,
+        'a today token expires the next day'
+    );
+    $assert(
+        bakery_survey_token_is_expired([
+            'kind' => 'store_verify',
+            'status' => 'open',
+            'delivery_date' => '2026-10-15',
+        ], '2026-10-14') === false,
+        'a tomorrow token stays usable the morning before'
+    );
+    $assert(
+        bakery_survey_token_allows_public([
+            'kind' => 'store_verify',
+            'status' => 'open',
+            'delivery_date' => '2020-01-01',
+        ]) === false,
+        'an expired delivery-date token is not public auth'
+    );
+    $assert(
+        bakery_survey_bound_delivery_date($todayToken, '2026-10-15') === '2026-10-14',
+        'a today token cannot be retargeted to another date'
+    );
+}
 $assert(bakery_survey_page_needs_login('', []) === true, 'no token still requires login');
 $assert(
     bakery_survey_page_needs_login('nope', []) === true,
@@ -377,7 +415,11 @@ $assert(strpos($surveysInc, 'driver_id IS NULL OR driver_id = 0') !== false, 'en
 $assert(strpos($commsSrc, 'texts.survey_driver_all') !== false, 'Text Comms offers HQ all-drivers option');
 $assert(strpos($commsSrc, 'bakery_survey_ensure_store_verify') !== false, 'composer reuses HQ survey via ensure');
 $assert(strpos($commsSrc, 'survey_coverage') !== false || strpos($commsSrc, 'surveyCoverage') !== false, 'Survey Center shows coverage radar');
-$assert(strpos($commsSrc, 'bakery_survey_store_verify_unassigned_stores') !== false, 'coverage radar uses unassigned-store helper');
+$assert(strpos($commsSrc, 'bakery_unassigned_for_date') !== false, 'coverage radar uses the shared unassigned-for-date query');
+$assert(strpos($commsSrc, 'tc-unassigned-names') !== false, 'Survey Center lists every unassigned store name');
+$assert(strpos($commsSrc, 'texts.survey_today_link') !== false, 'Survey Center offers a today survey link for morning texts');
+$assignSrc = (string)file_get_contents($root . '/driver_assignment.php');
+$assert(strpos($assignSrc, 'bakery_unassigned_for_date') !== false, 'driver assignment uses the shared unassigned-for-date query');
 $assert(strpos($commsSrc, 'bakery_survey_store_verify_empty_drivers') !== false, 'coverage radar uses empty-driver helper');
 $assert(strpos($commsSrc, 'page.survey_center') !== false, 'surveys view uses Survey Center page title');
 

@@ -72,6 +72,25 @@ try {
     $assert($row && $row['direction'] === 'outbound' && $row['status'] === 'logged', 'logged row lands in ledger as outbound/logged');
     $assert($row && $row['to_number'] === '+14155550001', 'ledger stores normalized E.164 number');
     $assert($row && $row['operating_date'] === '2026-08-23', 'ledger keys on the chosen operating date');
+    $loggedRow = $db->query('SELECT error_message FROM text_messages WHERE id = ' . (int)$recorded['id'])->fetch(PDO::FETCH_ASSOC);
+    $notice = function_exists('bakery_text_not_connected_notice') ? bakery_text_not_connected_notice() : '';
+    $assert($notice === 'Not connected, nothing delivered', 'missing Twilio config uses the not-connected notice');
+    $assert(
+        $loggedRow && (string)$loggedRow['error_message'] === 'Not connected, nothing delivered',
+        'unconfigured send logs Not connected, nothing delivered'
+    );
+    $commsPage = (string)file_get_contents(dirname(__DIR__) . '/text_comms.php');
+    $assert(strpos($commsPage, 'texts.not_connected') !== false, 'send button uses the not-connected label when Twilio is missing');
+    $enCatalog = require dirname(__DIR__) . '/lang/en.php';
+    $esCatalog = require dirname(__DIR__) . '/lang/es.php';
+    $assert(
+        ($enCatalog['texts.not_connected'] ?? '') === 'Not connected, nothing delivered',
+        'English catalog states Not connected, nothing delivered'
+    );
+    $assert(
+        isset($esCatalog['texts.not_connected']) && $esCatalog['texts.not_connected'] !== '' && $esCatalog['texts.not_connected'] !== $enCatalog['texts.not_connected'],
+        'Spanish catalog translates the not-connected notice'
+    );
 
     // ---- Mocked live success -------------------------------------------------
     $GLOBALS['bakery_text_force_record_only'] = null;
@@ -168,6 +187,34 @@ try {
     $failed = bakery_text_send($db, '+10000000000', 'should fail', ['operating_date' => '2026-08-23']);
     $cleanupMessageIds[] = $failed['id'];
     $assert(!$failed['ok'] && $failed['status'] === 'failed' && strpos((string)$failed['error'], 'HTTP 400') !== false, 'API error becomes failed ledger row, not an exception');
+
+    $GLOBALS['bakery_twilio_api_handler'] = static function (): array {
+        return ['sid' => 'SMfake00000000000000000000000004', 'status' => 'delivered', 'from' => '+14155550999'];
+    };
+    $deliveredSend = bakery_text_send($db, '+14155550004', 'delivered probe', ['operating_date' => '2026-08-23']);
+    $cleanupMessageIds[] = $deliveredSend['id'];
+    $assert($deliveredSend['ok'] && $deliveredSend['status'] === 'delivered', 'configured send records delivered when Twilio says delivered');
+    $deliveredLedger = (string)$db->query('SELECT status FROM text_messages WHERE id = ' . (int)$deliveredSend['id'])->fetchColumn();
+    $assert($deliveredLedger === 'delivered', 'ledger stores delivered for a delivered send');
+
+    $GLOBALS['bakery_twilio_api_handler'] = static function (): array {
+        return ['sid' => 'SMfake00000000000000000000000005', 'status' => 'undelivered', 'from' => '+14155550999'];
+    };
+    $failedSend = bakery_text_send($db, '+14155550005', 'failed probe', ['operating_date' => '2026-08-23']);
+    $cleanupMessageIds[] = $failedSend['id'];
+    $assert(!$failedSend['ok'] && $failedSend['status'] === 'failed', 'configured send records failed when Twilio does not deliver');
+    $failedLedger = (string)$db->query('SELECT status FROM text_messages WHERE id = ' . (int)$failedSend['id'])->fetchColumn();
+    $assert($failedLedger === 'failed', 'ledger stores failed for an undelivered send');
+
+    unset($GLOBALS['bakery_twilio_api_handler']);
+    $blocked = bakery_text_send($db, '+14155550006', 'must not leave the machine', ['operating_date' => '2026-08-23']);
+    $cleanupMessageIds[] = (int)$blocked['id'];
+    $assert(
+        function_exists('bakery_twilio_live_http_blocked') && bakery_twilio_live_http_blocked() === true,
+        'test database blocks live Twilio HTTP'
+    );
+    $assert(!$blocked['ok'] && $blocked['status'] === 'failed', 'a live send without a test handler fails closed and does not call Twilio');
+    $assert(strpos((string)$blocked['error'], 'blocked') !== false, 'blocked live send names the test guard');
     $failedRow = $db->query("SELECT error_message FROM text_messages WHERE id = " . (int)$failed['id'])->fetch(PDO::FETCH_ASSOC);
     $assert($failedRow && strpos((string)$failedRow['error_message'], 'invalid phone') !== false, 'failure reason stored beside the attempt');
 

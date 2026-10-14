@@ -40,7 +40,8 @@ try {
     );
 }
 
-if (bakery_survey_page_needs_login($token, $survey)) {
+$expiredPublicToken = is_array($survey) && $survey !== [] && bakery_survey_token_is_expired($survey, date('Y-m-d'));
+if (!$expiredPublicToken && bakery_survey_page_needs_login($token, $survey)) {
     bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
 }
 
@@ -180,6 +181,12 @@ if ((string)$survey['status'] !== 'open') {
         (string)bakery_t('survey.closed_body', [], 'This survey already closed. Thank you!')
     );
 }
+if (bakery_survey_token_is_expired($survey, date('Y-m-d'))) {
+    bakery_survey_fail(
+        (string)bakery_t('survey.token_expired_title', [], 'Survey link expired'),
+        (string)bakery_t('survey.token_expired_body', [], 'This survey link has expired. Ask the bakery to send a new one.')
+    );
+}
 
 $driverId = (int)($survey['driver_id'] ?? 0);
 $deliveryDate = (string)($survey['delivery_date'] ?? '');
@@ -188,17 +195,19 @@ if ($deliveryDate === '') {
 }
 $surveyDate = (string)($survey['delivery_date'] ?? '');
 $verifyDate = $nextDeliveryDate;
-if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate) && $surveyDate >= date('Y-m-d')) {
-    $verifyDate = $surveyDate;
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate)) {
+    $verifyDate = bakery_survey_bound_delivery_date($survey, null);
 }
 $dateParam = trim((string)($_REQUEST['date'] ?? ''));
-try {
-    $verifyDate = bakery_survey_store_verify_resolve_date(
-        $verifyDate,
-        $dateParam !== '' ? $dateParam : null
-    );
-} catch (RuntimeException $e) {
-    // Keep the default next-delivery / survey date when the query is junk.
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate)) {
+    try {
+        $verifyDate = bakery_survey_store_verify_resolve_date(
+            $verifyDate,
+            $dateParam !== '' ? $dateParam : null
+        );
+    } catch (RuntimeException $e) {
+        // Keep the default next-delivery date when the query is junk.
+    }
 }
 
 // Token-public store_verify / route_review skips identity. Logged-in

@@ -105,6 +105,12 @@ function bakery_text_context_from_purpose(string $purpose): string
     return 'manual';
 }
 
+/** Exact ledger phrase when Twilio is not configured. The UI translates texts.not_connected. */
+function bakery_text_not_connected_notice(): string
+{
+    return 'Not connected, nothing delivered';
+}
+
 /** True when outbound sends can really leave via Twilio. */
 function bakery_text_live_ready(): bool
 {
@@ -264,12 +270,14 @@ function bakery_text_send(PDO $db, string $to, string $body, array $opts = []): 
         // Honesty mode: record exactly what would have gone out.
         $result['recorded_only'] = true;
         $result['status'] = 'logged';
+        $result['error'] = bakery_text_not_connected_notice();
         $result['id'] = bakery_text_record($db, [
             'direction' => 'outbound',
             'status' => 'logged',
             'to_number' => $to,
             'from_number' => TWILIO_FROM_NUMBER !== '' ? TWILIO_FROM_NUMBER : '',
             'body' => $body,
+            'error_message' => bakery_text_not_connected_notice(),
             'customer_id' => $customerId,
             'staff_user_id' => $opts['staff_user_id'] ?? null,
             'context_type' => bakery_text_normalize_context_type((string)($opts['context_type'] ?? 'manual')),
@@ -307,10 +315,13 @@ function bakery_text_send(PDO $db, string $to, string $body, array $opts = []): 
         $response = twilio_api_request('POST', $path, $form);
         $sid = (string)($response['sid'] ?? '');
         $status = strtolower((string)($response['status'] ?? 'queued'));
+        if ($status === 'undelivered') {
+            $status = 'failed';
+        }
         if ($sid === '') {
             throw new RuntimeException('Twilio response missing message sid.');
         }
-        $result['ok'] = true;
+        $result['ok'] = $status !== 'failed';
         $result['status'] = $status !== '' ? $status : 'queued';
         $result['sid'] = $sid;
         $result['id'] = bakery_text_record($db, [

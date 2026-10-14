@@ -253,11 +253,73 @@ try {
     $stillNoOrder = bakery_survey_find_route_order($db, 0, $probeDate);
     $assert($stillNoOrder === [], 'route-order lookup stays read-only');
 
+    $assert(function_exists('bakery_unassigned_for_date'), 'shared unassigned-for-date query exists');
+    if (function_exists('bakery_unassigned_for_date')) {
+        $gapDate = '2026-10-10';
+        $db->prepare('DELETE FROM daily_order_assignments WHERE delivery_date = ?')->execute([$gapDate]);
+        $db->prepare('DELETE FROM daily_orders WHERE order_date = ?')->execute([$gapDate]);
+        $db->prepare('DELETE FROM standing_routes WHERE customer_id = 3 AND day_of_week = 6')->execute();
+        $db->prepare(
+            'INSERT INTO standing_routes (day_of_week, driver_id, customer_id, route_order) VALUES (6, 1, 3, 9)'
+        )->execute();
+        $insertGap = $db->prepare(
+            "INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, 'pending', 0)"
+        );
+        $insertGap->execute([1, $gapDate]);
+        $assignedGapId = (int)$db->lastInsertId();
+        $insertGap->execute([2, $gapDate]);
+        $db->prepare(
+            'INSERT INTO daily_order_assignments (daily_order_id, driver_id, delivery_date, route_order, delivery_status)
+             VALUES (?, 1, ?, 1, \'pending\')'
+        )->execute([$assignedGapId, $gapDate]);
+        $gapRows = bakery_unassigned_for_date($db, $gapDate);
+        $gapNames = array_map(static function (array $row): string {
+            return (string)($row['name'] ?? '');
+        }, $gapRows);
+        $assert(in_array('Demo Market Beta', $gapNames, true), 'Sat 10/10 unassigned list names the dated store with no driver');
+        $assert(!in_array('Demo Cafe Alpha', $gapNames, true), 'an assigned dated store is not unassigned');
+        $assert(!in_array('Demo Spot Gamma', $gapNames, true), 'a standing-only store is not counted as unassigned for the date');
+        $assert(
+            bakery_driver_unassigned_count($db, $gapDate) === count($gapRows),
+            'driver assignment count uses the same unassigned-for-date rows'
+        );
+        $db->prepare('DELETE FROM daily_orders WHERE order_date = ?')->execute([$gapDate]);
+        $db->prepare('DELETE FROM standing_routes WHERE customer_id = 3 AND day_of_week = 6 AND route_order = 9')->execute();
+    }
+
+    $todayLinkDate = date('Y-m-d');
+    $todaySurvey = bakery_survey_ensure_store_verify($db, 0, $todayLinkDate, 0);
+    $surveyIds[] = (int)$todaySurvey['id'];
+    $todayBody = bakery_survey_build_message($todaySurvey);
+    $assert(
+        strpos($todayBody, 'date=' . rawurlencode($todayLinkDate)) !== false
+            && strpos($todayBody, (string)$todaySurvey['token']) !== false,
+        'a today survey text carries a link for today'
+    );
+    $assert(
+        preg_match('/^[0-9a-f]{32}$/', (string)$todaySurvey['token']) === 1,
+        'today token stays a 32 character hex secret'
+    );
+    $assert(
+        function_exists('bakery_survey_token_is_expired')
+            && bakery_survey_token_is_expired($todaySurvey, $todayLinkDate) === false,
+        'today token is not expired on its own day'
+    );
+    $dayAfter = (new DateTime($todayLinkDate))->modify('+1 day')->format('Y-m-d');
+    $assert(
+        function_exists('bakery_survey_token_is_expired')
+            && bakery_survey_token_is_expired($todaySurvey, $dayAfter) === true,
+        'today token expires after its delivery day'
+    );
+
     $surveyPhp = (string)file_get_contents(dirname(__DIR__) . '/survey.php');
     $routeOrderRender = (string)file_get_contents(dirname(__DIR__) . '/includes/survey_route_order_render.php');
     $assert(strpos($surveyPhp, "=== 'open_hub'") !== false, 'HQ survey creation is the open_hub POST action');
     $assert(strpos($surveyPhp, 'bakery_survey_dual_hub_existing') !== false, 'survey page renders from existing hub rows');
     $assert(strpos($surveyPhp, 'bakery_survey_find_store_verify') !== false, 'driver copy links look up surveys');
+    $assert(strpos($surveyPhp, 'bakery_survey_token_is_expired') !== false, 'survey page rejects an expired token');
+    $assert(strpos($surveyPhp, '!$expiredPublicToken && bakery_survey_page_needs_login') !== false, 'an expired public link shows the expired page without a login wall');
+    $assert(strpos($surveyPhp, 'bakery_survey_bound_delivery_date') !== false, 'survey page keeps the token on its delivery date');
     $assert(strpos($surveyPhp, 'bakery_survey_record_interaction') === false, 'a survey page view does not write an open interaction');
     $assert(substr_count($surveyPhp, 'bakery_survey_dual_hub_links') === 1, 'creating hub rows happens in one POST path');
     $assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');

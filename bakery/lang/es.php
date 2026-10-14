@@ -4795,6 +4795,12 @@ return [
     'catalog_gaps.group' => ':label (:count)',
     'catalog_gaps.method_not_allowed' => 'Esta página solo acepta GET y POST.',
 
+    'texts.not_connected' => 'No conectado, no se entregó nada',
+    'texts.survey_today_link' => 'Enlace de encuesta de hoy',
+    'texts.survey_today_help' => 'Los textos de la mañana pueden llevar este enlace de hoy. Vence al final del día.',
+    'survey.token_expired_title' => 'El enlace de la encuesta venció',
+    'survey.token_expired_body' => 'Este enlace de encuesta ya venció. Pide a la panadería que envíe uno nuevo.',
+
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Hoja semanal de Zazie',
     'nav.item_desc.zazie_weekly_sheet' => 'Sube el archivo semanal de Zazie y aplícalo a los pedidos con fecha.',

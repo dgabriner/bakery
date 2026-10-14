@@ -1384,24 +1384,68 @@ function bakery_driver_plan_text(string $key, array $params = [], string $fallba
 }
 
 /**
+ * Dated orders with no driver for this delivery date.
+ * Survey Center and Driver Assignment both use this list.
+ *
+ * @return list<array{id:int,name:string,zone:string,address:string,daily_order_id:int,pieces:int}>
+ */
+function bakery_unassigned_for_date(PDO $db, string $date): array
+{
+    $date = bakery_driver_validate_delivery_date($date);
+    if (!function_exists('table_exists') || !table_exists($db, 'daily_orders') || !table_exists($db, 'customers')) {
+        return [];
+    }
+    $origin = function_exists('bakery_sfb_ops_origin_clause')
+        ? bakery_sfb_ops_origin_clause('c', $db)
+        : '';
+    $pieces = '0';
+    if (table_exists($db, 'daily_order_items')) {
+        $pieces = '(SELECT COALESCE(SUM(doi.quantity), 0) FROM daily_order_items doi WHERE doi.daily_order_id = do.id)';
+    }
+    $assignmentGuard = '';
+    if (table_exists($db, 'daily_order_assignments')) {
+        $assignmentGuard = ' AND NOT EXISTS (
+            SELECT 1 FROM daily_order_assignments doa
+            WHERE doa.daily_order_id = do.id
+              AND doa.delivery_date = do.order_date
+              AND doa.driver_id <> 0
+        )';
+    }
+    $sql = "SELECT c.id AS id, c.name AS name, COALESCE(c.zone, '') AS zone,
+                   COALESCE(c.address, '') AS address, do.id AS daily_order_id,
+                   {$pieces} AS pieces
+            FROM daily_orders do
+            JOIN customers c ON c.id = do.customer_id
+            {$origin}
+            WHERE do.order_date = ?
+            {$assignmentGuard}
+            ORDER BY c.name";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$date]);
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $id = (int)$row['id'];
+        if ($id <= 0) {
+            continue;
+        }
+        $rows[] = [
+            'id' => $id,
+            'name' => (string)$row['name'],
+            'zone' => (string)($row['zone'] ?? ''),
+            'address' => (string)($row['address'] ?? ''),
+            'daily_order_id' => (int)$row['daily_order_id'],
+            'pieces' => (int)($row['pieces'] ?? 0),
+        ];
+    }
+    return $rows;
+}
+
+/**
  * Count unassigned daily orders for a date.
  */
 function bakery_driver_unassigned_count(PDO $db, string $date): int
 {
-    if (!table_exists($db, 'daily_orders') || !table_exists($db, 'daily_order_assignments')) {
-        return 0;
-    }
-    $stmt = $db->prepare('
-        SELECT COUNT(*)
-        FROM daily_orders do
-        WHERE do.order_date = ?
-          AND NOT EXISTS (
-              SELECT 1 FROM daily_order_assignments doa
-              WHERE doa.daily_order_id = do.id AND doa.delivery_date = ?
-          )
-    ');
-    $stmt->execute([$date, $date]);
-    return (int)$stmt->fetchColumn();
+    return count(bakery_unassigned_for_date($db, $date));
 }
 
 /**

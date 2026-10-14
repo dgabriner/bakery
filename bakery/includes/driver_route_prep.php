@@ -34,31 +34,17 @@ function bakery_driver_plan_search(PDO $db, int $driverId, string $deliveryDate,
     $otherRoutes = [];
 
     if ($query === '') {
-        $unassignedStmt = $db->prepare(
-            "SELECT
-                c.id AS customer_id,
-                c.name AS customer_name,
-                c.address AS customer_address,
-                c.zone,
-                do.id AS daily_order_id,
-                0 AS assigned_driver_id,
-                '' AS assigned_driver_name,
-                {$pieceSelect} AS pieces
-             FROM daily_orders do
-             JOIN customers c ON c.id = do.customer_id
-             {$origin}
-             WHERE do.order_date = ?
-               AND c.is_active = 1
-               AND NOT EXISTS (
-                   SELECT 1 FROM daily_order_assignments doa
-                   WHERE doa.daily_order_id = do.id AND doa.delivery_date = ?
-               )
-             ORDER BY c.name
-             LIMIT 40"
-        );
-        $unassignedStmt->execute([$deliveryDate, $deliveryDate]);
-        foreach ($unassignedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $unassigned[] = bakery_driver_plan_format_candidate($row, $driverId);
+        foreach (array_slice(bakery_unassigned_for_date($db, $deliveryDate), 0, 40) as $gap) {
+            $unassigned[] = bakery_driver_plan_format_candidate([
+                'customer_id' => (int)$gap['id'],
+                'customer_name' => (string)$gap['name'],
+                'customer_address' => (string)($gap['address'] ?? ''),
+                'zone' => (string)($gap['zone'] ?? ''),
+                'daily_order_id' => (int)$gap['daily_order_id'],
+                'assigned_driver_id' => 0,
+                'assigned_driver_name' => '',
+                'pieces' => (int)($gap['pieces'] ?? 0),
+            ], $driverId);
         }
 
         if (function_exists('table_exists') && table_exists($db, 'standing_routes')) {
