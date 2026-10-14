@@ -428,7 +428,12 @@ $assert(strpos($navCatalog, "nav_key' => 'survey_center'") !== false, 'navigatio
 $assert(substr_count($navCatalog, "text_comms.php?view=surveys") >= 2, 'Survey Center appears in Workday and Delivery');
 $navSrc = (string)file_get_contents($root . '/includes/nav.php');
 $assert(strpos($navSrc, 'text_comms.php?view=surveys') === false, 'manager navigation omits Survey Center');
-$assert(strpos($navSrc, 'survey.php') !== false, 'driver More includes tomorrow stores survey link');
+$assert(strpos($navSrc, 'survey.php') !== false, 'driver and manager nav include survey.php');
+$assert(preg_match("/currentPage === 'survey'/", $navSrc) === 1, 'primary nav lights Survey');
+$assert(strpos($surveyPhp, 'survey-day-chip') !== false, 'survey hub and store-verify expose Today/Tomorrow day chips');
+$assert(strpos($surveyPhp, '$isManager ? 0') !== false, 'manager hub always mints HQ all-drivers surveys');
+$assert(strpos($surveyPhp, 'includes/header.php') !== false, 'logged-in survey hub uses app chrome');
+$assert(strpos($surveyPhp, 'hub_title_manager') !== false, 'manager hub uses everyone title');
 
 // ---- Coverage radar helpers -------------------------------------------------
 $hqFixture = [
@@ -510,6 +515,12 @@ $keys = [
     'nav.item.survey_center',
     'nav.item_desc.survey_center',
     'nav.survey_tomorrow',
+    'nav.survey_route',
+    'common.tomorrow',
+    'survey.hub_title_manager',
+    'survey.hub_day_aria',
+    'texts.survey_step1_help_hq',
+    'texts.survey_step2_help_hq',
     'texts.view_surveys',
     'texts.survey_coverage_title',
     'texts.survey_coverage_help',
