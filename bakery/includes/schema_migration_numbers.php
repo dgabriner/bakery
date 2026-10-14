@@ -99,6 +99,17 @@ function bakery_schema_unexpected_duplicate_prefixes(?array $ids = null): array
     return $unexpected;
 }
 
+/**
+ * 094, 095, and 096 are taken or reserved by other work and are not files
+ * on this branch. Do not reuse them. The next id after 093 is 097.
+ *
+ * @return list<int>
+ */
+function bakery_schema_reserved_migration_numbers(): array
+{
+    return [94, 95, 96];
+}
+
 /** @param list<string>|null $ids */
 function bakery_schema_next_migration_number(?array $ids = null): int
 {
@@ -107,7 +118,12 @@ function bakery_schema_next_migration_number(?array $ids = null): int
     foreach ($ids as $id) {
         $max = max($max, (int)substr((string)$id, 0, 3));
     }
-    return $max + 1;
+    $next = $max + 1;
+    $reserved = array_fill_keys(bakery_schema_reserved_migration_numbers(), true);
+    while (isset($reserved[$next])) {
+        $next++;
+    }
+    return $next;
 }
 
 /** @param list<string>|null $ids */
