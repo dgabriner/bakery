@@ -8,6 +8,7 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/daily_order_generation.php';
 require_once 'includes/daily_run.php';
+require_once 'includes/driver_assignments.php';
 require_once 'includes/operational_exceptions.php';
 
 $user = bakery_current_user();
@@ -50,6 +51,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'reopen_day') {
             bakery_daily_run_reopen_day($db, $postDate, (int)($user['id'] ?? 0) ?: null);
             $flash = bakery_t('daily_run.reopened_success', ['date' => date('M j, Y', strtotime($postDate))]);
+            $selectedDate = $postDate;
+        } elseif ($action === 'restore_standing_stops') {
+            require_once __DIR__ . '/includes/driver_assignment_actions.php';
+            $restored = bakery_driver_assignment_action_sync_driver_route($db, [
+                'driver_id' => (int)($_POST['driver_id'] ?? 0),
+                'delivery_date' => $postDate,
+            ]);
+            $flash = (string)($restored['message'] ?? '');
             $selectedDate = $postDate;
         }
     } catch (Throwable $e) {
@@ -162,6 +171,23 @@ require_once 'includes/nav.php';
             <div class="ops-alert ops-alert-warning" role="alert">
                 <?php bakery_te('daily_run.partial_data'); ?>
             </div>
+        <?php endif; ?>
+
+        <?php
+        $routeRestoreGroups = [];
+        if (function_exists('bakery_route_missing_standing_by_driver')) {
+            $routeRestoreGroups = bakery_route_missing_standing_by_driver($db, $selectedDate);
+        }
+        ?>
+        <?php if ($routeRestoreGroups): ?>
+            <section class="dr-restore-standing" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.restore_standing_title')); ?>">
+                <h2><?php echo htmlspecialchars(bakery_t('daily_run.restore_standing_title')); ?></h2>
+                <p><?php bakery_te('daily_run.restore_standing_help'); ?></p>
+                <?php bakery_route_restore_render_forms($routeRestoreGroups, [
+                    'action' => 'restore_standing_stops',
+                    'operating_date' => $selectedDate,
+                ], 'dr-btn dr-btn-secondary route-restore-btn'); ?>
+            </section>
         <?php endif; ?>
 
         <?php if (!empty($dailyRun['unrouted_standing_orders'])): ?>

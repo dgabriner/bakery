@@ -193,6 +193,15 @@ body.workspace-manager {
   color: #fff;
 }
 
+.manager-phone__btn.route-restore-btn {
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
+  height: auto;
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
 .manager-phone__drivers,
 .manager-phone__adjust {
   display: grid;

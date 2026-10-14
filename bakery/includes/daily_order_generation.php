@@ -46,7 +46,8 @@ function bakery_next_standing_route_order(
 /**
  * True when an active standing-route stop for this date has no dated assignment.
  * Paused and skipped customers are ignored. A cancelled assignment still counts
- * as present. A hard-deleted assignment does not, because removal is not stored.
+ * as present. A recorded manager removal stays off. An untracked hard delete
+ * does not, so the next fill copies that stop again.
  */
 function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date): bool
 {
@@ -80,6 +81,13 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
         $pauseParams[] = $date;
         $pauseParams[] = $date;
     }
+    if (table_exists($db, 'dated_route_removals')) {
+        $pauseSql .= ' AND NOT EXISTS (
+            SELECT 1 FROM dated_route_removals drr
+            WHERE drr.customer_id = sr.customer_id AND drr.delivery_date = ?
+        )';
+        $pauseParams[] = $date;
+    }
 
     $stmt = $db->prepare(
         'SELECT 1
@@ -102,6 +110,123 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
 }
 
 /**
+ * Create the dated-removal table when this database has not migrated yet.
+ * Call this before opening a transaction. DDL commits an open transaction.
+ */
+function bakery_dated_route_removals_ready(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready && table_exists($db, 'dated_route_removals')) {
+        return true;
+    }
+    if (table_exists($db, 'dated_route_removals')) {
+        $ready = true;
+        return true;
+    }
+    if ($db->inTransaction()) {
+        return false;
+    }
+    $db->exec(
+        'CREATE TABLE IF NOT EXISTS dated_route_removals (
+            id INT NOT NULL AUTO_INCREMENT,
+            delivery_date DATE NOT NULL,
+            customer_id INT NOT NULL,
+            driver_id INT NULL DEFAULT NULL,
+            removed_by_user_id INT NULL DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_dated_route_removals_date_customer (delivery_date, customer_id),
+            KEY idx_dated_route_removals_driver_date (driver_id, delivery_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    if (function_exists('bakery_forget_table_exists')) {
+        bakery_forget_table_exists('dated_route_removals');
+    }
+    $ready = table_exists($db, 'dated_route_removals');
+    return $ready;
+}
+
+/**
+ * @return array<int,true>
+ */
+function bakery_dated_route_removed_customer_ids(PDO $db, string $date): array
+{
+    if (!table_exists($db, 'dated_route_removals')) {
+        return [];
+    }
+    $stmt = $db->prepare('SELECT customer_id FROM dated_route_removals WHERE delivery_date = ?');
+    $stmt->execute([$date]);
+    $ids = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $customerId) {
+        $ids[(int)$customerId] = true;
+    }
+    return $ids;
+}
+
+function bakery_dated_route_removal_record(PDO $db, string $date, int $customerId, int $driverId): void
+{
+    if ($customerId <= 0 || !table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $userId = null;
+    if (function_exists('bakery_current_user')) {
+        $user = bakery_current_user();
+        if ($user && (int)($user['id'] ?? 0) > 0) {
+            $userId = (int)$user['id'];
+        }
+    }
+    $stmt = $db->prepare(
+        'INSERT INTO dated_route_removals (delivery_date, customer_id, driver_id, removed_by_user_id)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            driver_id = VALUES(driver_id),
+            removed_by_user_id = VALUES(removed_by_user_id),
+            created_at = CURRENT_TIMESTAMP'
+    );
+    $stmt->execute([$date, $customerId, $driverId > 0 ? $driverId : null, $userId]);
+}
+
+function bakery_dated_route_removal_clear(PDO $db, string $date, int $customerId): void
+{
+    if ($customerId <= 0 || !table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $db->prepare('DELETE FROM dated_route_removals WHERE delivery_date = ? AND customer_id = ?')
+        ->execute([$date, $customerId]);
+}
+
+function bakery_dated_route_removal_clear_date(PDO $db, string $date): void
+{
+    if (!table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $db->prepare('DELETE FROM dated_route_removals WHERE delivery_date = ?')->execute([$date]);
+}
+
+/**
+ * @param list<int> $orderIds
+ * @return array<int,int> daily_order_id => customer_id
+ */
+function bakery_dated_route_customers_for_orders(PDO $db, array $orderIds): array
+{
+    $orderIds = array_values(array_unique(array_filter(
+        array_map('intval', $orderIds),
+        static fn(int $id): bool => $id > 0
+    )));
+    if ($orderIds === []) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $db->prepare("SELECT id, customer_id FROM daily_orders WHERE id IN ($placeholders)");
+    $stmt->execute($orderIds);
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['id']] = (int)$row['customer_id'];
+    }
+    return $map;
+}
+
+/**
  * Generate dated daily orders from standing orders for one date.
  *
  * @param array{overwrite_changed?:bool, record_event?:bool, assign_routes?:bool} $options
@@ -109,9 +234,10 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
  *   record_event      — write an operational-timeline event (default true)
  *   assign_routes     — copy standing-route stops onto the dated route (default true).
  *                       Stops with no standing order are included. An existing
- *                       dated assignment is left where it is. A hard delete is
- *                       not recorded, so the next fill copies that stop again.
- *                       Cancelled assignments stay cancelled.
+ *                       dated assignment is left where it is. A recorded
+ *                       manager removal stays off the route. An untracked hard
+ *                       delete is not recorded, so the next fill copies that
+ *                       stop again. Cancelled assignments stay cancelled.
  *
  * @return array{db_day:int, standing_rows:int, orders_created:int, items_created:int,
  *               items_updated:int, items_preserved:int, overwrite_changed:bool,
@@ -136,6 +262,11 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
     // which implicitly commits in MariaDB. Finish them before opening the
     // generation transaction.
     bakery_customer_order_ensure_schema($db);
+    $removedCustomerIds = [];
+    if ($assignRoutes) {
+        bakery_dated_route_removals_ready($db);
+        $removedCustomerIds = bakery_dated_route_removed_customer_ids($db, $date);
+    }
     $db->beginTransaction();
 
     try {
@@ -379,6 +510,10 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                             $standingRoutePlaced[(int)$customerId] = true;
                             continue;
                         }
+                        if (isset($removedCustomerIds[(int)$customerId])) {
+                            $standingRoutePlaced[(int)$customerId] = true;
+                            continue;
+                        }
 
                         $driverId = (int)$standingRoute['driver_id'];
                         $routeOrder = bakery_next_standing_route_order(
@@ -420,8 +555,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
         // Standing-route stops are the route plan. Customers with no standing
         // order (or whose order lines were filtered out of the product join)
         // still belong on the dated route. Existing assignments, including
-        // cancelled ones, are left alone. A hard delete leaves no record, so
-        // this pass copies the stop again.
+        // cancelled ones, are left alone. A recorded manager removal stays
+        // off. An untracked hard delete leaves no record, so this pass copies
+        // that stop again.
         if ($assignRoutes && $standingRouteByCustomer !== []) {
             $routeWeekStart = bakery_week_start_monday($date);
             $routeOrderExists = $db->prepare(
@@ -430,6 +566,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
             foreach ($standingRouteByCustomer as $routeCustomerId => $standingRoute) {
                 $routeCustomerId = (int)$routeCustomerId;
                 if (isset($standingRoutePlaced[$routeCustomerId])) {
+                    continue;
+                }
+                if (isset($removedCustomerIds[$routeCustomerId])) {
                     continue;
                 }
                 if (bakery_customer_week_is_paused($db, $routeCustomerId, $routeWeekStart)

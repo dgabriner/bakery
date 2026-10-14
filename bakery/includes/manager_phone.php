@@ -561,6 +561,12 @@ function bakery_manager_phone_render_routes(array $ctx): void
     $plan = $ctx['routePlan'] ?? [];
     $unassignedCount = (int)($plan['unassigned_count'] ?? $ctx['unassigned'] ?? 0);
     $driverStops = $ctx['driver_stops'] ?? [];
+    $restoreByDriver = $ctx['routeRestoreByDriver'] ?? [];
+    if ($restoreByDriver === [] && ($ctx['db'] ?? null) instanceof PDO && function_exists('bakery_route_missing_standing_by_driver')) {
+        foreach (bakery_route_missing_standing_by_driver($ctx['db'], $date) as $restoreGroup) {
+            $restoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
+        }
+    }
     ?>
   <?php if ($unassignedCount > 0): ?>
     <section class="manager-phone__panel manager-phone__panel--loud">
@@ -692,6 +698,12 @@ function bakery_manager_phone_render_routes(array $ctx): void
           </details>
         <?php endif; ?>
         <div class="manager-phone__driver-actions">
+          <?php if (!empty($restoreByDriver[$id])): ?>
+            <?php bakery_route_restore_render_forms([$restoreByDriver[$id]], [
+                'manager_mutation' => 'restore_standing_stops',
+                'view' => 'routes',
+            ], 'manager-phone__btn route-restore-btn'); ?>
+          <?php endif; ?>
           <?php if ($needsClose && !$isClosed): ?>
             <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h(bakery_manager_phone_href($date, 'routes', ['sheet' => 'close', 'driver_id' => $id])); ?>"><?php bakery_te('manager_phone.close_route'); ?></a>
           <?php endif; ?>

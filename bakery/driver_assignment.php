@@ -57,8 +57,7 @@ $ordersByDriver = [];
 $unassignedOrders = [];
 $otherUnassignedOrders = [];
 $standingCustomerIds = [];
-$routeSyncCountByDriver = [];
-$routeSyncLabelsByDriver = [];
+$routeRestoreByDriver = [];
 $standingRoutesByDriver = [];
 $weeklyStandingRoutesByCustomer = [];
 $driversById = [];
@@ -201,19 +200,9 @@ try {
         }
     }
 
-    $assignedDriverByCustomer = [];
-    foreach ($dailyOrders as $order) {
-        if (!empty($order['assigned_driver_id'])) {
-            $assignedDriverByCustomer[(int)$order['customer_id']] = (int)$order['assigned_driver_id'];
-        }
-    }
-    foreach ($standingRoutes as $route) {
-        $customerId = (int)$route['customer_id'];
-        $driverId = (int)$route['driver_id'];
-        if (($assignedDriverByCustomer[$customerId] ?? 0) !== $driverId) {
-            $routeSyncCountByDriver[$driverId] = ($routeSyncCountByDriver[$driverId] ?? 0) + 1;
-            $routeSyncLabelsByDriver[$driverId][] = bakery_driver_assignment_missing_store_label($route);
-        }
+    $routeRestoreByDriver = [];
+    foreach (bakery_route_missing_standing_by_driver($db, $selectedDate) as $restoreGroup) {
+        $routeRestoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
     }
 
     foreach ($dailyOrders as $order) {
@@ -354,10 +343,10 @@ try {
             <?php foreach ($drivers as $driver): ?>
                 <?php
                 $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
-                $missingRouteCount = $routeSyncCountByDriver[$driver['id']] ?? 0;
-                $restoreLabel = $missingRouteCount > 0
-                    ? bakery_driver_assignment_restore_label($missingRouteCount, $routeSyncLabelsByDriver[$driver['id']] ?? [])
-                    : '';
+                $restoreGroup = $routeRestoreByDriver[(int)$driver['id']] ?? null;
+                $missingRouteCount = $restoreGroup ? count($restoreGroup['stops']) : 0;
+                $restoreLabel = $restoreGroup['label'] ?? '';
+                $restoreConfirm = $restoreGroup['confirm'] ?? '';
                 $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
                 ?>
                 <div class="driver-section" data-driver-id="<?= $driver['id'] ?>">
@@ -365,7 +354,7 @@ try {
                         <h3><?= htmlspecialchars($driver['name']) ?></h3>
                         <div class="driver-controls">
                             <?php if ($missingRouteCount > 0): ?>
-                                <button class="btn btn-sm btn-warning restore-missing-stops" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
+                                <button class="btn btn-sm btn-warning restore-missing-stops" data-confirm="<?= htmlspecialchars($restoreConfirm, ENT_QUOTES) ?>" onclick="assignFromStandingRoutes(<?= (int)$driver['id'] ?>, this)">
                                     <?= htmlspecialchars($restoreLabel) ?>
                                 </button>
                             <?php endif; ?>

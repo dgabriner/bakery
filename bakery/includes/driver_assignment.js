@@ -261,8 +261,13 @@ function saveAsStandingRoute() {
 }
 
 // Assign specific driver from standing routes
-function assignFromStandingRoutes(driverId) {
-    if (!confirm('Restore this driver\'s dated route from the standing route?')) {
+function assignFromStandingRoutes(driverId, button) {
+    var message = button && button.getAttribute ? button.getAttribute('data-confirm') : '';
+    if (!message) {
+        message = (window.__DRIVER_ASSIGNMENT__ && window.__DRIVER_ASSIGNMENT__.restoreConfirm)
+            || 'Add these standing stops back to the dated route?';
+    }
+    if (!confirm(message)) {
         return;
     }
 

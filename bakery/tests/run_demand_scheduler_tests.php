@@ -243,6 +243,9 @@ $fillCleanup = static function () use ($db, $fillDate, $mondayDate, $fillCustome
         if (table_exists($db, 'customer_delivery_skips')) {
             $db->prepare("DELETE FROM customer_delivery_skips WHERE customer_id IN ($ph)")->execute($fillCustomerIds);
         }
+        if (table_exists($db, 'dated_route_removals')) {
+            $db->prepare("DELETE FROM dated_route_removals WHERE customer_id IN ($ph)")->execute($fillCustomerIds);
+        }
         $db->prepare("DELETE FROM customers WHERE id IN ($ph)")->execute($fillCustomerIds);
     }
     $db->prepare('DELETE FROM drivers WHERE id IN (?, ?, ?)')->execute([$sergioId, $lauraId, $otherId]);
@@ -456,6 +459,73 @@ try {
         $assert(!isset($orphanByName['Route Fill Routed Monday']), 'a Monday store that already has a driver is not flagged');
     }
 
+    $_SESSION['user_id'] = 1;
+    $_SESSION['user_email'] = 'route-fill@example.test';
+    $_SESSION['user_display_name'] = 'Route Fill Manager';
+    $_SESSION['user_role_slug'] = 'administrator';
+    $_SESSION['auth_login_at'] = time();
+    $_SESSION['auth_last_activity'] = time();
+    $removedName = 'Route Fill Sergio 04';
+    $removedOrderStmt = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ? AND order_date = ? LIMIT 1');
+    $removedOrderStmt->execute([$bySlot[4], $fillDate]);
+    $removedOrderId = (int)$removedOrderStmt->fetchColumn();
+    $assert($removedOrderId > 0, 'slot 4 has a dated order before the manager unassigns it');
+    $assert(
+        bakery_driver_remove_assignment($db, $removedOrderId, $sergioId, $fillDate),
+        'manager can unassign slot 4'
+    );
+    $assert($assignmentCount($db, $bySlot[4], $fillDate) === 0, 'unassigned stop is off the dated route');
+    bakery_generate_daily_orders_from_standing($db, $fillDate, [
+        'overwrite_changed' => false,
+        'record_event' => false,
+        'assign_routes' => true,
+    ]);
+    $assert(
+        $assignmentCount($db, $bySlot[4], $fillDate) === 0,
+        'manager removal stays off the next standing fill'
+    );
+    $ensuredAfterRemoval = bakery_ensure_daily_orders_for_date($db, $fillDate, [
+        'record_event' => false,
+        'assign_routes' => true,
+        'skip_if_closed' => true,
+    ]);
+    $assert(
+        $assignmentCount($db, $bySlot[4], $fillDate) === 0,
+        'ensure does not put a manager removal back (ran=' . (!empty($ensuredAfterRemoval['ran']) ? 'yes' : 'no') . ')'
+    );
+    $assert(function_exists('bakery_route_missing_standing_by_driver'), 'missing standing stops are listed with store names');
+    if (function_exists('bakery_route_missing_standing_by_driver')) {
+        $missingGroups = bakery_route_missing_standing_by_driver($db, $fillDate);
+        $sergioGroup = null;
+        foreach ($missingGroups as $group) {
+            if ((int)$group['driver_id'] === $sergioId) {
+                $sergioGroup = $group;
+            }
+        }
+        $assert($sergioGroup !== null, 'Sergio still has a Restore group after the removal');
+        $sergioLabel = (string)($sergioGroup['label'] ?? '');
+        $sergioConfirm = (string)($sergioGroup['confirm'] ?? '');
+        $assert(strpos($sergioLabel, $removedName) !== false, 'Restore label names Route Fill Sergio 04 (got ' . $sergioLabel . ')');
+        $assert(strpos($sergioLabel, '#4') !== false, 'Restore label keeps standing slot 4');
+        $assert(strpos($sergioConfirm, $removedName) !== false, 'Restore confirm names the stop it will add back');
+    }
+    require_once $root . '/includes/driver_assignment_actions.php';
+    $restoreResult = bakery_driver_assignment_action_sync_driver_route($db, [
+        'driver_id' => $sergioId,
+        'delivery_date' => $fillDate,
+    ]);
+    $assert(
+        strpos((string)($restoreResult['message'] ?? ''), $removedName) !== false,
+        'restore result names the store it added back (got ' . (string)($restoreResult['message'] ?? '') . ')'
+    );
+    $assert($assignmentCount($db, $bySlot[4], $fillDate) === 1, 'explicit restore puts the removed stop back');
+    bakery_generate_daily_orders_from_standing($db, $fillDate, [
+        'overwrite_changed' => false,
+        'record_event' => false,
+        'assign_routes' => true,
+    ]);
+    $assert($assignmentCount($db, $bySlot[4], $fillDate) === 1, 'fill after restore does not duplicate the stop');
+
     $assert(function_exists('bakery_driver_assignment_restore_label'), 'Restore label names the missing stores');
     if (function_exists('bakery_driver_assignment_restore_label')) {
         $label = bakery_driver_assignment_restore_label(3, ['Amigos (#9)', 'Plaza (#11)', 'Fishtail (#13)']);
@@ -468,7 +538,13 @@ try {
     }
     $assignPage = (string)file_get_contents($root . '/driver_assignment.php');
     $runPage = (string)file_get_contents($root . '/daily_run.php');
-    $assert(strpos($assignPage, 'bakery_driver_assignment_restore_label') !== false, 'Driver Assignment prints store names on Restore');
+    $managerPage = (string)file_get_contents($root . '/manager.php');
+    $phonePage = (string)file_get_contents($root . '/includes/manager_phone.php');
+    $assert(strpos($assignPage, 'bakery_route_missing_standing_by_driver') !== false, 'Driver Assignment prints store names on Restore');
+    $assert(strpos($assignPage, 'data-confirm') !== false, 'Driver Assignment confirm names the stops');
+    $assert(strpos($runPage, 'bakery_route_restore_render_forms') !== false, 'Daily Run shows Restore with store names');
+    $assert(strpos($managerPage, 'bakery_route_restore_render_forms') !== false, 'manager board shows Restore with store names');
+    $assert(strpos($phonePage, 'bakery_route_restore_render_forms') !== false, 'phone shows Restore with store names');
     $assert(strpos($runPage, 'unrouted_standing_orders') !== false, 'Daily Run renders the unrouted standing-order warning');
     $en = require $root . '/lang/en.php';
     $es = require $root . '/lang/es.php';
@@ -476,6 +552,13 @@ try {
         'driver_assignment.restore_missing_one',
         'driver_assignment.restore_missing_many',
         'driver_assignment.restore_missing_hint',
+        'driver_assignment.restore_confirm_one',
+        'driver_assignment.restore_confirm_many',
+        'driver_assignment.restore_done_one',
+        'driver_assignment.restore_done_many',
+        'driver_assignment.restore_done_none',
+        'daily_run.restore_standing_title',
+        'daily_run.restore_standing_help',
         'daily_run.unrouted_standing_title',
         'daily_run.unrouted_standing_help',
         'daily_run.unrouted_standing_open',

@@ -222,6 +222,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($mutation === 'recovery_report') {
             bakery_delivery_recovery_report_failure($db, (int)($_POST['assignment_id'] ?? 0), $_POST);
             $managerNotice = 'Failed stop added to the recovery board.';
+        } elseif ($mutation === 'restore_standing_stops') {
+            require_once __DIR__ . '/includes/driver_assignment_actions.php';
+            $restored = bakery_driver_assignment_action_sync_driver_route($db, [
+                'driver_id' => (int)($_POST['driver_id'] ?? 0),
+                'delivery_date' => $selectedDate,
+            ]);
+            $managerNotice = (string)($restored['message'] ?? '');
         } elseif ($mutation === 'recovery_action') {
             $recoveryAction = (string)($_POST['recovery_action'] ?? '');
             bakery_delivery_recovery_apply($db, (int)($_POST['case_id'] ?? 0), $recoveryAction, $_POST);
@@ -246,9 +253,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if (!empty($_GET['notice'])) {
-    $managerNotice = substr(trim((string)$_GET['notice']), 0, 160);
+    $managerNotice = substr(trim((string)$_GET['notice']), 0, 500);
 } elseif (!empty($_GET['msg'])) {
-    $managerNotice = substr(trim((string)$_GET['msg']), 0, 160);
+    $managerNotice = substr(trim((string)$_GET['msg']), 0, 500);
 }
 
 $metric = static function (string $stageKey, string $metricKey, $fallback = null) use ($stageByKey) {
@@ -303,6 +310,12 @@ try {
 $driversWithWork = count(array_filter($driverRows, static function (array $row): bool {
     return $row['stops'] > 0;
 }));
+$routeRestoreByDriver = [];
+if (function_exists('bakery_route_missing_standing_by_driver')) {
+    foreach (bakery_route_missing_standing_by_driver($db, $selectedDate) as $restoreGroup) {
+        $routeRestoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
+    }
+}
 
 /*
  * Production and packing stay read-only here. The manager board combines the
@@ -595,6 +608,7 @@ if (bakery_manager_is_phone_workspace()) {
         'error' => $managerError,
         'notice' => $managerNotice,
         'db' => $db,
+        'routeRestoreByDriver' => $routeRestoreByDriver,
     ]);
     require_once 'includes/header.php';
     require_once 'includes/nav.php';
@@ -1430,7 +1444,17 @@ require_once 'includes/nav.php';
                   <td class="num" data-label="Open"><?php echo number_format($open); ?></td>
                   <td class="num" data-label="Delivered"><?php echo number_format($driver['delivered']); ?></td>
                   <td data-label="Issue"><?php if ($driver['failed'] > 0): ?><span class="sf-badge sf-badge--danger"><?php echo number_format($driver['failed']); ?> failed</span><?php elseif ($driver['stops'] === 0): ?><span class="sf-badge sf-badge--neutral">No route</span><?php else: ?><span class="sf-badge sf-badge--success">On route</span><?php endif; ?></td>
-                  <td data-label="Route"><a href="<?php echo htmlspecialchars(BASE_URL); ?>driver.php?driver_id=<?php echo (int)$driver['id']; ?>&amp;date=<?php echo urlencode($selectedDate); ?>">Open route</a></td>
+                  <td data-label="Route">
+                    <a href="<?php echo htmlspecialchars(BASE_URL); ?>driver.php?driver_id=<?php echo (int)$driver['id']; ?>&amp;date=<?php echo urlencode($selectedDate); ?>">Open route</a>
+                    <?php
+                    $restoreGroup = $routeRestoreByDriver[(int)$driver['id']] ?? null;
+                    if ($restoreGroup) {
+                        bakery_route_restore_render_forms([$restoreGroup], [
+                            'manager_mutation' => 'restore_standing_stops',
+                        ], 'sf-btn sf-btn--outline sf-btn--sm route-restore-btn');
+                    }
+                    ?>
+                  </td>
                 </tr>
               <?php endforeach; ?>
             </tbody>

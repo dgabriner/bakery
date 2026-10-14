@@ -214,6 +214,14 @@ function bakery_driver_assignment_action_sync_driver_route(PDO $db, array $input
         throw new Exception('This driver has no standing-route stops for ' . date('l', strtotime($deliveryDate)) . '.');
     }
 
+    $restoreLabels = [];
+    foreach (bakery_route_missing_standing_by_driver($db, $deliveryDate) as $group) {
+        if ((int)$group['driver_id'] === $driverId) {
+            $restoreLabels = $group['labels'];
+            break;
+        }
+    }
+
     bakery_generate_daily_orders_from_standing($db, $deliveryDate, [
         'overwrite_changed' => false,
         'record_event' => true,
@@ -231,10 +239,18 @@ function bakery_driver_assignment_action_sync_driver_route(PDO $db, array $input
 
     $result = bakery_driver_assign_orders($db, $driverId, $deliveryDate, $assignments, 'append');
 
+    if ($restoreLabels === []) {
+        $message = bakery_t('driver_assignment.restore_done_none', [
+            'driver' => (string)$driverRow['name'],
+        ]);
+    } else {
+        $message = bakery_route_restore_done_message($restoreLabels, (string)$driverRow['name']);
+    }
+
     return [
         'success' => true,
-        'message' => 'Restored ' . $result['stop_count'] . ' missing standing-route stop'
-            . ($result['stop_count'] === 1 ? '' : 's') . ' for ' . $driverRow['name'] . '.',
+        'message' => $message,
+        'stores' => $restoreLabels,
     ];
 }
 
