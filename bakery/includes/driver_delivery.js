@@ -80,6 +80,61 @@
     }
   }
 
+  function photoFailureReference() {
+    var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var out = '';
+    for (var i = 0; i < 6; i++) {
+      out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+    }
+    return out;
+  }
+
+  function revealSkipPhotoPath() {
+    var modal = $('deliveryPhotoModal');
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      modal.classList.add('is-open');
+    }
+    var actions = $('deliveryWizardActions');
+    if (actions) actions.hidden = false;
+    var skipBtn = $('deliveryWizardSkipBtn');
+    if (skipBtn) {
+      skipBtn.hidden = false;
+      skipBtn.disabled = false;
+    }
+    var skipInline = $('deliverySkipPhotoInlineBtn');
+    if (skipInline) {
+      skipInline.hidden = false;
+      skipInline.disabled = false;
+    }
+    state.submitting = false;
+  }
+
+  function reportArrivalPhotoFailure(err) {
+    try {
+      var ref = photoFailureReference();
+      var message = i18n(
+        'arrival_photo_failed',
+        'Arrival photo could not start. Use Skip photo to continue. Ref :ref'
+      );
+      message = String(message).split(':ref').join(ref);
+      revealSkipPhotoPath();
+      setStatus(message, 'error');
+      var toast = $('routeSuccessToast');
+      if (toast) {
+        toast.hidden = false;
+        toast.textContent = message;
+        toast.classList.add('is-visible');
+      }
+      var detail = (err && err.message) ? String(err.message) : 'arrival photo';
+      var stack = (err && err.stack) ? String(err.stack) : '';
+      if (typeof window.bakeryReportClientError === 'function') {
+        window.bakeryReportClientError('error', detail, stack, ref);
+      }
+    } catch (ignore) {}
+  }
+
   function revokePreviewUrl() {
     if (!state.previewUrl) return;
     try {
@@ -279,9 +334,13 @@
     var modal = $('deliveryPhotoModal');
     if (modal) modal.classList.remove('camera-unavailable');
     state.blob = null;
-    $('deliveryCaptureBtn').classList.remove('hidden');
-    $('deliveryCaptureBtn').textContent = state.cameraActive ? i18n('take_photo') : i18n('activate_camera');
-    $('deliveryRetakeBtn').classList.add('hidden');
+    var captureBtn = $('deliveryCaptureBtn');
+    if (captureBtn) {
+      captureBtn.classList.remove('hidden');
+      captureBtn.textContent = state.cameraActive ? i18n('take_photo') : i18n('activate_camera');
+    }
+    var retakeBtn = $('deliveryRetakeBtn');
+    if (retakeBtn) retakeBtn.classList.add('hidden');
   }
 
   function showCapturedPreview(objectUrl) {
@@ -434,11 +493,20 @@
   }
 
   function beginPhotoCapture() {
-    if (usesCompactCapture()) {
-      useNativeCamera();
-      return;
+    try {
+      if (usesCompactCapture()) {
+        useNativeCamera();
+        return;
+      }
+      var cameraPromise = startCamera();
+      if (cameraPromise && typeof cameraPromise.catch === 'function') {
+        cameraPromise.catch(function (err) {
+          reportArrivalPhotoFailure(err);
+        });
+      }
+    } catch (err) {
+      reportArrivalPhotoFailure(err);
     }
-    startCamera();
   }
 
   function hasPhotoType(type) {
@@ -650,6 +718,14 @@
   }
 
   async function startCamera() {
+    try {
+      await startCameraNow();
+    } catch (err) {
+      reportArrivalPhotoFailure(err);
+    }
+  }
+
+  async function startCameraNow() {
     stopCamera();
     showLivePreview();
     updatePhotoWorkflowUi(false);
@@ -712,6 +788,10 @@
       return;
     }
     if (frame) frame.classList.remove('is-camera-idle');
+    if (!video) {
+      setStatus(i18n('could_not_open_camera'), 'error');
+      return;
+    }
     video.srcObject = state.stream;
     try {
       await video.play();
@@ -1147,7 +1227,7 @@
     var height = image.naturalHeight || image.height || 0;
     var maxDimension = 1920;
     var largest = Math.max(width, height);
- var isSmallJpeg = /^image\\/jpe?g$/i.test(file.type || '')
+    var isSmallJpeg = /^image\/jpe?g$/i.test(file.type || '')
       && file.size <= 1500 * 1024
       && largest > 0
       && largest <= maxDimension;
@@ -2037,6 +2117,14 @@
   }
 
   function openModal(opts) {
+    try {
+      openArrivalPhoto(opts);
+    } catch (err) {
+      reportArrivalPhotoFailure(err);
+    }
+  }
+
+  function openArrivalPhoto(opts) {
     state.driverId = opts.driverId;
     state.driverName = opts.driverName || '';
     state.customerId = opts.customerId;
@@ -2097,8 +2185,10 @@
     if (opts.photoMode !== 'review' && opts.startStep === 'delivery') {
       startStep = 'delivery';
     }
-    $('deliveryInvoiceEditSavedBtn').hidden = true;
-    $('deliveryInvoiceActions').hidden = opts.photoMode === 'review';
+    var editSavedBtn = $('deliveryInvoiceEditSavedBtn');
+    if (editSavedBtn) editSavedBtn.hidden = true;
+    var invoiceActions = $('deliveryInvoiceActions');
+    if (invoiceActions) invoiceActions.hidden = opts.photoMode === 'review';
     var invoiceFooter = $('deliveryInvoiceFooterActions');
     if (invoiceFooter) invoiceFooter.hidden = true;
     setSubmitting(false);
@@ -2113,6 +2203,9 @@
     var arriveOrders = $('deliveryArriveOrders');
     if (arriveOrders) arriveOrders.hidden = opts.photoMode === 'review';
     updatePhotoWorkflowUi(true);
+    if (!modal) {
+      throw new Error('delivery photo modal missing');
+    }
     modal.classList.remove('is-closing', 'has-saved-photo', 'delivery-invoice-open', 'delivery-invoice-fullstep', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
     modal.style.display = 'flex';
     modal.setAttribute('aria-hidden', 'false');
@@ -2270,7 +2363,8 @@
     if (state.submitting) return;
     e.preventDefault();
     e.stopPropagation();
-    openModal({
+    try {
+      openModal({
       driverId: parseInt(btn.getAttribute('data-driver-id'), 10) || 0,
       driverName: btn.getAttribute('data-driver-name') || '',
       customerId: parseInt(btn.getAttribute('data-customer-id'), 10) || 0,
@@ -2282,7 +2376,10 @@
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
       startStep: btn.getAttribute('data-start-step') || 'photo',
       autoOpenCamera: false
-    });
+      });
+    } catch (err) {
+      reportArrivalPhotoFailure(err);
+    }
   }
 
   function bindPhotoButtons(root) {

@@ -4,6 +4,31 @@
 (function () {
   'use strict';
 
+  // The drive document stays in the back-forward cache while Add / remove stops
+  // is open. A take-over reloads only this prep document, so the restored route
+  // view still has the pre-take stop list until pageshow reloads it.
+  var routeDocumentLoadedAt = Date.now();
+
+  function markRouteDirty() {
+    try {
+      window.sessionStorage.setItem('bakeryRouteDirtyAt', String(Date.now()));
+    } catch (err) {}
+  }
+
+  window.addEventListener('pageshow', function (event) {
+    if (!event || !event.persisted) return;
+    if (document.body && document.body.classList.contains('driver-route-prep')) return;
+    var dirtyAt = 0;
+    try {
+      dirtyAt = Number(window.sessionStorage.getItem('bakeryRouteDirtyAt') || 0);
+    } catch (err) {
+      return;
+    }
+    if (dirtyAt > routeDocumentLoadedAt) {
+      window.location.reload();
+    }
+  });
+
   function t(key, fallback, params) {
     var di = window.__DRIVER_PAGE_I18N__ || {};
     var value = di[key];
@@ -156,6 +181,7 @@
         return;
       }
       toast(data.message || t('prep_removed', 'Stop removed from your route.'));
+      markRouteDirty();
       window.setTimeout(function () { window.location.reload(); }, 350);
     } catch (err) {
       toast(err.message || t('route_order_error', 'Could not update the route.'));
@@ -322,6 +348,7 @@
         return;
       }
       toast(data.message || t('prep_added', 'Added :name', { name: name }));
+      markRouteDirty();
       window.setTimeout(function () { window.location.reload(); }, 350);
     } catch (err) {
       toast(err.message || t('route_order_error', 'Could not update the route.'));

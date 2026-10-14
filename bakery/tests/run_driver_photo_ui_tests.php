@@ -469,4 +469,51 @@ driver_photo_assert(
         && $spanish['error.something_failed'] !== ''
 );
 
+$uploadPhoto = (string)file_get_contents($root . '/upload_driver_photo.php');
+$loginHistory = (string)file_get_contents($root . '/login_history.php');
+driver_photo_assert(
+    'take-over marks the route dirty before the prep page reloads',
+    strpos($prepScript, 'bakeryRouteDirtyAt') !== false
+        && strpos($prepScript, 'function markRouteDirty()') !== false
+        && strpos($prepScript, 'event.persisted') !== false
+        && strpos(driver_photo_section($prepScript, 'toast(data.message || t(\'prep_added\'', 'function bind()'), 'markRouteDirty();') !== false
+);
+driver_photo_assert(
+    'arrival photo failures name Skip photo and a reference',
+    strpos($script, 'function reportArrivalPhotoFailure') !== false
+        && strpos($script, 'function revealSkipPhotoPath') !== false
+        && strpos($script, 'arrival_photo_failed') !== false
+        && strpos($page, "'arrival_photo_failed' => bakery_t('driver.arrival_photo_failed')") !== false
+        && isset($english['driver.arrival_photo_failed'], $spanish['driver.arrival_photo_failed'])
+        && strpos((string)$english['driver.arrival_photo_failed'], 'Skip photo') !== false
+        && strpos((string)$spanish['driver.arrival_photo_failed'], 'Omitir foto') !== false
+        && strpos((string)$english['driver.arrival_photo_failed'], "\u{2013}") === false
+        && strpos((string)$english['driver.arrival_photo_failed'], "\u{2014}") === false
+);
+driver_photo_assert(
+    'photo upload returns JSON for Throwable',
+    strpos($uploadPhoto, 'catch (Throwable $e)') !== false
+        && strpos($uploadPhoto, "header('Content-Type: application/json; charset=utf-8')") !== false
+);
+driver_photo_assert(
+    'client errors view is a read-only tab and keeps the reference',
+    strpos($loginHistory, "'client_errors'") !== false
+        && strpos($loginHistory, 'name="page_path"') !== false
+        && strpos($loginHistory, 'reference_code') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_errors_search') !== false
+        && strpos($clientErrorsHelper, 'function bakery_client_error_reference_code') !== false
+        && strpos($shell, 'window.bakeryReportClientError') !== false
+);
+
+$nodeScript = $root . '/tests/driver_takeover_arrival_photo.js';
+$nodeOut = [];
+$nodeCode = 1;
+exec('node ' . escapeshellarg($nodeScript) . ' 2>&1', $nodeOut, $nodeCode);
+$nodeText = implode("\n", $nodeOut);
+echo $nodeText . ($nodeText === '' ? '' : "\n");
+driver_photo_assert(
+    'take-over then arrival photo runs with no drive reload',
+    $nodeCode === 0 && strpos($nodeText, 'FAIL') === false
+);
+
 exit($failures > 0 ? 1 : 0);

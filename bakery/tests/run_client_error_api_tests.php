@@ -70,6 +70,57 @@ $recent = bakery_client_errors_recent($db, 5);
 $assert($recent !== [] && (string)$recent[0]['message'] === 'characterization beacon', 'recent list returns the beacon');
 $db->prepare('DELETE FROM client_errors WHERE id = ?')->execute([$id]);
 
+$userId = (int)$db->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+$assert($userId > 0, 'a user exists for client error filters');
+$today = date('Y-m-d');
+$refId = bakery_client_error_record($db, [
+    'user_id' => $userId,
+    'kind' => 'error',
+    'message' => 'delivery photo modal missing',
+    'page_path' => '/driver.php',
+    'reference' => 'ab12cd',
+]);
+$assert($refId > 0, 'reference beacon inserts');
+$matched = bakery_client_errors_search($db, [
+    'user_id' => $userId,
+    'page_path' => 'driver.php',
+    'from' => $today,
+    'until' => $today,
+], 20);
+$found = null;
+foreach ($matched as $row) {
+    if ((int)$row['id'] === $refId) {
+        $found = $row;
+        break;
+    }
+}
+$assert(is_array($found), 'search finds the beacon by user, page, and date');
+$assert(($found['reference_code'] ?? '') === 'AB12CD', 'search shows the reference code');
+$assert(strpos((string)($found['message'] ?? ''), 'Ref AB12CD') === 0, 'reference is stored in the message');
+$otherUser = bakery_client_errors_search($db, [
+    'user_id' => $userId + 999999,
+    'page_path' => 'driver.php',
+    'from' => $today,
+    'until' => $today,
+], 20);
+$assert($otherUser === [], 'another user does not see this beacon');
+$otherPage = bakery_client_errors_search($db, [
+    'user_id' => $userId,
+    'page_path' => 'pack_list.php',
+    'from' => $today,
+    'until' => $today,
+], 20);
+$assert($otherPage === [], 'another page does not match this beacon');
+$otherDay = bakery_client_errors_search($db, [
+    'user_id' => $userId,
+    'page_path' => 'driver.php',
+    'from' => '2001-01-01',
+    'until' => '2001-01-01',
+], 20);
+$assert($otherDay === [], 'another date does not match this beacon');
+$assert(bakery_client_error_normalize_reference('no') === '', 'short references are dropped');
+$db->prepare('DELETE FROM client_errors WHERE id = ?')->execute([$refId]);
+
 $manifest = (string)file_get_contents($root . '/scripts/deploy_manifest.ps1');
 $assert(strpos($manifest, 'client_error_api.php') !== false, 'client_error_api.php is in the deploy root whitelist');
 

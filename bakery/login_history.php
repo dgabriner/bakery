@@ -269,6 +269,11 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
     <div class="login-history-filters__primary">
       <label><?php bakery_te('login_history.from'); ?> <input type="date" name="from" value="<?php echo htmlspecialchars($filters['from']); ?>"></label>
       <label><?php bakery_te('login_history.through'); ?> <input type="date" name="until" value="<?php echo htmlspecialchars($filters['until']); ?>"></label>
+      <?php if ($view === 'client_errors'): ?>
+      <label><?php bakery_te('login_history.client_errors_page'); ?>
+        <input type="search" name="page_path" value="<?php echo htmlspecialchars((string)($filters['page_path'] ?? '')); ?>" placeholder="<?php echo htmlspecialchars(bakery_t('login_history.client_errors_page_ph')); ?>">
+      </label>
+      <?php endif; ?>
       <label><?php bakery_te('login_history.person'); ?>
         <select name="subject" onchange="this.form.submit()">
           <option value=""><?php bakery_te('login_history.person_all'); ?></option>
@@ -370,6 +375,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
     bakery_login_history_tab($filters, 'usage', bakery_t('login_history.view_usage'));
     bakery_login_history_tab($filters, 'live', bakery_t('login_history.view_live'));
     bakery_login_history_tab($filters, 'records', bakery_t('login_history.view_records'));
+    bakery_login_history_tab($filters, 'client_errors', bakery_t('login_history.view_client_errors'));
     ?>
   </nav>
 
@@ -939,6 +945,41 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
         </div>
       <?php else: ?>
         <div class="login-history-empty"><?php bakery_te('login_history.no_idle'); ?></div>
+      <?php endif; ?>
+    </section>
+
+  <?php elseif ($view === 'client_errors'):
+      $clientErrors = $data['client_errors'] ?? [];
+  ?>
+    <section class="login-history-panel" id="client-errors" aria-labelledby="client-errors-title">
+      <div class="login-history-panel__head">
+        <div>
+          <h2 id="client-errors-title"><?php bakery_te('login_history.client_errors_title'); ?></h2>
+          <p class="login-history-panel__lead"><?php bakery_te('login_history.client_errors_lead'); ?></p>
+        </div>
+        <?php if ($clientErrors): ?>
+          <span class="login-history-chip is-count"><?php echo (int)count($clientErrors); ?></span>
+        <?php endif; ?>
+      </div>
+      <?php if (!$clientErrors): ?>
+        <div class="login-history-empty"><?php bakery_te('login_history.client_errors_empty'); ?></div>
+      <?php else: ?>
+        <ul class="login-history-browser-errors">
+          <?php foreach ($clientErrors as $errRow): ?>
+            <li>
+              <?php if (!empty($errRow['reference_code'])): ?>
+                <span class="login-history-chip is-flow"><?php bakery_te('login_history.client_errors_reference'); ?> <?php echo htmlspecialchars((string)$errRow['reference_code']); ?></span>
+              <?php endif; ?>
+              <span class="login-history-chip is-flow"><?php echo htmlspecialchars((string)($errRow['kind'] ?? 'error')); ?></span>
+              <strong><?php echo htmlspecialchars((string)($errRow['display_name'] ?? bakery_t('login_history.unknown_device'))); ?></strong>
+              <span><?php echo htmlspecialchars(bakery_login_history_when((string)($errRow['created_at'] ?? ''))); ?></span>
+              <p><?php echo htmlspecialchars((string)($errRow['message'] ?? '')); ?></p>
+              <?php if (!empty($errRow['page_path'])): ?>
+                <p><?php echo htmlspecialchars((string)$errRow['page_path']); ?></p>
+              <?php endif; ?>
+            </li>
+          <?php endforeach; ?>
+        </ul>
       <?php endif; ?>
     </section>
 

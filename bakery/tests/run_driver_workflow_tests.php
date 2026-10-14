@@ -474,6 +474,49 @@ assert_true($foundOtherB, 'other-driver list includes the stop assigned to drive
 $taken = bakery_driver_plan_add_stop($db, 1, $prepDate, $prepCustomerB, true);
 assert_true(!empty($taken['ok']) && !empty($taken['taken_from_other']), 'driver can take a pending stop after confirm');
 
+echo "\n=== Take-over then arrival photo without a page reload ===\n";
+require_once $root . '/includes/photo_handler.php';
+$photoHandler = new PhotoHandler();
+$earlierAssignment = $photoHandler->verifyDeliveryAssignment(
+    $db,
+    1,
+    $prepCustomerA,
+    (int)$added['daily_order_id'],
+    $prepDate
+);
+assert_true(is_array($earlierAssignment), 'earlier stop stays on this driver after take-over without rebuilding the page');
+$earlierStatus = (string)($earlierAssignment['delivery_status'] ?? '');
+$takenAssignment = $photoHandler->verifyDeliveryAssignment(
+    $db,
+    1,
+    $prepCustomerB,
+    (int)$taken['daily_order_id'],
+    $prepDate
+);
+assert_true(is_array($takenAssignment), 'taken stop is assigned in the same request as the arrival photo');
+$arrivalSaved = $photoHandler->saveToDatabase($db, 1, $prepCustomerA, [
+    'delivery_date' => $prepDate,
+    'filename' => 'arrival-noe-cafe.jpg',
+    'original_filename' => 'arrival-noe-cafe.jpg',
+    'file_path' => 'uploads/driver_photos/arrival-noe-cafe.jpg',
+    'thumbnail_path' => null,
+    'file_size' => 128,
+    'mime_type' => 'image/jpeg',
+    'photo_type' => 'Before',
+    'latitude' => null,
+    'longitude' => null,
+    'notes' => 'arrival after takeover',
+]);
+assert_true(!empty($arrivalSaved['success']) && (int)($arrivalSaved['photo_id'] ?? 0) > 0, 'arrival photo saves for the earlier stop with no reload');
+$statusAfterPhoto = $db->prepare(
+    'SELECT delivery_status FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ? AND driver_id = 1'
+);
+$statusAfterPhoto->execute([(int)$added['daily_order_id'], $prepDate]);
+assert_eq($earlierStatus, (string)$statusAfterPhoto->fetchColumn(), 'arrival photo leaves the earlier stop pending');
+if (!empty($arrivalSaved['photo_id'])) {
+    $db->prepare('DELETE FROM driver_photos WHERE id = ?')->execute([(int)$arrivalSaved['photo_id']]);
+}
+
 assert_true(
     bakery_driver_remove_assignment($db, (int)$added['daily_order_id'], 1, $prepDate),
     'driver can unassign a pending stop from their route'
