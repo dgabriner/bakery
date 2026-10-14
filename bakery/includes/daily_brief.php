@@ -27,7 +27,7 @@ define('BAKERY_BRIEF_MIN_RELATIVE_DELTA', 0.20);
 function bakery_daily_brief_build(PDO $db, string $date, array $options = []): array
 {
     $today = date('Y-m-d');
-    $now = date('g:i A');
+    $now = bakery_locale_time(time());
     $role = (string)($options['role'] ?? 'manager');
     $weekday = bakery_standing_day_from_date($date);
     $dayNames = bakery_day_names();
@@ -209,7 +209,7 @@ function bakery_daily_brief_run_status(array $commandCenter, ?array $dailyRun = 
         }
         if ($critical > 0) {
             return [
-                'label' => 'Blocked — ' . $critical . ' blocker' . ($critical === 1 ? '' : 's'),
+                'label' => 'Blocked.' . $critical . ' blocker' . ($critical === 1 ? '' : 's'),
                 'tone' => 'critical',
                 'critical_count' => $critical,
                 'completed_stages' => [],
@@ -271,10 +271,10 @@ function bakery_daily_brief_run_status(array $commandCenter, ?array $dailyRun = 
         $label = 'Not started';
         $tone = 'muted';
     } elseif ($critical > 0) {
-        $label = 'Blocked — ' . $critical . ' urgent item' . ($critical === 1 ? '' : 's');
+        $label = 'Blocked.' . $critical . ' urgent item' . ($critical === 1 ? '' : 's');
         $tone = 'critical';
     } elseif (!$allOk) {
-        $label = 'In progress — needs attention';
+        $label = 'In progress. Needs attention';
         $tone = 'warning';
     } else {
         $label = 'On track';
@@ -387,7 +387,7 @@ function bakery_daily_brief_format_qty_change(string $productName, ?int $standin
         return $productName . ': ' . number_format($daily) . ' added (not on standing for this weekday)';
     }
     if ($standing !== null && $daily === null && $standing > 0) {
-        return $productName . ': standing ' . number_format($standing) . ' — not on dated order';
+        return $productName . ': standing ' . number_format($standing) . '. Not on dated order';
     }
     return $productName . ': changed';
 }
@@ -435,7 +435,7 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
             $changes[] = [
                 'severity' => 'critical',
                 'category' => 'demand',
-                'title' => $name . ' — no dated order',
+                'title' => $name . '. No dated order',
                 'detail' => 'Standing forecast expects '
                     . ($units > 0 ? number_format($units) . ' units' : 'delivery')
                     . ' on ' . $dayLabel . ', but no daily order exists yet.',
@@ -448,7 +448,7 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
             $changes[] = [
                 'severity' => 'critical',
                 'category' => 'demand',
-                'title' => $name . ' — empty dated order',
+                'title' => $name . '. Empty dated order',
                 'detail' => 'A daily order row exists but has no line items; standing forecast may be unfulfilled.',
                 'href' => $customerHref,
             ];
@@ -461,7 +461,7 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
                 $changes[] = [
                     'severity' => 'warning',
                     'category' => 'demand',
-                    'title' => $name . ' — one-off order',
+                    'title' => $name . '. One-off order',
                     'detail' => number_format($units) . ' units with no standing forecast for this weekday.',
                     'href' => $customerHref,
                 ];
@@ -487,7 +487,7 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
                 $changes[] = [
                     'severity' => 'warning',
                     'category' => 'demand',
-                    'title' => $name . ' — order changed from standing',
+                    'title' => $name . '. Order changed from standing',
                     'detail' => implode('; ', array_slice($meaningful, 0, 4))
                         . (count($meaningful) > 4 ? ' (+' . (count($meaningful) - 4) . ' more)' : ''),
                     'href' => $customerHref,
@@ -501,7 +501,7 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
             $changes[] = [
                 'severity' => 'info',
                 'category' => 'route',
-                'title' => $name . ' — route reassignment',
+                'title' => $name . '. Route reassignment',
                 'detail' => 'Standing route: ' . $standingDriver . ' → assigned: ' . $routeDriver . '.',
                 'href' => $base . 'driver_assignment.php?date=' . rawurlencode($date),
             ];
@@ -623,7 +623,7 @@ function bakery_daily_brief_production(PDO $db, string $date, array $commandCent
 
     foreach ($requiredByProduct as $row) {
         if ($row['short']) {
-            $shortages[] = $row['product_name'] . ' — need ' . number_format($row['required'])
+            $shortages[] = $row['product_name'] . '. Need ' . number_format($row['required'])
                 . ', stock short';
         }
         if ($row['remaining'] > 0 && ($commandCenter['inventory_ready'] ?? false)) {
@@ -975,9 +975,9 @@ function bakery_daily_brief_handoff(
                     continue;
                 }
                 $at = !empty($entry['occurred_at'])
-                    ? date('g:i A', strtotime((string)$entry['occurred_at']))
+                    ? bakery_locale_time(strtotime((string)$entry['occurred_at']))
                     : '';
-                $recent[] = ($at !== '' ? $at . ' — ' : '') . $summary;
+                $recent[] = ($at !== '' ? $at . ' - ' : '') . $summary;
                 if (count($recent) >= 6) {
                     break;
                 }

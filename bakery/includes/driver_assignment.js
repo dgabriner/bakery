@@ -536,7 +536,7 @@ function displayConstraintAwareRoute(result, customerOrder, orders, routeWithTim
     let routeList = `<div class='route-stops'><h4>Constraint-Aware Route Order</h4><div class='draggable-route-list'>`;
     routeWithTimes.forEach((stop, idx) => {
         const customer = stop.customer;
-        const arrival = stop.arrivalTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const arrival = window.bakeryLocaleTime ? window.bakeryLocaleTime(stop.arrivalTime) : stop.arrivalTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
         let constraintStatus = '';
         if (customer.deliver_by) {
             const deadline = new Date();
@@ -544,7 +544,8 @@ function displayConstraintAwareRoute(result, customerOrder, orders, routeWithTim
             deadline.setHours(parseInt(h), parseInt(m), 0, 0);
             if (stop.arrivalTime > deadline) {
                 const delay = Math.ceil((stop.arrivalTime - deadline) / (1000 * 60));
-                constraintStatus = `<span style='color:red'>❌ Late by ${delay} min (Deadline: ${deadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })})</span>`;
+                const deadlineLabel = window.bakeryLocaleTime ? window.bakeryLocaleTime(deadline) : deadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                constraintStatus = `<span style='color:red'>❌ Late by ${delay} min (Deadline: ${deadlineLabel})</span>`;
             } else {
                 const buffer = Math.floor((deadline - stop.arrivalTime) / (1000 * 60));
                 constraintStatus = `<span style='color:green'>✅ On time (${buffer} min buffer)</span>`;
@@ -724,7 +725,7 @@ function updateArrivalTimesInUI(routeWithTimes) {
     const items = document.querySelectorAll('.route-stop-item');
     items.forEach((item, index) => {
         if (routeWithTimes[index]) {
-            const arrival = routeWithTimes[index].arrivalTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const arrival = window.bakeryLocaleTime ? window.bakeryLocaleTime(routeWithTimes[index].arrivalTime) : routeWithTimes[index].arrivalTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
             const arrivalElement = item.querySelector('.stop-content');
             if (arrivalElement) {
                 const arrivalText = arrivalElement.innerHTML.replace(/🕐 Arrival: [^<]+/, `🕐 Arrival: ${arrival}`);
@@ -772,7 +773,7 @@ function editAssignments(driverId) {
                 <div class="assignment-info">
                     <div class="customer-name">${order.customer_name}</div>
                     <div class="customer-address">${order.address}</div>
-                    ${isLocked ? `<div class="route-stop-lock-note">${order.delivery_status === 'delivered' ? 'Completed' : 'In transit'} — kept on this route</div>` : ''}
+                    ${isLocked ? `<div class="route-stop-lock-note">${order.delivery_status === 'delivered' ? 'Completed' : 'In transit'}. Kept on this route</div>` : ''}
                 </div>
                 <div class="assignment-controls">
                     <input type="number" class="route-order-input" value="${order.route_order || 0}" 

@@ -96,7 +96,7 @@ $dateFormatted = format_date($date, 'l, F j, Y');
               <?php
                 if ($line['diff'] > 0) echo '+' . $line['diff'];
                 elseif ($line['diff'] < 0) echo (string)$line['diff'];
-                else echo '—';
+                else echo '-';
               ?>
             </span>
           </div>

@@ -47,7 +47,7 @@ function bakery_billing_attention_meta() {
         'incomplete' => [
             'label' => 'Delivery incomplete',
             'short' => 'Incomplete',
-            'help' => 'Still open on the route — not delivered and not confirmed.',
+            'help' => 'Still open on the route. Not delivered and not confirmed.',
             'tone' => 'warn',
             'priority' => 20,
         ],
@@ -273,7 +273,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
     if ($amountIsBillable && $billableAmount <= 0 && ($deliveredPieces ?? 0) > 0 && !$pricingIssue) {
         $amountIsBillable = false;
         $pricingIssue = true;
-        $pricingNotes[] = 'Billable amount is zero despite delivered pieces — review pricing snapshot.';
+        $pricingNotes[] = 'Billable amount is zero despite delivered pieces. Review pricing snapshot.';
         if (!in_array('pricing_issue', $flags, true)) {
             $flags[] = 'pricing_issue';
         }
@@ -342,7 +342,7 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
         }
         return [
             'key' => 'cod_expected',
-            'label' => 'COD — collection not recorded',
+            'label' => 'COD. Collection not recorded',
             'detail' => 'Customer is COD; no amount_collected stored on this delivery.',
         ];
     }
@@ -395,7 +395,7 @@ function bakery_billing_payment_status(array $order, array $customer = []) {
     return [
         'key' => 'not_billable',
         'label' => 'Not yet billable',
-        'detail' => 'Delivery invoice not confirmed — no external payment state applies.',
+        'detail' => 'Delivery invoice not confirmed. No external payment state applies.',
     ];
 }
 

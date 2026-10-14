@@ -361,13 +361,13 @@ bakery_locale(true);
 $assert(bakery_locale() === 'es', 'anonymous survey locale resolves to Spanish');
 $GLOBALS['bakery_i18n_catalog'] = null;
 $assert(
-    bakery_t('survey.store_verify_hq_title') === 'Todos los repartidores — próximo día de entrega',
+    bakery_t('survey.store_verify_hq_title') === 'Todos los repartidores. Próximo día de entrega',
     'Spanish catalog is active for survey HQ title'
 );
 bakery_set_locale('en', false);
 $GLOBALS['bakery_i18n_catalog'] = null;
 $assert(
-    bakery_t('survey.store_verify_hq_title') === 'All drivers — next delivery day',
+    bakery_t('survey.store_verify_hq_title') === 'All drivers. Next delivery day',
     'English switch works for survey strings'
 );
 $_SERVER['SCRIPT_NAME'] = '/cli.php';

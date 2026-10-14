@@ -171,7 +171,7 @@ require_once 'includes/nav.php';
         <?php if ($standardPriceMixed): ?>
             <p class="standard-price-note mixed">
                 Products currently have mixed prices ($<?php echo number_format((float)$standardPriceInfo['min_price'], 2); ?>
-                – $<?php echo number_format((float)$standardPriceInfo['max_price'], 2); ?>).
+ to $<?php echo number_format((float)$standardPriceInfo['max_price'], 2); ?>).
                 Saving will set all Pan Dulce products to one price.
             </p>
         <?php else: ?>
@@ -226,7 +226,7 @@ require_once 'includes/nav.php';
             <div class="summary-card reference mixed">
                 <span class="summary-value" id="standard-price-display">
                     $<?php echo number_format((float)$standardPriceInfo['min_price'], 2); ?>
-                    – $<?php echo number_format((float)$standardPriceInfo['max_price'], 2); ?>
+ to $<?php echo number_format((float)$standardPriceInfo['max_price'], 2); ?>
                 </span>
                 <span class="summary-label">Mixed Product Prices</span>
             </div>

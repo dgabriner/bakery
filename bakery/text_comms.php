@@ -442,7 +442,7 @@ function bakery_text_render_compose(string $date, string $view, string $laneFilt
                         <?php foreach ($composeCustomers as $c): ?>
                             <option value="<?php echo htmlspecialchars($c['phone'], ENT_QUOTES, 'UTF-8'); ?>"
                                 <?php echo ($selectedPhone !== '' && bakery_text_phone_tail($c['phone']) === bakery_text_phone_tail($selectedPhone)) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($c['name'] . ' — ' . $c['phone'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php echo htmlspecialchars($c['name'] . ' - ' . $c['phone'], ENT_QUOTES, 'UTF-8'); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -564,7 +564,7 @@ require_once __DIR__ . '/includes/nav.php';
 
 <div class="tc-strip">
     <?php if (!$tablesReady): ?>
-        <span class="tc-chip tc-chip-warn"><strong>—</strong> <?php bakery_te('texts.unavailable_table'); ?></span>
+ <span class="tc-chip tc-chip-warn"><strong>-</strong> <?php bakery_te('texts.unavailable_table'); ?></span>
     <?php elseif (!$liveReady): ?>
         <span class="tc-chip tc-chip-warn"><strong>⏸</strong> <?php bakery_te('texts.badge_log'); ?></span>
     <?php elseif (!$credsSane): ?>
@@ -670,9 +670,9 @@ require_once __DIR__ . '/includes/nav.php';
         <div class="tc-panel-head">
             <?php if ($selectedPhone !== ''): ?>
                 <span>
-                    <?php echo htmlspecialchars($selectedPhone, ENT_QUOTES, 'UTF-8'); ?>
+                    <?php echo htmlspecialchars($selectedPhone, ENT_QUOTES, 'UTF-8'); ?>.
                     <?php if ($selectedCustomerId > 0): ?>
-                        — <a href="<?php echo htmlspecialchars(BASE_URL . 'customers.php?search=' . urlencode($selectedPhone), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.open_customer'); ?></a>
+                        <a href="<?php echo htmlspecialchars(BASE_URL . 'customers.php?search=' . urlencode($selectedPhone), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.open_customer'); ?></a>
                     <?php endif; ?>
                 </span>
                 <small><?php echo count($thread); ?> <?php bakery_te('texts.messages_count_suffix'); ?></small>
@@ -896,7 +896,7 @@ require_once __DIR__ . '/includes/nav.php';
                     <div><strong><?php bakery_te('texts.survey_coverage_empty_drivers', ['count' => count($surveyCoverage['empty_drivers'])]); ?></strong>
                     <?php
                       $names = array_map(static fn($d) => (string)($d['driver_name'] ?? ''), $surveyCoverage['empty_drivers']);
-                      echo ' — ' . htmlspecialchars(implode(', ', array_filter($names)), ENT_QUOTES, 'UTF-8');
+                      echo ' - ' . htmlspecialchars(implode(', ', array_filter($names)), ENT_QUOTES, 'UTF-8');
                     ?></div>
                 <?php endif; ?>
                 <?php if ($surveyCoverage['unassigned']): ?>
@@ -906,7 +906,7 @@ require_once __DIR__ . '/includes/nav.php';
                       foreach (array_slice($surveyCoverage['unassigned'], 0, 8) as $store) {
                           $storeNames[] = (string)($store['name'] ?? '');
                       }
-                      echo ' — ' . htmlspecialchars(implode(', ', array_filter($storeNames)), ENT_QUOTES, 'UTF-8');
+                      echo ' - ' . htmlspecialchars(implode(', ', array_filter($storeNames)), ENT_QUOTES, 'UTF-8');
                       if (count($surveyCoverage['unassigned']) > 8) {
                           echo '…';
                       }
@@ -1278,7 +1278,7 @@ require_once __DIR__ . '/includes/nav.php';
             <?php else: ?>
                 <ul class="tc-feed">
                     <?php foreach ($ops['contexts'] as $ctx): ?>
-                        <li><?php echo htmlspecialchars((string)$ctx['context_type'], ENT_QUOTES, 'UTF-8'); ?> — <?php echo (int)$ctx['n']; ?></li>
+                        <li><?php echo htmlspecialchars((string)$ctx['context_type'], ENT_QUOTES, 'UTF-8'); ?> - <?php echo (int)$ctx['n']; ?></li>
                     <?php endforeach; ?>
                 </ul>
             <?php endif; ?>

@@ -60,7 +60,7 @@ require_once __DIR__ . '/includes/nav.php';
       <span class="module-guide__legend-item module-guide__usage--<?php echo htmlspecialchars($usageLevel, ENT_QUOTES, 'UTF-8'); ?>">
         <span class="module-guide__usage-dot" aria-hidden="true"></span>
         <strong><?php echo htmlspecialchars(bakery_navigation_usage_label($usageLevel), ENT_QUOTES, 'UTF-8'); ?></strong>
-        — <?php echo htmlspecialchars(bakery_navigation_usage_description($usageLevel), ENT_QUOTES, 'UTF-8'); ?>
+        - <?php echo htmlspecialchars(bakery_navigation_usage_description($usageLevel), ENT_QUOTES, 'UTF-8'); ?>
       </span>
       <?php endforeach; ?>
     </div>

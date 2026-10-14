@@ -66,9 +66,9 @@ function bakery_time_clock_format_time(string $stamp): string
     if ($ts === false) {
         return $stamp;
     }
-    $clock = (function_exists('bakery_locale') && bakery_locale() === 'es')
-        ? date('H:i', $ts)
-        : date('g:i A', $ts);
+    $clock = function_exists('bakery_locale_time')
+        ? bakery_locale_time($ts)
+        : bakery_locale_time($ts);
     if (date('Y-m-d', $ts) === date('Y-m-d')) {
         return $clock;
     }

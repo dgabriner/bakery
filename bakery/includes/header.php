@@ -78,7 +78,27 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <?php if ($authUser && in_array($authRoleSlug, ['administrator', 'manager'], true)): ?>
     <script defer src="<?php echo bakery_asset_href('includes/staff_alerts.js'); ?>"></script>
     <?php endif; ?>
-    <script>window.__BAKERY_LOCALE__ = <?php echo json_encode($currentLocale); ?>;     window.__BAKERY_I18N__ = <?php echo json_encode([
+    <script>window.__BAKERY_LOCALE__ = <?php echo json_encode($currentLocale); ?>;
+    window.bakeryLocaleTime = function (value, withSeconds) {
+      var date = value instanceof Date ? value : new Date(value);
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      var hour24 = date.getHours();
+      var hour12 = hour24 % 12;
+      if (hour12 === 0) {
+        hour12 = 12;
+      }
+      var clock = String(hour12) + ':' + String(date.getMinutes()).padStart(2, '0');
+      if (withSeconds) {
+        clock += ':' + String(date.getSeconds()).padStart(2, '0');
+      }
+      var suffix = window.__BAKERY_LOCALE__ === 'es'
+        ? (hour24 < 12 ? 'a. m.' : 'p. m.')
+        : (hour24 < 12 ? 'AM' : 'PM');
+      return clock + ' ' + suffix;
+    };
+    window.__BAKERY_I18N__ = <?php echo json_encode([
         'saving' => bakery_t('common.saving'),
         'loading' => bakery_t('common.loading'),
         'cancel' => bakery_t('common.cancel'),

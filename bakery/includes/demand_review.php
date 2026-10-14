@@ -1838,7 +1838,7 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
         }
         $summary = trim((string)($context['summary'] ?? ''));
         if ($summary === '') {
-            $summary = 'Visit compare set dated qty for ' . $customer['name'] . ' — ' . $productName;
+            $summary = 'Visit compare set dated qty for ' . $customer['name'] . ' - ' . $productName;
         }
         bakery_record_operational_event(
             $db,

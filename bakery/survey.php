@@ -381,14 +381,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $done = (string)bakery_t(
                     'survey.store_verify_done_route_partial',
                     [],
-                    'Saved your list. Some route updates could not apply — ask the bakery to check Driver Assignment.'
+                    'Saved your list. Some route updates could not apply. Ask the bakery to check Driver Assignment.'
                 );
             }
             if (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.store_verify_sms_failed',
                     [],
-                    'Saved your list. The text to headquarters did not send — ask the bakery to check Twilio.'
+                    'Saved your list. The text to headquarters did not send. Ask the bakery to check Twilio.'
                 );
             }
             safe_redirect(
@@ -452,7 +452,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $done = (string)bakery_t(
                     'survey.route_order_sms_failed',
                     [],
-                    'Order saved. The text to headquarters did not send — ask the bakery to check Twilio.'
+                    'Order saved. The text to headquarters did not send. Ask the bakery to check Twilio.'
                 );
             }
             safe_redirect(
@@ -495,7 +495,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $touched = ((int)($route['assigned'] ?? 0) + (int)($route['removed'] ?? 0) + (int)($route['moved'] ?? 0)) > 0;
             $done = $touched
                 ? (string)bakery_t('survey.apply_done', [], 'Applied to dated routes. Driver Assignment updated.')
-                : (string)bakery_t('survey.apply_noop', [], 'Confirmed — dated routes already matched the survey.');
+                : (string)bakery_t('survey.apply_noop', [], 'Confirmed. Dated routes already matched the survey.');
             safe_redirect(
                 'survey.php?t=' . rawurlencode($token)
                 . '&date=' . rawurlencode($verifyDate)
@@ -720,7 +720,7 @@ if ($showStoreVerify || $isHqStoreVerify) {
   <div class="lang-row"><?php $langSwitchVariant = 'inline'; require __DIR__ . '/includes/language_switch.php'; ?></div>
   <h1><?php
     if ($isHqStoreVerify) {
-        echo $esc(bakery_survey_text('survey.store_verify_hq_title', [], 'All drivers — next delivery day'));
+        echo $esc(bakery_survey_text('survey.store_verify_hq_title', [], 'All drivers. Next delivery day'));
     } elseif ($showStoreVerify) {
         echo $esc(bakery_survey_text('survey.store_verify_title', [], 'Next delivery day'));
     } else {
@@ -769,7 +769,7 @@ if ($showStoreVerify || $isHqStoreVerify) {
     <div class="card links-card">
       <div class="meta"><?php echo $esc(bakery_survey_text('survey.store_verify_links', [], 'Share links (no text required)')); ?></div>
       <div class="row">
-        <span><?php echo $esc(bakery_survey_text('survey.store_verify_link_manager', [], 'Manager — all drivers')); ?></span>
+        <span><?php echo $esc(bakery_survey_text('survey.store_verify_link_manager', [], 'Manager. All drivers')); ?></span>
         <button type="button" class="linkish" data-copy-url="<?php echo $esc($selfUrl); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_copy_link', [], 'Copy link')); ?></button>
       </div>
       <?php foreach ($hqGroups as $group): ?>
@@ -1060,7 +1060,7 @@ if ($showStoreVerify || $isHqStoreVerify) {
     </div>
 
     <div class="card">
-      <div class="meta"><?php echo $esc(bakery_survey_text('survey.unassigned_stops', ['count' => count($data['unassigned'])], 'Stores with no driver (:count) — tap to add to your route')); ?></div>
+      <div class="meta"><?php echo $esc(bakery_survey_text('survey.unassigned_stops', ['count' => count($data['unassigned'])], 'Stores with no driver (:count). Tap to add to your route')); ?></div>
       <?php foreach (array_slice($data['unassigned'], 0, 20) as $candidate): ?>
       <div class="stop">
         <div>

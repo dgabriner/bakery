@@ -88,7 +88,7 @@ function route_analysis_minutes_between(?string $start, ?string $end): ?int {
     }
 }
 function route_analysis_datetime(?string $time): string {
-    return $time ? date('g:i A', strtotime($time)) : '—';
+    return $time ? bakery_locale_time(strtotime($time)) : '-';
 }
 
 $stats = ['stops' => count($stops), 'completed' => 0, 'timed_total' => 0, 'timed_count' => 0, 'second_photo_count' => 0];
@@ -132,7 +132,7 @@ require_once 'includes/nav.php';
     <section class="ra-context" aria-label="Route being analyzed"><strong><?php echo htmlspecialchars($selectedDriverName); ?></strong><span><?php echo htmlspecialchars(date('l, F j, Y', strtotime($selectedDate))); ?></span><span><?php echo $stats['stops']; ?> planned stops</span></section>
     <section class="ra-summary" aria-label="Route summary">
       <div><span>Completed</span><strong><?php echo $stats['completed']; ?>/<?php echo $stats['stops']; ?></strong><small>stops delivered</small></div>
-      <div><span>Average load time</span><strong><?php echo $avgLoad !== null ? $avgLoad . ' min' : '—'; ?></strong><small>first photo to second photo</small></div>
+      <div><span>Average load time</span><strong><?php echo $avgLoad !== null ? $avgLoad . ' min' : '-'; ?></strong><small>first photo to second photo</small></div>
       <div><span>Stops timed</span><strong><?php echo $stats['timed_count']; ?>/<?php echo $stats['stops']; ?></strong><small>at least two photos recorded</small></div>
       <div><span>Need second photo</span><strong><?php echo max(0, $stats['stops'] - $stats['second_photo_count']); ?></strong><small>stops without a photo pair</small></div>
     </section>
@@ -149,7 +149,7 @@ require_once 'includes/nav.php';
           <td><span class="ra-stop-num">#<?php echo (int)$stop['route_order']; ?></span><strong><?php echo htmlspecialchars($stop['customer_name']); ?></strong><?php if ($stop['zone']): ?><small><?php echo htmlspecialchars($stop['zone']); ?></small><?php endif; ?></td>
           <td><strong><?php echo route_analysis_datetime($stop['first_photo_at']); ?></strong><small><?php echo $stop['first_photo_at'] ? htmlspecialchars((string)$stop['first_photo_type']) . ' · photo 1 of ' . $stop['photo_count'] : 'not taken'; ?></small></td>
           <td><strong><?php echo route_analysis_datetime($stop['second_photo_at']); ?></strong><small><?php echo $stop['second_photo_at'] ? htmlspecialchars((string)$stop['second_photo_type']) . ' · photo 2' : 'not taken'; ?></small></td>
-          <td><strong><?php echo $stop['load_minutes'] !== null ? $stop['load_minutes'] . ' min' : '—'; ?></strong><small><?php echo $stop['load_minutes'] !== null ? 'between photos' : 'needs two photos'; ?></small></td>
+          <td><strong><?php echo $stop['load_minutes'] !== null ? $stop['load_minutes'] . ' min' : '-'; ?></strong><small><?php echo $stop['load_minutes'] !== null ? 'between photos' : 'needs two photos'; ?></small></td>
           <td><div class="ra-default"><strong><?php echo (int)$stop['default_minutes']; ?> min</strong><?php if ($shouldSuggest): ?><span>Observed: <?php echo $suggested; ?> min</span><form method="post" action=""><input type="hidden" name="action" value="update_default_time"><?php echo bakery_csrf_field(); ?><input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>"><input type="hidden" name="driver_id" value="<?php echo $selectedDriverId; ?>"><input type="hidden" name="customer_id" value="<?php echo (int)$stop['customer_id']; ?>"><input type="hidden" name="delivery_time" value="<?php echo $suggested; ?>"><button type="submit">Use <?php echo $suggested; ?> min</button></form><?php else: ?><small><?php echo $suggested !== null ? 'Matches observed time' : 'No change suggested'; ?></small><?php endif; ?></div></td>
         </tr><?php endforeach; ?></tbody>
       </table></div>

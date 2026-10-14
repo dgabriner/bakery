@@ -547,9 +547,9 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
                     bakery_inventory_movement($db, $date, $productId, 'load', -$reserved, $driverId, $notes);
                 }
                 if ($override > 0) {
-                    $sourceNote = trim(($notes ?? '') !== '' ? ($notes . ' — ') : '')
+                    $sourceNote = trim(($notes ?? '') !== '' ? ($notes . ' - ') : '')
                         . "External load source: counted {$override} unit(s) into finished-goods custody.";
-                    $loadNote = trim(($notes ?? '') !== '' ? ($notes . ' — ') : '')
+                    $loadNote = trim(($notes ?? '') !== '' ? ($notes . ' - ') : '')
                         . "Loaded {$override} externally supplied unit(s).";
                     $sourceStockUpdate->execute([$override, $date, $productId]);
                     bakery_inventory_movement($db, $date, $productId, 'count', $override, $driverId, $sourceNote);

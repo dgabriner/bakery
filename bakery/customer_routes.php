@@ -241,7 +241,7 @@ require_once 'includes/nav.php';
                                                 <span class="driver-initial"><?php echo htmlspecialchars($assignment['driver_initial']); ?></span>
                                                 <span class="driver-name"><?php echo htmlspecialchars($assignment['driver_name']); ?></span>
                                             <?php else: ?>
-                                                <span class="no-driver">—</span>
+ <span class="no-driver">-</span>
                                             <?php endif; ?>
                                         </button>
                                     </div>

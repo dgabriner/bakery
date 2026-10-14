@@ -435,6 +435,12 @@ function format_price($amount) {
 
 function format_date($date, $format = 'M j, Y') {
     try {
+        if ($date === null || $date === '') {
+            return '';
+        }
+        if (function_exists('bakery_format_user_stamp') && preg_match('/[gh]:i/', (string)$format)) {
+            return bakery_format_user_stamp($date, (string)$format);
+        }
         return date($format, strtotime($date));
     } catch (Exception $e) {
         return $date;

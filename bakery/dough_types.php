@@ -1088,7 +1088,7 @@ foreach ($dough_types_rows as $dough_type) {
                                             <?php if (!empty($dough_type['standard_batch_dough_grams'])): ?>
                                                 Standard batch: <?php echo rtrim(rtrim(number_format((float)$dough_type['standard_batch_dough_grams'], 1), '0'), '.'); ?> g dough
                                             <?php else: ?>
-                                                <span class="no-items">No standard batch size — Ingredient Planner uses continuous dough grams</span>
+ <span class="no-items">No standard batch size. Ingredient Planner uses continuous dough grams</span>
                                             <?php endif; ?>
                                         </p>
                                     <?php endif; ?>
@@ -1131,7 +1131,7 @@ foreach ($dough_types_rows as $dough_type) {
                                                                 min="0"
                                                                 step="1"
                                                                 value="<?php echo $product['weight_grams'] !== null ? (int)$product['weight_grams'] : ''; ?>"
-                                                                placeholder="—"
+ placeholder="-"
                                                                 aria-label="Weight in grams for <?php echo htmlspecialchars($product['name']); ?>"
                                                                 onchange="updateProductWeight(<?php echo (int)$product['id']; ?>, this.value)">
                                                             <span class="weight-unit">g</span>

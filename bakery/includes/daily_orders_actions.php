@@ -196,7 +196,7 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
     if ($itemRow && $oldQty !== null && $oldQty !== $quantity) {
         $label = $quantity <= 0 ? 'removed' : 'changed';
         bakery_record_operational_event($db, BAKERY_OP_DAILY_ORDER_QUANTITY_CHANGED,
-            'Order quantity ' . $label . ' for ' . $itemRow['customer_name'] . ' — ' . $itemRow['product_name'], [
+            'Order quantity ' . $label . ' for ' . $itemRow['customer_name'] . ' - ' . $itemRow['product_name'], [
             'operational_date' => $itemRow['order_date'],
             'customer_id' => (int)$itemRow['customer_id'],
             'daily_order_id' => (int)$itemRow['daily_order_id'],
@@ -499,7 +499,7 @@ function bakery_daily_orders_action_set_no_charge(PDO $db, array $input, ?array 
         bakery_record_operational_event(
             $db,
             $eventType,
-            ($mark ? 'Marked no-charge' : 'Cleared no-charge') . ' for ' . $row['customer_name'] . ' — ' . $row['product_name'],
+            ($mark ? 'Marked no-charge' : 'Cleared no-charge') . ' for ' . $row['customer_name'] . ' - ' . $row['product_name'],
             [
                 'operational_date' => $row['order_date'],
                 'customer_id' => (int)$row['customer_id'],

@@ -660,7 +660,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
           <p class="manager-phone__counts manager-phone__counts--cash">
             <?php echo htmlspecialchars(bakery_t('manager_phone.cod_collected_vs_turned_in', [
                 'collected' => number_format((float)($codCollected ?? 0), 2),
-                'turned_in' => $codTurnedIn !== null ? number_format((float)$codTurnedIn, 2) : '—',
+                'turned_in' => $codTurnedIn !== null ? number_format((float)$codTurnedIn, 2) : '-',
             ], 'COD $:collected collected · $:turned_in turned in'), ENT_QUOTES, 'UTF-8'); ?>
           </p>
           <form method="post" class="manager-phone__cod-turnin">
@@ -727,7 +727,7 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
                 $committedTs = strtotime((string)($planState['commit']['committed_at'] ?? ''));
                 $committedAtLabel = bakery_t('manager_phone.plan_committed_at', [
                     'time' => $committedTs
-                        ? date('g:i A', $committedTs)
+                        ? bakery_locale_time($committedTs)
                         : (string)($planState['commit']['committed_at'] ?? ''),
                 ]);
                 $driftCount = (int)($planState['changed_since']['count'] ?? 0);

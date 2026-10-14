@@ -130,7 +130,7 @@ require_once 'includes/nav.php';
                       'created_at' => bakery_route_summary_format_time($photo['created_at'] ?? null),
                   ];
               }
-              $cardLabel = $stop['customer_name'] . ' — ' . bakery_route_summary_format_money((float)$stop['sold_amount']);
+              $cardLabel = $stop['customer_name'] . ' - ' . bakery_route_summary_format_money((float)$stop['sold_amount']);
             ?>
             <article class="rs-card status-<?php echo htmlspecialchars($status); ?><?php echo $hero ? ' has-photo' : ' no-photo'; ?>" data-stop-id="<?php echo (int)$stop['daily_order_id']; ?>">
               <button type="button" class="rs-card__photo" data-photos="<?php echo htmlspecialchars(json_encode($photoPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>" data-customer="<?php echo htmlspecialchars((string)$stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars($hero ? bakery_t('route_summary.view_photos') . ': ' . $cardLabel : $cardLabel); ?>">

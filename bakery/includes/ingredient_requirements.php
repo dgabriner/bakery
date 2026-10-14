@@ -223,7 +223,7 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
         } elseif ($demandMode === 'dated') {
             $sourceDetail = 'Dated daily orders for ' . $date . ' (every customer on this day has a dated order).';
         } else {
-            $sourceDetail = 'No daily orders for ' . $date . ' — standing_orders forecast for weekday ' . $weekday . '.';
+            $sourceDetail = 'No daily orders for ' . $date . '. Standing_orders forecast for weekday ' . $weekday . '.';
             $notes[] = 'Standing forecast is in use because no dated daily-order lines exist for this day.';
         }
     } elseif ($source === 'to_produce') {
@@ -404,7 +404,7 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
         if ($demandWithoutPlan > 0) {
             $notes[] = $demandWithoutPlan . ' product'
                 . ($demandWithoutPlan === 1 ? '' : 's')
-                . ' have demand for this day but no saved production plan — they are excluded from plan-based requirements.';
+                . ' have demand for this day but no saved production plan. They are excluded from plan-based requirements.';
         }
         if (empty($products)) {
             $planWithoutRows = 1;
@@ -417,7 +417,7 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
     }
 
     if ($source === 'plan' && $demandMode !== 'standing') {
-        $notes[] = 'Demand for this date includes dated orders — ingredient requirements follow the saved production plan, not standing forecast alone.';
+        $notes[] = 'Demand for this date includes dated orders. Ingredient requirements follow the saved production plan, not standing forecast alone.';
     }
 
     return [
@@ -597,10 +597,10 @@ function bakery_ingredient_requirements_enrich_stock(array $ingredients, array $
                 $packages = (int)ceil($shortageInUnit / $packageSize);
                 $row['suggested_purchase'] = $packages . ' × '
                     . bakery_ingredient_format_quantity($packageSize, $row['catalogue_unit']);
-                $row['suggested_purchase_note'] = 'Recommendation only — does not create a purchase order.';
+                $row['suggested_purchase_note'] = 'Recommendation only. Does not create a purchase order.';
             } elseif ($shortageInUnit !== null) {
                 $row['suggested_purchase'] = bakery_ingredient_format_quantity($shortageInUnit, $row['catalogue_unit']);
-                $row['suggested_purchase_note'] = 'Recommendation only — does not create a purchase order.';
+                $row['suggested_purchase_note'] = 'Recommendation only. Does not create a purchase order.';
             }
         } elseif (!$row['stock_trustworthy'] && $inventoryReady && $inv !== null) {
             if (!$row['stock_unit_comparable']) {
@@ -613,7 +613,7 @@ function bakery_ingredient_requirements_enrich_stock(array $ingredients, array $
         }
 
         if (!isset($row['stock_note']) && !$row['stock_trustworthy']) {
-            $row['stock_note'] = 'Shortage not calculated — ingredient stock is manual and not consumption-linked.';
+            $row['stock_note'] = 'Shortage not calculated. Ingredient stock is manual and not consumption-linked.';
         }
     }
     unset($row);
@@ -706,7 +706,7 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
         if ($weight === null || $weight <= 0) {
             $exceptions[] = [
                 'code' => 'missing_yield_weight',
-                'message' => $productName . ': missing or zero weight_grams — finished units cannot be converted to dough weight.',
+                'message' => $productName . ': missing or zero weight_grams. Finished units cannot be converted to dough weight.',
                 'product_id' => $productId,
                 'product_name' => $productName,
                 'dough_type_id' => $doughTypeId,
@@ -803,7 +803,7 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
             $exceptions[] = [
                 'code' => 'no_batch_reference',
                 'message' => ($doughTypeName ?? ('Dough #' . $doughTypeId))
-                    . ': no standard_batch_dough_grams configured — dough batches shown as continuous grams only.',
+                    . ': no standard_batch_dough_grams configured. Dough batches shown as continuous grams only.',
                 'product_id' => null,
                 'product_name' => null,
                 'dough_type_id' => $doughTypeId,
@@ -1137,11 +1137,11 @@ function bakery_ingredient_requirements_build(PDO $db, string $date, string $sou
         'on_hand_trustworthy' => false,
         'on_hand_note' => $inventoryReady
             ? 'On Hand is shown only when the ingredient catalogue unit converts to grams (g, kg, lb, oz). Stock is manual and not updated by production.'
-            : 'Ingredient inventory columns are not installed — requirements only, no on-hand comparison.',
+            : 'Ingredient inventory columns are not installed. Requirements only, no on-hand comparison.',
         'yield_note' => 'Yield uses finished units × products.weight_grams as total dough grams, then baker’s-% invert: flour_base = dough_grams ÷ (Σ% ÷ 100); each ingredient = flour_base × (% ÷ 100).',
         'batch_note' => $batchReady
             ? 'When standard_batch_dough_grams is set on a dough type, theoretical batches = dough_grams ÷ batch reference. Suggested whole batches = ceil(theoretical) and do not change the production plan.'
-            : 'Batch reference column is not installed — only continuous dough grams are shown. Run migration 023 to enable batch planning.',
+            : 'Batch reference column is not installed. Only continuous dough grams are shown. Run migration 023 to enable batch planning.',
         'unit_note' => 'Formula requirements are always grams. Mass catalogue units (g, kg, lb, oz) convert for shortage; volume/count units are not mixed into totals.',
         'stock_formula_note' => 'When comparable: shortage_grams = max(0, required_grams − on_hand_grams). Suggested purchase rounds shortage up to package_size when configured.',
     ];

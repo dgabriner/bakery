@@ -389,9 +389,9 @@ function bakery_customer_delivery_detail(PDO $db, int $customerId, int $dailyOrd
     $deliveredTimeLabel = null;
     if (!empty($order['delivery_confirmed_at'])) {
         $deliveredAt = (string)$order['delivery_confirmed_at'];
-        $deliveredTimeLabel = date('g:i A', strtotime($deliveredAt));
+        $deliveredTimeLabel = bakery_locale_time(strtotime($deliveredAt));
     } elseif (!empty($order['actual_delivery_time'])) {
-        $deliveredTimeLabel = date('g:i A', strtotime((string)$order['actual_delivery_time']));
+        $deliveredTimeLabel = bakery_locale_time(strtotime((string)$order['actual_delivery_time']));
     }
 
     $gpsEvent = bakery_customer_delivery_completion_gps($db, $dailyOrderId, $customerId);

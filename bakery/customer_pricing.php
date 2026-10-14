@@ -120,7 +120,7 @@ require_once __DIR__ . '/includes/nav.php';
           <td style="padding:10px;border-bottom:1px solid #eee;">
             <input type="number" class="custom-price" step="0.01" min="0" style="width:100px;padding:6px;"
                    value="<?php echo isset($customPrices[(int)$product['id']]) ? htmlspecialchars($customPrices[(int)$product['id']]) : ''; ?>"
-                   placeholder="—">
+ placeholder="-">
           </td>
         </tr>
       <?php endforeach; ?>

@@ -245,14 +245,14 @@ $signedIn = $customerId > 0;
             $status = (string)$orderSummary['purchase_status'];
             bakery_te('sfb.purchase_status_' . $status);
             if ($status === 'pending') {
-                echo ' — ';
+                echo ' - ';
                 bakery_te('sfb.starter_jar_pending_copy');
             } elseif ($status === 'paid') {
-                echo ' — ';
+                echo ' - ';
                 $pack = (string)($orderSummary['pack_kind'] ?? 'jar');
                 bakery_te($pack === 'first_loaf_kit' ? 'sfb.starter_jar_kit_paid_copy' : 'sfb.starter_jar_paid_copy');
             } elseif ($status === 'intent') {
-                echo ' — ';
+                echo ' - ';
                 bakery_te('sfb.pay_intent_saved');
             }
           ?></p>

@@ -35,7 +35,7 @@ require_once 'includes/nav.php';
 
 $formatScale = static function ($value): string {
     if ($value === null) {
-        return '—';
+        return '-';
     }
     return number_format((int)$value);
 };
@@ -342,7 +342,7 @@ $relationLabel = static function (string $relation): string {
                                     <td><?php echo htmlspecialchars($route['driver_name']); ?></td>
                                     <td class="dbrief-num"><?php echo number_format($route['stop_count']); ?></td>
                                     <td class="dbrief-num"><?php echo number_format($route['units']); ?></td>
-                                    <td><?php echo htmlspecialchars($statusParts !== [] ? implode(' · ', $statusParts) : '—'); ?></td>
+                                    <td><?php echo htmlspecialchars($statusParts !== [] ? implode(' · ', $statusParts) : '-'); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

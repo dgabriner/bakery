@@ -588,7 +588,7 @@ function bakery_agent_homebase_brief(PDO $db, string $agentName = '', string $mi
         $next[] = 'This loop is shipped. Do not reopen it from the paste-ready prompt; use file ownership only.';
     }
     if (($packet['prompt_status'] ?? '') === 'partial') {
-        $next[] = 'Commit path shipped; remaining baker UX lives on Daily Production — do not rebuild a second planner.';
+        $next[] = 'Commit path shipped; remaining baker UX lives on Daily Production. Do not rebuild a second planner.';
     }
     if ($packet['slug'] !== 'general' && $agentName !== $packet['slug'] && $family !== $packet['slug']) {
         $next[] = 'Prefer canonical --agent=' . $packet['slug'];

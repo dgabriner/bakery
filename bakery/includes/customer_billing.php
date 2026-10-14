@@ -232,7 +232,7 @@ function bakery_portal_billing_line_export_rows(PDO $db, $customerId, $startDate
             }
             $product = (string)$line['product_name'];
             if ($noChargeLabel !== '') {
-                $product .= ' — ' . $noChargeLabel;
+                $product .= ' - ' . $noChargeLabel;
             }
             $rows[] = [
                 'invoice_id' => $inv['invoice_number'],

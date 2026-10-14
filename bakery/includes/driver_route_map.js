@@ -121,6 +121,9 @@
   function displayTime(value) {
     var parts = clockParts(value);
     if (!parts) return '';
+    if (window.bakeryLocaleTime) {
+      return window.bakeryLocaleTime(new Date(2026, 0, 1, parts.hours, parts.minutes, 0));
+    }
     var suffix = parts.hours >= 12 ? 'PM' : 'AM';
     var hours = parts.hours % 12 || 12;
     return String(hours) + ':' + String(parts.minutes).padStart(2, '0') + ' ' + suffix;
@@ -138,7 +141,7 @@
   function windowRange(stop) {
     var after = displayTime(stop.deliverAfter);
     var by = displayTime(stop.deliverBy);
-    if (after && by) return fillTemplate(t('map_window_range', ':from–:to'), { from: after, to: by });
+    if (after && by) return fillTemplate(t('map_window_range', ':from to :to'), { from: after, to: by });
     if (by) return fillTemplate(t('map_window_by', 'By :time'), { time: by });
     return after;
   }
@@ -155,7 +158,7 @@
       return { tone: 'wait', text: fillTemplate(t('map_window_opens', 'Opens :time'), { time: displayTime(stop.deliverAfter) }) };
     }
     if (byMinutes != null && minutesNow > byMinutes) {
-      return { tone: 'late', text: fillTemplate(t('map_window_late', 'Late — by :time'), { time: displayTime(stop.deliverBy) }) };
+      return { tone: 'late', text: fillTemplate(t('map_window_late', 'Late. By :time'), { time: displayTime(stop.deliverBy) }) };
     }
     if (byMinutes != null && minutesNow >= byMinutes - 30) {
       return { tone: 'due', text: fillTemplate(t('map_window_due', 'Due by :time'), { time: displayTime(stop.deliverBy) }) };

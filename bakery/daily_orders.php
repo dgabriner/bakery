@@ -471,7 +471,7 @@ $summary = $demandSummaryAll['summary'];
             if ($kind === 'assigned') {
                 return bakery_t('daily_orders.visit_cell_on_route');
             }
-            return '—';
+            return '-';
         };
         $callClass = static function (string $call): string {
             if (in_array($call, ['overdue', 'missed_yesterday'], true)) {
@@ -610,13 +610,13 @@ $summary = $demandSummaryAll['summary'];
                                         <?php if (!empty($vc['flags']['on_standing_today'])): ?>
                                             <?= htmlspecialchars(bakery_t('daily_orders.visit_cell_yes')) ?>
                                         <?php else: ?>
-                                            <span class="muted">—</span>
+ <span class="muted">-</span>
                                         <?php endif; ?>
                                     </td>
                                     <td>
                                         <?php $priorLabel = $yesterdayCell($vc); ?>
-                                        <?php if ($priorLabel === '—'): ?>
-                                            <span class="muted">—</span>
+                                        <?php if ($priorLabel === '-'): ?>
+ <span class="muted">-</span>
                                         <?php else: ?>
                                             <?= htmlspecialchars($priorLabel) ?>
                                         <?php endif; ?>
@@ -625,7 +625,7 @@ $summary = $demandSummaryAll['summary'];
                                         <?php if (!empty($vc['last_actual_label'])): ?>
                                             <?= htmlspecialchars($vc['last_actual_label']) ?>
                                         <?php else: ?>
-                                            <span class="muted">—</span>
+ <span class="muted">-</span>
                                         <?php endif; ?>
                                     </td>
                                     <td>
@@ -696,7 +696,7 @@ $summary = $demandSummaryAll['summary'];
             <div class="demand-ops-warning">
                 <?= (int)$demandSummaryAll['advanced_status_count'] ?> dated order(s) on this date already look progressed
                 (in production, ready, out for delivery, delivered, or invoiced).
-                Quantity edits affect operational demand — confirm with production/delivery before changing them.
+ Quantity edits affect operational demand. Confirm with production/delivery before changing them.
             </div>
         <?php endif; ?>
 
@@ -838,21 +838,21 @@ $summary = $demandSummaryAll['summary'];
                                         } elseif ($s !== null && $d !== null && (int)$s !== (int)$d) {
                                             $note = 'Changed for this date';
                                         } elseif ($s === null && $d === null) {
-                                            $note = '—';
+                                            $note = '-';
                                         }
                                         ?>
                                         <tr class="<?= ($s !== null && $d !== null && (int)$s === (int)$d) ? 'row-match' : 'row-diff' ?>">
                                             <td><?= htmlspecialchars($line['product_name']) ?></td>
                                             <td>
                                                 <?php if ($s === null): ?>
-                                                    <span class="muted">—</span>
+ <span class="muted">-</span>
                                                 <?php else: ?>
                                                     <span class="qty-standing" title="From standing_orders (recurring)"><?= (int)$s ?></span>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
                                                 <?php if ($d === null): ?>
-                                                    <span class="muted">—</span>
+ <span class="muted">-</span>
                                                 <?php else: ?>
                                                     <span class="qty-daily" title="From daily_order_items for <?= htmlspecialchars($selectedDate) ?>"><?= (int)$d ?></span>
                                                 <?php endif; ?>
@@ -1008,7 +1008,7 @@ $summary = $demandSummaryAll['summary'];
                                                 </td>
                                                 <td>
                                                     <?php if ($standingQty === null): ?>
-                                                        <span class="muted">—</span>
+ <span class="muted">-</span>
                                                     <?php else: ?>
                                                         <span class="qty-standing"><?= (int)$standingQty ?></span>
                                                     <?php endif; ?>
@@ -2081,7 +2081,7 @@ function loadGeneratePreview() {
         if (p.overwrite_examples && p.overwrite_examples.length) {
             html += '<p><strong>Examples that differ today:</strong></p><ul>';
             p.overwrite_examples.forEach(function (ex) {
-                html += '<li>' + escapeHtml(ex.customer_name) + ' — ' + escapeHtml(ex.product_name) +
+ html += '<li>' + escapeHtml(ex.customer_name) + '. ' + escapeHtml(ex.product_name) +
                     ': standing ' + ex.standing_qty + ' → dated ' + ex.daily_qty +
                     (ex.status ? ' (' + escapeHtml(ex.status) + ')' : '') + '</li>';
             });
@@ -2163,7 +2163,7 @@ function generateFromStanding() {
 
 function generateWeekFromStanding() {
     const ok = confirm(
-        'Generate dated orders from standing for the full Monday–Sunday week that contains ' +
+ 'Generate dated orders from standing for the full Monday to Sunday week that contains ' +
         selectedOrderDate + '?\n\nPaused customers are skipped, inactive customers are excluded, ' +
         'and dated quantity changes are preserved.'
     );

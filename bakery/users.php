@@ -280,7 +280,7 @@ require_once __DIR__ . '/includes/nav.php';
                   <div class="users-muted"><?php echo bakery_t($u['role_slug'] === 'driver_assistant' ? 'users.paired_driver' : 'users.driver'); ?>: <?php echo htmlspecialchars($u['driver_name']); ?></div>
                 <?php endif; ?>
               </td>
-              <td><span class="users-code"><?php echo htmlspecialchars($u['login_code'] ?? '————'); ?></span></td>
+              <td><span class="users-code"><?php echo htmlspecialchars($u['login_code'] ?? '----'); ?></span></td>
               <td>
                 <div class="users-actions">
                   <a href="<?php echo htmlspecialchars(BASE_URL . 'users.php?edit=' . (int)$u['id']); ?>">Edit</a>
@@ -344,7 +344,7 @@ require_once __DIR__ . '/includes/nav.php';
         <div class="driver-link-fields" id="driverFields">
           <label for="driver_id"><?php bakery_te('users.route_driver'); ?></label>
           <select id="driver_id" name="driver_id">
-            <option value="0">— None —</option>
+ <option value="0">(None)</option>
             <?php
             $selectedDriver = (int)($editUser['driver_id'] ?? ($_POST['driver_id'] ?? 0));
             foreach ($drivers as $driver):

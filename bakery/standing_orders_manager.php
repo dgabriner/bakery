@@ -326,7 +326,7 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
     <div id="som-save-confirm" class="som-save-confirm" role="status" aria-live="assertive" hidden></div>
     <?php if ($showFullWeek): ?>
         <div class="som-week-mode-banner" role="status">
-            Full week editing is on — every customer shows Monday–Sunday, matching the classic Standing Orders page. Route days stay marked for reference.
+ Full week editing is on. Every customer shows Monday to Sunday, matching the classic Standing Orders page. Route days stay marked for reference.
         </div>
     <?php endif; ?>
     
@@ -359,7 +359,7 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
                     <?php foreach ($customersWithoutOrders as $customer): ?>
                         <option value="<?php echo $customer['id']; ?>">
                             <?php echo htmlspecialchars($customer['name']); ?>
-                            (No routes — <?php echo (int)$customer['order_count']; ?> orders)
+                            (No routes. <?php echo (int)$customer['order_count']; ?> orders)
                         </option>
                     <?php endforeach; ?>
                 </optgroup>
@@ -499,10 +499,10 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
                                 <strong><?php echo htmlspecialchars($customer['name']); ?></strong>
                                 <?php if (!empty($customer['zone'])): ?><small><?php echo htmlspecialchars($customer['zone']); ?></small><?php endif; ?>
                             </td>
-                            <td class="coverage-status-cell"><span class="coverage-status">—</span></td>
-                            <td class="coverage-route-cell">—</td>
-                            <td class="coverage-orders-cell">—</td>
-                            <td class="coverage-actions-cell">—</td>
+ <td class="coverage-status-cell"><span class="coverage-status">-</span></td>
+ <td class="coverage-route-cell">-</td>
+ <td class="coverage-orders-cell">-</td>
+ <td class="coverage-actions-cell">-</td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -556,7 +556,7 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
                     <h2>🆕 Customers Without Delivery Routes</h2>
                     <span class="customer-count"><?php echo count($customersWithoutOrders); ?> customers</span>
                 </div>
-                <p class="no-orders-help">These customers have no standing routes yet, but you can still set standing orders for any day of the week — same as the classic Standing Orders page. Add routes later when delivery days are known.</p>
+ <p class="no-orders-help">These customers have no standing routes yet, but you can still set standing orders for any day of the week. Same as the classic Standing Orders page. Add routes later when delivery days are known.</p>
                 
                 <?php 
                 // Group customers without orders by zone
@@ -611,7 +611,7 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
                                                 📍 <?php echo htmlspecialchars($customer['address']); ?>
                                             <?php endif; ?>
                                             | 📦 <?php echo $customer['order_count']; ?> orders
-                                            | 📅 No delivery routes — full week editable
+ | 📅 No delivery routes, full week editable
                                             <span class="no-orders-badge">📋 Ready for Orders</span>
                                         </span>
                                     </div>

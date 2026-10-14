@@ -66,7 +66,7 @@ if ($context === 'customer' && $customerId > 0) {
     $custStmt->execute([$customerId]);
     $custName = (string)($custStmt->fetchColumn() ?: 'Customer');
     $contextTitle = 'Customer timeline';
-    $contextSubtitle = $custName . ' — recent activity';
+    $contextSubtitle = $custName . '. Recent activity';
 } elseif ($context === 'order' && $dailyOrderId > 0) {
     $ctx = bakery_operational_order_context($db, $dailyOrderId);
     if ($ctx) {

@@ -90,7 +90,7 @@ function bakery_login_history_render_session(array $row): void
         <?php elseif ($isSuccess && empty($row['logout_at'])): ?>
           <p><?php bakery_te('login_history.inactive'); ?> · <?php bakery_te('login_history.last_seen'); ?> <?php echo htmlspecialchars(bakery_login_history_ago((string)($row['last_seen_at'] ?: $row['login_at']))); ?></p>
         <?php elseif (!empty($row['logout_at'])): ?>
-          <p><?php bakery_te('login_history.ended'); ?> <?php echo htmlspecialchars(date('g:i:s A', strtotime((string)$row['logout_at']))); ?></p>
+          <p><?php bakery_te('login_history.ended'); ?> <?php echo htmlspecialchars(bakery_locale_time((string)$row['logout_at'], true)); ?></p>
         <?php endif; ?>
       </div>
       <div>
@@ -408,7 +408,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
             <h4 class="history-day__title"><?php echo htmlspecialchars($dayLabel); ?></h4>
             <?php foreach ($events as $event): ?>
               <article class="history-event" data-kind="<?php echo htmlspecialchars((string)$event['kind']); ?>">
-                <time class="history-event-time" datetime="<?php echo htmlspecialchars(date('c', (int)$event['timestamp'])); ?>"><?php echo htmlspecialchars(date('g:i:s A', (int)$event['timestamp'])); ?></time>
+                <time class="history-event-time" datetime="<?php echo htmlspecialchars(date('c', (int)$event['timestamp'])); ?>"><?php echo htmlspecialchars(bakery_locale_time((int)$event['timestamp'], true)); ?></time>
                 <h4><?php echo htmlspecialchars((string)$event['title']); ?></h4>
                 <?php if ($event['detail']): ?><p><?php echo htmlspecialchars((string)$event['detail']); ?></p><?php endif; ?>
                 <?php if ($event['path']): ?>

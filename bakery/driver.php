@@ -258,7 +258,7 @@ function bakery_render_driver_stop_item(
         data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-ordered-pieces="<?php echo (int)($stop['ordered_pieces'] ?? 0); ?>"
         data-stop-notes="<?php echo htmlspecialchars(bakery_driver_stop_notes($stop), ENT_QUOTES, 'UTF-8'); ?>"
-        data-scheduled-time="<?php echo !empty($stop['scheduled_delivery_time']) ? htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8') : ''; ?>"
+        data-scheduled-time="<?php echo !empty($stop['scheduled_delivery_time']) ? htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8') : ''; ?>"
         data-deliver-after="<?php echo htmlspecialchars((string)($stop['deliver_after'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-deliver-by="<?php echo htmlspecialchars((string)($stop['deliver_by'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
         data-lat="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
@@ -292,7 +292,7 @@ function bakery_render_driver_stop_item(
                 <div class="stop-item-meta">
                     <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
                     <?php if ($receivingHours !== ''): ?><span><?php echo htmlspecialchars($receivingHours); ?></span><?php endif; ?>
-                    <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+                    <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
                     <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
                 </div>
             </div>
@@ -847,7 +847,7 @@ document.body.classList.add('driver-route-prep');
         <div class="next-stop-meta" id="nextStopMeta">
             <?php if (!empty($nextStop['zone'])): ?><span><?php echo htmlspecialchars($nextStop['zone']); ?></span><?php endif; ?>
             <?php if ($nextReceivingHours !== ''): ?><span><?php echo htmlspecialchars($nextReceivingHours); ?></span><?php endif; ?>
-            <?php if (!empty($nextStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($nextStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+            <?php if (!empty($nextStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($nextStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
             <?php if ((int)($nextStop['ordered_pieces'] ?? 0) > 0): ?><span><?php echo htmlspecialchars(bakery_t('driver.pieces_ordered', ['count' => number_format((int)$nextStop['ordered_pieces'])])); ?></span><?php endif; ?>
         </div>
         <?php if ($stopNotes !== ''): ?>
@@ -2302,7 +2302,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
                 if (!el) return;
                 el.setAttribute('data-route-order', row.order);
                 var badge = el.querySelector('.stop-item-order');
-                if (badge) badge.textContent = row.order ? '#' + row.order : '#—';
+ if (badge) badge.textContent = row.order ? '#' + row.order : '#-';
             });
             routeAdjust.open = false;
             refreshRouteUi();

@@ -99,7 +99,7 @@
                 var diffEl = row.querySelector('.col-diff');
                 if (diffEl && res.result) {
                   var diff = res.result.diff_from_regular;
-                  diffEl.textContent = diff > 0 ? '+' + diff : (diff < 0 ? String(diff) : '—');
+                  diffEl.textContent = diff > 0 ? '+' + diff : (diff < 0 ? String(diff) : '-');
                   diffEl.className = 'col-diff diff' + (diff === 0 ? ' diff--zero' : '');
                 }
               } else {

@@ -111,7 +111,7 @@ function bakery_homebase_durable_connection(PDO $db): PDO
         throw new RuntimeException(
             'Homebase needs bakerysf_stage_local (durable). The nightly mirror bakerysf_local is read-only. Create/refresh staging: '
             . 'php scripts/refresh_local_from_snapshot.php --target=bakerysf_stage_local. '
-            . 'Do not store craft on bakerysf_test — the local test gate wipes it. '
+            . 'Do not store craft on bakerysf_test. The local test gate wipes it.'
             . '(' . $e->getMessage() . ')'
         );
     }

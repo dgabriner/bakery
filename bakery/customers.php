@@ -466,7 +466,7 @@ try {
                             <?php 
                             if ($customer['deliver_by']) {
                                 $time = new DateTime($customer['deliver_by']);
-                                echo '<span class="time-display">' . $time->format('g:i A') . '</span>';
+                                echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
                                 echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_by'] . '">';
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
@@ -478,7 +478,7 @@ try {
                             <?php 
                             if ($customer['deliver_after']) {
                                 $time = new DateTime($customer['deliver_after']);
-                                echo '<span class="time-display">' . $time->format('g:i A') . '</span>';
+                                echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
                                 echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_after'] . '">';
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
@@ -1078,7 +1078,7 @@ try {
         function updateTimeDisplay(timeDisplay, value) {
             if (value) {
                 const time = new Date('1970-01-01T' + value);
-                timeDisplay.textContent = time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+                timeDisplay.textContent = window.bakeryLocaleTime ? window.bakeryLocaleTime(time) : time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
                 timeDisplay.className = 'time-display';
             } else {
                 timeDisplay.textContent = 'No constraint';

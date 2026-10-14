@@ -66,9 +66,9 @@ function bakery_login_history_when(?string $sqlTime, string $withTime = 'full'):
         return $date;
     }
     if ($withTime === 'time') {
-        return $dt->format('g:i A');
+        return bakery_locale_time($dt);
     }
-    return $date . ' · ' . $dt->format('g:i:s A');
+    return $date . ' · ' . bakery_locale_time($dt, true);
 }
 
 function bakery_login_history_ago(?string $sqlTime, ?int $now = null): string
@@ -214,12 +214,7 @@ function bakery_login_history_format_hour(?int $hour): string
     if ($hour === null || $hour < 0 || $hour > 23) {
         return '';
     }
-    $suffix = $hour >= 12 ? 'PM' : 'AM';
-    $display = $hour % 12;
-    if ($display === 0) {
-        $display = 12;
-    }
-    return $display . ' ' . $suffix;
+    return bakery_locale_hour_label($hour);
 }
 
 function bakery_login_history_credential_label(?string $method): string

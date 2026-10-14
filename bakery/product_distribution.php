@@ -386,7 +386,7 @@ $dayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
                                             <td><?php echo number_format($metrics['produced']); ?></td>
                                             <td><?php echo number_format($metrics['stock']); ?><small><?php echo number_format((int)$product['available_quantity']); ?> available + <?php echo number_format((int)$product['loaded_quantity']); ?> loaded</small></td>
                                             <td class="<?php echo $metrics['to_produce'] > 0 ? 'needs-attention' : 'is-covered'; ?>"><?php echo $metrics['to_produce'] > 0 ? number_format($metrics['to_produce']) : 'Covered'; ?></td>
-                                            <td><?php echo $product['weight_missing'] ? '—' : number_format($metrics['dough_grams'] / 1000, 2) . ' kg'; ?></td>
+                                            <td><?php echo $product['weight_missing'] ? '-' : number_format($metrics['dough_grams'] / 1000, 2) . ' kg'; ?></td>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endforeach; ?>
