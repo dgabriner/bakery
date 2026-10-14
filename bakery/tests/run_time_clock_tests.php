@@ -25,6 +25,8 @@ require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/auth.php';
 require_once $root . '/includes/time_clock.php';
+require_once $root . '/includes/schema_sql.php';
+require_once $root . '/includes/hosted_migration_runtime.php';
 
 $db = check_mysql_connection();
 bakery_assert_local_test_target($db);
@@ -278,6 +280,59 @@ tc_assert(strpos($nav, 'name="return"') !== false, 'driver punch posts a return 
 tc_assert(strpos($nav, 'isset($db) && $db instanceof PDO') !== false, 'driver clock query is skipped when navigation renders without a database');
 
 $db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?, ?)')->execute([$cashierId, $managerId, $driverId]);
+
+$punchesSql = (string)file_get_contents($root . '/database/schema/091_time_clock_punches.sql');
+$overridesSql = (string)file_get_contents($root . '/database/schema/092_time_clock_overrides.sql');
+[$punchesSafe] = bakery_hosted_migration_sql_safe($punchesSql);
+[$overridesSafe] = bakery_hosted_migration_sql_safe($overridesSql);
+tc_assert($punchesSafe, '091 stays on the hosted additive allow-list');
+tc_assert($overridesSafe, '092 stays on the hosted additive allow-list');
+tc_assert(substr_count($overridesSql, 'ADD COLUMN') === 5, '092 adds each correction column in its own statement');
+tc_assert(substr_count($overridesSql, 'ADD KEY') === 1, '092 adds the correction key in its own statement');
+tc_assert(strpos($punchesSql, 'CREATE TABLE IF NOT EXISTS time_clock_punches') !== false, '091 is a no-op when the punch table already exists');
+
+try {
+    foreach (bakery_parse_sql_file($root . '/database/schema/091_time_clock_punches.sql') as $statement) {
+        bakery_hosted_migration_exec_statement($db, $statement);
+    }
+    tc_assert(true, '091 applies again without error when time_clock_punches exists');
+} catch (Throwable $e) {
+    tc_assert(false, '091 applies again without error when time_clock_punches exists');
+}
+
+$db->exec('ALTER TABLE time_clock_punches DROP INDEX idx_time_clock_overridden_by');
+foreach ([
+    'overridden_at',
+    'overridden_by_user_id',
+    'override_note',
+    'original_clock_out_at',
+    'original_clock_in_at',
+] as $column) {
+    $db->exec('ALTER TABLE time_clock_punches DROP COLUMN ' . $column);
+}
+$db->exec('ALTER TABLE time_clock_punches ADD COLUMN original_clock_in_at DATETIME NULL DEFAULT NULL');
+try {
+    foreach (bakery_parse_sql_file($root . '/database/schema/092_time_clock_overrides.sql') as $statement) {
+        bakery_hosted_migration_exec_statement($db, $statement);
+    }
+    tc_assert(true, '092 resumes after the first correction column already exists');
+} catch (Throwable $e) {
+    tc_assert(false, '092 resumes after the first correction column already exists (' . $e->getMessage() . ')');
+}
+$overrideColumns = $db->query("SHOW COLUMNS FROM time_clock_punches")->fetchAll(PDO::FETCH_COLUMN);
+foreach (['original_clock_in_at', 'original_clock_out_at', 'override_note', 'overridden_by_user_id', 'overridden_at'] as $column) {
+    tc_assert(in_array($column, $overrideColumns, true), "092 leaves {$column} in place");
+}
+$index = $db->query("SHOW INDEX FROM time_clock_punches WHERE Key_name = 'idx_time_clock_overridden_by'")->fetch(PDO::FETCH_ASSOC);
+tc_assert(is_array($index), '092 leaves the correction key in place');
+try {
+    foreach (bakery_parse_sql_file($root . '/database/schema/092_time_clock_overrides.sql') as $statement) {
+        bakery_hosted_migration_exec_statement($db, $statement);
+    }
+    tc_assert(true, '092 applies again when every correction column already exists');
+} catch (Throwable $e) {
+    tc_assert(false, '092 applies again when every correction column already exists (' . $e->getMessage() . ')');
+}
 
 echo $failed === 0
     ? "Time clock tests passed ({$passed})\n"
