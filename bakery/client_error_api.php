@@ -64,6 +64,7 @@ $id = bakery_client_error_record($db, [
     'page_href' => (string)($payload['href'] ?? $payload['page_href'] ?? ''),
     'build_id' => (string)($payload['build'] ?? $payload['build_id'] ?? ''),
     'user_agent' => (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+    'reference' => (string)($payload['reference'] ?? ''),
 ]);
 
 echo json_encode(['success' => true, 'id' => $id]);

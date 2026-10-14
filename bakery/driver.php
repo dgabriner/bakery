@@ -1371,6 +1371,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'photo_finish' => bakery_t('driver.photo_finish'),
     'finish_stop' => bakery_t('driver.finish_stop'),
     'arrival_photo' => bakery_t('driver.arrival_photo'),
+    'arrival_photo_failed' => bakery_t('driver.arrival_photo_failed'),
     'activate_camera' => bakery_t('driver.activate_camera'),
     'retake_photo_type' => bakery_t('driver.retake_photo_type'),
     'take_arrival_photo' => bakery_t('driver.take_arrival_photo'),

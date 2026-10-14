@@ -85,6 +85,24 @@ $pageSource = (string)file_get_contents(dirname(__DIR__) . '/login_history.php')
 $en = require dirname(__DIR__) . '/lang/en.php';
 $es = require dirname(__DIR__) . '/lang/es.php';
 login_history_assert(strpos($pageSource, 'browser-errors') !== false, 'Login History overview has a browser errors section');
+login_history_assert(in_array('client_errors', bakery_login_history_views(), true), 'client errors is a login history view');
+$clientErrorFilters = bakery_login_history_parse_filters([
+    'view' => 'client_errors',
+    'page_path' => "driver.php\n",
+    'user_id' => 2,
+    'from' => '2026-10-14',
+    'until' => '2026-10-14',
+], '2026-10-14');
+login_history_assert(
+    $clientErrorFilters['view'] === 'client_errors'
+        && $clientErrorFilters['page_path'] === 'driver.php'
+        && $clientErrorFilters['user_id'] === 2
+        && $clientErrorFilters['from'] === '2026-10-14',
+    'client errors filters keep user, page, and date'
+);
+login_history_assert(bakery_login_history_has_filters($clientErrorFilters), 'a page path counts as an active filter');
+login_history_assert(strpos($pageSource, "'client_errors'") !== false && strpos($pageSource, 'name="page_path"') !== false, 'client errors tab and page filter are on Login History');
+login_history_assert(isset($en['login_history.view_client_errors'], $es['login_history.view_client_errors'], $en['login_history.client_errors_reference'], $es['login_history.client_errors_reference']), 'client errors i18n keys exist in EN and ES');
 login_history_assert(isset($en['login_history.browser_errors']) && isset($es['login_history.browser_errors']), 'browser errors i18n keys exist in EN and ES');
 login_history_assert(isset($en['error.something_failed']) && isset($es['error.something_failed']), 'shell toast i18n keys exist in EN and ES');
 

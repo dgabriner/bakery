@@ -103,6 +103,24 @@ function bakery_client_error_rate_limit(int $maxPerMinute = 20): array
  *   user_agent?:string
  * } $row
  */
+function bakery_client_error_normalize_reference(string $reference): string
+{
+    $reference = strtoupper((string)preg_replace('/[^A-Za-z0-9]/', '', $reference));
+    if (strlen($reference) < 4 || strlen($reference) > 8) {
+        return '';
+    }
+    return $reference;
+}
+
+function bakery_client_error_reference_code(array $row): string
+{
+    $message = (string)($row['message'] ?? '');
+    if (preg_match('/\bRef ([A-Z0-9]{4,8})\b/', $message, $match)) {
+        return $match[1];
+    }
+    return '';
+}
+
 function bakery_client_error_record(PDO $db, array $row): int
 {
     bakery_client_errors_ensure($db);
@@ -113,6 +131,11 @@ function bakery_client_error_record(PDO $db, array $row): int
     if (!in_array($kind, ['error', 'unhandledrejection'], true)) {
         $kind = 'error';
     }
+    $message = mb_substr((string)($row['message'] ?? ''), 0, 500);
+    $reference = bakery_client_error_normalize_reference((string)($row['reference'] ?? ''));
+    if ($reference !== '' && !preg_match('/\bRef ' . preg_quote($reference, '/') . '\b/', $message)) {
+        $message = mb_substr('Ref ' . $reference . ' ' . $message, 0, 500);
+    }
     $stmt = $db->prepare(
         'INSERT INTO client_errors
             (user_id, login_audit_id, kind, message, stack_head, page_path, page_href, build_id, user_agent)
@@ -122,7 +145,7 @@ function bakery_client_error_record(PDO $db, array $row): int
         isset($row['user_id']) ? (int)$row['user_id'] : null,
         isset($row['login_audit_id']) ? (int)$row['login_audit_id'] : null,
         $kind,
-        mb_substr((string)($row['message'] ?? ''), 0, 500),
+        $message,
         mb_substr((string)($row['stack_head'] ?? ''), 0, 2000) ?: null,
         mb_substr((string)($row['page_path'] ?? ''), 0, 1024) ?: null,
         mb_substr((string)($row['page_href'] ?? ''), 0, 1024) ?: null,
@@ -150,4 +173,57 @@ function bakery_client_errors_recent(PDO $db, int $limit = 20): array
          LIMIT {$limit}"
     );
     return $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+}
+
+/**
+ * Read-only admin list. Filters: user_id, page_path (substring), from, until (Y-m-d).
+ *
+ * @param array{user_id?:int,page_path?:string,from?:string,until?:string} $filters
+ * @return list<array<string,mixed>>
+ */
+function bakery_client_errors_search(PDO $db, array $filters, int $limit = 100): array
+{
+    if (!bakery_client_errors_ready($db)) {
+        return [];
+    }
+    $where = ['1=1'];
+    $params = [];
+    $from = (string)($filters['from'] ?? '');
+    $until = (string)($filters['until'] ?? '');
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+        $where[] = 'ce.created_at >= ?';
+        $params[] = $from . ' 00:00:00';
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
+        $where[] = 'ce.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+        $params[] = $until . ' 00:00:00';
+    }
+    $userId = (int)($filters['user_id'] ?? 0);
+    if ($userId > 0) {
+        $where[] = 'ce.user_id = ?';
+        $params[] = $userId;
+    }
+    $page = trim((string)($filters['page_path'] ?? ''));
+    if ($page !== '') {
+        $page = mb_substr($page, 0, 200);
+        $where[] = 'ce.page_path LIKE ?';
+        $params[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $page) . '%';
+    }
+    $limit = max(1, min(200, $limit));
+    $stmt = $db->prepare(
+        "SELECT ce.id, ce.user_id, ce.kind, ce.message, ce.page_path, ce.build_id, ce.created_at,
+                COALESCE(u.display_name, u.email, CONCAT('user #', ce.user_id)) AS display_name
+         FROM client_errors ce
+         LEFT JOIN users u ON u.id = ce.user_id
+         WHERE " . implode(' AND ', $where) . "
+         ORDER BY ce.created_at DESC, ce.id DESC
+         LIMIT {$limit}"
+    );
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($rows as &$row) {
+        $row['reference_code'] = bakery_client_error_reference_code($row);
+    }
+    unset($row);
+    return $rows;
 }

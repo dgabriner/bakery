@@ -44,7 +44,10 @@ try {
         default:
             throw new Exception('Unknown action');
     }
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8');
+    }
     echo json_encode([
         'success' => false,
         'error' => $e->getMessage(),

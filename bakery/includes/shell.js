@@ -58,7 +58,7 @@
     }, 3200);
   }
 
-  function beaconPayload(kind, message, stack) {
+  function beaconPayload(kind, message, stack, reference) {
     var buildMeta = document.querySelector('meta[name="app-build"]');
     var body = new URLSearchParams();
     body.set('kind', kind || 'error');
@@ -67,14 +67,15 @@
     body.set('page', String(window.location.pathname || '').slice(0, 1024));
     body.set('href', String(window.location.href || '').slice(0, 1024));
     body.set('build', buildMeta ? String(buildMeta.content || '') : '');
+    if (reference) body.set('reference', String(reference).slice(0, 8));
     return body;
   }
 
-  function sendClientErrorBeacon(kind, message, stack) {
+  function sendClientErrorBeacon(kind, message, stack, reference) {
     var baseMeta = document.querySelector('meta[name="app-base-url"]');
     if (!baseMeta) return;
     var url = String(baseMeta.content || '/') + 'client_error_api.php';
-    var body = beaconPayload(kind, message, stack);
+    var body = beaconPayload(kind, message, stack, reference);
     try {
       if (navigator.sendBeacon) {
         navigator.sendBeacon(url, body);
@@ -90,6 +91,10 @@
       }).catch(function () {});
     } catch (ignore2) {}
   }
+
+  window.bakeryReportClientError = function (kind, message, stack, reference) {
+    sendClientErrorBeacon(kind, message, stack, reference);
+  };
 
   window.addEventListener('unhandledrejection', function (event) {
     var reason = event && event.reason;

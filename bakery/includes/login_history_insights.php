@@ -15,7 +15,7 @@ function bakery_login_history_live_seconds(): int
 
 function bakery_login_history_views(): array
 {
-    return ['overview', 'time', 'usage', 'live', 'records'];
+    return ['overview', 'time', 'usage', 'live', 'records', 'client_errors'];
 }
 
 function bakery_login_history_ranges(): array
@@ -717,6 +717,10 @@ function bakery_login_history_parse_filters(array $get, ?string $today = null): 
     if (strlen($q) > 80) {
         $q = substr($q, 0, 80);
     }
+    $pagePath = str_replace(["\0", "\r", "\n"], '', trim((string)($get['page_path'] ?? '')));
+    if (strlen($pagePath) > 200) {
+        $pagePath = substr($pagePath, 0, 200);
+    }
     $view = (string)($get['view'] ?? 'overview');
     if (!in_array($view, bakery_login_history_views(), true)) {
         $view = 'overview';
@@ -746,6 +750,7 @@ function bakery_login_history_parse_filters(array $get, ?string $today = null): 
         'module' => $module,
         'session' => $session,
         'q' => $q,
+        'page_path' => $pagePath,
         'view' => $view,
         'page' => $page,
         'timeline' => $timeline,
@@ -760,7 +765,7 @@ function bakery_login_history_has_filters(array $filters): bool
     if (!in_array((string)($filters['range'] ?? ''), ['', '14d'], true)) {
         return true;
     }
-    foreach (['subject', 'auth_type', 'outcome', 'role', 'device', 'area', 'module', 'session', 'q'] as $key) {
+    foreach (['subject', 'auth_type', 'outcome', 'role', 'device', 'area', 'module', 'session', 'q', 'page_path'] as $key) {
         if (($filters[$key] ?? '') !== '') {
             return true;
         }
@@ -2106,6 +2111,7 @@ function bakery_login_history_active_chips(array $filters, array $options): arra
         'device' => ['login_history.device', 'Device'],
         'area' => ['login_history.area', 'Work area'],
         'q' => ['login_history.search', 'Search'],
+        'page_path' => ['login_history.client_errors_page', 'Page'],
     ];
     foreach ($simple as $key => $meta) {
         if (($filters[$key] ?? '') === '') {
@@ -2212,6 +2218,7 @@ function bakery_login_history_empty_payload(array $filters, array $ready): array
         'session_paths' => [],
         'failures' => [],
         'browser_errors' => [],
+        'client_errors' => [],
         'roles' => [],
         'comparison' => null,
         'briefing' => [],
@@ -2245,6 +2252,14 @@ function bakery_login_history_load(PDO $db, array $filters, array $ready): array
 {
     $data = bakery_login_history_empty_payload($filters, $ready);
     $data['options'] = bakery_login_history_load_options($db, $ready);
+    if (($filters['view'] ?? '') === 'client_errors' && function_exists('bakery_client_errors_search')) {
+        $data['client_errors'] = bakery_client_errors_search($db, [
+            'user_id' => (int)($filters['user_id'] ?? 0),
+            'page_path' => (string)($filters['page_path'] ?? ''),
+            'from' => (string)($filters['from'] ?? ''),
+            'until' => (string)($filters['until'] ?? ''),
+        ], 100);
+    }
     if (empty($ready['audit'])) {
         if (!empty($filters['user_id']) || !empty($filters['customer_id'])) {
             $data['investigation'] = bakery_login_history_load_investigation($db, $filters, $ready);
