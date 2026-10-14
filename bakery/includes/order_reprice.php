@@ -86,6 +86,79 @@ function bakery_product_editor_next_wholesale(array $post, $existing)
     return $post['wholesale_price'];
 }
 
+function bakery_product_retail_is_zero($price): bool
+{
+    if ($price === null || $price === '' || !is_numeric($price)) {
+        return false;
+    }
+    return abs((float)$price) < 0.005;
+}
+
+function bakery_product_catalog_price_missing($price): bool
+{
+    if ($price === null || $price === '') {
+        return true;
+    }
+    return bakery_product_retail_is_zero($price);
+}
+
+/**
+ * Products have no inactive flag in the baseline schema. A later is_active
+ * column, when present and 0, marks the row inactive.
+ */
+function bakery_product_is_active_row(array $product): bool
+{
+    if (!array_key_exists('is_active', $product) || $product['is_active'] === null || $product['is_active'] === '') {
+        return true;
+    }
+    return (int)$product['is_active'] === 1;
+}
+
+function bakery_product_shows_in_no_price_filter(array $product): bool
+{
+    if (!bakery_product_is_active_row($product)) {
+        return false;
+    }
+    return bakery_product_catalog_price_missing($product['price'] ?? null);
+}
+
+function bakery_product_zero_price_confirm_required(array $existing, $newPrice): bool
+{
+    if (!bakery_product_is_active_row($existing)) {
+        return false;
+    }
+    if (!bakery_product_retail_is_zero($newPrice)) {
+        return false;
+    }
+    return !bakery_product_retail_is_zero($existing['price'] ?? null);
+}
+
+function bakery_product_zero_price_confirmed(array $post): bool
+{
+    return (string)($post['confirm_zero_price'] ?? '') === '1';
+}
+
+/**
+ * Lang key when an active product is being saved at $0.00 without confirmation.
+ * Already-zero rows can be saved again without asking. Null means allow the save.
+ */
+function bakery_product_save_zero_price_block(array $existing, $newPrice, array $post): ?string
+{
+    if (!bakery_product_zero_price_confirm_required($existing, $newPrice)) {
+        return null;
+    }
+    if (bakery_product_zero_price_confirmed($post)) {
+        return null;
+    }
+    return 'reprice.zero_save_blocked';
+}
+
+function bakery_product_editor_select_sql(PDO $db): string
+{
+    $active = column_exists($db, 'products', 'is_active') ? ', is_active' : '';
+    return 'id, name, price, wholesale_price' . $active;
+}
+
 /**
  * A catalog product is active when the row exists. Products have no inactive flag.
  * Block only when the price that would be booked is $0 and the line is not No charge.

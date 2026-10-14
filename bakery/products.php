@@ -21,11 +21,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($_POST['action']) {
             case 'create':
                 try {
+                    $newPrice = $_POST['price'] === '' ? null : $_POST['price'];
+                    $zeroBlock = bakery_product_save_zero_price_block([], $newPrice, $_POST);
+                    if ($zeroBlock !== null) {
+                        $error = bakery_t($zeroBlock);
+                        break;
+                    }
                     $stmt = $db->prepare("INSERT INTO products (name, description, price, wholesale_price, weight_grams, dough_type_id) VALUES (?, ?, ?, ?, ?, ?)");
                     $stmt->execute([
                         $_POST['name'],
                         $_POST['description'],
-                        $_POST['price'] === '' ? null : $_POST['price'],
+                        $newPrice,
                         empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
                         $_POST['weight_grams'] ?: null,
                         $_POST['dough_type_id'] ?: null // Convert empty string to null
@@ -40,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'update':
                 try {
                     $productId = (int)($_POST['id'] ?? 0);
-                    $oldStmt = $db->prepare('SELECT id, name, price, wholesale_price FROM products WHERE id = ?');
+                    $oldStmt = $db->prepare('SELECT ' . bakery_product_editor_select_sql($db) . ' FROM products WHERE id = ?');
                     $oldStmt->execute([$productId]);
                     $oldProduct = $oldStmt->fetch(PDO::FETCH_ASSOC);
                     if (!$oldProduct) {
@@ -48,6 +54,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $newPrice = bakery_product_editor_next_price($_POST, $oldProduct['price']);
                     $newWholesale = bakery_product_editor_next_wholesale($_POST, $oldProduct['wholesale_price']);
+                    $zeroBlock = bakery_product_save_zero_price_block($oldProduct, $newPrice, $_POST);
+                    if ($zeroBlock !== null) {
+                        if (isset($_POST['inline']) && $_POST['inline'] === '1') {
+                            http_response_code(422);
+                            header('Content-Type: application/json');
+                            echo json_encode([
+                                'success' => false,
+                                'code' => 'zero_price_confirm',
+                                'message' => bakery_t($zeroBlock),
+                            ]);
+                            exit;
+                        }
+                        $error = bakery_t($zeroBlock);
+                        break;
+                    }
                     $stmt = $db->prepare("UPDATE products SET name = ?, description = ?, price = ?, wholesale_price = ?, weight_grams = ?, dough_type_id = ? WHERE id = ?");
                     $stmt->execute([
                         $_POST['name'],
@@ -132,10 +153,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ids = array_values(array_filter($ids));
                     if ($ids !== []) {
                         $placeholders = implode(',', array_fill(0, count($ids), '?'));
-                        $oldStmt = $db->prepare("SELECT id, price, wholesale_price FROM products WHERE id IN ($placeholders)");
+                        $oldStmt = $db->prepare('SELECT ' . bakery_product_editor_select_sql($db) . " FROM products WHERE id IN ($placeholders)");
                         $oldStmt->execute($ids);
                         foreach ($oldStmt->fetchAll(PDO::FETCH_ASSOC) as $oldRow) {
                             $oldById[(int)$oldRow['id']] = $oldRow;
+                        }
+                    }
+                    foreach ($updates as $update) {
+                        $id = (int)($update['id'] ?? 0);
+                        if (!isset($oldById[$id])) {
+                            continue;
+                        }
+                        $zeroBlock = bakery_product_save_zero_price_block($oldById[$id], $update['price'] ?? null, $_POST);
+                        if ($zeroBlock !== null) {
+                            $error = bakery_t($zeroBlock);
+                            break 2;
                         }
                     }
                     $db->beginTransaction();
@@ -422,6 +454,13 @@ foreach ($products as $product) {
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
                     <input id="productSearch" type="search" placeholder="Search name or description" autocomplete="off">
                 </label>
+                <label class="select-field" for="priceFilter">
+                    <span class="sr-only"><?php echo htmlspecialchars(bakery_t('reprice.filter_price')); ?></span>
+                    <select id="priceFilter">
+                        <option value=""><?php echo htmlspecialchars(bakery_t('reprice.filter_all_prices')); ?></option>
+                        <option value="none"><?php echo htmlspecialchars(bakery_t('reprice.filter_no_price')); ?></option>
+                    </select>
+                </label>
                 <label class="select-field" for="doughTypeFilter">
                     <span class="sr-only">Filter by dough type</span>
                     <select id="doughTypeFilter">
@@ -483,6 +522,8 @@ foreach ($products as $product) {
                         data-name="<?php echo htmlspecialchars(strtolower($product['name']), ENT_QUOTES); ?>"
                         data-description="<?php echo htmlspecialchars((string)($product['description'] ?? ''), ENT_QUOTES); ?>"
                         data-price="<?php echo htmlspecialchars((string)($product['price'] ?? ''), ENT_QUOTES); ?>"
+                        data-no-price="<?php echo bakery_product_shows_in_no_price_filter($product) ? '1' : '0'; ?>"
+                        data-active="<?php echo bakery_product_is_active_row($product) ? '1' : '0'; ?>"
                         data-wholesale-price="<?php echo htmlspecialchars((string)($product['wholesale_price'] ?? ''), ENT_QUOTES); ?>"
                         data-weight="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>"
                         data-dough="<?php echo htmlspecialchars(empty($product['dough_type_id']) ? 'unassigned' : strtolower($product['dough_type_name']), ENT_QUOTES); ?>">
@@ -531,7 +572,7 @@ foreach ($products as $product) {
         <div class="modal-content">
             <button class="close" type="button" onclick="hideProductModal()" aria-label="Close product form">&times;</button>
             <h2 id="modalTitle">Add New Product</h2>
-            <form id="productForm" method="POST">
+            <form id="productForm" method="POST" onsubmit="return confirmZeroProductPrice(this)">
                 <input type="hidden" name="action" value="create">
                 <input type="hidden" name="id" value="">
 
@@ -631,6 +672,7 @@ foreach ($products as $product) {
     <?php endif; ?>
 
     <script>
+        const zeroPriceConfirm = <?php echo json_encode(bakery_t('reprice.zero_save_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
         const repriceCopy = <?php echo json_encode([
             'title' => bakery_t('reprice.warn_title'),
             'body' => bakery_t('reprice.warn_body'),
@@ -643,6 +685,43 @@ foreach ($products as $product) {
         let originalTableState = {};
 
         // Modal functions
+        function productRetailIsZero(value) {
+            if (value === null || value === undefined) return false;
+            const text = String(value).trim();
+            if (text === '' || Number.isNaN(Number(text))) return false;
+            return Math.abs(Number(text)) < 0.005;
+        }
+
+        function productPriceIsMissing(value) {
+            if (value === null || value === undefined) return true;
+            const text = String(value).trim();
+            return text === '' || productRetailIsZero(text);
+        }
+
+        function needsZeroPriceConfirm(previous, next) {
+            return productRetailIsZero(next) && !productRetailIsZero(previous);
+        }
+
+        function confirmZeroProductPrice(form) {
+            const price = form.elements.price ? form.elements.price.value : '';
+            const action = form.elements.action ? form.elements.action.value : '';
+            let previous = '';
+            if (action === 'update' && form.elements.id) {
+                const row = document.getElementById('product-' + form.elements.id.value);
+                previous = row ? (row.dataset.price || '') : '';
+            }
+            if (!needsZeroPriceConfirm(previous, price)) return true;
+            if (!window.confirm(zeroPriceConfirm)) return false;
+            if (!form.elements.confirm_zero_price) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'confirm_zero_price';
+                form.appendChild(input);
+            }
+            form.elements.confirm_zero_price.value = '1';
+            return true;
+        }
+
         function showProductModal(id = null) {
             const modal = document.getElementById('productModal');
             const form = document.getElementById('productForm');
@@ -1015,6 +1094,15 @@ foreach ($products as $product) {
             }
 
             const field = name => row.querySelector(`[data-field="${name}"]`);
+            const nextPrice = field('price').value;
+            if (row.dataset.active !== '0' && needsZeroPriceConfirm(row.dataset.price || '', nextPrice)) {
+                if (!window.confirm(zeroPriceConfirm)) {
+                    field('price').value = row.dataset.price || '';
+                    status.textContent = 'Saved';
+                    status.className = 'inline-save-status is-saved';
+                    return;
+                }
+            }
             const payload = new URLSearchParams({
                 action: 'update',
                 inline: '1',
@@ -1026,6 +1114,9 @@ foreach ($products as $product) {
                 weight_grams: field('weight_grams').value,
                 dough_type_id: field('dough_type_id').value
             });
+            if (needsZeroPriceConfirm(row.dataset.price || '', field('price').value)) {
+                payload.set('confirm_zero_price', '1');
+            }
 
             status.textContent = 'Saving…';
             status.className = 'inline-save-status is-saving';
@@ -1042,6 +1133,7 @@ foreach ($products as $product) {
                 row.dataset.name = field('name').value.trim().toLowerCase();
                 row.dataset.description = field('description').value.trim();
                 row.dataset.price = field('price').value;
+                row.dataset.noPrice = (row.dataset.active !== '0' && productPriceIsMissing(field('price').value)) ? '1' : '0';
                 row.dataset.weight = field('weight_grams').value;
                 row.dataset.dough = doughSelect.value ? (selectedOption.dataset.name || selectedOption.textContent.trim().toLowerCase()) : 'unassigned';
                 if (targetGroup && row.parentElement !== targetGroup) targetGroup.appendChild(row);
@@ -1079,6 +1171,7 @@ foreach ($products as $product) {
 
         const productSearch = document.getElementById('productSearch');
         const doughTypeFilter = document.getElementById('doughTypeFilter');
+        const priceFilter = document.getElementById('priceFilter');
         const clearProductFilters = document.getElementById('clearProductFilters');
         const productResultCount = document.getElementById('productResultCount');
         const noProductResults = document.getElementById('noProductResults');
@@ -1090,12 +1183,14 @@ foreach ($products as $product) {
         function applyProductFilters() {
             const query = productSearch.value.trim().toLowerCase();
             const doughType = doughTypeFilter.value;
+            const priceMode = priceFilter ? priceFilter.value : '';
             let visibleCount = 0;
 
             getProductRows().forEach(row => {
                 const matchesQuery = !query || row.dataset.name.includes(query) || row.dataset.description.toLowerCase().includes(query);
                 const matchesDough = !doughType || row.dataset.dough === doughType;
-                const isVisible = matchesQuery && matchesDough;
+                const matchesPrice = priceMode !== 'none' || row.dataset.noPrice === '1';
+                const isVisible = matchesQuery && matchesDough && matchesPrice;
                 row.hidden = !isVisible;
                 if (isVisible) visibleCount += 1;
             });
@@ -1106,14 +1201,16 @@ foreach ($products as $product) {
 
             productResultCount.textContent = `${visibleCount} product${visibleCount === 1 ? '' : 's'}`;
             noProductResults.hidden = visibleCount !== 0;
-            clearProductFilters.hidden = !query && !doughType;
+            clearProductFilters.hidden = !query && !doughType && !priceMode;
         }
 
         productSearch.addEventListener('input', applyProductFilters);
         doughTypeFilter.addEventListener('change', applyProductFilters);
+        if (priceFilter) priceFilter.addEventListener('change', applyProductFilters);
         clearProductFilters.addEventListener('click', () => {
             productSearch.value = '';
             doughTypeFilter.value = '';
+            if (priceFilter) priceFilter.value = '';
             applyProductFilters();
             productSearch.focus();
         });

@@ -1012,6 +1012,7 @@ function bakery_agent_work_map_core(): array
                 'Do not price delivered or invoiced history from the live catalog.',
                 'Administrator and manager. CSRF on the reprice POST.',
                 'No schema migration. Tests use bakerysf_test only.',
+                'Saving an active product at $0.00 requires confirmation. The No price filter lists active products with a zero or blank catalog price.',
             ],
             'bugs' => [],
             'prompt' => null,

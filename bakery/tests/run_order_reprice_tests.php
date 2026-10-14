@@ -456,6 +456,23 @@ try {
     orp_money(2.50, $kept, 'inline save that omits wholesale keeps the stored wholesale price');
     assert_true(bakery_product_editor_next_wholesale(['wholesale_price' => ''], 2.50) === null, 'a blank wholesale field clears wholesale');
 
+    echo "\n=== $0.00 catalog save asks for confirmation ===\n";
+    $active = ['price' => 0.75, 'is_active' => 1];
+    assert_true(bakery_product_zero_price_confirm_required($active, '0.00') === true, 'changing an active product to $0.00 requires confirmation');
+    assert_true(bakery_product_zero_price_confirm_required($active, 0) === true, 'a numeric zero price requires confirmation');
+    assert_true(bakery_product_zero_price_confirm_required(['price' => 0.00], '0.00') === false, 'a product already at $0.00 does not ask again');
+    assert_true(bakery_product_save_zero_price_block(['price' => 0.00], '0.00', []) === null, 'a product already at $0.00 can be saved again');
+    assert_true(bakery_product_save_zero_price_block($active, '0.00', []) === 'reprice.zero_save_blocked', 'a zero save without confirmation is blocked');
+    assert_true(bakery_product_save_zero_price_block($active, '0.00', ['confirm_zero_price' => '1']) === null, 'a confirmed zero save is allowed');
+    assert_true(bakery_product_save_zero_price_block($active, '1.25', []) === null, 'a non-zero save does not ask');
+    assert_true(bakery_product_save_zero_price_block($active, '', []) === null, 'clearing the price to blank is not a $0.00 save');
+    assert_true(bakery_product_save_zero_price_block(['price' => 0.75, 'is_active' => 0], '0', []) === null, 'an inactive product can be saved at $0.00 without confirmation');
+    assert_true(bakery_product_save_zero_price_block([], '0.00', []) === 'reprice.zero_save_blocked', 'creating an active product at $0.00 requires confirmation');
+    assert_true(bakery_product_shows_in_no_price_filter(['name' => 'Poppy Seed Bagel', 'price' => 0.00]) === true, 'an active $0.00 product is in the No price filter');
+    assert_true(bakery_product_shows_in_no_price_filter(['price' => null]) === true, 'a blank catalog price is in the No price filter');
+    assert_true(bakery_product_shows_in_no_price_filter(['price' => '0.75']) === false, 'a priced product is not in the No price filter');
+    assert_true(bakery_product_shows_in_no_price_filter(['price' => 0, 'is_active' => 0]) === false, 'an inactive $0.00 product is not in the No price filter');
+
     echo "\n=== Page contracts ===\n";
     $productsPage = (string)file_get_contents($root . '/products.php');
     $ordersPage = (string)file_get_contents($root . '/daily_orders.php');
@@ -466,13 +483,19 @@ try {
     assert_true(strpos($productsPage, 'bakery_require_csrf()') !== false, 'products POST requires CSRF');
     assert_true(strpos($productsPage, "bakery_t('reprice.action')") !== false, 'products page uses the reprice label');
     assert_true(strpos($productsPage, "bakery_t('reprice.warn_standing')") !== false, 'products warning says standing orders do not store a price');
+    assert_true(substr_count($productsPage, 'bakery_product_save_zero_price_block') >= 3, 'create, update, and batch save confirm a $0.00 price');
+    assert_true(strpos($productsPage, 'id="priceFilter"') !== false, 'the product list has a price filter');
+    assert_true(strpos($productsPage, "bakery_t('reprice.filter_no_price')") !== false, 'the price filter offers No price');
+    assert_true(strpos($productsPage, 'data-no-price') !== false, 'product rows mark a missing catalog price');
+    assert_true(strpos($productsPage, 'confirm_zero_price') !== false, 'a confirmed zero save posts the confirmation');
+    assert_true(strpos($productsPage, 'zeroPriceConfirm') !== false, 'the zero price save uses the confirm dialog');
     assert_true(strpos($ordersPage, 'reprice_order_from_catalog') !== false, 'daily orders can reprice one order');
     assert_true(strpos($ordersPage, "bakery_t('reprice.order_button')") !== false, 'daily orders shows the catalog button');
     assert_true(strpos($ordersPage, "bakery_t('reprice.zero_warn')") !== false, 'add product warns on a $0 catalog price');
     assert_true(strpos($actions, 'reprice_order_from_catalog') !== false, 'dispatch handles order reprice');
     assert_true(strpos($actions, 'bakery_order_reprice_zero_catalog_blocked') !== false, 'add item uses the zero catalog guard');
     assert_true(strpos($en, "'reprice.action'") !== false && strpos($es, "'reprice.action'") !== false, 'reprice copy is in English and Spanish');
-    foreach (['reprice.action', 'reprice.zero_block', 'reprice.order_button', 'reprice.warn_title'] as $key) {
+    foreach (['reprice.action', 'reprice.zero_block', 'reprice.order_button', 'reprice.warn_title', 'reprice.zero_save_confirm', 'reprice.zero_save_blocked', 'reprice.filter_no_price'] as $key) {
         $enPos = strpos($en, "'" . $key . "'");
         $esPos = strpos($es, "'" . $key . "'");
         assert_true($enPos !== false && $esPos !== false, $key . ' exists in both catalogs');

@@ -4692,6 +4692,11 @@ return [
     'reprice.forbidden' => 'Only a manager can reprice open orders.',
     'reprice.csrf' => 'The reprice request was rejected. Reload the page and try again.',
     'reprice.past' => 'Past orders are not repriced.',
+    'reprice.zero_save_confirm' => 'Save this active product at $0.00? Open orders can keep the old price until you reprice them.',
+    'reprice.zero_save_blocked' => 'This active product was not saved at $0.00. Confirm the zero price and save again.',
+    'reprice.filter_price' => 'Filter by price',
+    'reprice.filter_all_prices' => 'All prices',
+    'reprice.filter_no_price' => 'No price',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Zazie weekly sheet',

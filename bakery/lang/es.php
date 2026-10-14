@@ -4689,6 +4689,11 @@ return [
     'reprice.forbidden' => 'Solo un gerente puede actualizar precios de pedidos abiertos.',
     'reprice.csrf' => 'Se rechazó la actualización de precios. Recarga la página e intenta de nuevo.',
     'reprice.past' => 'No se actualizan precios de pedidos pasados.',
+    'reprice.zero_save_confirm' => '¿Guardar este producto activo en $0.00? Los pedidos abiertos pueden conservar el precio anterior hasta que los actualices.',
+    'reprice.zero_save_blocked' => 'Este producto activo no se guardó en $0.00. Confirma el precio en cero y guarda otra vez.',
+    'reprice.filter_price' => 'Filtrar por precio',
+    'reprice.filter_all_prices' => 'Todos los precios',
+    'reprice.filter_no_price' => 'Sin precio',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Hoja semanal de Zazie',
