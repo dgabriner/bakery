@@ -187,6 +187,7 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         }
         $structures = bakery_formula_structure_load_map($db, $doughIds);
         $partsByProduct = bakery_formula_parts_load_map($db, $productIds);
+        $subformulaCatalog = bakery_formula_subformula_catalog($db);
         foreach ($batches as &$batch) {
             $structure = $structures[(int) ($batch['dough_type_id'] ?? 0)] ?? bakery_formula_normalize_structure([]);
             $batch['formula_structure'] = $structure;
@@ -203,6 +204,13 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
             $reference = bakery_formula_batch_reference($structure, null);
             $batch['batch_multiplier_applied'] = $reference['multiplier_applied'];
             $batch['batch_multiplier'] = $reference['multiplier'];
+            $batch['batch_math'] = bakery_formula_mix_batch_math(
+                $structure['standard_batch_dough_grams'] ?? null,
+                $structure['pieces_per_batch'] ?? null,
+                (float) ($batch['formula_dough_grams'] ?? $batch['total_weight_grams']),
+                (float) $batch['planned_units']
+            );
+            $batch['ingredients'] = bakery_formula_decorate_subformulas($batch['ingredients'], $subformulaCatalog);
             $batch['add_in_rows'] = bakery_formula_mix_add_in_rows($batch['products'], $partsByProduct);
         }
         unset($batch);
@@ -364,6 +372,12 @@ function bakery_baker_mix_echo_formula(
             }
         }
     }
+    foreach ($ingredients as $ingredient) {
+        if (!empty($ingredient['subformula']['lines'])) {
+            $foldable = true;
+            break;
+        }
+    }
     if ($foldable) {
         echo '<p class="bm-batch__hint">' . htmlspecialchars(bakery_t('formula_structure.mix_folded'), ENT_QUOTES, 'UTF-8') . '</p>';
     }
@@ -374,12 +388,16 @@ function bakery_baker_mix_echo_formula(
     if ($foldable && $normalized !== null) {
         $lines = [];
         foreach ($ingredients as $ingredient) {
-            $lines[] = [
+            $line = [
                 'ingredient_id' => (int) ($ingredient['ingredient_id'] ?? 0),
                 'ingredient_name' => (string) ($ingredient['name'] ?? $ingredient['ingredient_name'] ?? ''),
                 'unit' => (string) ($ingredient['unit'] ?? ''),
                 'percentage' => (float) ($ingredient['percentage'] ?? 0),
             ];
+            if (!empty($ingredient['subformula']) && is_array($ingredient['subformula'])) {
+                $line['subformula'] = $ingredient['subformula'];
+            }
+            $lines[] = $line;
         }
         $folded = bakery_formula_fold_formula($lines, $normalized['starters'], $totalDoughGrams);
         foreach ($folded['ingredients'] as $ingredient) {

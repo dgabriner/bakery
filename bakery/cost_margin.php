@@ -59,6 +59,7 @@ function bakery_cost_margin_flag_text(array $flags): string
             <p class="cost-margin-kicker"><a href="products.php"><?php echo htmlspecialchars(bakery_t('cost_margin.back_to_products')); ?></a></p>
             <h1><?php echo htmlspecialchars(bakery_t('cost_margin.heading')); ?></h1>
             <p><?php echo htmlspecialchars(bakery_t('cost_margin.intro')); ?></p>
+            <p><?php echo htmlspecialchars(bakery_t('cost_margin.package_note')); ?></p>
             <p><?php echo htmlspecialchars(bakery_t('cost_margin.loss_note')); ?></p>
         </div>
         <a class="cost-margin-export" href="cost_margin.php?export=csv"><?php echo htmlspecialchars(bakery_t('cost_margin.export_csv')); ?></a>
@@ -89,7 +90,12 @@ function bakery_cost_margin_flag_text(array $flags): string
                     <tr<?php echo $flagText !== '' ? ' class="is-flagged"' : ''; ?>>
                         <th scope="row"><?php echo htmlspecialchars((string)$row['product_name']); ?></th>
                         <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_grams($row['piece_grams'])); ?></td>
-                        <td class="num"><?php echo htmlspecialchars(bakery_cost_margin_format_money($row['ingredient_cost'])); ?></td>
+                        <td class="num">
+                            <?php echo htmlspecialchars(bakery_cost_margin_format_money($row['ingredient_cost'])); ?>
+                            <?php foreach ($row['package_prices'] ?? [] as $packageNote): ?>
+                                <span class="cost-margin-share"><?php echo htmlspecialchars((string) $packageNote); ?></span>
+                            <?php endforeach; ?>
+                        </td>
                         <td class="num">
                             <?php echo htmlspecialchars(bakery_cost_margin_format_money($row['dough_loss'])); ?>
                             <?php if ($row['loss_share_grams'] !== null): ?>
