@@ -655,6 +655,37 @@ function bakery_survey_next_sell_date_from_db(PDO $db, string $fromDate): string
     );
 }
 
+/**
+ * A dated token works through the end of its delivery day, including today.
+ * The next calendar day it is expired. Undated tokens keep the older open rule.
+ */
+function bakery_survey_token_is_expired(array $survey, string $today): bool
+{
+    $date = trim((string)($survey['delivery_date'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
+    }
+    $today = bakery_survey_validate_ymd($today);
+    return $today > $date;
+}
+
+/**
+ * Public tokens stay on the delivery date they were issued for.
+ * A requested date cannot move a today token onto tomorrow, or the reverse.
+ */
+function bakery_survey_bound_delivery_date(array $survey, ?string $requestedDate): string
+{
+    $bound = trim((string)($survey['delivery_date'] ?? ''));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $bound)) {
+        return bakery_survey_validate_ymd($bound);
+    }
+    $requested = trim((string)$requestedDate);
+    if ($requested !== '') {
+        return bakery_survey_validate_ymd($requested);
+    }
+    return date('Y-m-d');
+}
+
 /** Open store_verify / route_review tokens are the auth — no staff PIN. */
 function bakery_survey_token_allows_public(?array $survey): bool
 {
@@ -663,7 +694,10 @@ function bakery_survey_token_allows_public(?array $survey): bool
     }
     $kind = (string)($survey['kind'] ?? '');
     $status = (string)($survey['status'] ?? '');
-    return $status === 'open' && in_array($kind, ['store_verify', 'route_review', 'route_order'], true);
+    if ($status !== 'open' || !in_array($kind, ['store_verify', 'route_review', 'route_order'], true)) {
+        return false;
+    }
+    return !bakery_survey_token_is_expired($survey, date('Y-m-d'));
 }
 
 function bakery_survey_page_needs_login(string $token, array $survey): bool

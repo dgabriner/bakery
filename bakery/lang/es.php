@@ -4936,6 +4936,12 @@ return [
     'reprice.filter_price' => 'Filtrar por precio',
     'reprice.filter_all_prices' => 'Todos los precios',
     'reprice.filter_no_price' => 'Sin precio',
+    'texts.not_connected' => 'No conectado, no se entregó nada',
+    'texts.survey_today_link' => 'Enlace de encuesta de hoy',
+    'texts.survey_today_help' => 'Los textos de la mañana pueden llevar este enlace de hoy. Vence al final del día.',
+    'texts.survey_today_create' => 'Crear enlace de hoy',
+    'survey.token_expired_title' => 'El enlace de la encuesta venció',
+    'survey.token_expired_body' => 'Este enlace de encuesta ya venció. Pide a la panadería que envíe uno nuevo.',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Hoja semanal de Zazie',

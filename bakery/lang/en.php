@@ -4939,6 +4939,12 @@ return [
     'reprice.filter_price' => 'Filter by price',
     'reprice.filter_all_prices' => 'All prices',
     'reprice.filter_no_price' => 'No price',
+    'texts.not_connected' => 'Not connected, nothing delivered',
+    'texts.survey_today_link' => 'Today survey link',
+    'texts.survey_today_help' => 'Morning texts can carry this link for today. It expires at the end of the day.',
+    'texts.survey_today_create' => 'Create today link',
+    'survey.token_expired_title' => 'Survey link expired',
+    'survey.token_expired_body' => 'This survey link has expired. Ask the bakery to send a new one.',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Zazie weekly sheet',
