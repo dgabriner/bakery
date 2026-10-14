@@ -75,9 +75,9 @@ translation, never an English copy.
 - **Generation with edit preservation** (`includes/daily_order_generation.php` →
   `bakery_generate_daily_orders_from_standing($db, $date, $options)`; called from
   `daily_orders.php` single-date + "Generate week", `daily_run_api.php`
-  `generate_daily_orders` inline action, lazy `bakery_ensure_daily_orders_for_date`
-  / rolling `bakery_fill_demand_horizon` on Daily Run, Daily Orders, dashboard,
-  and Daily Production, plus DreamHost cron `scripts/demand_scheduler.php`).
+  `generate_daily_orders` inline action, the manager Build from standing
+  button, and DreamHost cron `scripts/demand_scheduler.php`. Page views do
+  not create orders.
   Re-generation preserves manually changed
   dated quantities unless `overwrite_changed` is set. It also preserves dated route
   transfers/reorders and one-time stops; newly discovered standing stops append instead
@@ -137,11 +137,17 @@ Violating these breaks operations even if the code "works."
 2. **Standing = template/forecast. Daily = commercial commitment.** Standing edits never
    rewrite past dated orders; dated edits never write standing. Shared semantics live in
    `includes/customer_order_mutations.php`.
-3. **Generation is automatic for a 7-day horizon**, plus on-demand via Daily Orders
+3. **Generation is explicit or cron**, plus on-demand via Daily Orders
    single-date or "Generate week", the dashboard/Daily Run inline `generate_daily_orders`
-   action, first view of Daily Run / Daily Orders / dashboard / Daily Production
-   (`bakery_fill_demand_horizon` → `bakery_ensure_daily_orders_for_date`), route build
+   action, the manager Build from standing button, route build
    (`assign_from_standing`), or DreamHost cron `scripts/demand_scheduler.php`.
+   Opening Daily Run, Daily Orders, the dashboard, Daily Production, Baker Mix,
+   Driver Assignment, or a survey does not create dated orders. An order a
+   manager emptied stays empty (`daily_orders.standing_fill_blocked`) until
+   overwrite generation or Apply standing. Removing one dated line writes
+   quantity 0 for that customer, product, and date. Standing sync keeps that 0.
+   Daily Orders calls it a one-day removal and can undo it. A production cut
+   to zero sets `standing_fill_blocked` so standing sync does not refill that order.
    Cadence from calendar today: default mid-week lookahead is bake tomorrow
    (`today+1`) for the route the day after (`today+2`). That matches pan dulce
    Monday→Tuesday through Thursday→Friday. Friday's pan dulce bake covers
@@ -327,12 +333,10 @@ a later item.
 
 1. **"Tomorrow, Confirmed"** — shipped: shared generation + `is_active`, Generate
    week, dashboard/Daily Run inline Generate, rolling 7-day horizon
-   (`bakery_fill_demand_horizon`) on Daily Run / Daily Orders / dashboard / Daily
-   Production, DreamHost cron `scripts/demand_scheduler.php`, `demand_confirmations`
+   DreamHost cron `scripts/demand_scheduler.php`, `demand_confirmations`
    + Confirm Demand hard-gating stage 1 / closeout, "changed since confirmation",
    tomorrow-readiness strip, demand cadence with Friday/Sour Flour cover windows. *Still open: optional
-   overnight cron must be installed on DreamHost (page load fills the horizon
-   even without it).*
+   overnight cron must be installed on DreamHost. Page views do not fill the horizon.*
 2. **Production-plan integration** — shipped: commit action in Production Center
    (and Daily Run calling the same helper); Daily Production executes the committed
    plan with demand alongside + drift flags; post-commit demand changes raise

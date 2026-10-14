@@ -38,6 +38,8 @@ $isToday = ($selectedDate === $today);
 $prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
 $nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 
+bakery_try_build_from_standing_post($db);
+
 $dbError = null;
 $commandCenter = null;
 $chartData = [];
@@ -45,11 +47,6 @@ $tomorrowDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 $tomorrowReadiness = null;
 
 try {
-    try {
-        bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => !$isBaker]);
-    } catch (Throwable $horizonEx) {
-        error_log('dashboard demand horizon: ' . $horizonEx->getMessage());
-    }
     if ($isBaker) {
         // Baker dashboard needs no ops metrics.
     } else {
@@ -125,6 +122,7 @@ require_once 'includes/nav.php';
                 <a href="?date=<?php echo urlencode($today); ?>" class="ops-today-link"><?php bakery_te('common.today'); ?></a>
             <?php endif; ?>
             <a href="?date=<?php echo urlencode($nextDate); ?>"><?php bakery_te('common.next'); ?></a>
+            <?php echo bakery_build_from_standing_button($selectedDate, 'ops-inline-action-btn'); ?>
             <form class="ops-date-jump" method="get" action="">
                 <label class="ops-sr-only" for="ops-date-input"><?php bakery_te('common.operating_date'); ?></label>
                 <input id="ops-date-input" type="date" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">

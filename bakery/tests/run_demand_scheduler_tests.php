@@ -132,11 +132,14 @@ $dashSrc = (string)file_get_contents($root . '/index.php');
 $runSrc = (string)file_get_contents($root . '/daily_run.php');
 $ordersSrc = (string)file_get_contents($root . '/daily_orders.php');
 $prodSrc = (string)file_get_contents($root . '/production.php');
-$assert(strpos($dashSrc, 'bakery_fill_demand_horizon') !== false, 'dashboard fills the horizon');
+$assert(strpos($dashSrc, 'bakery_fill_demand_horizon(') === false, 'dashboard view does not fill the horizon');
+$assert(strpos($dashSrc, 'build_from_standing') !== false, 'dashboard offers Build from standing');
 $assert(strpos($dashSrc, 'bakery_render_demand_cadence_strip') !== false, 'dashboard shows cadence strip');
-$assert(strpos($runSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Run fills the horizon');
-$assert(strpos($ordersSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Orders fills the horizon');
-$assert(strpos($prodSrc, 'bakery_fill_demand_horizon') !== false, 'Daily Production fills the horizon');
+$assert(strpos($runSrc, 'bakery_fill_demand_horizon(') === false, 'Daily Run view does not fill the horizon');
+$assert(strpos($runSrc, 'build_from_standing') !== false, 'Daily Run offers Build from standing');
+$assert(strpos($ordersSrc, 'bakery_fill_demand_horizon(') === false, 'Daily Orders view does not fill the horizon');
+$assert(strpos($prodSrc, 'bakery_fill_demand_horizon(') === false, 'Daily Production view does not fill the horizon');
+$assert(strpos($prodSrc, 'build_from_standing') !== false, 'Daily Production offers Build from standing');
 
 $schedSrc = (string)file_get_contents($root . '/scripts/demand_scheduler.php');
 $assert(strpos($schedSrc, 'bakery_cron_record_run') !== false, 'demand_scheduler records cron_run stamps');

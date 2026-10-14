@@ -426,6 +426,60 @@ function bakery_customer_update_daily_total(PDO $db, $dailyOrderId) {
     bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
 }
 
+function bakery_daily_order_standing_fill_column_ready(PDO $db): bool
+{
+    return function_exists('column_exists') && column_exists($db, 'daily_orders', 'standing_fill_blocked');
+}
+
+function bakery_daily_order_standing_fill_is_blocked(PDO $db, int $orderId, ?bool $ready = null): bool
+{
+    if ($orderId <= 0) {
+        return false;
+    }
+    if ($ready === null) {
+        $ready = bakery_daily_order_standing_fill_column_ready($db);
+    }
+    if (!$ready) {
+        return false;
+    }
+    $stmt = $db->prepare('SELECT standing_fill_blocked FROM daily_orders WHERE id = ? LIMIT 1');
+    $stmt->execute([$orderId]);
+    return (int)$stmt->fetchColumn() === 1;
+}
+
+function bakery_daily_order_set_standing_fill_blocked(PDO $db, int $orderId, bool $blocked, ?bool $ready = null): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+    if ($ready === null) {
+        $ready = bakery_daily_order_standing_fill_column_ready($db);
+    }
+    if (!$ready) {
+        return;
+    }
+    $db->prepare('UPDATE daily_orders SET standing_fill_blocked = ? WHERE id = ?')
+        ->execute([$blocked ? 1 : 0, $orderId]);
+}
+
+/**
+ * Mark a dated order so standing generation will not refill it.
+ * Called when a person removes the last positive line on purpose.
+ */
+function bakery_daily_order_block_standing_fill_if_empty(PDO $db, int $orderId): void
+{
+    if ($orderId <= 0 || !bakery_daily_order_standing_fill_column_ready($db)) {
+        return;
+    }
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ? AND quantity > 0'
+    );
+    $stmt->execute([$orderId]);
+    if ((int)$stmt->fetchColumn() === 0) {
+        bakery_daily_order_set_standing_fill_blocked($db, $orderId, true, true);
+    }
+}
+
 function bakery_customer_product_row(PDO $db, $productId) {
     $stmt = $db->prepare(
         'SELECT p.id, p.name, p.price, p.wholesale_price, pl.name AS product_line_name
@@ -912,6 +966,9 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
         $del->execute([(int)$existing['id']]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    if ($quantity <= 0) {
+        bakery_daily_order_block_standing_fill_if_empty($db, (int)$dailyOrderId);
+    }
 
     if ($oldQty !== $quantity) {
         bakery_portal_record_event($db, BAKERY_OP_PORTAL_DAILY_CHANGED,
