@@ -16,7 +16,7 @@ $customRange = isset($_GET['start_date'], $_GET['end_date']);
 if ($customRange) {
     $startDate = trim((string)$_GET['start_date']);
     $endDate = trim((string)$_GET['end_date']);
-    $rangeLabel = date('M j, Y', strtotime($startDate)) . ' – ' . date('M j, Y', strtotime($endDate));
+    $rangeLabel = date('M j, Y', strtotime($startDate)) . ' ' . bakery_locale_range_word() . ' ' . date('M j, Y', strtotime($endDate));
 } else {
     $range = bakery_portal_billing_date_preset($preset);
     $startDate = $range['start_date'];
@@ -144,7 +144,7 @@ $portalCustomerName = $customer['name'];
           <?php foreach ($account['statements'] as $st): ?>
             <tr>
               <td><?php echo date('M j, Y', strtotime($st['statement_date'])); ?></td>
-              <td><?php echo htmlspecialchars($st['period_start'] . ' – ' . $st['period_end']); ?></td>
+              <td><?php echo htmlspecialchars($st['period_start'] . ' ' . bakery_locale_range_word() . ' ' . $st['period_end']); ?></td>
               <td class="num">$<?php echo number_format((float)$st['total_amount'], 2); ?></td>
             </tr>
           <?php endforeach; ?>

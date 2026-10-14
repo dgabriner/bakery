@@ -410,7 +410,7 @@ function bakery_baker_mix_echo_formula(
         }
         foreach ($folded['prep'] as $prep) {
             bakery_baker_mix_echo_amount_row(
-                (string) $prep['ingredient_name'] . ' — ' . bakery_t('formula_structure.starter_folded_note'),
+                (string) $prep['ingredient_name'] . ' - ' . bakery_t('formula_structure.starter_folded_note'),
                 (string) ($prep['unit'] ?? ''),
                 (float) $prep['grams'],
                 null
@@ -430,7 +430,7 @@ function bakery_baker_mix_echo_formula(
     foreach ($addInRows as $row) {
         $kindKey = ($row['source'] ?? '') === 'filling' ? 'formula_structure.kind_filling' : 'formula_structure.kind_topping';
         bakery_baker_mix_echo_amount_row(
-            (string) ($row['ingredient_name'] ?? '') . ' — ' . bakery_t($kindKey),
+            (string) ($row['ingredient_name'] ?? '') . ' - ' . bakery_t($kindKey),
             (string) ($row['unit'] ?? ''),
             (float) ($row['grams'] ?? 0),
             null

@@ -1255,7 +1255,7 @@ function bakery_portal_create_tip_checkout(array $customer, string $clientKey, s
     $result = square_api_request('POST', '/v2/online-checkout/payment-links', [
         'idempotency_key' => $idempotencyKey,
         'quick_pay' => [
-            'name' => 'Tip — Sour Flour Bakery',
+            'name' => 'Tip. Sour Flour Bakery',
             'price_money' => ['amount' => 100, 'currency' => 'USD'],
             'location_id' => defined('SQUARE_LOCATION_ID') ? SQUARE_LOCATION_ID : '',
         ],

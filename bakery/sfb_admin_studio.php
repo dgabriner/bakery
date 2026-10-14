@@ -93,7 +93,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
       <span><?php bakery_te('sfb.studio_clock'); ?></span>
     </div>
     <div class="sfb-admin__stat">
-      <strong><?php echo (int)$settings['min_interval_minutes']; ?>–<?php echo (int)$settings['max_interval_minutes']; ?>m</strong>
+      <strong><?php echo (int)$settings['min_interval_minutes']; ?> <?php echo bakery_locale_range_word(); ?> <?php echo (int)$settings['max_interval_minutes']; ?>m</strong>
       <span><?php bakery_te('sfb.studio_min_minutes'); ?></span>
     </div>
     <div class="sfb-admin__stat">
@@ -170,9 +170,9 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
               </div>
               <p class="sfb-admin__batch-meta">
                 <?php bakery_te('sfb.studio_next'); ?>:
-                <?php echo $baker['next_action_at'] ? htmlspecialchars(date('M j, g:ia', strtotime((string)$baker['next_action_at'])), ENT_QUOTES, 'UTF-8') : '—'; ?>
+                <?php echo $baker['next_action_at'] ? htmlspecialchars(bakery_format_user_stamp(strtotime((string)$baker['next_action_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8') : '-'; ?>
                 · <?php bakery_te('sfb.studio_last'); ?>:
-                <?php echo $baker['last_action'] ? htmlspecialchars(bakery_sfb_studio_action_label($baker['last_action']), ENT_QUOTES, 'UTF-8') : '—'; ?>
+                <?php echo $baker['last_action'] ? htmlspecialchars(bakery_sfb_studio_action_label($baker['last_action']), ENT_QUOTES, 'UTF-8') : '-'; ?>
               </p>
               <div class="sfb-admin__batch-actions">
                 <a class="sfb-admin__button sfb-admin__button--secondary" href="sfb_admin_studio_baker.php?baker=<?php echo (int)$baker['id']; ?>"><?php bakery_te('sfb.studio_open_baker'); ?></a>
@@ -202,7 +202,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
         <tbody>
           <?php foreach ($logs as $log): ?>
             <tr>
-              <td><?php echo htmlspecialchars(date('M j, g:ia', strtotime((string)$log['created_at'])), ENT_QUOTES, 'UTF-8'); ?></td>
+              <td><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime((string)$log['created_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8'); ?></td>
               <td>
                 <a href="sfb_admin_studio_baker.php?baker=<?php echo (int)$log['customer_id']; ?>">
                   <?php echo htmlspecialchars((string)$log['baker_name'], ENT_QUOTES, 'UTF-8'); ?>

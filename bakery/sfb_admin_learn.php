@@ -393,7 +393,7 @@ $currentLocale = bakery_locale();
                   <?php echo htmlspecialchars((string)$purchaseRow['customer_name'], ENT_QUOTES, 'UTF-8'); ?>
                   · <?php echo htmlspecialchars($purchaseRow['offering_title_snapshot'], ENT_QUOTES, 'UTF-8'); ?>
                   · $<?php echo number_format((float)$purchaseRow['price_cents_snapshot'] / 100, 2); ?>
-                  <br><small class="muted"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($purchaseRow['created_at'])), ENT_QUOTES, 'UTF-8'); ?><?php
+                  <br><small class="muted"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($purchaseRow['created_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8'); ?><?php
                     if (!empty($purchaseRow['manual_note'])) { echo ' · ' . htmlspecialchars($purchaseRow['manual_note'], ENT_QUOTES, 'UTF-8'); }
                     $jarOrder = bakery_sfb_starter_jar_for_purchase($db, (int)$purchaseRow['id']);
                     if ($jarOrder) {
@@ -551,7 +551,7 @@ $currentLocale = bakery_locale();
                   · <?php echo htmlspecialchars((string)($activated['activated_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
                   <br><small class="muted"><?php
                     echo !empty($activated['used_at'])
-                        ? htmlspecialchars(date('M j, g:ia', strtotime((string)$activated['used_at'])), ENT_QUOTES, 'UTF-8')
+                        ? htmlspecialchars(bakery_format_user_stamp(strtotime((string)$activated['used_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8')
                         : '';
                   ?></small>
                 </span>

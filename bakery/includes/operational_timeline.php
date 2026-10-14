@@ -889,13 +889,13 @@ function bakery_operational_timeline_links(array $entry): array
 function bakery_operational_format_time(string $occurredAt): string
 {
     $ts = strtotime($occurredAt);
-    return $ts === false ? $occurredAt : date('g:i A', $ts);
+    return $ts === false ? $occurredAt : bakery_locale_time($ts);
 }
 
 function bakery_operational_format_datetime(string $occurredAt): string
 {
     $ts = strtotime($occurredAt);
-    return $ts === false ? $occurredAt : date('M j, Y g:i A', $ts);
+    return $ts === false ? $occurredAt : bakery_format_user_stamp($ts, 'M j, Y g:i A');
 }
 
 function bakery_operational_actor_label(array $entry): string
@@ -938,7 +938,7 @@ function bakery_operational_log_user_action(PDO $db, string $action, string $ent
         $summary .= ' #' . $entityId;
     }
     if ($details !== null && $details !== '') {
-        $summary .= ' — ' . (is_string($details) ? $details : json_encode($details));
+        $summary .= ' - ' . (is_string($details) ? $details : json_encode($details));
     }
     bakery_record_operational_event($db, 'legacy_' . preg_replace('/[^a-z0-9_]+/i', '_', $action), $summary, [
         'metadata' => [

@@ -187,11 +187,11 @@ require_once 'includes/nav.php';
                         <p><?php echo htmlspecialchars($stop['customer_address'] ?: bakery_t('driver.no_address_short'), ENT_QUOTES, 'UTF-8'); ?></p>
                         <div class="driver-stop-meta">
                             <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone'], ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
-                            <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
+                            <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
                         </div>
                     </div>
                     <?php if ($canOpenStop): ?></a><?php endif; ?>
-                    <?php if ($ordersHref): ?><a class="driver-stop-orders" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.what_delivering') . ' — ' . $stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.store_orders'); ?></a><?php endif; ?>
+                    <?php if ($ordersHref): ?><a class="driver-stop-orders" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.what_delivering') . ' - ' . $stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.store_orders'); ?></a><?php endif; ?>
                     <?php if (!$isDone && $mapsUrl): ?><a class="driver-stop-navigate" href="<?php echo htmlspecialchars($mapsUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate_to', ['name' => $stop['customer_name']]), ENT_QUOTES, 'UTF-8'); ?>">↗</a><?php endif; ?>
                 </li>
                 <?php endforeach; ?>

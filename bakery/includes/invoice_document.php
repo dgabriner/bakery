@@ -64,20 +64,20 @@ function bakery_billing_invoice_document_html(array $invoice, array $options = [
         if ((int)$qty <= 0 && (int)$item['quantity'] <= 0) {
             continue;
         }
-        $deliveredCell = $item['delivered_quantity'] !== null ? (string)(int)$item['delivered_quantity'] : '—';
+        $deliveredCell = $item['delivered_quantity'] !== null ? (string)(int)$item['delivered_quantity'] : '-';
         if (!empty($item['delivered_quantity_estimated']) && function_exists('bakery_t')) {
             $deliveredCell .= ' ' . bakery_t('billing.line_estimated');
         }
         $noCharge = !empty($item['is_no_charge']);
         $showPrice = $noCharge || !empty($item['has_price']);
-        $priceCell = $showPrice ? '$' . number_format((float)$item['unit_price'], 2) : '—';
-        $totalCell = $showPrice ? '$' . number_format((float)$item['line_total'], 2) : '—';
+        $priceCell = $showPrice ? '$' . number_format((float)$item['unit_price'], 2) : '-';
+        $totalCell = $showPrice ? '$' . number_format((float)$item['line_total'], 2) : '-';
         $name = $esc($item['product_name'] ?? '');
         if ($noCharge) {
             $noChargeLabel = function_exists('bakery_billing_line_no_charge_label')
                 ? bakery_billing_line_no_charge_label($item)
                 : (function_exists('bakery_t') ? bakery_t('no_charge.label') : 'No charge');
-            $name .= ' — ' . $esc($noChargeLabel);
+            $name .= ' - ' . $esc($noChargeLabel);
         }
         $itemRows .= '<tr>'
             . '<td>' . $name . '</td>'
@@ -104,7 +104,7 @@ function bakery_billing_invoice_document_html(array $invoice, array $options = [
         $creditsHtml = '<p class="adjustment">Credits taken back: ' . (int)$invoice['credits_taken_back'] . '</p>';
     }
 
-    $snapshotNote = 'Line prices are from the delivery billing snapshot at the time of confirmation — not current catalog pricing.';
+    $snapshotNote = 'Line prices are from the delivery billing snapshot at the time of confirmation. Not current catalog pricing.';
     if (function_exists('bakery_t')) {
         $snapshotNote = bakery_t('billing.snapshot_note');
     }

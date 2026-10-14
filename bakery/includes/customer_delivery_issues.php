@@ -561,7 +561,7 @@ function bakery_delivery_issue_resolve(PDO $db, int $issueId, array $input, ?int
                 'credit_recommendation' => $creditRec,
                 'credit_pieces' => $creditPieces,
                 'billing_note' => $creditRec !== 'none'
-                    ? 'Credit adjustment requires manual billing action — delivery record unchanged.'
+                    ? 'Credit adjustment requires manual billing action. Delivery record unchanged.'
                     : null,
             ],
         ]

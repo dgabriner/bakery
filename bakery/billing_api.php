@@ -69,7 +69,7 @@ try {
             if (empty($result['ok'])) {
                 $msg = 'Invoice marked invoiced but not sent: no billing email on file.';
                 if (($result['reason'] ?? '') === 'mail_failed') {
-                    $msg = 'Invoice ' . ($result['invoice_number'] ?? '') . ' is marked invoiced but the email failed; the failed send is recorded — fix mail settings and resend.';
+                    $msg = 'Invoice ' . ($result['invoice_number'] ?? '') . ' is marked invoiced but the email failed; the failed send is recorded. Fix mail settings and resend.';
                 } elseif (($result['reason'] ?? '') !== 'no_email') {
                     $msg = 'Invoice could not be sent.';
                 }
@@ -101,7 +101,7 @@ try {
                 $msg .= ' ' . $batch['skipped'] . ' skipped (not confirmed, not sendable, or no billing email).';
             }
             if (($batch['failed'] ?? 0) > 0) {
-                $msg .= ' ' . $batch['failed'] . ' email' . ($batch['failed'] === 1 ? '' : 's') . ' failed (marked invoiced, failed send recorded — resend after fixing mail).';
+                $msg .= ' ' . $batch['failed'] . ' email' . ($batch['failed'] === 1 ? '' : 's') . ' failed (marked invoiced, failed send recorded, resend after fixing mail).';
             }
             $sep = strpos($redirect, '?') !== false ? '&' : '?';
             safe_redirect(($redirect ?: 'billing_center.php?panel=invoices') . $sep . 'bulk_msg=' . urlencode($msg), 'invoice_sent');

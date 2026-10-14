@@ -579,7 +579,7 @@ foreach ($products as $product) {
                             <label class="inline-number-control"><span aria-hidden="true">$</span><span class="sr-only">Price</span><input class="inline-product-control" data-field="price" type="number" value="<?php echo htmlspecialchars((string)($product['price'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="0.00"></label>
                         </td>
                         <td class="weight-cell">
-                            <label class="inline-number-control"><span class="sr-only">Weight in grams</span><input class="inline-product-control" data-field="weight_grams" type="number" value="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="—"><span aria-hidden="true">g</span></label>
+                            <label class="inline-number-control"><span class="sr-only">Weight in grams</span><input class="inline-product-control" data-field="weight_grams" type="number" value="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="-"><span aria-hidden="true">g</span></label>
                         </td>
                         <td class="dough-type-cell">
                             <label class="sr-only" for="product-dough-<?php echo (int)$product['id']; ?>">Dough type</label>

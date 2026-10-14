@@ -576,7 +576,7 @@ try {
                                                     title="<?= htmlspecialchars($dayLabel) ?> standing route"
                                                     style="<?= $selectStyle ?>"
                                                     onchange="saveStandingRoute(this)">
-                                                <option value="0">—</option>
+ <option value="0">-</option>
                                                 <?php foreach ($drivers as $driver): ?>
                                                     <option value="<?= (int)$driver['id'] ?>"<?= $selectedDriverId === (int)$driver['id'] ? ' selected' : '' ?>>
                                                         <?= htmlspecialchars($driver['name']) ?>
@@ -664,7 +664,7 @@ try {
                                 data-assigned-driver="<?= $assignedDriverId ?>">
                             <?= htmlspecialchars($customer['name']) ?><?= $statusHint ?>
                             <?php if (!empty($customer['address'])): ?>
-                                — <?= htmlspecialchars($customer['address']) ?>
+                                - <?= htmlspecialchars($customer['address']) ?>
                             <?php endif; ?>
                         </option>
                     <?php endforeach; ?>
@@ -678,7 +678,7 @@ try {
             <div id="add-customer-standing-section" class="add-customer-standing-section" hidden>
                 <div class="add-customer-standing-header">
                     <strong>Standing order for <?= htmlspecialchars($dayName) ?></strong>
-                    <span class="add-customer-standing-hint">Optional — set products for future weeks too</span>
+ <span class="add-customer-standing-hint">Optional. Set products for future weeks too</span>
                 </div>
                 <div class="add-customer-standing-actions">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="applyPanDulceInAddModal()">

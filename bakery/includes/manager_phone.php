@@ -1014,7 +1014,7 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
                 $committedTs = strtotime((string)($planState['commit']['committed_at'] ?? ''));
                 $committedAtLabel = bakery_t('manager_phone.plan_committed_at', [
                     'time' => $committedTs
-                        ? bakery_manager_phone_format_clock_timestamp($committedTs)
+                        ? bakery_locale_time($committedTs)
                         : (string)($planState['commit']['committed_at'] ?? ''),
                 ]);
                 $driftCount = (int)($planState['changed_since']['count'] ?? 0);

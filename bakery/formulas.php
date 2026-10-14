@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                     $stmt->execute([$dough_type_id, $source_id]);
                     if ($stmt->rowCount() === 0) {
-                        throw new Exception('Nothing to copy — the source formula is empty or all ingredients are already present.');
+                        throw new Exception('Nothing to copy. The source formula is empty or all ingredients are already present.');
                     }
                     if ($wants_json) {
                         formulas_json_response([
@@ -1038,7 +1038,7 @@ try {
                     <?php if (empty($ingredients)): ?>
                         <div class="formula-starter-panel">
                             <strong>Start this formula</strong>
-                            <span>Pick a starter template — we'll match ingredients from your catalogue by name.</span>
+ <span>Pick a starter template. We'll match ingredients from your catalogue by name.</span>
                             <div class="starter-template-grid">
                                 <?php foreach ($starter_templates as $template_key => $template): ?>
                                     <button type="button"

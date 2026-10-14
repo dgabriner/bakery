@@ -217,7 +217,7 @@ function bakery_formula_structure_render_folded(array $ingredients, array $struc
     }
     foreach ($fold['prep'] as $prep) {
         echo '<li class="is-prep"><span>' . htmlspecialchars((string) $prep['ingredient_name'], ENT_QUOTES, 'UTF-8')
-            . ' — ' . bakery_formula_structure_h('formula_structure.starter_prep') . '</span><strong>'
+            . ' - ' . bakery_formula_structure_h('formula_structure.starter_prep') . '</span><strong>'
             . htmlspecialchars(bakery_t((string) $prep['label_key']), ENT_QUOTES, 'UTF-8') . '</strong></li>';
     }
     echo '</ul></div>';

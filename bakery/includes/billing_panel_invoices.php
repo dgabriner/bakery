@@ -329,7 +329,7 @@ $attentionClassFor = static function ($category) {
 
 $formatVariance = static function ($variance) {
     if ($variance === null) {
-        return '—';
+        return '-';
     }
     $variance = (int)$variance;
     return $variance === 0 ? '0' : (($variance > 0 ? '+' : '') . $variance);
@@ -495,8 +495,8 @@ $formAction = 'billing_center.php?panel=invoices';
                                     $settle = is_array($order['settlement'] ?? null) ? $order['settlement'] : bakery_billing_settlement_row($order);
                                     $codLabel = $settle['cod_collected'] !== null
                                         ? '$' . number_format((float)$settle['cod_collected'], 2)
-                                        : '—';
-                                    $squareLabel = $settle['square_status'] !== '' ? $settle['square_status'] : '—';
+                                        : '-';
+                                    $squareLabel = $settle['square_status'] !== '' ? $settle['square_status'] : '-';
                                     $sendLabel = (string)bakery_t('billing.settlement_send_' . $settle['send_status'], [], $settle['send_status']);
                                     ?>
                                     <div style="font-size:.7rem;margin-top:2px;color:#334155"><?php echo htmlspecialchars($queueLabel); ?></div>
@@ -581,7 +581,7 @@ $formAction = 'billing_center.php?panel=invoices';
                 <article class="invoice-detail">
                     <div class="<?php echo in_array($selectedInvoice['category'], ['ready', 'already_invoiced'], true) ? 'ic-exception-box is-ok' : 'ic-exception-box'; ?>">
                         <strong><?php echo htmlspecialchars($selectedInvoice['category_meta']['label']); ?></strong>
-                        — <?php echo htmlspecialchars($selectedInvoice['category_meta']['help']); ?>
+                        - <?php echo htmlspecialchars($selectedInvoice['category_meta']['help']); ?>
                     </div>
                     <p style="margin:0 0 12px;font-size:.84rem"><strong><?php echo htmlspecialchars($selectedInvoice['invoice_number']); ?></strong> · <?php echo date('F j, Y', strtotime($selectedInvoice['order_date'])); ?></p>
 
@@ -592,9 +592,9 @@ $formAction = 'billing_center.php?panel=invoices';
                             <tr>
                                 <td><?php echo htmlspecialchars($item['product_name']); ?><?php if (!empty($item['is_no_charge'])): ?><div><?php echo htmlspecialchars($item['no_charge_label'] !== '' ? $item['no_charge_label'] : bakery_t('no_charge.label')); ?></div><?php endif; ?></td>
                                 <td><?php echo (int)$item['quantity']; ?></td>
-                                <td><?php echo $item['delivered_quantity'] !== null ? (int)$item['delivered_quantity'] : '—'; ?><?php if (!empty($item['delivered_quantity_estimated'])): ?><div><?php echo htmlspecialchars(bakery_t('billing.line_estimated'), ENT_QUOTES, 'UTF-8'); ?></div><?php endif; ?></td>
-                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['unit_price'], 2) : '—'; ?></td>
-                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['line_total'], 2) : '—'; ?></td>
+                                <td><?php echo $item['delivered_quantity'] !== null ? (int)$item['delivered_quantity'] : '-'; ?><?php if (!empty($item['delivered_quantity_estimated'])): ?><div><?php echo htmlspecialchars(bakery_t('billing.line_estimated'), ENT_QUOTES, 'UTF-8'); ?></div><?php endif; ?></td>
+                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['unit_price'], 2) : '-'; ?></td>
+                                <td><?php echo !empty($item['has_price']) ? '$' . number_format($item['line_total'], 2) : '-'; ?></td>
                             </tr>
                         <?php endforeach; ?>
                         <?php if (!empty($selectedInvoice['unallocated_delivered_pieces'])): ?>
@@ -611,7 +611,7 @@ $formAction = 'billing_center.php?panel=invoices';
 
                     <div class="invoice-detail-summary">
                         <?php if ($selectedInvoice['pricing_issue']): ?>
-                            <div style="color:#b45309"><strong>Pricing issue — amount may not be trustworthy</strong></div>
+ <div style="color:#b45309"><strong>Pricing issue. Amount may not be trustworthy</strong></div>
                         <?php endif; ?>
                         <div><span><?php echo htmlspecialchars(bakery_t('billing.collection_filter')); ?></span><strong><?php echo htmlspecialchars(!empty($selectedInvoice['is_cod']) ? bakery_t('billing.collection_cod') : bakery_t('billing.collection_invoice')); ?></strong></div>
                         <div><span>Payment / AR</span><strong title="<?php echo htmlspecialchars($selectedInvoice['payment_status']['detail']); ?>"><?php echo htmlspecialchars($selectedInvoice['payment_status']['label']); ?></strong></div>

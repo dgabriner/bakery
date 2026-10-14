@@ -25,7 +25,7 @@ function check_file(string $root, string $rel, int $minBytes, array $needles = [
     }
     $size = filesize($path);
     if ($size === false || $size < $minBytes) {
-        line("BAD SIZE: {$rel} = {$size} bytes (expected >= {$minBytes}) — upload likely truncated");
+        line("BAD SIZE: {$rel} = {$size} bytes (expected >= {$minBytes}). Upload likely truncated");
         return;
     }
     line("OK size: {$rel} = {$size} bytes");
@@ -119,7 +119,7 @@ try {
             line('Manifest compare complete.');
         }
     } else {
-        line('No deploy_file_sizes.json on server (optional — build a new ZIP locally).');
+        line('No deploy_file_sizes.json on server (optional, build a new ZIP locally).');
     }
 
     line('');

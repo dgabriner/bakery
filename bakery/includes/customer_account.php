@@ -120,7 +120,7 @@ function bakery_customer_account_receiving_hours_label($deliverAfter, $deliverBy
     $after = bakery_customer_account_format_time($deliverAfter);
     $by = bakery_customer_account_format_time($deliverBy);
     if ($after !== '' && $by !== '') {
-        return $after . ' – ' . $by;
+        return $after . ' ' . bakery_locale_range_word() . ' ' . $by;
     }
     if ($after !== '') {
         return bakery_t('portal.account_receiving_after_only', ['time' => $after]);
@@ -138,7 +138,7 @@ function bakery_customer_account_format_time($value): string
         return '';
     }
     $ts = strtotime($value);
-    return $ts ? date('g:i A', $ts) : $value;
+    return $ts ? bakery_locale_time($ts) : $value;
 }
 
 function bakery_customer_account_normalize_time($value): ?string

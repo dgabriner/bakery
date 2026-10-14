@@ -631,7 +631,7 @@ function bakery_customer_record_hints(
     if ($zoneText === '' && $zoneId <= 0) {
         $hints[] = [
             'level' => 'warn',
-            'message' => 'No delivery zone assigned — routing and daily order filters may be incomplete.',
+            'message' => 'No delivery zone assigned. Routing and daily order filters may be incomplete.',
         ];
     }
 

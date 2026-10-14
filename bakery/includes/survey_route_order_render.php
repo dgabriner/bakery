@@ -53,7 +53,7 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
         </div>
       </div>
       <?php if ($locked !== []): ?>
-        <p class="meta"><?php echo $esc(bakery_survey_text('survey.route_order_locked', ['count' => count($locked)], 'Already locked (:count) — stay at the front of the route')); ?>:
+        <p class="meta"><?php echo $esc(bakery_survey_text('survey.route_order_locked', ['count' => count($locked)], 'Already locked (:count). Stay at the front of the route')); ?>:
           <?php
             $names = [];
             foreach ($locked as $row) {
@@ -175,7 +175,7 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   <div class="links-card">
     <div class="meta"><?php echo $esc(bakery_survey_text('survey.route_order_links', [], 'Share order links')); ?></div>
     <div class="row">
-      <span><?php echo $esc(bakery_survey_text('survey.route_order_link_manager', [], 'Manager — all drivers')); ?></span>
+      <span><?php echo $esc(bakery_survey_text('survey.route_order_link_manager', [], 'Manager. All drivers')); ?></span>
       <button type="button" class="linkish" data-copy-url="<?php echo $esc($selfUrl); ?>"><?php echo $esc(bakery_survey_text('survey.store_verify_copy_link', [], 'Copy link')); ?></button>
     </div>
     <?php foreach ($hqGroups as $group):

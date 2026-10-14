@@ -534,7 +534,7 @@ function bakery_customer_notify_delivery_completed(PDO $db, $dailyOrderId) {
     }
 
     $dateLabel = format_date($ctx['order_date'], 'l M j');
-    $timeLabel = date('g:i A', strtotime($ctx['delivery_confirmed_at']));
+    $timeLabel = bakery_locale_time(strtotime($ctx['delivery_confirmed_at']));
     $link = function_exists('bakery_portal_delivery_url')
         ? bakery_portal_delivery_url($ctx['order_date'], (int)$dailyOrderId)
         : 'customer_portal_delivery.php?id=' . (int)$dailyOrderId;

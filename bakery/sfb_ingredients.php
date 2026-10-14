@@ -67,12 +67,12 @@ if (!$selectedIngredient && $ingredients) {
 
 $saved = (string)($_GET['saved'] ?? '');
 $savedMessages = [
-    'created' => 'Ingredient added — it is ready to use in your formulas.',
+    'created' => 'Ingredient added. It is ready to use in your formulas.',
     'updated' => 'Ingredient saved.',
     'toggled' => 'Ingredient updated.',
 ];
 
-$page_title = 'SF Baker — Ingredients';
+$page_title = 'SF Baker. Ingredients';
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];

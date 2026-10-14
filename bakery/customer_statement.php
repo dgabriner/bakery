@@ -56,7 +56,7 @@ $emailReady = bakery_billing_email_ready();
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Statement — <?php echo htmlspecialchars($customer['name']); ?></title>
+    <title>Statement. <?php echo htmlspecialchars($customer['name']); ?></title>
     <style>
         body { font-family: Georgia, 'Times New Roman', serif; max-width: 820px; margin: 0 auto; padding: 28px; color: #1a202c; line-height: 1.45; }
         .toolbar { position: fixed; top: 16px; right: 16px; display: flex; gap: 8px; font-family: system-ui, sans-serif; }
@@ -93,7 +93,7 @@ $emailReady = bakery_billing_email_ready();
         <div class="stmt-meta">
             <h1>STATEMENT</h1>
             <div>Statement date: <?php echo date('F j, Y', strtotime($statementDate)); ?></div>
-            <div>Period: <?php echo date('M j, Y', strtotime($startDate)); ?> – <?php echo date('M j, Y', strtotime($endDate)); ?></div>
+            <div>Period: <?php echo date('M j, Y', strtotime($startDate)); ?> <?php echo bakery_locale_range_word(); ?> <?php echo date('M j, Y', strtotime($endDate)); ?></div>
         </div>
     </header>
 

@@ -276,7 +276,7 @@ require_once __DIR__ . '/includes/nav.php';
             <?php
               $label = (string)$opt['name'];
               if (!empty($opt['line_name'])) {
-                  $label = $opt['line_name'] . ' — ' . $label;
+                  $label = $opt['line_name'] . ' - ' . $label;
               }
               echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
             ?>

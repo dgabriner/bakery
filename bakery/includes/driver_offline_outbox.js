@@ -106,7 +106,7 @@
   function chipLabel(status) {
     if (status === 'queued') return i18n('outbox_queued', 'Queued');
     if (status === 'synced') return i18n('outbox_synced', 'Synced');
-    if (status === 'failed') return i18n('outbox_failed', 'Failed — tap to retry');
+    if (status === 'failed') return i18n('outbox_failed', 'Failed. Tap to retry');
     return status;
   }
 

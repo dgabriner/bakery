@@ -123,7 +123,7 @@ function bakery_survey_route_order_sms_body(array $payload): string
 {
     $driver = trim((string)($payload['driver_name'] ?? 'Driver'));
     $date = trim((string)($payload['delivery_date'] ?? ''));
-    $lines = ['Route order — ' . $driver . ($date !== '' ? (' — ' . $date) : '')];
+    $lines = ['Route order.' . $driver . ($date !== '' ? (' - ' . $date) : '')];
     $n = 1;
     foreach ((array)($payload['stores'] ?? []) as $store) {
         if (!is_array($store)) {

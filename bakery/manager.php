@@ -717,7 +717,7 @@ require_once 'includes/nav.php';
                   $filesWhen = $formatWhen($livePromotion['completed_at']);
               }
             ?>
-            <?php if ($filesWhen !== ''): ?> — <?php echo htmlspecialchars($filesWhen); ?><?php endif; ?>
+            <?php if ($filesWhen !== ''): ?> - <?php echo htmlspecialchars($filesWhen); ?><?php endif; ?>
             <?php if (!empty($livePromotion['message'])): ?> · <?php echo htmlspecialchars((string)$livePromotion['message']); ?><?php endif; ?>
           </p>
         <?php endif; ?>
@@ -728,7 +728,7 @@ require_once 'includes/nav.php';
           <?php if (is_array($approval)): ?>
             <small><?php echo htmlspecialchars(bakery_t('manager.live_queued')); ?>:
               <?php echo htmlspecialchars((string)($approval['release_id'] ?? '')); ?>
-              — <?php echo htmlspecialchars($formatWhen($approval['approved_at'] ?? '', (string)($approval['approved_at_local'] ?? ''))); ?>
+              - <?php echo htmlspecialchars($formatWhen($approval['approved_at'] ?? '', (string)($approval['approved_at_local'] ?? ''))); ?>
               · <?php echo number_format((int)($approval['file_count'] ?? 0)); ?>
             </small>
           <?php endif; ?>
@@ -813,7 +813,7 @@ require_once 'includes/nav.php';
                   $dbWhen = $formatWhen($migrationStatus['completed_at']);
               }
             ?>
-            <?php if ($dbWhen !== ''): ?> — <?php echo htmlspecialchars($dbWhen); ?><?php endif; ?>
+            <?php if ($dbWhen !== ''): ?> - <?php echo htmlspecialchars($dbWhen); ?><?php endif; ?>
             <?php if (!empty($migrationStatus['message'])): ?> · <?php echo htmlspecialchars((string)$migrationStatus['message']); ?><?php endif; ?>
           </small>
         <?php endif; ?>
@@ -946,7 +946,7 @@ require_once 'includes/nav.php';
           } else {
             var label = data.status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
             text = prefix + ': ' + label;
-            if (data.completed_at_display || data.completed_at) text += ' — ' + (data.completed_at_display || data.completed_at);
+ if (data.completed_at_display || data.completed_at) text += '. ' + (data.completed_at_display || data.completed_at);
             if (data.message) text += ' · ' + data.message;
           }
           if (status.textContent !== text) status.textContent = text;
@@ -1105,7 +1105,7 @@ require_once 'includes/nav.php';
           if (!$packingSummary['tracking_available']) {
               echo 'Open the Pack List once to begin shared check-off tracking.';
           } elseif ($packingSummary['last_checked_at']) {
-              echo 'Last check by ' . htmlspecialchars($packingSummary['last_checked_by']) . ' at ' . htmlspecialchars(date('g:i A', strtotime($packingSummary['last_checked_at']))) . '.';
+              echo 'Last check by ' . htmlspecialchars($packingSummary['last_checked_by']) . ' at ' . htmlspecialchars(bakery_locale_time(strtotime($packingSummary['last_checked_at']))) . '.';
           } else {
               echo $packingSummary['required_lines'] > 0 ? 'No packing lines have been checked yet.' : 'No packing lines are required for this date.';
           }
@@ -1282,7 +1282,7 @@ require_once 'includes/nav.php';
         <p class="manager-inline-note">No packing lines are required for this date.</p>
       <?php endif; ?>
       <div class="manager-packing-board__footer">
-        <span><?php echo $packingSummary['last_checked_at'] ? 'Last checked ' . htmlspecialchars(date('M j, g:i A', strtotime($packingSummary['last_checked_at']))) : 'No pack check recorded'; ?></span>
+        <span><?php echo $packingSummary['last_checked_at'] ? 'Last checked ' . htmlspecialchars(bakery_format_user_stamp(strtotime($packingSummary['last_checked_at']), 'M j, g:i A')) : 'No pack check recorded'; ?></span>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_pack_list($selectedDate, ['view' => 'route'], 'manager')); ?>">View by route</a>
       </div>
     </aside>
@@ -1306,9 +1306,9 @@ require_once 'includes/nav.php';
           <?php foreach ($bakerRows as $baker): ?>
             <article class="manager-baker-row">
               <div class="manager-baker-avatar" aria-hidden="true"><?php echo htmlspecialchars(strtoupper(substr($baker['display_name'], 0, 1))); ?></div>
-              <div class="manager-baker-row__identity"><strong><?php echo htmlspecialchars($baker['display_name']); ?></strong><small><?php echo $baker['is_active'] ? 'Active session · last seen ' . htmlspecialchars(date('g:i A', strtotime((string)$baker['last_seen_at']))) : 'Last seen ' . ($baker['last_seen_at'] ? htmlspecialchars(date('M j, g:i A', strtotime((string)$baker['last_seen_at']))) : 'not yet recorded'); ?></small></div>
-              <div class="manager-baker-row__open"><span>Last app page opened</span><strong><?php echo $baker['last_opened_label'] !== '' ? htmlspecialchars($baker['last_opened_label']) : 'Not recorded'; ?></strong><small><?php echo $baker['last_opened_at'] ? htmlspecialchars(date('M j, g:i A', strtotime((string)$baker['last_opened_at']))) : 'Open the baker app to begin tracking'; ?></small></div>
-              <div class="manager-baker-row__sign-in"><span>Selected-day sign-in</span><strong><?php echo $baker['date_login_at'] ? htmlspecialchars(date('g:i A', strtotime((string)$baker['date_login_at']))) : 'No sign-in'; ?></strong></div>
+              <div class="manager-baker-row__identity"><strong><?php echo htmlspecialchars($baker['display_name']); ?></strong><small><?php echo $baker['is_active'] ? 'Active session · last seen ' . htmlspecialchars(bakery_locale_time(strtotime((string)$baker['last_seen_at']))) : 'Last seen ' . ($baker['last_seen_at'] ? htmlspecialchars(bakery_format_user_stamp(strtotime((string)$baker['last_seen_at']), 'M j, g:i A')) : 'not yet recorded'); ?></small></div>
+              <div class="manager-baker-row__open"><span>Last app page opened</span><strong><?php echo $baker['last_opened_label'] !== '' ? htmlspecialchars($baker['last_opened_label']) : 'Not recorded'; ?></strong><small><?php echo $baker['last_opened_at'] ? htmlspecialchars(bakery_format_user_stamp(strtotime((string)$baker['last_opened_at']), 'M j, g:i A')) : 'Open the baker app to begin tracking'; ?></small></div>
+              <div class="manager-baker-row__sign-in"><span>Selected-day sign-in</span><strong><?php echo $baker['date_login_at'] ? htmlspecialchars(bakery_locale_time(strtotime((string)$baker['date_login_at']))) : 'No sign-in'; ?></strong></div>
             </article>
           <?php endforeach; ?>
         </div>
@@ -1346,7 +1346,7 @@ require_once 'includes/nav.php';
       <ol class="manager-workflow-events">
         <?php foreach ($workflowEvents as $event): ?>
           <li>
-            <time datetime="<?php echo htmlspecialchars((string)$event['occurred_at']); ?>"><?php echo htmlspecialchars(date('g:i A', strtotime((string)$event['occurred_at']))); ?></time>
+            <time datetime="<?php echo htmlspecialchars((string)$event['occurred_at']); ?>"><?php echo htmlspecialchars(bakery_locale_time(strtotime((string)$event['occurred_at']))); ?></time>
             <div><strong><?php echo htmlspecialchars((string)($event['summary'] ?? 'Operational activity')); ?></strong><small><?php echo htmlspecialchars(ucfirst((string)($event['category'] ?? 'workflow')) . ' · ' . bakery_operational_actor_label($event)); ?></small></div>
           </li>
         <?php endforeach; ?>
@@ -1407,7 +1407,7 @@ require_once 'includes/nav.php';
       <?php foreach ($recoveryCases as $case): ?>
         <?php $reasonLabels = bakery_delivery_recovery_reason_codes(); $reasonLabel = $reasonLabels[(string)$case['failure_reason']] ?? (string)$case['failure_reason']; ?>
         <details class="manager-recovery-case"><summary><strong><?php echo htmlspecialchars((string)$case['customer_name']); ?></strong><span><?php echo htmlspecialchars(str_replace('_', ' ', (string)$case['workflow_state'])); ?></span><small><?php echo htmlspecialchars($reasonLabel); ?></small></summary>
-          <div class="manager-recovery-case__body"><p>Original driver: <?php echo (int)$case['original_driver_id']; ?> · Active driver: <?php echo htmlspecialchars((string)($case['active_driver_name'] ?? '—')); ?></p>
+          <div class="manager-recovery-case__body"><p>Original driver: <?php echo (int)$case['original_driver_id']; ?> · Active driver: <?php echo htmlspecialchars((string)($case['active_driver_name'] ?? '-')); ?></p>
             <form method="post" class="manager-work-form"><?php echo bakery_csrf_field(); ?><input type="hidden" name="manager_mutation" value="recovery_action"><input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>"><input type="hidden" name="recovery_action" value="update_handoffs"><label>Customer communication <select name="communication_status"><?php foreach (['not_needed','pending','contacted','unable_to_reach'] as $status): ?><option value="<?php echo $status; ?>" <?php echo $case['customer_communication_status'] === $status ? 'selected' : ''; ?>><?php echo htmlspecialchars(str_replace('_', ' ', $status)); ?></option><?php endforeach; ?></select></label><label>Billing / credit <select name="billing_handoff"><?php foreach (['not_needed','review_needed','credit_requested','credit_issued','not_billable'] as $status): ?><option value="<?php echo $status; ?>" <?php echo $case['billing_handoff'] === $status ? 'selected' : ''; ?>><?php echo htmlspecialchars(str_replace('_', ' ', $status)); ?></option><?php endforeach; ?></select></label><label>Manager note <textarea name="manager_note" rows="2" required><?php echo htmlspecialchars((string)$case['manager_note']); ?></textarea></label><label>Communication note <input name="communication_note" maxlength="2000" value="<?php echo htmlspecialchars((string)$case['customer_communication_note']); ?>"></label><button class="sf-btn sf-btn--outline sf-btn--sm" type="submit">Save handoffs</button></form>
             <form method="post" class="manager-recovery-actions"><?php echo bakery_csrf_field(); ?><input type="hidden" name="manager_mutation" value="recovery_action"><input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>"><input name="manager_note" maxlength="2000" placeholder="Decision note" required><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="acknowledge">Acknowledge</button><label>Retry at <input type="datetime-local" name="retry_at"></label><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="retry">Schedule retry</button><select name="to_driver_id"><option value="">Reassign to…</option><?php foreach (($routePlan['drivers'] ?? []) as $driver): ?><option value="<?php echo (int)$driver['id']; ?>"><?php echo htmlspecialchars((string)$driver['name']); ?> · <?php echo (int)$driver['stop_count']; ?> stops</option><?php endforeach; ?></select><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="reassign">Reassign in Driver Assignment</button><button class="sf-btn sf-btn--primary sf-btn--sm" name="recovery_action" value="text_customer"><?php echo htmlspecialchars((string)bakery_t('exception_desk.text_customer', [], 'Text customer')); ?></button><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="create_credit"><?php echo htmlspecialchars((string)bakery_t('exception_desk.create_credit', [], 'Create credit')); ?></button><button class="sf-btn sf-btn--primary sf-btn--sm" name="recovery_action" value="resolve">Resolve</button><button class="sf-btn sf-btn--outline sf-btn--sm" name="recovery_action" value="close">Close</button></form>
           </div>

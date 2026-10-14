@@ -27,7 +27,7 @@ if ($summary['turn_count'] > 0) {
     $facts[] = bakery_t('sfb.community_bake_turns', ['count' => $summary['turn_count']]);
 }
 if ($summary['temp_min'] !== null && $summary['temp_max'] !== null) {
-    $facts[] = number_format((float)$summary['temp_min'], 1) . '–' . number_format((float)$summary['temp_max'], 1) . ' F';
+    $facts[] = number_format((float)$summary['temp_min'], 1) . '-' . number_format((float)$summary['temp_max'], 1) . ' F';
 }
 if ($summary['oven_temp_f'] !== null) {
     $facts[] = number_format((float)$summary['oven_temp_f'], 0) . ' F';

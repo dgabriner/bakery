@@ -398,7 +398,7 @@ php scripts/agent_homebase.php brief --agent=SLUG --json</pre>
         <ul class="ah-list">
           <?php foreach ($sessions as $session): ?>
             <li class="ah-card">
-              <h3><?php echo htmlspecialchars($session['agent_name'] . ' — ' . ($session['mission'] ?: bakery_t('homebase.untitled')), ENT_QUOTES, 'UTF-8'); ?></h3>
+              <h3><?php echo htmlspecialchars($session['agent_name'] . ' - ' . ($session['mission'] ?: bakery_t('homebase.untitled')), ENT_QUOTES, 'UTF-8'); ?></h3>
               <p class="ah-meta"><?php echo htmlspecialchars($session['status'] . ' · ' . $session['started_at'], ENT_QUOTES, 'UTF-8'); ?></p>
               <?php if (!empty($session['handoff_md'])): ?>
                 <?php $score = bakery_agent_homebase_score_handoff((string)$session['handoff_md']); ?>

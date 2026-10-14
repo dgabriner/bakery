@@ -585,7 +585,7 @@ $bakerCommitStamp = '';
 if ($isBaker && $planCommitted && !empty($bakeList['commit']['committed_at'])) {
     $commitTs = strtotime((string)$bakeList['commit']['committed_at']);
     if ($commitTs) {
-        $bakerCommitStamp = bakery_t('production.baker_committed_stamp', ['time' => date('g:i a', $commitTs)]);
+        $bakerCommitStamp = bakery_t('production.baker_committed_stamp', ['time' => bakery_locale_time($commitTs)]);
     }
 }
 $commitDiff = [];

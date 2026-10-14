@@ -202,7 +202,7 @@ $portalCustomerName = $customer['name'];
                   </td>
                   <td style="padding:8px 4px;border-top:1px solid var(--border);text-align:right"><?php echo (int)$item['ordered']; ?></td>
                   <td style="padding:8px 4px;border-top:1px solid var(--border);text-align:right">
-                    <?php echo $item['delivered'] !== null ? (int)$item['delivered'] : '—'; ?>
+                    <?php echo $item['delivered'] !== null ? (int)$item['delivered'] : '-'; ?>
                   </td>
                 </tr>
               <?php endforeach; ?>
@@ -282,7 +282,7 @@ $portalCustomerName = $customer['name'];
                     <span class="badge badge-<?php echo htmlspecialchars($issue['status_tone']); ?>"><?php echo htmlspecialchars($issue['status_label']); ?></span>
                     <span><?php echo htmlspecialchars($issue['category_label']); ?></span>
                     <?php if ($issue['product_name']): ?>
-                      <span class="muted"> — <?php echo htmlspecialchars($issue['product_name']); ?></span>
+                      <span class="muted">. <?php echo htmlspecialchars($issue['product_name']); ?></span>
                     <?php endif; ?>
                     <span class="muted" style="float:right;font-size:.85rem"><?php echo htmlspecialchars($issue['created_at_label']); ?></span>
                   </a>
@@ -309,7 +309,7 @@ $portalCustomerName = $customer['name'];
                               data-delivered="<?php echo $item['delivered'] !== null ? (int)$item['delivered'] : ''; ?>">
                         <?php echo htmlspecialchars($item['product_name']); ?>
                         (<?php bakery_te('delivery.ordered'); ?>: <?php echo (int)$item['ordered']; ?>,
-                         <?php bakery_te('delivery.delivered_qty'); ?>: <?php echo $item['delivered'] !== null ? (int)$item['delivered'] : '—'; ?>)
+                         <?php bakery_te('delivery.delivered_qty'); ?>: <?php echo $item['delivered'] !== null ? (int)$item['delivered'] : '-'; ?>)
                       </option>
                     <?php endforeach; ?>
                   <?php endif; ?>
@@ -454,7 +454,7 @@ $portalCustomerName = $customer['name'];
           }
           var ordered = opt.getAttribute('data-ordered');
           var delivered = opt.getAttribute('data-delivered');
-          qtyFacts.textContent = 'Ordered: ' + ordered + ' · Driver recorded: ' + (delivered !== '' ? delivered : '—');
+ qtyFacts.textContent = 'Ordered: ' + ordered + ' · Driver recorded: ' + (delivered !== '' ? delivered : '-');
           qtyFacts.style.display = 'block';
         }
 

@@ -195,7 +195,7 @@ class EmailUtils {
                     </tr>
                     <tr>
                         <td style='padding: 8px 0; font-weight: bold;'>Generated:</td>
-                        <td style='padding: 8px 0;'>" . date('F j, Y g:i A') . "</td>
+                        <td style='padding: 8px 0;'>" . bakery_format_user_stamp(time(), 'F j, Y g:i A') . "</td>
                     </tr>
                 </table>
                 
@@ -267,7 +267,7 @@ class EmailUtils {
                 <p>If you received this email, your email system is working perfectly! 🎊</p>
                 <hr>
                 <p style="color: #666; font-size: 12px;">
-                    <em>Generated on ' . date('F j, Y g:i A') . '</em>
+                    <em>Generated on ' . bakery_format_user_stamp(time(), 'F j, Y g:i A') . '</em>
                 </p>
             ';
             

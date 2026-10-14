@@ -325,7 +325,7 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
     <div class="route-manager-header">
         <div>
             <h1>Route Manager</h1>
-            <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route. <strong>Each driver header shows the pickup manifest from Driver Pickup Loads, plus COD cash totals.</strong></p>
+ <p class="subtitle">Assigned deliveries for the selected day. Drag stops to reorder each driver’s route. <strong>Each driver header shows the pickup manifest from Driver Pickup Loads, plus COD cash totals.</strong></p>
         </div>
         <div class="route-manager-actions">
             <a class="btn btn-secondary" href="driver_load.php?date=<?php echo htmlspecialchars($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.driver_load')); ?></a>
@@ -615,7 +615,7 @@ window.__ROUTE_MANAGER__ = {
 document.addEventListener('DOMContentLoaded', function() {
     const mapEl = document.getElementById('route-map');
     if (!mapEl) return;
-    mapEl.innerHTML = '<div class="map-fallback">Map unavailable — cash and delivery totals still load from the selected routes. Enable maps (MAPS_ENABLED + API key) to show the map.</div>';
+ mapEl.innerHTML = '<div class="map-fallback">Map unavailable. Cash and delivery totals still load from the selected routes. Enable maps (MAPS_ENABLED + API key) to show the map.</div>';
 });
 </script>
 

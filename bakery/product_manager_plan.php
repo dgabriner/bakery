@@ -174,15 +174,15 @@ $summary = $board['summary'];
                             <div class="pmp-muted"><?= htmlspecialchars($row['product_line_name']) ?></div>
                         <?php endif; ?>
                     </td>
-                    <td><?= $row['standard_quantity'] > 0 ? number_format($row['standard_quantity']) : '—' ?></td>
-                    <td><?= $row['standing_quantity'] > 0 ? number_format($row['standing_quantity']) : '—' ?></td>
+                    <td><?= $row['standard_quantity'] > 0 ? number_format($row['standard_quantity']) : '-' ?></td>
+                    <td><?= $row['standing_quantity'] > 0 ? number_format($row['standing_quantity']) : '-' ?></td>
                     <td><strong><?= number_format($row['focus_demand']) ?></strong></td>
                     <td><?= number_format($row['cover_demand']) ?></td>
                     <?php foreach ($board['cover_dates'] as $cd): ?>
                         <td class="pmp-day-col"><?= number_format((int)($row['demand_by_date'][$cd] ?? 0)) ?></td>
                     <?php endforeach; ?>
-                    <td><?= $board['inventory_ready'] ? number_format($row['on_hand']) : '—' ?></td>
-                    <td><?= $row['has_plan'] ? number_format($row['planned']) : '—' ?></td>
+                    <td><?= $board['inventory_ready'] ? number_format($row['on_hand']) : '-' ?></td>
+                    <td><?= $row['has_plan'] ? number_format($row['planned']) : '-' ?></td>
                     <td><strong><?= number_format($row['make_need']) ?></strong></td>
                     <td class="pmp-muted">
                         <?php if ($row['gallons_hint'] !== null): ?>
@@ -190,7 +190,7 @@ $summary = $board['summary'];
                         <?php elseif ($row['trays_hint'] !== null): ?>
                             ≈ <?= htmlspecialchars((string)$row['trays_hint']) ?> trays
                         <?php else: ?>
-                            —
+                            -
                         <?php endif; ?>
                     </td>
                     <td>

@@ -12,12 +12,12 @@ require_once __DIR__ . '/agent_program_map.php';
 function bakery_agent_doc_trust_order(): array
 {
     return [
-        'BAKERY_PRODUCT_CONTEXT.md — product manual',
-        'Agent Homebase whiteboard Decided and open bugs — living choices',
-        'docs/AGENT_DEVELOPMENT_MANUAL.md — how agents develop',
-        'docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md — data, Git, deploy, DreamHost',
-        'docs/prompts/ — file-ownership missions; confirm loops against §6–7',
-        'docs/archive/ — historical evidence; do not brief from it',
+        'BAKERY_PRODUCT_CONTEXT.md, product manual',
+        'Agent Homebase whiteboard Decided and open bugs, living choices',
+        'docs/AGENT_DEVELOPMENT_MANUAL.md, how agents develop',
+        'docs/DATA_ENVIRONMENT_STABILIZATION_PLAN.md, data, Git, deploy, DreamHost',
+        'docs/prompts/, file-ownership missions; confirm loops against §6 to 7',
+        'docs/archive/, historical evidence; do not brief from it',
     ];
 }
 
@@ -103,7 +103,7 @@ function bakery_agent_work_map_core(): array
                 'Friday pan dulce bake covers Sat-Sun-Mon; Sour Flour is Tue/Fri plus Sunday-for-Monday',
                 'Production Center assigns from the bake: standing default, dated one-off optional',
                 'Produce stage measures against committed bake when committed',
-                'Production Center is the Production Manager hub — no second master page',
+                'Production Center is the Production Manager hub. No second master page',
             ],
             'bugs' => ['plan-not-on-bake-sheet', 'additive-production'],
             'prompt' => 'docs/prompts/20-commit-production-plan.md',
@@ -256,7 +256,7 @@ function bakery_agent_work_map_core(): array
             'invariants' => [
                 'Alerts derive from LIVE exceptions; completing work never suppresses a still-true fact',
                 'An assignment whose fact is gone stops pinging',
-                'Bell is progressive enhancement — hidden without data, never a broken control',
+                'Bell is progressive enhancement. Hidden without data, never a broken control',
             ],
             'bugs' => ['no-staff-alerts'],
         ],
@@ -914,7 +914,7 @@ function bakery_agent_work_map_core(): array
                 'Current cost per kg is the latest invoice price row by invoice date. Quote and public_list never become current cost.',
                 'Draft purchase order is printable only and never emails, texts, or sends',
                 'Reorder point is ingredients.reorder_level; reorder_qty is the suggested order quantity',
-                'No new top-level nav module — prices and the draft order stay on ingredients.php',
+                'No new top-level nav module. Prices and the draft order stay on ingredients.php',
                 'Migration 086 is reserved here; the next free number is 087',
             ],
             'bugs' => [],

@@ -154,7 +154,7 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
       <div class="card-header"><h2><?php bakery_te('sfb.shared_batch_facts'); ?></h2></div>
       <div class="card-body">
         <dl class="sfb-shared-facts">
-          <div><dt><?php bakery_te('sfb.started_at'); ?></dt><dd><?php echo htmlspecialchars(date('M j, Y g:ia', strtotime($batch['started_at'])), ENT_QUOTES, 'UTF-8'); ?></dd></div>
+          <div><dt><?php bakery_te('sfb.started_at'); ?></dt><dd><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($batch['started_at']), 'M j, Y g:ia'), ENT_QUOTES, 'UTF-8'); ?></dd></div>
           <?php if ($batch['status'] === 'completed'): ?><div><dt><?php bakery_te('sfb.loaf_count'); ?></dt><dd><?php echo (int)$batch['loaf_count']; ?></dd></div><?php endif; ?>
           <?php if ($batch['mix_minutes'] !== null): ?><div><dt><?php bakery_te('sfb.mix_minutes'); ?></dt><dd><?php echo (int)$batch['mix_minutes']; ?> min</dd></div><?php endif; ?>
           <?php if (!empty($batch['mix_speed'])): ?><div><dt><?php bakery_te('sfb.mix_speed'); ?></dt><dd><?php echo htmlspecialchars($batch['mix_speed'], ENT_QUOTES, 'UTF-8'); ?></dd></div><?php endif; ?>
@@ -175,7 +175,7 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
             <?php foreach ($turns as $turn): ?>
               <li>
                 <strong><?php echo htmlspecialchars(bakery_sfb_turn_type_label($turn['turn_type']), ENT_QUOTES, 'UTF-8'); ?></strong>
-                <span><?php echo htmlspecialchars(date('g:ia', strtotime($turn['occurred_at'])), ENT_QUOTES, 'UTF-8'); ?></span>
+                <span><?php echo htmlspecialchars(bakery_locale_time(strtotime($turn['occurred_at'])), ENT_QUOTES, 'UTF-8'); ?></span>
                 <?php if ($turn['dough_temp_f'] !== null): ?>
                   <span><?php echo number_format((float)$turn['dough_temp_f'], 1); ?> F</span>
                 <?php endif; ?>
@@ -194,7 +194,7 @@ $portalCustomerName = ($customer['name'] ?? '') !== '' ? $customer['name'] : bak
             <?php foreach ($temps as $temp): ?>
               <li>
                 <strong><?php echo htmlspecialchars(bakery_sfb_phase_label($temp['phase']), ENT_QUOTES, 'UTF-8'); ?></strong>
-                <span><?php echo htmlspecialchars(date('g:ia', strtotime($temp['measured_at'])), ENT_QUOTES, 'UTF-8'); ?></span>
+                <span><?php echo htmlspecialchars(bakery_locale_time(strtotime($temp['measured_at'])), ENT_QUOTES, 'UTF-8'); ?></span>
                 <span><?php echo number_format((float)$temp['temp_f'], 1); ?> F</span>
               </li>
             <?php endforeach; ?>

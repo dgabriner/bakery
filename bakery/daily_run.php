@@ -282,7 +282,7 @@ require_once 'includes/nav.php';
                             <?php if ($confRow !== null): ?>
                                 <p class="dr-demand-confirm-status is-confirmed">
                                     <?php echo htmlspecialchars(bakery_t('daily_run.demand_confirmed_line', [
-                                        'at' => date('M j, Y g:i A', strtotime($confRow['confirmed_at'])),
+                                        'at' => bakery_format_user_stamp(strtotime($confRow['confirmed_at']), 'M j, Y g:i A'),
                                         'customers' => (int)$confRow['customers_count'],
                                         'units' => number_format((int)$confRow['units_count']),
                                     ])); ?>
@@ -326,7 +326,7 @@ require_once 'includes/nav.php';
                             <?php if ($planRow !== null): ?>
                                 <p class="dr-demand-confirm-status is-confirmed">
                                     <?php echo htmlspecialchars(bakery_t('daily_run.plan_committed_line', [
-                                        'at' => date('M j, Y g:i A', strtotime($planRow['committed_at'])),
+                                        'at' => bakery_format_user_stamp(strtotime($planRow['committed_at']), 'M j, Y g:i A'),
                                         'products' => (int)$planRow['products_count'],
                                         'units' => number_format((int)$planRow['units_count']),
                                     ])); ?>
@@ -364,7 +364,7 @@ require_once 'includes/nav.php';
                                 <div class="dr-closeout-status dr-closeout-status--closed">
                                     <strong><?php bakery_te('daily_run.day_closed'); ?></strong>
                                     <?php if (!empty($dailyRun['closeout']['closed_at'])): ?>
-                                        <span><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($dailyRun['closeout']['closed_at']))); ?></span>
+                                        <span><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($dailyRun['closeout']['closed_at']), 'M j, Y g:i A')); ?></span>
                                     <?php endif; ?>
                                     <?php if (!empty($dailyRun['closeout']['manager_note'])): ?>
                                         <p class="dr-closeout-note"><?php echo htmlspecialchars($dailyRun['closeout']['manager_note']); ?></p>
@@ -388,9 +388,9 @@ require_once 'includes/nav.php';
                                         <ul>
                                             <?php foreach ($dailyRun['close_blockers'] as $cb): ?>
                                                 <li>
-                                                    <?php echo htmlspecialchars($cb['title']); ?>
+                                                    <?php echo htmlspecialchars($cb['title']); ?>.
                                                     <?php if (!empty($cb['href'])): ?>
-                                                        — <a href="<?php echo htmlspecialchars($cb['href']); ?>"><?php echo htmlspecialchars($cb['action'] ?? bakery_t('dashboard.open')); ?></a>
+                                                        <a href="<?php echo htmlspecialchars($cb['href']); ?>"><?php echo htmlspecialchars($cb['action'] ?? bakery_t('dashboard.open')); ?></a>
                                                     <?php endif; ?>
                                                 </li>
                                             <?php endforeach; ?>

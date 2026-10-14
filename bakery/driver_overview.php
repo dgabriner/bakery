@@ -465,7 +465,7 @@ require_once 'includes/nav.php';
                                         <div class="stop-details">
                                             <div class="route-order">#<?php echo $stop['route_order'] ?: 'TBD'; ?></div>
                                             <?php if ($stop['scheduled_delivery_time']): ?>
-                                            <div class="delivery-time"><?php echo date('g:i A', strtotime($stop['scheduled_delivery_time'])); ?></div>
+                                            <div class="delivery-time"><?php echo bakery_locale_time(strtotime($stop['scheduled_delivery_time'])); ?></div>
                                             <?php endif; ?>
                                             <div class="order-amount">$<?php echo number_format($stop['total_amount'], 2); ?></div>
                                         </div>

@@ -249,7 +249,7 @@ $dayShort = bakery_day_names(true);
                                 } elseif ($cell['has_orders']) {
                                     bakery_te('standing_routes.order_units', ['n' => $cell['order_units']]);
                                 } else {
-                                    echo '—';
+                                    echo '-';
                                 }
                                 ?>
                             </div>

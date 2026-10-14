@@ -125,7 +125,7 @@ function formatRouteTime(?string $time): string
     if (empty($time)) {
         return '';
     }
-    return date('g:i A', strtotime($time));
+    return bakery_locale_time(strtotime($time));
 }
 
 $routeData = [];
@@ -502,7 +502,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         <div class="alert alert-info">Select a driver to view their route<?php echo $view === 'month' ? ' schedule for the month' : ($view === 'list' ? ' assignments' : ''); ?>.</div>
     <?php elseif ($view === 'list'): ?>
         <div class="route-summary month-summary">
-            <h3><?php echo htmlspecialchars($selectedDriverName); ?> — Daily Assignments</h3>
+            <h3><?php echo htmlspecialchars($selectedDriverName); ?>. Daily Assignments</h3>
             <p class="summary-note">All scheduled delivery assignments for this driver, grouped by date.</p>
             <div class="summary-grid">
                 <div class="summary-item">
@@ -598,7 +598,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                                             · <?php echo $day['pending']; ?> pending
                                             · <?php echo $day['delivered']; ?> delivered
                                             <?php if ($day['time_start']): ?>
-                                                · <strong><?php echo htmlspecialchars(formatRouteTime($day['time_start'])); ?>–<?php echo htmlspecialchars(formatRouteTime($day['time_end'])); ?></strong>
+                                                · <strong><?php echo htmlspecialchars(formatRouteTime($day['time_start'])); ?> <?php echo bakery_locale_range_word(); ?> <?php echo htmlspecialchars(formatRouteTime($day['time_end'])); ?></strong>
                                             <?php endif; ?>
                                         </div>
                                         <a href="driver.php?driver_id=<?php echo $selectedDriverId; ?>&date=<?php echo urlencode($day['date']); ?>"
@@ -609,7 +609,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                             <?php foreach ($day['customers'] as $assignment): ?>
                                 <tr class="assignment-row">
                                     <td class="list-date-sub"><?php echo date('M j', strtotime($day['date'])); ?></td>
-                                    <td class="list-route-order"><?php echo $assignment['route_order'] > 0 ? $assignment['route_order'] : '—'; ?></td>
+                                    <td class="list-route-order"><?php echo $assignment['route_order'] > 0 ? $assignment['route_order'] : '-'; ?></td>
                                     <td class="list-customer-name">
                                         <span class="customer-chip <?php echo zoneClassFromName($assignment['zone']); ?>">
                                             <?php echo htmlspecialchars($assignment['customer_name']); ?>
@@ -642,7 +642,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         </div>
     <?php elseif ($view === 'month'): ?>
         <div class="route-summary month-summary">
-            <h3><?php echo htmlspecialchars($selectedDriverName); ?> — <?php echo htmlspecialchars($monthLabel); ?></h3>
+            <h3><?php echo htmlspecialchars($selectedDriverName); ?> - <?php echo htmlspecialchars($monthLabel); ?></h3>
             <p class="summary-note">Standing routes repeat each week. Each calendar day shows the route for that weekday.</p>
             <div class="summary-grid">
                 <div class="summary-item">
@@ -784,7 +784,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
         </div>
 
         <div class="route-summary">
-            <h3>Route Summary — <?php echo htmlspecialchars($selectedDriverName); ?> · <?php echo htmlspecialchars($days[$selectedDay]); ?></h3>
+            <h3>Route Summary. <?php echo htmlspecialchars($selectedDriverName); ?> · <?php echo htmlspecialchars($days[$selectedDay]); ?></h3>
             <div class="summary-grid">
                 <div class="summary-item">
                     <span class="summary-label">Total Stops</span>
@@ -801,7 +801,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                 <div class="summary-item time-summary-item">
                     <span class="summary-label">Scheduled Span</span>
                     <span class="summary-value summary-time-range">
-                        <?php echo $routeStartTime ? htmlspecialchars(formatRouteTime($routeStartTime) . ' – ' . formatRouteTime($routeEndTime)) : 'Not scheduled'; ?>
+                        <?php echo $routeStartTime ? htmlspecialchars(formatRouteTime($routeStartTime) . ' ' . bakery_locale_range_word() . ' ' . formatRouteTime($routeEndTime)) : 'Not scheduled'; ?>
                     </span>
                 </div>
             </div>
@@ -855,7 +855,7 @@ $leadingBlanks = (int)date('N', strtotime($monthStart)) - 1;
                                         <?php elseif (!empty($customer['deliver_after']) || !empty($customer['deliver_by'])): ?>
                                             <span class="time-badge time-window"><i class="fas fa-clock"></i>
                                                 <?php if (!empty($customer['deliver_after']) && !empty($customer['deliver_by'])): ?>
-                                                    <?php echo htmlspecialchars(formatRouteTime($customer['deliver_after']) . ' – ' . formatRouteTime($customer['deliver_by'])); ?>
+                                                    <?php echo htmlspecialchars(formatRouteTime($customer['deliver_after']) . ' ' . bakery_locale_range_word() . ' ' . formatRouteTime($customer['deliver_by'])); ?>
                                                 <?php elseif (!empty($customer['deliver_after'])): ?>
                                                     After <?php echo htmlspecialchars(formatRouteTime($customer['deliver_after'])); ?>
                                                 <?php else: ?>

@@ -943,7 +943,7 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
         throw new InvalidArgumentException('Deliveries are paused for this date');
     }
     if ($state['locked']) {
-        throw new InvalidArgumentException('This delivery is locked — use Request a Change');
+        throw new InvalidArgumentException('This delivery is locked. Use Request a Change');
     }
 
     $dayOfWeek = bakery_standing_day_from_date($date);
@@ -1026,7 +1026,7 @@ function bakery_customer_skip_delivery(PDO $db, array $customer, $date, $note = 
 
     $state = bakery_customer_delivery_state($db, $customerId, $date);
     if ($state['locked']) {
-        throw new InvalidArgumentException('This delivery is locked — use Request a Change');
+        throw new InvalidArgumentException('This delivery is locked. Use Request a Change');
     }
 
     $note = trim((string)$note);
@@ -1145,7 +1145,7 @@ function bakery_customer_remove_pause_range(PDO $db, array $customer, $pauseId) 
         ->execute([$pauseId, $customerId]);
 
     bakery_portal_record_event($db, BAKERY_OP_PORTAL_PAUSE_REMOVED,
-        $customer['name'] . ' resumed deliveries (removed pause ' . $row['pause_start'] . ' – ' . $row['pause_end'] . ')',
+        $customer['name'] . ' resumed deliveries (removed pause ' . $row['pause_start'] . ' ' . bakery_locale_range_word() . ' ' . $row['pause_end'] . ')',
         $customerId,
         [
             'metadata' => [

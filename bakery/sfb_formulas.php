@@ -192,16 +192,16 @@ $totalPct = bakery_sfb_formula_total_pct($selectedLines);
 
 $saved = (string)($_GET['saved'] ?? '');
 $savedMessages = [
-    'copied' => 'Standard formula copied — it is yours to adjust now.',
+    'copied' => 'Standard formula copied. It is yours to adjust now.',
     'created' => 'Formula created. Add ingredient percentages below.',
     'updated' => 'Formula saved.',
     'deleted' => 'Formula deleted.',
     'line_added' => 'Ingredient added to the formula.',
-    'ingredient_created' => 'Custom ingredient added — select it below to add to your formula.',
+    'ingredient_created' => 'Custom ingredient added. Select it below to add to your formula.',
     'remixed' => bakery_t('sfb.saved_remixed'),
 ];
 
-$page_title = 'SF Baker — Formulas';
+$page_title = 'SF Baker. Formulas';
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];

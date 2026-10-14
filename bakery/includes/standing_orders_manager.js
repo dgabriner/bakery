@@ -796,7 +796,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const actionsCell = row.querySelector('.coverage-actions-cell');
             status.className = 'coverage-status';
             row.classList.remove('coverage-highlight');
-            if (actionsCell) actionsCell.textContent = '—';
+            if (actionsCell) actionsCell.textContent = '-';
 
             if (hasRoute && hasOrders) {
                 counts.routeOrders++;
@@ -807,7 +807,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 counts.routeEmpty++;
                 row.dataset.coverageStatus = 'route-empty';
                 status.classList.add('route-empty');
-                status.textContent = 'Route — add products';
+                status.textContent = 'Route. Add products';
                 row.classList.add('coverage-highlight');
                 if (actionsCell) {
                     const btn = document.createElement('button');
@@ -825,7 +825,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 counts.noRouteOrders++;
                 row.dataset.coverageStatus = 'no-route-orders';
                 status.classList.add('no-route-orders');
-                status.textContent = 'Orders — no route';
+                status.textContent = 'Orders. No route';
                 row.classList.add('coverage-highlight');
             } else {
                 counts.noRouteEmpty++;
@@ -835,7 +835,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             routeCell.textContent = selectedDay
-                ? (hasRoute ? `Yes — ${dayLabels[selectedDay]}` : 'No route')
+                ? (hasRoute ? `Yes. ${dayLabels[selectedDay]}` : 'No route')
                 : (routeDays.length ? routeDays.map(day => dayLabels[day]).join(', ') : 'No route');
 
             let orderDetails = {};

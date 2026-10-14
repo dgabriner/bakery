@@ -824,7 +824,7 @@ function bakery_sfb_agent_run_customer_batch_demo(PDO $db) {
         $customer = bakery_sfb_agent_login_as_customer($db, (int)$created['customer']['id']);
         $batch = bakery_sfb_agent_start_batch(
             $db,
-            'Agent test batch — ' . $spec['name'],
+            'Agent test batch.' . $spec['name'],
             0,
             (int)$customer['id']
         );

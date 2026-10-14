@@ -1283,7 +1283,7 @@ try {
             bakery_skip_delivery_stop($db, $dailyOrderId, (string)$_POST['reason']);
             echo json_encode([
                 'success' => true,
-                'message' => function_exists('bakery_t') ? bakery_t('driver.skip_success') : 'Stop skipped — moving to your next stop.',
+                'message' => function_exists('bakery_t') ? bakery_t('driver.skip_success') : 'Stop skipped. Moving to your next stop.',
             ]);
             break;
 

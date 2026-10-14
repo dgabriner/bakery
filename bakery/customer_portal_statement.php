@@ -49,7 +49,7 @@ if ($record) {
                 'sent_to_email' => null,
             ], null);
         }
-        bakery_portal_billing_log_event($db, $customerId, 'portal_statement_generated', 'Customer generated statement for ' . $startDate . ' – ' . $endDate, [
+        bakery_portal_billing_log_event($db, $customerId, 'portal_statement_generated', 'Customer generated statement for ' . $startDate . ' ' . bakery_locale_range_word() . ' ' . $endDate, [
             'period_start' => $startDate,
             'period_end' => $endDate,
             'invoice_count' => $statement['invoice_count'],
@@ -66,7 +66,7 @@ $customerRow = $statement['customer'];
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Statement — <?php echo htmlspecialchars($customerRow['name']); ?></title>
+  <title>Statement. <?php echo htmlspecialchars($customerRow['name']); ?></title>
   <style>
     body { font-family: Georgia, 'Times New Roman', serif; max-width: 820px; margin: 0 auto; padding: 28px; color: #1a202c; line-height: 1.45; }
     .toolbar { position: fixed; top: 16px; right: 16px; display: flex; gap: 8px; font-family: system-ui, sans-serif; }
@@ -102,7 +102,7 @@ $customerRow = $statement['customer'];
     <div class="stmt-meta">
       <h1>STATEMENT</h1>
       <div>Statement date: <?php echo date('F j, Y', strtotime($statementDate)); ?></div>
-      <div>Period: <?php echo date('M j, Y', strtotime($startDate)); ?> – <?php echo date('M j, Y', strtotime($endDate)); ?></div>
+      <div>Period: <?php echo date('M j, Y', strtotime($startDate)); ?> <?php echo bakery_locale_range_word(); ?> <?php echo date('M j, Y', strtotime($endDate)); ?></div>
     </div>
   </header>
 

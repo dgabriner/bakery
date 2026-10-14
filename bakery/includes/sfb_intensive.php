@@ -786,7 +786,7 @@ function bakery_sfb_intensive_present(PDO $db, array $enrollment, $markRead = fa
     $dates = '';
     if (!empty($enrollment['start_date']) && !empty($enrollment['coaching_end_date'])) {
         $dates = date('M j', strtotime((string)$enrollment['start_date']))
-            . ' – ' . date('M j', strtotime((string)$enrollment['coaching_end_date']));
+            . ' ' . bakery_locale_range_word() . ' ' . date('M j', strtotime((string)$enrollment['coaching_end_date']));
     }
     $coachingClosed = !empty($enrollment['coaching_end_date'])
         && (string)$enrollment['status'] !== 'completed'
@@ -2108,7 +2108,7 @@ function bakery_sfb_intensive_staff_rows(PDO $db, $includeClosed = false) {
             $needs = true;
             $next = 'New note from the baker';
         }
-        $day = '—';
+        $day = '-';
         if (!empty($row['start_date'])) {
             $start = strtotime((string)$row['start_date'] . ' 00:00:00');
             if ($start !== false) {

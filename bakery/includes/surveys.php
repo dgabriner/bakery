@@ -493,7 +493,7 @@ function bakery_survey_build_message(array $survey): string
     $headline = trim((string)($survey['title'] ?? ''));
     $questions = bakery_survey_questions($survey);
     if ($headline === '' && count($questions) > 1) {
-        $headline = (string)bakery_survey_text('survey.msg_multi_head', ['count' => count($questions)], 'Quick survey — :count questions:');
+        $headline = (string)bakery_survey_text('survey.msg_multi_head', ['count' => count($questions)], 'Quick survey. :count questions:');
         $numbered = '';
         foreach ($questions as $i => $q) {
             $numbered .= "\n" . ($i + 1) . '. ' . $q['text'];
@@ -509,10 +509,10 @@ function bakery_survey_build_message(array $survey): string
                 $fallback = 'Which stores can you cover on :date? Tap to confirm:';
             } elseif ($kind === 'route_order') {
                 $msgKey = 'survey.msg_route_order_link';
-                $fallback = 'Set stop order for :date — tap stores in the order you will deliver:';
+                $fallback = 'Set stop order for :date. Tap stores in the order you will deliver:';
             } else {
                 $msgKey = 'survey.msg_route_review_link';
-                $fallback = 'Quick route check for :date — tap the link to skip stores you cannot cover or claim open stops:';
+                $fallback = 'Quick route check for :date. Tap the link to skip stores you cannot cover or claim open stops:';
             }
             $body = bakery_survey_text($msgKey, ['date' => $dateLabel], $fallback);
             $body .= "\n" . bakery_survey_link_url((string)$survey['token'], $dateLabel);
@@ -520,7 +520,7 @@ function bakery_survey_build_message(array $survey): string
             $body = bakery_survey_text(
                 'survey.msg_route_review_reply',
                 ['date' => $dateLabel],
-                'Route check for :date — reply with any store you cannot cover or want added.'
+                'Route check for :date. Reply with any store you cannot cover or want added.'
             );
         }
         return $body;

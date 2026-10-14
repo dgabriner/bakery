@@ -178,7 +178,7 @@ require_once 'includes/nav.php';
         <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
         <?php if ($dbError && !$commandCenter): ?>
             <div class="ops-alert ops-alert-danger" role="alert">
-                The command center could not load this day's data. This is <strong>not</strong> a quiet zero day —
+ The command center could not load this day's data. This is <strong>not</strong> a quiet zero day.
                 <?php echo htmlspecialchars($dbError); ?>
             </div>
         <?php elseif ($commandCenter && !empty($commandCenter['section_errors'])): ?>
@@ -293,7 +293,7 @@ require_once 'includes/nav.php';
                         <?php else: ?>
                             <strong><?php bakery_te('dashboard.tomorrow_confirmed'); ?></strong>
                             <span><?php echo htmlspecialchars(bakery_t('dashboard.tomorrow_confirmed_desc', [
-                                'at' => !empty($tr['confirmation']['confirmed_at']) ? date('g:i A', strtotime($tr['confirmation']['confirmed_at'])) : '',
+                                'at' => !empty($tr['confirmation']['confirmed_at']) ? bakery_locale_time(strtotime($tr['confirmation']['confirmed_at'])) : '',
                                 'customers' => (int)$tr['customers_with_daily'],
                                 'units' => number_format((int)$tr['daily_units']),
                             ])); ?></span>

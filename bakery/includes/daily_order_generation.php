@@ -730,7 +730,7 @@ function bakery_generate_daily_orders_week(PDO $db, string $date, array $options
 
     $weekEnd = date('Y-m-d', strtotime($weekStart . ' +6 days'));
     $message = "Generated orders for the week of " . date('M j', strtotime($weekStart))
-        . " – " . date('M j', strtotime($weekEnd)) . ": "
+        . ' ' . bakery_locale_range_word() . ' ' . date('M j', strtotime($weekEnd)) . ": "
         . $totals['orders_created'] . " new orders, "
         . $totals['items_created'] . " new item(s), "
         . $totals['items_updated'] . " updated item(s), "

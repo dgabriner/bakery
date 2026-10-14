@@ -10,6 +10,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/route_manager.php';
+require_once __DIR__ . '/i18n.php';
 
 /**
  * @return array<string, string>
@@ -90,7 +91,7 @@ function bakery_route_summary_format_time(?string $value): string
     if ($timestamp === false) {
         return '';
     }
-    return date('g:i A', $timestamp);
+    return bakery_locale_time($timestamp);
 }
 
 function bakery_route_summary_stop_time(array $stop): string

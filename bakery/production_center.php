@@ -586,7 +586,7 @@ $loadHref = function_exists('bakery_ops_link_driver_load')
     : ('driver_load.php?date=' . rawurlencode($selectedDate));
 
 
-$weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strtotime($weekEnd));
+$weekLabel = date('M j', strtotime($weekStart)) . ' ' . bakery_locale_range_word() . ' ' . date('M j, Y', strtotime($weekEnd));
 ?>
 <main class="production-center container">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
@@ -736,7 +736,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                 echo ' (' . htmlspecialchars((string)$kLine['unit']) . ')';
                             }
                             if (!empty($kLine['note'])) {
-                                echo ' — ' . htmlspecialchars((string)$kLine['note']);
+                                echo ' - ' . htmlspecialchars((string)$kLine['note']);
                             }
                             ?>
                         </li>
@@ -847,7 +847,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                     <tbody>
                         <?php foreach ($storeAlloc as $row): ?>
                             <tr class="<?php echo ((int)$row['gap'] < 0) ? 'pc-row-short' : ''; ?>">
-                                <td><?php echo htmlspecialchars((string)($row['customer_name'] !== '' ? $row['customer_name'] : '—')); ?></td>
+                                <td><?php echo htmlspecialchars((string)($row['customer_name'] !== '' ? $row['customer_name'] : '-')); ?></td>
                                 <td>
                                     <button type="button" class="pc-store-demand-open" data-product-id="<?php echo (int)$row['product_id']; ?>" data-pool="<?php echo (int)($savedBake[(int)$row['product_id']] ?? 0); ?>">
                                         <?php echo htmlspecialchars((string)$row['product_name']); ?>
@@ -884,7 +884,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                     <tbody>
                         <?php foreach ($routeCapacity as $cap): ?>
                             <tr class="<?php echo ((int)$cap['gap'] < 0) ? 'pc-row-short' : ''; ?>">
-                                <td><?php echo htmlspecialchars((string)($cap['driver_name'] ?: '—')); ?></td>
+                                <td><?php echo htmlspecialchars((string)($cap['driver_name'] ?: '-')); ?></td>
                                 <td><?php echo htmlspecialchars((string)$cap['product_name']); ?></td>
                                 <td><?php echo number_format((int)$cap['desired']); ?></td>
                                 <td><?php echo number_format((int)$cap['available']); ?></td>
@@ -948,7 +948,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                 ?>
                                 <?php if ($dayCommit): ?>
                                     <span class="pc-source real"><?php echo htmlspecialchars(bakery_t('production_center.committed_badge', [
-                                        'at' => date('M j, g:i A', strtotime($dayCommit['committed_at'])),
+                                        'at' => bakery_format_user_stamp(strtotime($dayCommit['committed_at']), 'M j, g:i A'),
                                     ])); ?></span>
                                     <?php if ($dayDrift > 0): ?>
                                         <span class="pc-source standing"><?php echo htmlspecialchars(bakery_t('production_center.drift_badge', ['count' => $dayDrift])); ?></span>
@@ -1110,7 +1110,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                     </td>
                                     <td>
                                         <?php if (!$inventoryReady): ?>
-                                            <span class="pc-muted">—</span>
+ <span class="pc-muted">-</span>
                                             <small>inventory off</small>
                                         <?php else: ?>
                                             <?php echo number_format($row['onHand']); ?>
@@ -1148,7 +1148,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                     </td>
                                     <td class="<?php echo (!$inventoryReady) ? '' : ($row['makeNeed'] ? 'pc-short' : 'pc-covered'); ?>">
                                         <?php if (!$inventoryReady): ?>
-                                            <span class="pc-muted">—</span>
+ <span class="pc-muted">-</span>
                                             <small>needs inventory</small>
                                         <?php else: ?>
                                             <strong class="pc-make-need" data-date="<?php echo htmlspecialchars($dayDate); ?>" data-product-id="<?php echo (int)$row['productId']; ?>" data-on-hand="<?php echo (int)$row['onHand']; ?>">
@@ -1159,7 +1159,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                     </td>
                                     <td>
                                         <?php if (!$inventoryReady): ?>
-                                            <span class="pc-muted">—</span>
+ <span class="pc-muted">-</span>
                                         <?php else: ?>
                                             <?php echo number_format($row['confirmed']); ?>
                                             <small>Daily Production</small>
@@ -1167,7 +1167,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                                     </td>
                                     <td class="<?php echo $varianceClass; ?>">
                                         <?php if (!$inventoryReady): ?>
-                                            <span class="pc-muted">—</span>
+ <span class="pc-muted">-</span>
                                         <?php else: ?>
                                             <?php
                                             $v = (int)$row['variance'];
@@ -1498,7 +1498,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         var planned = parseQty(input.value);
         var onHand = parseInt(cell.getAttribute('data-on-hand'), 10) || 0;
         if (planned === null || isNaN(planned) || planned < 0) {
-            cell.textContent = '—';
+ cell.textContent = '-';
             return;
         }
         var need = Math.max(0, planned - onHand);
@@ -1970,7 +1970,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                 '<td>' + escapeHtml(customer.name || '') +
                 (customer.zone ? '<small>' + escapeHtml(customer.zone) + '</small>' : '') +
                 '</td>' +
-                (mode === 'cut' ? '<td>' + escapeHtml(customer.driver_name || '—') + '</td>' : '') +
+ (mode === 'cut' ? '<td>' + escapeHtml(customer.driver_name || '-') + '</td>' : '') +
                 '<td>' + escapeHtml(sourceLabel(customer.source)) +
                 '<small>now ' + String(customer.quantity) +
                 (customer.standing_qty != null ? ' · stand ' + String(customer.standing_qty) : '') +
@@ -2037,7 +2037,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
             '" data-date="' + escapeHtml(btn.getAttribute('data-date')) +
             '" data-product-id="' + escapeHtml(btn.getAttribute('data-product-id')) + '">' +
             '<div class="pc-assign-head">' +
-            '<h3>' + escapeHtml((mode === 'cut' ? copy.cutTitle : copy.title)) + ' — ' + escapeHtml(btn.getAttribute('data-product-name') || '') + '</h3>' +
+ '<h3>' + escapeHtml((mode === 'cut' ? copy.cutTitle : copy.title)) + '. ' + escapeHtml(btn.getAttribute('data-product-name') || '') + '</h3>' +
             '<button type="button" class="pc-assign-close">' + escapeHtml(copy.close) + '</button>' +
             '</div>' +
             '<div class="pc-assign-meter" data-meter></div>' +
@@ -2281,7 +2281,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
                 return;
             }
             var f = result.data.formula;
-            var html = '<h3>' + copy.formulaTitle + ' — ' + String(f.product || '') + '</h3>';
+ var html = '<h3>' + copy.formulaTitle + '. ' + String(f.product || '') + '</h3>';
             if (f.dough) html += '<p>' + copy.formulaTitle + ': ' + String(f.dough) + '</p>';
             if (f.dough_grams > 0) {
                 html += '<p>' + String(f.pieces) + ' × ' + String(f.piece_weight_grams) + ' g = ' + String(f.dough_grams) + ' g</p>';
@@ -2328,7 +2328,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
     }
 
     function renderStore(data) {
-        var html = '<h3>' + copy.storeTitle + ' — ' + String(data.product_name || '') + '</h3>';
+ var html = '<h3>' + copy.storeTitle + '. ' + String(data.product_name || '') + '</h3>';
         html += '<p>' + copy.storeLead + '</p>';
         var rows = data.customers || [];
         if (!rows.length) {
@@ -2340,7 +2340,7 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' – ' . date('M j, Y', strto
         html += '<table class="pc-assign-table"><thead><tr><th>' + copy.customer + '</th><th>' + copy.storeZone + '</th><th>' + copy.storeGoing + '</th><th>' + copy.storeQty + '</th></tr></thead><tbody>';
         rows.forEach(function (row) {
             var locked = !!row.locked;
-            html += '<tr><td>' + String(row.name || '') + '</td><td>' + String(row.zone || '—') + '</td><td>' + String(row.driver_name || '—') + '</td><td>';
+ html += '<tr><td>' + String(row.name || '') + '</td><td>' + String(row.zone || '-') + '</td><td>' + String(row.driver_name || '-') + '</td><td>';
             if (locked) {
                 html += String(row.quantity) + ' <small>' + copy.storeLocked + '</small>';
             } else {

@@ -1029,7 +1029,7 @@
       var lines = [];
       if (photo.created_at) lines.push(formatTime(photo.created_at));
       if (photo.notes) lines.push(photo.notes);
-      meta.textContent = lines.join('\n');
+ meta.textContent = lines.join('\\n');
     }
     if (viewer) {
       viewer.style.display = 'flex';
@@ -1121,7 +1121,7 @@
     if (type.indexOf('image/') === 0) return true;
     // Some iPhone/Android picker versions omit File.type even for a real
     // camera image. The server still performs authoritative MIME validation.
-    return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
+ return /\\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
   }
 
   function canvasToJpeg(canvas, quality) {
@@ -1147,7 +1147,7 @@
     var height = image.naturalHeight || image.height || 0;
     var maxDimension = 1920;
     var largest = Math.max(width, height);
-    var isSmallJpeg = /^image\/jpe?g$/i.test(file.type || '')
+ var isSmallJpeg = /^image\\/jpe?g$/i.test(file.type || '')
       && file.size <= 1500 * 1024
       && largest > 0
       && largest <= maxDimension;
@@ -1170,7 +1170,7 @@
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     var blob = await canvasToJpeg(canvas, 0.82);
-    var baseName = (file.name || 'delivery-photo').replace(/\.[^.]+$/, '');
+ var baseName = (file.name || 'delivery-photo').replace(/\\.[^.]+$/, '');
     return { blob: blob, filename: baseName + '.jpg' };
   }
 
@@ -1706,9 +1706,9 @@
     var perPiece = getEffectivePricePerPiece();
     var total = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
     setInvoiceText('deliveryInvoiceDate', formatInvoiceDate(state.date));
-    setInvoiceText('deliveryInvoiceCustomer', state.customerName || '—');
+ setInvoiceText('deliveryInvoiceCustomer', state.customerName || '-');
     setInvoiceText('deliveryInvoiceAddress', state.address || i18n('no_address_invoice'));
-    setInvoiceText('deliveryInvoiceDriver', state.driverName || '—');
+ setInvoiceText('deliveryInvoiceDriver', state.driverName || '-');
     setInvoiceText('deliveryInvoiceOrderedPieces', String(state.orderedPieces));
     setInvoiceText('deliveryInvoicePieces', String(pieces));
     setInvoiceText('deliveryInvoiceCredits', String(credits));
@@ -1718,9 +1718,9 @@
       if (invoicePriceInput && state.pricePerPieceOverride != null) {
         invoicePriceInput.value = state.pricePerPieceOverride.toFixed(2);
       }
-      setInvoiceText('deliveryInvoicePrice', '—');
+ setInvoiceText('deliveryInvoicePrice', '-');
     } else {
-      setInvoiceText('deliveryInvoicePrice', perPiece > 0 ? '$' + perPiece.toFixed(2) : '—');
+ setInvoiceText('deliveryInvoicePrice', perPiece > 0 ? '$' + perPiece.toFixed(2) : '-');
     }
     setInvoiceText('deliveryInvoiceTotal', '$' + total.toFixed(2));
     var cashRow = $('deliveryInvoiceCashRow');
@@ -2013,7 +2013,7 @@
         setSubmitting(false);
         return;
       }
-      setStatus((err.message || i18n('could_not_complete_delivery')) + ' — ' + i18n('nothing_saved_retry'), 'error');
+ setStatus((err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry'), 'error');
       setSubmitting(false);
     }
   }

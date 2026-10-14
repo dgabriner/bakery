@@ -134,7 +134,7 @@ $portalCustomerName = $customer['name'];
 
             <li>
 
-              <?php echo htmlspecialchars(format_date($pause['pause_start']) . ' – ' . format_date($pause['pause_end'])); ?>
+              <?php echo htmlspecialchars(format_date($pause['pause_start']) . ' ' . bakery_locale_range_word() . ' ' . format_date($pause['pause_end'])); ?>
 
               <button type="button" class="btn-link" data-remove-pause="<?php echo (int)$pause['id']; ?>"><?php bakery_te('portal.resume_deliveries'); ?></button>
 
