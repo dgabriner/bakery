@@ -186,12 +186,58 @@ function bakery_delivery_product_count_mismatch_message(): string
 }
 
 /**
+ * Keep saved delivered_quantity values when every ordered line has one,
+ * none of them are marked estimated, and they already add up to the
+ * confirmed total. Returns null when the mix is still unknown.
+ *
+ * @param list<array<string, mixed>> $items
+ * @return array{lines:list<array{id:int,delivered:int,estimated:int}>,unallocated:int}|null
+ */
+function bakery_delivery_saved_line_plan(array $items, int $targetPieces): ?array
+{
+    $lines = [];
+    $sum = 0;
+    $any = false;
+    foreach ($items as $item) {
+        $ordered = max(0, (int)($item['quantity'] ?? 0));
+        $raw = $item['delivered_quantity'] ?? null;
+        $has = $raw !== null && $raw !== '';
+        if ((int)($item['delivered_quantity_estimated'] ?? 0) === 1) {
+            return null;
+        }
+        if ($ordered > 0 && !$has) {
+            return null;
+        }
+        $delivered = 0;
+        if ($has) {
+            $parsed = filter_var($raw, FILTER_VALIDATE_INT);
+            if ($parsed === false || (int)$parsed < 0) {
+                return null;
+            }
+            $delivered = (int)$parsed;
+            $any = true;
+            $sum += $delivered;
+        }
+        $lines[] = [
+            'id' => (int)$item['id'],
+            'delivered' => $delivered,
+            'estimated' => 0,
+        ];
+    }
+    if (!$any || $sum !== $targetPieces) {
+        return null;
+    }
+    return ['lines' => $lines, 'unallocated' => 0];
+}
+
+/**
  * Decide line counts for one confirmed total.
  *
- * Counts the driver entered are stored as given. A total above the order does
+ * Counts the driver entered are stored as given. Line counts already saved
+ * that add up to the confirmed total are kept. A total above the order does
  * not invent a per-product overage: each product stays at its ordered count
- * and the extra pieces are unallocated. A short total is still split in
- * proportion, and those lines are estimated.
+ * and the extra pieces are unallocated. A short total with no saved line
+ * counts is still split in proportion, and those lines are estimated.
  *
  * @param list<array<string, mixed>> $items
  * @param array<int, int> $lineQuantities
@@ -206,6 +252,13 @@ function bakery_delivery_quantity_plan(array $items, int $targetPieces, array $l
         $id = (int)$item['id'];
         $orderedTotal += max(0, (int)$item['quantity']);
         $knownIds[$id] = true;
+    }
+
+    if ($lineQuantities === []) {
+        $saved = bakery_delivery_saved_line_plan($items, $targetPieces);
+        if ($saved !== null) {
+            return $saved;
+        }
     }
 
     if ($lineQuantities !== []) {
@@ -344,8 +397,12 @@ function bakery_apply_delivery_line_quantities(PDO $db, int $dailyOrderId, array
         ? (int)$headerPieces
         : null;
 
+    $estimatedSelect = '';
+    if (function_exists('column_exists') && column_exists($db, 'daily_order_items', 'delivered_quantity_estimated')) {
+        $estimatedSelect = ', delivered_quantity_estimated';
+    }
     $itemStmt = $db->prepare(
-        'SELECT id, quantity, delivered_quantity, unit_price
+        'SELECT id, quantity, delivered_quantity, unit_price' . $estimatedSelect . '
          FROM daily_order_items
          WHERE daily_order_id = ?
          ORDER BY id'

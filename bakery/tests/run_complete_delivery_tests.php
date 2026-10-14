@@ -338,6 +338,47 @@ try {
 }
 $assert($mismatch, 'product counts that do not add up to the total are refused');
 
+$savedPlan = bakery_delivery_quantity_plan([
+    ['id' => 11, 'quantity' => 10, 'delivered_quantity' => 6],
+    ['id' => 12, 'quantity' => 2, 'delivered_quantity' => 2],
+    ['id' => 13, 'quantity' => 1, 'delivered_quantity' => 1],
+], 9);
+$savedById = [];
+foreach ($savedPlan['lines'] as $line) {
+    $savedById[(int)$line['id']] = $line;
+}
+$assert_eq(6, (int)$savedById[11]['delivered'], 'saved short product count is kept when it already sums to the total');
+$assert_eq(2, (int)$savedById[12]['delivered'], 'saved full product count is kept beside a short product');
+$assert_eq(1, (int)$savedById[13]['delivered'], 'saved single unit is kept beside a short product');
+$assert_eq(0, (int)$savedById[11]['estimated'], 'saved line counts are not marked estimated');
+$assert_eq(0, (int)$savedPlan['unallocated'], 'saved line counts leave nothing unallocated');
+
+$blankPlan = bakery_delivery_quantity_plan([
+    ['id' => 21, 'quantity' => 10, 'delivered_quantity' => null],
+    ['id' => 22, 'quantity' => 2, 'delivered_quantity' => null],
+], 9);
+$blankById = [];
+foreach ($blankPlan['lines'] as $line) {
+    $blankById[(int)$line['id']] = $line;
+}
+$assert(
+    (int)$blankById[21]['estimated'] === 1 && (int)$blankById[22]['estimated'] === 1,
+    'a short total with blank line counts is estimated'
+);
+
+$replayPlan = bakery_delivery_quantity_plan([
+    ['id' => 31, 'quantity' => 10, 'delivered_quantity' => 7, 'delivered_quantity_estimated' => 1],
+    ['id' => 32, 'quantity' => 2, 'delivered_quantity' => 1, 'delivered_quantity_estimated' => 1],
+    ['id' => 33, 'quantity' => 1, 'delivered_quantity' => 1, 'delivered_quantity_estimated' => 1],
+], 9);
+$replayEstimated = true;
+foreach ($replayPlan['lines'] as $line) {
+    if ((int)$line['estimated'] !== 1) {
+        $replayEstimated = false;
+    }
+}
+$assert($replayEstimated, 'a short total replay keeps the estimated flag on invented line counts');
+
 $shortId = $makeLines($db, $customerId, $shortDate, $driverId, [
     ['product_id' => $productA, 'qty' => 45, 'price' => $priceA],
     ['product_id' => $productB, 'qty' => 10, 'price' => $priceB],
