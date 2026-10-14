@@ -812,7 +812,7 @@ function bakery_agent_work_map_core(): array
                 'includes/formula_structure.php',
                 'includes/formula_structure_ui.php',
                 'database/schema/087_formula_structure.sql',
-                'database/schema/093_formula_costing.sql',
+                'database/schema/102_formula_costing.sql',
                 'dough_types.php',
                 'baker_mix.php',
                 'includes/baker_mix.php',
