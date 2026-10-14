@@ -91,7 +91,8 @@ body.workspace-manager {
 .manager-phone__panel,
 .manager-phone__driver,
 .manager-phone__score,
-.manager-phone__tomorrow {
+.manager-phone__tomorrow,
+.manager-phone__pickups {
   background: #fff;
   border: 1px solid var(--sf-border, #d5e0dc);
   border-radius: 14px;
@@ -155,12 +156,17 @@ body.workspace-manager {
   border-top: 4px solid var(--sf-warning, #c77c31);
 }
 
-.manager-phone__tomorrow {
+.manager-phone__tomorrow,
+.manager-phone__pickups {
   display: grid;
   gap: 0.2rem;
   text-decoration: none;
   color: inherit;
   min-height: 56px;
+}
+
+.manager-phone__pickups {
+  border-top: 4px solid var(--sf-warning, #c77c31);
 }
 
 .manager-phone__tomorrow--missing,
@@ -274,6 +280,13 @@ body.workspace-manager {
 
 .manager-phone__list small {
   color: var(--sf-text-secondary, #536258);
+}
+
+.manager-phone__list a {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sf-touch-min, 44px);
 }
 
 .manager-phone__list .is-failed strong,

@@ -62,6 +62,7 @@ $routesBeforePlan = bakery_manager_phone_next_action([
     'productionSummary' => ['remaining' => 9],
 ]);
 manager_phone_assert($routesBeforePlan['key'] === 'unassigned', 'stops without a driver come before plan release');
+manager_phone_assert((int)$routesBeforePlan['count'] === 2, 'unassigned next step carries the stop count');
 $driftNext = bakery_manager_phone_next_action([
     'date' => '2099-08-07',
     'failed' => 0,
@@ -74,6 +75,7 @@ $driftNext = bakery_manager_phone_next_action([
     'inTransit' => 0,
 ]);
 manager_phone_assert($driftNext['key'] === 'drift', 'post-release demand change points back to the plan');
+manager_phone_assert((int)$driftNext['count'] === 3, 'drift next step carries the change count');
 manager_phone_assert(strpos($driftNext['href'], 'production_center.php?date=2099-08-07') !== false, 'drift action keeps the selected date');
 manager_phone_assert(bakery_manager_phone_view('routes') === 'routes', 'routes view is accepted');
 manager_phone_assert(bakery_manager_phone_view('nope') === 'today', 'unknown view falls back to today');
@@ -117,8 +119,51 @@ manager_phone_assert(strpos($phone, 'bakery_production_plan_state') !== false, '
 manager_phone_assert(strpos($phone, 'manager_phone.plan_committed_at') !== false, 'committed kitchen state shows the commit time label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_not_committed') !== false, 'uncommitted kitchen state is loud with its own label');
 manager_phone_assert(strpos($phone, 'manager_phone.plan_drift_count') !== false, 'post-commit drift count renders on the kitchen tab');
+manager_phone_assert(strpos($phone, 'manager_phone.pickups') !== false, 'today shows pending counter pickups for the selected date');
+manager_phone_assert(strpos($phone, 'counter_orders.php') !== false, 'pickup row opens the existing counter slip list');
 manager_phone_assert(strpos($phone, 'production_center.php?date=') !== false, 'kitchen sends managers to Production Center first');
 manager_phone_assert(strpos($phone, "bakery_te('nav.item.production_center')") !== false, 'kitchen labels the primary action as Production Center');
+$kitchenRelease = bakery_manager_phone_kitchen_action([
+    'date' => '2099-08-07',
+    'plan_committed' => false,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 4],
+    'packingSummary' => ['required_lines' => 2, 'checked_lines' => 0],
+]);
+manager_phone_assert($kitchenRelease['key'] === 'release', 'an unreleased day opens Production Center');
+manager_phone_assert(strpos($kitchenRelease['href'], 'production_center.php?date=2099-08-07') !== false, 'unreleased kitchen action keeps the date');
+$kitchenDrift = bakery_manager_phone_kitchen_action([
+    'date' => '2099-08-07',
+    'plan_committed' => true,
+    'plan_drift' => 2,
+    'productionSummary' => ['remaining' => 0],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+]);
+manager_phone_assert($kitchenDrift['key'] === 'release', 'demand that changed after release returns to Production Center');
+$kitchenBake = bakery_manager_phone_kitchen_action([
+    'date' => '2099-08-07',
+    'plan_committed' => true,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 6],
+    'packingSummary' => ['required_lines' => 3, 'checked_lines' => 0],
+]);
+manager_phone_assert($kitchenBake['key'] === 'bake', 'a released day with units left opens Daily Production');
+manager_phone_assert(strpos($kitchenBake['href'], 'production.php?date=2099-08-07') !== false, 'bake action keeps the selected date');
+$kitchenPack = bakery_manager_phone_kitchen_action([
+    'date' => '2099-08-07',
+    'plan_committed' => true,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 0],
+    'packingSummary' => ['required_lines' => 3, 'checked_lines' => 1],
+]);
+manager_phone_assert($kitchenPack['key'] === 'pack', 'finished bake with open pack lines opens Pack List');
+manager_phone_assert(strpos($kitchenPack['href'], 'pack_list.php') !== false, 'pack action opens the pack list');
+manager_phone_assert(strpos($kitchenPack['href'], 'date=2099-08-07') !== false, 'pack action keeps the selected date');
+$missedRoute = bakery_manager_phone_missed_route_href('2099-08-07', 4);
+manager_phone_assert(strpos($missedRoute, 'driver.php?driver_id=4') !== false, 'a missed stop opens that driver route');
+manager_phone_assert(strpos($missedRoute, 'date=2099-08-07') !== false, 'a missed stop keeps the selected date');
+manager_phone_assert(bakery_manager_phone_missed_route_href('2099-08-07', 0) === '', 'a missed stop without a driver has no route link');
+manager_phone_assert(bakery_manager_phone_missed_route_href('tomorrow', 4) === '', 'a missed route link rejects a bad date');
 manager_phone_assert(strpos($phone, "sheet' => 'close'") !== false || strpos($phone, "['sheet' => 'close'") !== false, 'routes tab offers Close route sheet');
 manager_phone_assert(strpos($phone, 'manager_phone.close_route') !== false, 'close route copy is wired');
 manager_phone_assert(strpos($phone, 'bakery_inventory_closeout_lines') !== false, 'close sheet loads closeout lines');
