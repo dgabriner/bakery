@@ -25,6 +25,30 @@ function bakery_ingredient_prices_ready(PDO $db): bool
     return function_exists('table_exists') && table_exists($db, 'ingredient_price_history');
 }
 
+function bakery_ingredient_price_type_ready(PDO $db): bool
+{
+    return function_exists('column_exists') && column_exists($db, 'ingredient_price_history', 'price_type');
+}
+
+/**
+ * Missing or blank becomes invoice. invoice, quote, and public_list pass through.
+ * Anything else is null.
+ */
+function bakery_ingredient_price_normalize_type($value): ?string
+{
+    if ($value === null) {
+        return 'invoice';
+    }
+    $text = strtolower(trim((string)$value));
+    if ($text === '') {
+        return 'invoice';
+    }
+    if ($text === 'invoice' || $text === 'quote' || $text === 'public_list') {
+        return $text;
+    }
+    return null;
+}
+
 function bakery_ingredient_reorder_qty_ready(PDO $db): bool
 {
     static $ready = null;
@@ -122,6 +146,13 @@ function bakery_ingredient_price_add(PDO $db, array $input): array
     if ($error !== null) {
         return ['ok' => false, 'error' => $error];
     }
+    $priceType = bakery_ingredient_price_normalize_type($input['price_type'] ?? null);
+    if ($priceType === null) {
+        return ['ok' => false, 'error' => 'ingredient_prices.invalid_price_type'];
+    }
+    if ($priceType !== 'invoice' && !bakery_ingredient_price_type_ready($db)) {
+        return ['ok' => false, 'error' => 'ingredient_prices.migration_needed'];
+    }
     $ingredientId = (int)$input['ingredient_id'];
     $exists = $db->prepare('SELECT id FROM ingredients WHERE id = ?');
     $exists->execute([$ingredientId]);
@@ -145,22 +176,30 @@ function bakery_ingredient_price_add(PDO $db, array $input): array
     $costPerKg = bakery_ingredient_cost_per_kg_from_pack($packPrice, $packGrams);
     $sku = trim((string)($input['vendor_sku'] ?? ''));
     $invoice = trim((string)($input['invoice_number'] ?? ''));
-    $stmt = $db->prepare(
-        'INSERT INTO ingredient_price_history
-            (ingredient_id, vendor, vendor_sku, pack_size_grams, pack_price, cost_per_kg, invoice_number, invoice_date, entered_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    $stmt->execute([
+    $columns = 'ingredient_id, vendor, vendor_sku, pack_size_grams, pack_price, cost_per_kg';
+    $placeholders = '?, ?, ?, ?, ?, ?';
+    $values = [
         $ingredientId,
         trim((string)$input['vendor']),
         $sku !== '' ? substr($sku, 0, 80) : null,
         $packGrams,
         $packPrice,
         $costPerKg,
-        $invoice !== '' ? substr($invoice, 0, 64) : null,
-        bakery_ingredient_price_normalize_date($input['invoice_date']),
-        $enteredBy,
-    ]);
+    ];
+    if (bakery_ingredient_price_type_ready($db)) {
+        $columns .= ', price_type';
+        $placeholders .= ', ?';
+        $values[] = $priceType;
+    }
+    $columns .= ', invoice_number, invoice_date, entered_by';
+    $placeholders .= ', ?, ?, ?';
+    $values[] = $invoice !== '' ? substr($invoice, 0, 64) : null;
+    $values[] = bakery_ingredient_price_normalize_date($input['invoice_date']);
+    $values[] = $enteredBy;
+    $stmt = $db->prepare(
+        'INSERT INTO ingredient_price_history (' . $columns . ') VALUES (' . $placeholders . ')'
+    );
+    $stmt->execute($values);
     $id = (int)$db->lastInsertId();
     $row = bakery_ingredient_price_row($db, $id);
     return ['ok' => true, 'row' => $row ?? ['id' => $id, 'cost_per_kg' => $costPerKg]];
@@ -192,14 +231,15 @@ function bakery_ingredient_current_price(PDO $db, int $ingredientId): ?array
     if ($ingredientId <= 0 || !bakery_ingredient_prices_ready($db)) {
         return null;
     }
-    $stmt = $db->prepare(
-        'SELECT h.*, u.display_name AS entered_by_name
+    $sql = 'SELECT h.*, u.display_name AS entered_by_name
          FROM ingredient_price_history h
          LEFT JOIN users u ON u.id = h.entered_by
-         WHERE h.ingredient_id = ?
-         ORDER BY h.invoice_date DESC, h.id DESC
-         LIMIT 1'
-    );
+         WHERE h.ingredient_id = ?';
+    if (bakery_ingredient_price_type_ready($db)) {
+        $sql .= " AND h.price_type = 'invoice'";
+    }
+    $sql .= ' ORDER BY h.invoice_date DESC, h.id DESC LIMIT 1';
+    $stmt = $db->prepare($sql);
     $stmt->execute([$ingredientId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -222,6 +262,30 @@ function bakery_ingredient_current_cost_per_kg($ingredientId, $db = null): ?floa
         return null;
     }
     return (float)$row['cost_per_kg'];
+}
+
+/**
+ * Latest quote or public_list cost per kg. Never used as the current cost.
+ * Null when the ingredient has no such row, or when price_type is not installed.
+ */
+function bakery_ingredient_fill_cost_per_kg(PDO $db, int $ingredientId): ?float
+{
+    if ($ingredientId <= 0 || !bakery_ingredient_price_type_ready($db)) {
+        return null;
+    }
+    $stmt = $db->prepare(
+        "SELECT cost_per_kg
+         FROM ingredient_price_history
+         WHERE ingredient_id = ? AND price_type IN ('quote', 'public_list')
+         ORDER BY invoice_date DESC, id DESC
+         LIMIT 1"
+    );
+    $stmt->execute([$ingredientId]);
+    $value = $stmt->fetchColumn();
+    if ($value === false || $value === null || $value === '') {
+        return null;
+    }
+    return (float)$value;
 }
 
 /**
@@ -253,6 +317,9 @@ function bakery_ingredient_current_prices_map(PDO $db): array
     if (!bakery_ingredient_prices_ready($db)) {
         return [];
     }
+    $invoiceOnly = bakery_ingredient_price_type_ready($db);
+    $innerWhere = $invoiceOnly ? " WHERE price_type = 'invoice'" : '';
+    $outerWhere = $invoiceOnly ? " WHERE h1.price_type = 'invoice'" : '';
     $sql = 'SELECT h.*, u.display_name AS entered_by_name
             FROM ingredient_price_history h
             LEFT JOIN users u ON u.id = h.entered_by
@@ -261,9 +328,10 @@ function bakery_ingredient_current_prices_map(PDO $db): array
                 FROM ingredient_price_history h1
                 INNER JOIN (
                     SELECT ingredient_id, MAX(invoice_date) AS invoice_date
-                    FROM ingredient_price_history
+                    FROM ingredient_price_history' . $innerWhere . '
                     GROUP BY ingredient_id
                 ) d ON d.ingredient_id = h1.ingredient_id AND d.invoice_date = h1.invoice_date
+                ' . $outerWhere . '
                 GROUP BY h1.ingredient_id
             ) pick ON pick.id = h.id';
     $map = [];
@@ -434,6 +502,10 @@ function bakery_ingredient_prices_import_csv(PDO $db, string $path, bool $apply)
             continue;
         }
         $name = trim((string)($cells[$columns['name']] ?? ''));
+        $rawType = null;
+        if (isset($columns['price_type'])) {
+            $rawType = trim((string)($cells[$columns['price_type']] ?? ''));
+        }
         $payload = [
             'ingredient_name' => $name,
             'vendor' => trim((string)($cells[$columns['vendor']] ?? '')),
@@ -444,6 +516,14 @@ function bakery_ingredient_prices_import_csv(PDO $db, string $path, bool $apply)
             'invoice_date' => trim((string)($cells[$columns['invoice_date']] ?? '')),
             'line' => $line,
         ];
+        $normalizedType = bakery_ingredient_price_normalize_type(isset($columns['price_type']) ? $rawType : null);
+        if ($normalizedType !== 'invoice') {
+            $payload['price_type'] = $rawType ?? '';
+            $payload['error'] = 'ingredient_prices.not_invoice';
+            $invalid[] = $payload;
+            continue;
+        }
+        $payload['price_type'] = 'invoice';
         $key = bakery_ingredient_price_name_key($name);
         if ($name === '' || !isset($names[$key])) {
             $unmatched[] = $payload;
@@ -513,6 +593,8 @@ function bakery_ingredient_price_csv_columns(array $header): array
         'invoice_number' => 'invoice_number',
         'invoice date' => 'invoice_date',
         'invoice_date' => 'invoice_date',
+        'price type' => 'price_type',
+        'price_type' => 'price_type',
     ];
     $columns = [];
     foreach ($header as $index => $label) {
