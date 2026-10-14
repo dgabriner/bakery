@@ -17,6 +17,8 @@ bakery_ensure_portal_schema($db);
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    bakery_require_csrf();
+    bakery_require_role(['administrator', 'manager']);
     header('Content-Type: application/json');
 
     try {
@@ -189,7 +191,7 @@ try {
         ? 'COALESCE(pdqs.standard_quantity, 12) AS pan_dulce_standard_quantity'
         : '12 AS pan_dulce_standard_quantity';
     $products = $db->query("
-        SELECT p.id, p.name, p.price, dt.name AS dough_type_name, pl.name AS product_line_name,
+        SELECT p.id, p.name, p.price, p.wholesale_price, dt.name AS dough_type_name, pl.name AS product_line_name,
                {$standardQuantitySelect}
         FROM products p
         LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
@@ -235,6 +237,13 @@ try {
     ));
     $reviewByOrderId = [];
     $reviewByCustomerId = [];
+    $repriceOpenIds = [];
+    if (!empty($dailyOrders) && function_exists('bakery_order_reprice_open_ids')) {
+        foreach (bakery_order_reprice_open_ids($db, array_map('intval', array_column($dailyOrders, 'id'))) as $openOrderId) {
+            $repriceOpenIds[(int)$openOrderId] = true;
+        }
+    }
+
     foreach ($demandSummaryAll['customers'] as $reviewCustomer) {
         $reviewByCustomerId[(int)$reviewCustomer['customer_id']] = $reviewCustomer;
         if (!empty($reviewCustomer['daily_order_id'])) {
@@ -955,6 +964,11 @@ $summary = $demandSummaryAll['summary'];
                             <span class="status-badge status-<?= $order['status'] ?>">
                                 <?= ucwords(str_replace('_', ' ', $order['status'])) ?>
                             </span>
+                            <?php if (!empty($repriceOpenIds[(int)$order['id']])): ?>
+                                <button type="button" class="btn btn-small" onclick="repriceOrderFromCatalog(<?= (int)$order['id'] ?>)">
+                                    <?= htmlspecialchars(bakery_t('reprice.order_button')) ?>
+                                </button>
+                            <?php endif; ?>
                             <span class="state-badge state-<?= htmlspecialchars($orderState) ?>">
                                 <?= htmlspecialchars(bakery_demand_review_state_label($orderState)) ?>
                             </span>
@@ -1125,6 +1139,8 @@ $summary = $demandSummaryAll['summary'];
                                         <option value="">Select Product</option>
                                         <?php foreach ($products as $product): ?>
                                             <option value="<?= $product['id'] ?>"
+                                                data-price="<?= htmlspecialchars((string)($product['price'] ?? ''), ENT_QUOTES) ?>"
+                                                data-wholesale="<?= htmlspecialchars((string)($product['wholesale_price'] ?? ''), ENT_QUOTES) ?>"
                                                 data-pan-dulce="<?= $product['product_line_name'] === 'Pan Dulce' ? '1' : '0' ?>"
                                                 data-standard-quantity="<?= (int)$product['pan_dulce_standard_quantity'] ?>">
                                                 <?= htmlspecialchars($product['name']) ?> ($<?= $product['price'] ?>)</option>
@@ -1136,6 +1152,10 @@ $summary = $demandSummaryAll['summary'];
                                         <option value="2">2×</option>
                                     </select>
                                     <input type="number" class="quantity-input" placeholder="Qty" id="newQty_<?= $order['id'] ?>">
+                                    <label class="source-tag">
+                                        <input type="checkbox" id="newNoCharge_<?= (int)$order['id'] ?>">
+                                        <?= htmlspecialchars(bakery_t('no_charge.mark')) ?>
+                                    </label>
                                     <button class="btn btn-primary" onclick="addItem(<?= $order['id'] ?>, <?= $isAdvanced ? 'true' : 'false' ?>)">Add</button>
                                 </div>
                                 <small class="pan-dulce-note">Adds to the dated order for <?= htmlspecialchars($selectedDate) ?> only. Leave product blank and choose 1× / 1.5× / 2× to add the full Pan Dulce suite, or pick one product to add a single line.</small>
@@ -1994,6 +2014,8 @@ $summary = $demandSummaryAll['summary'];
 
 <script>
 const selectedOrderDate = '<?= htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8') ?>';
+const repriceZeroWarn = <?= json_encode(bakery_t('reprice.zero_warn'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const repriceOrderConfirm = <?= json_encode(bakery_t('reprice.order_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 
 function showCreateDatedOrderModal() {
     document.getElementById('createDatedOrderModal').style.display = 'flex';
@@ -2387,6 +2409,26 @@ function applyStandingToDated(customerId, isAdvanced) {
     .catch(error => alert('Error: ' + error.message));
 }
 
+function repriceOrderFromCatalog(orderId) {
+    if (!confirm(repriceOrderConfirm)) {
+        return;
+    }
+    fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=reprice_order_from_catalog&order_id=' + encodeURIComponent(orderId)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || 'Error');
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
+}
+
 function updateStatus(orderId, status) {
     fetch('daily_orders.php', {
         method: 'POST',
@@ -2422,6 +2464,18 @@ function addItem(orderId, isAdvanced) {
         alert('Please enter a quantity');
         return;
     }
+    const noChargeEl = document.getElementById('newNoCharge_' + orderId);
+    const noCharge = !!(noChargeEl && noChargeEl.checked);
+    const selectedOption = productSelect.options[productSelect.selectedIndex];
+    const retailPrice = parseFloat((selectedOption && selectedOption.getAttribute('data-price')) || '');
+    const wholesalePrice = parseFloat((selectedOption && selectedOption.getAttribute('data-wholesale')) || '');
+    const retailZero = !Number.isFinite(retailPrice) || retailPrice <= 0;
+    const wholesaleZero = !Number.isFinite(wholesalePrice) || wholesalePrice <= 0;
+    if (retailZero && wholesaleZero && !noCharge) {
+        if (!confirm(repriceZeroWarn)) {
+            return;
+        }
+    }
     if (!confirmAdvancedEdit(!!isAdvanced)) {
         return;
     }
@@ -2431,7 +2485,7 @@ function addItem(orderId, isAdvanced) {
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `action=add_item&order_id=${orderId}&product_id=${productId}&quantity=${quantity}`
+        body: `action=add_item&order_id=${orderId}&product_id=${productId}&quantity=${quantity}&is_no_charge=${noCharge ? '1' : '0'}`
     })
     .then(response => response.json())
     .then(data => {
