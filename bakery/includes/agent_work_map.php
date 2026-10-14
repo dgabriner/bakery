@@ -641,7 +641,7 @@ function bakery_agent_work_map_core(): array
                 'includes/demand_review.php',
                 'includes/demand_confirmation.php',
                 'includes/daily_order_generation.php',
-                'database/schema/093_standing_fill_blocked.sql',
+                'database/schema/097_standing_fill_blocked.sql',
                 'includes/production_cadence.php',
                 'product_distribution.php',
                 'scripts/demand_scheduler.php',

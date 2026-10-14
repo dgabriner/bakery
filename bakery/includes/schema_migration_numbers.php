@@ -100,14 +100,14 @@ function bakery_schema_unexpected_duplicate_prefixes(?array $ids = null): array
 }
 
 /**
- * 094, 095, and 096 are taken or reserved by other work and are not files
- * on this branch. Do not reuse them. The next id after 093 is 097.
+ * 093 is reserved for PR #62. 094, 095, and 096 are taken or reserved by
+ * other work. This branch uses 097. The next id is 098.
  *
  * @return list<int>
  */
 function bakery_schema_reserved_migration_numbers(): array
 {
-    return [94, 95, 96];
+    return [93, 94, 95, 96];
 }
 
 /** @param list<string>|null $ids */

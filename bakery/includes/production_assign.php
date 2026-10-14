@@ -808,6 +808,9 @@ function bakery_production_assign_save_daily_line(
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
     $oldQty = $existing ? (int)$existing['quantity'] : 0;
     if ($oldQty === $quantity) {
+        if ($quantity <= 0) {
+            bakery_daily_order_block_standing_fill_if_empty($db, $dailyOrderId);
+        }
         return;
     }
 
@@ -831,6 +834,9 @@ function bakery_production_assign_save_daily_line(
         $del->execute([(int)$existing['id']]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    if ($quantity <= 0) {
+        bakery_daily_order_block_standing_fill_if_empty($db, $dailyOrderId);
+    }
 
     bakery_record_operational_event(
         $db,

@@ -19,6 +19,7 @@ require_once $root . '/includes/config.php';
 require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/production_assign.php';
+require_once $root . '/includes/daily_order_generation.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: tests must run with APP_ENV=local\n");
@@ -222,15 +223,34 @@ try {
     $zeroed = bakery_production_cut_apply($db, $date, $productId, [
         ['customer_id' => $smallId, 'quantity' => 0],
     ], null);
-    $assert((int)$zeroed['updated'] === 1 && (int)$zeroed['cut_units'] === 7, 'cutting to zero removes the dated override');
+    $assert((int)$zeroed['updated'] === 1 && (int)$zeroed['cut_units'] === 7, 'cutting to zero removes the dated line');
     $smallNow = null;
     foreach (bakery_operating_demand_customers_for_product($db, $date, $productId) as $line) {
         if ((int)$line['id'] === $smallId) {
             $smallNow = (int)$line['quantity'];
         }
     }
-    $assert($smallNow === 10, 'zero-cut falls back to standing 10 (empty_daily semantics)');
+    $smallOrderId = (int)$db->query(
+        'SELECT id FROM daily_orders WHERE customer_id = ' . $smallId . ' AND order_date = ' . $db->quote($date)
+    )->fetchColumn();
+    $smallBlocked = 0;
+    if (column_exists($db, 'daily_orders', 'standing_fill_blocked')) {
+        $smallBlocked = (int)$db->query(
+            'SELECT standing_fill_blocked FROM daily_orders WHERE id = ' . $smallOrderId
+        )->fetchColumn();
+    }
+    $assert($smallBlocked === 1, 'zero-cut sets standing_fill_blocked');
+    $assert($smallNow === null, 'zero-cut does not fall back to standing demand');
     $assert(bakery_customer_standing_qty($db, $smallId, $productId, $weekday) === 10, 'standing template still intact after zero-cut');
+    bakery_generate_daily_orders_from_standing($db, $date, [
+        'overwrite_changed' => false,
+        'record_event' => false,
+        'assign_routes' => false,
+    ]);
+    $refilled = (int)$db->query(
+        'SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ' . $smallOrderId . ' AND quantity > 0'
+    )->fetchColumn();
+    $assert($refilled === 0, 'standing sync does not refill a production zero-cut');
 
     $cleanupCustomers();
     $insertCustomer->execute(['Cut Locked Cafe', '13 Bake Lane']);

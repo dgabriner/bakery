@@ -146,7 +146,8 @@ Violating these breaks operations even if the code "works."
    manager emptied stays empty (`daily_orders.standing_fill_blocked`) until
    overwrite generation or Apply standing. Removing one dated line writes
    quantity 0 for that customer, product, and date. Standing sync keeps that 0.
-   Daily Orders calls it a one-day removal and can undo it.
+   Daily Orders calls it a one-day removal and can undo it. A production cut
+   to zero sets `standing_fill_blocked` so standing sync does not refill that order.
    Cadence from calendar today: default mid-week lookahead is bake tomorrow
    (`today+1`) for the route the day after (`today+2`). That matches pan dulce
    Monday→Tuesday through Thursday→Friday. Friday's pan dulce bake covers
