@@ -7,6 +7,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/order_reprice.php';
+
 function bakery_order_line_no_charge_ready(PDO $db): bool
 {
     return function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_no_charge');
@@ -256,42 +258,93 @@ function bakery_daily_orders_action_add_item(PDO $db, array $input, ?array $user
     $orderId = (int)($input['order_id'] ?? 0);
     $productId = (int)($input['product_id'] ?? 0);
     $quantity = (int)($input['quantity'] ?? 0);
+    if ($orderId <= 0 || $productId <= 0 || $quantity <= 0) {
+        return ['success' => false, 'error' => 'Invalid item'];
+    }
 
-    $stmt = $db->prepare("
-        SELECT p.price, p.wholesale_price, c.id AS customer_id, c.pricing_tier,
-               c.default_pan_dulce_price, pl.name as product_line_name
-        FROM products p
-        JOIN dough_types dt ON p.dough_type_id = dt.id
-        JOIN product_lines pl ON dt.product_line_id = pl.id
-        JOIN daily_orders do ON do.id = ?
-        JOIN customers c ON do.customer_id = c.id
-        WHERE p.id = ?
-    ");
-    $stmt->execute([$orderId, $productId]);
-    $productData = $stmt->fetch();
+    $orderStmt = $db->prepare(
+        'SELECT c.id AS customer_id, c.pricing_tier, c.default_pan_dulce_price
+         FROM daily_orders do
+         JOIN customers c ON c.id = do.customer_id
+         WHERE do.id = ?'
+    );
+    $orderStmt->execute([$orderId]);
+    $orderRow = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$orderRow) {
+        return ['success' => false, 'error' => 'Order not found'];
+    }
+
+    $productStmt = $db->prepare(
+        'SELECT p.id, p.price, p.wholesale_price, pl.name AS product_line_name
+         FROM products p
+         LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+         LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+         WHERE p.id = ?'
+    );
+    $productStmt->execute([$productId]);
+    $product = $productStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$product) {
+        return ['success' => false, 'error' => 'Product not found'];
+    }
+
+    $noCharge = (string)($input['is_no_charge'] ?? '0') === '1';
+    $reason = null;
+    if ($noCharge) {
+        if (!bakery_order_line_no_charge_ready($db)) {
+            return ['success' => false, 'error' => 'No charge is not available'];
+        }
+        try {
+            $reason = bakery_no_charge_normalize_reason($input['no_charge_reason'] ?? '');
+        } catch (InvalidArgumentException $e) {
+            return ['success' => false, 'error' => 'Unknown no-charge reason'];
+        }
+    }
 
     $unitPrice = bakery_resolve_customer_price($db, [
-        'id' => (int)($productData['customer_id'] ?? 0),
-        'pricing_tier' => $productData['pricing_tier'] ?? 'retail',
-        'default_pan_dulce_price' => $productData['default_pan_dulce_price'] ?? null,
+        'id' => (int)$orderRow['customer_id'],
+        'pricing_tier' => $orderRow['pricing_tier'] ?? 'retail',
+        'default_pan_dulce_price' => $orderRow['default_pan_dulce_price'] ?? null,
     ], [
         'id' => $productId,
-        'price' => floatval($productData['price'] ?? 0),
-        'wholesale_price' => $productData['wholesale_price'] ?? null,
-        'product_line_name' => $productData['product_line_name'] ?? '',
+        'price' => $product['price'] ?? 0,
+        'wholesale_price' => $product['wholesale_price'] ?? null,
+        'product_line_name' => $product['product_line_name'] ?? '',
     ]);
 
-    $lineTotal = $quantity * $unitPrice;
+    if (bakery_order_reprice_zero_catalog_blocked($product, (float)$unitPrice, $noCharge)) {
+        return [
+            'success' => false,
+            'error' => bakery_t('reprice.zero_block'),
+            'code' => 'zero_catalog',
+        ];
+    }
 
-    $stmt = $db->prepare("
-        INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
-        VALUES (?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE 
-        quantity = quantity + VALUES(quantity),
-        unit_price = VALUES(unit_price),
-        line_total = quantity * unit_price
-    ");
-    $stmt->execute([$orderId, $productId, $quantity, $unitPrice, $lineTotal]);
+    if ($noCharge) {
+        $unitPrice = 0.0;
+        $stmt = $db->prepare(
+            'INSERT INTO daily_order_items
+                (daily_order_id, product_id, quantity, unit_price, line_total, is_no_charge, no_charge_reason)
+             VALUES (?, ?, ?, 0, 0, 1, ?)
+             ON DUPLICATE KEY UPDATE
+                quantity = quantity + VALUES(quantity),
+                is_no_charge = 1,
+                no_charge_reason = VALUES(no_charge_reason),
+                unit_price = 0,
+                line_total = 0'
+        );
+        $stmt->execute([$orderId, $productId, $quantity, $reason]);
+    } else {
+        $lineTotal = round($quantity * $unitPrice, 2);
+        $stmt = $db->prepare(
+            'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                quantity = quantity + VALUES(quantity),
+                unit_price = VALUES(unit_price),
+                line_total = quantity * unit_price'
+        );
+        $stmt->execute([$orderId, $productId, $quantity, $unitPrice, $lineTotal]);
+    }
 
     bakery_daily_orders_update_order_total($db, $orderId);
 
@@ -316,6 +369,23 @@ function bakery_daily_orders_action_add_item(PDO $db, array $input, ?array $user
     }
 
     return ['success' => true];
+}
+
+function bakery_daily_orders_action_reprice_from_catalog(PDO $db, array $input, ?array $user = null): array
+{
+    $user = $user ?? (function_exists('bakery_current_user') ? bakery_current_user() : null);
+    $result = bakery_order_reprice_apply_order($db, (int)($input['order_id'] ?? 0), $user, null, true);
+    if (!$result['ok']) {
+        return [
+            'success' => false,
+            'error' => $result['message'] ?? bakery_t('reprice.order_refused'),
+        ];
+    }
+    return [
+        'success' => true,
+        'updated' => (int)$result['updated'],
+        'message' => $result['message'],
+    ];
 }
 
 function bakery_daily_orders_action_apply_pan_dulce_standard_to_order(PDO $db, array $input, ?array $user = null): array
@@ -553,6 +623,8 @@ function bakery_daily_orders_dispatch(PDO $db, array $input, ?array $user = null
             return bakery_daily_orders_action_update_status($db, $input, $user);
         case 'add_item':
             return bakery_daily_orders_action_add_item($db, $input, $user);
+        case 'reprice_order_from_catalog':
+            return bakery_daily_orders_action_reprice_from_catalog($db, $input, $user);
         case 'apply_pan_dulce_standard_to_order':
             return bakery_daily_orders_action_apply_pan_dulce_standard_to_order($db, $input, $user);
         case 'remove_order':
