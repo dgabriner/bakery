@@ -20,6 +20,15 @@ const paymentLabels = {
     signature: 'Signature'
 };
 
+function routeCopy(key, fallback) {
+    const copy = (window.__ROUTE_MANAGER__ && window.__ROUTE_MANAGER__.copy) || {};
+    return copy[key] || fallback || key;
+}
+
+function stopIsSquarePrepaid(delivery) {
+    return !!(delivery && delivery.square_prepaid);
+}
+
 function formatMoney(amount) {
     return '$' + Number(amount || 0).toFixed(2);
 }
@@ -1416,9 +1425,12 @@ function updateDeliveryList() {
             const isLast = stopIndex === stops.length - 1;
             const isCod = (d.payment_collection || 'cod') === 'cod';
             const cashAmount = stopPaymentAmount(d);
-            const paymentBadge = isCod
+            const prepaid = stopIsSquarePrepaid(d);
+            const paymentBadge = prepaid
+                ? `<span class="payment-badge payment-badge--prepaid">${escapeHtml(routeCopy('prepaid', 'Prepaid'))}</span>`
+                : (isCod
                 ? `<span class="payment-badge payment-badge--cod">${isDelivered ? 'COD cash ' + formatMoney(cashAmount) : 'COD expected ' + formatMoney(cashAmount)}</span>`
-                : `<span class="payment-badge payment-badge--signature">Signature</span>`;
+                : `<span class="payment-badge payment-badge--signature">Signature</span>`);
             const mapsLink = d.address
                 ? `<a class="stop-external-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(d.address)}" target="_blank" rel="noopener">Map</a>`
                 : '';
@@ -1966,7 +1978,9 @@ function viewStopDetail(driverId, orderId) {
     const photosGrid = document.getElementById('stopDetailPhotos');
 
     const status = statusLabels[delivery.delivery_status] || delivery.delivery_status;
-    const paymentType = paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature';
+    const paymentType = stopIsSquarePrepaid(delivery)
+        ? routeCopy('prepaid_square', 'Prepaid in Square')
+        : (paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature');
     const paymentAmount = stopPaymentAmount(delivery);
     const customerRecordUrl = `customer_record.php?customer_id=${encodeURIComponent(delivery.customer_id)}&date=${encodeURIComponent(selectedDate)}`;
     const mapsUrl = delivery.address
@@ -1998,6 +2012,58 @@ function viewStopDetail(driverId, orderId) {
         ['Collected', delivery.amount_collected != null ? formatMoney(delivery.amount_collected) : '—'],
         ['Items ordered', delivery.item_count ? String(delivery.item_count) : '—'],
     ]);
+
+    const existingOverride = statusEl.querySelector('[data-cod-override]');
+    if (existingOverride) {
+        existingOverride.remove();
+    }
+    if (stopIsSquarePrepaid(delivery) && !delivery.cod_override_reason) {
+        const form = document.createElement('form');
+        form.setAttribute('data-cod-override', '1');
+        form.className = 'cod-override-form';
+        form.innerHTML = `
+            <p class="cod-override-note">${escapeHtml(routeCopy('prepaid_square', 'Prepaid in Square'))}</p>
+            <label>${escapeHtml(routeCopy('cod_override_reason', 'Reason'))}
+                <input type="text" name="reason" maxlength="255" required>
+            </label>
+            <button type="submit" class="btn btn-secondary">${escapeHtml(routeCopy('cod_override_save', 'Save reason'))}</button>
+        `;
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const reason = (form.querySelector('input[name="reason"]').value || '').trim();
+            if (!reason) {
+                return;
+            }
+            const body = new URLSearchParams();
+            body.set('action', 'record_cod_square_override');
+            body.set('daily_order_id', String(delivery.daily_order_id));
+            body.set('reason', reason);
+            body.set('csrf_token', pickupCsrfToken());
+            fetch(window.location.pathname + window.location.search, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    showError(data.error || 'Could not record the COD override');
+                    return;
+                }
+                delivery.cod_override_reason = reason;
+                loadDeliveries({ background: true, skipMap: true });
+                viewStopDetail(driverId, orderId);
+            })
+            .catch(() => showError('Could not record the COD override'));
+        });
+        statusEl.appendChild(form);
+    } else if (stopIsSquarePrepaid(delivery) && delivery.cod_override_reason) {
+        const note = document.createElement('p');
+        note.setAttribute('data-cod-override', '1');
+        note.className = 'cod-override-note';
+        note.textContent = routeCopy('cod_override_saved', 'COD override saved') + ': ' + delivery.cod_override_reason;
+        statusEl.appendChild(note);
+    }
 
     invoiceStatus.textContent = 'Loading order details…';
     invoiceStatus.style.display = 'block';

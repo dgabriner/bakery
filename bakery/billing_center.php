@@ -20,7 +20,7 @@ $rangePresets = ['today', 'week', 'month', 'last_month', 'custom'];
 $statusOptions = array_merge(['all', 'open'], $orderStatuses);
 
 $panel = (string)($_GET['panel'] ?? 'invoices');
-$panels = ['invoices', 'customer', 'export', 'exceptions'];
+$panels = ['invoices', 'customer', 'export', 'exceptions', 'mismatch'];
 if (!in_array($panel, $panels, true)) {
     $panel = 'invoices';
 }
@@ -181,6 +181,7 @@ require_once __DIR__ . '/includes/nav.php';
 
     <nav class="bc-tabs" aria-label="Billing Center panels">
         <?php echo $panelTab('invoices', bakery_t('billing.tab_invoices')); ?>
+        <?php echo $panelTab('mismatch', bakery_t('billing.tab_mismatch')); ?>
         <?php echo $panelTab('customer', bakery_t('billing.tab_customer')); ?>
         <?php echo $panelTab('export', bakery_t('billing.tab_export')); ?>
     </nav>
@@ -319,6 +320,9 @@ require_once __DIR__ . '/includes/nav.php';
                 <p class="bc-note">Select a customer to view invoices, delivery dates, and statement history.</p>
             <?php endif; ?>
         </section>
+
+    <?php elseif ($panel === 'mismatch'): ?>
+        <?php require __DIR__ . '/includes/billing_panel_header_mismatch.php'; ?>
 
     <?php elseif ($panel === 'export'): ?>
         <section class="bc-panel">

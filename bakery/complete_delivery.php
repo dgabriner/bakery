@@ -23,6 +23,7 @@ require_once __DIR__ . '/includes/delivery_skip.php';
 require_once __DIR__ . '/includes/customer_portal.php';
 require_once __DIR__ . '/includes/client_request_id.php';
 require_once __DIR__ . '/includes/daily_orders_actions.php';
+require_once __DIR__ . '/includes/cod_square_guard.php';
 
 /**
  * Browser navigation (GET/HEAD) should not dump the JSON API.
@@ -843,7 +844,23 @@ function bakery_confirm_delivery(
     }
 
     $amountCollected = null;
-    if ($paymentCollection === 'cod') {
+    $squareGuard = bakery_cod_square_guard_row($db, $dailyOrderId);
+    $codBlocked = $paymentCollection === 'cod' && bakery_cod_cash_blocked($squareGuard);
+    if ($codBlocked) {
+        $overrideReason = trim((string)($options['cod_override_reason'] ?? ''));
+        if ($overrideReason === '') {
+            if (array_key_exists('amount_collected', $options)) {
+                throw new Exception('This stop is prepaid in Square. COD cash is blocked unless a manager records a reason.');
+            }
+        } else {
+            $actor = isset($options['actor']) && is_array($options['actor'])
+                ? $options['actor']
+                : (function_exists('bakery_current_user') ? bakery_current_user() : null);
+            bakery_cod_record_square_override($db, $dailyOrderId, $overrideReason, $actor);
+            $codBlocked = false;
+        }
+    }
+    if ($paymentCollection === 'cod' && !$codBlocked) {
         if (!array_key_exists('amount_collected', $options)) {
             throw new Exception('Cash collected amount is required for COD customers');
         }
@@ -970,6 +987,7 @@ try {
             if (!in_array($paymentCollection, ['cod', 'signature'], true)) {
                 $paymentCollection = 'signature';
             }
+            $summaryGuard = bakery_cod_square_guard_row($db, $dailyOrderId);
             echo json_encode([
                 'success' => true,
                 'ordered_pieces' => $summary['ordered_pieces'],
@@ -989,6 +1007,11 @@ try {
                 'payment_collection' => $paymentCollection,
                 'is_saved' => $order['delivery_confirmed_at'] !== null,
                 'items' => $invoice['items'],
+                'square_prepaid' => bakery_stop_square_prepaid($summaryGuard),
+                'cod_cash_blocked' => ($paymentCollection === 'cod') && bakery_cod_cash_blocked($summaryGuard),
+                'cod_override_reason' => $summaryGuard['cod_square_override_reason'],
+                'can_cod_override' => function_exists('bakery_user_has_role')
+                    && bakery_user_has_role(['administrator', 'manager']),
             ]);
             break;
 
@@ -1041,6 +1064,15 @@ try {
             }
             if (isset($_POST['amount_collected'])) {
                 $confirmOptions['amount_collected'] = $_POST['amount_collected'];
+            }
+            if (isset($_POST['cod_override_reason'])) {
+                $confirmOptions['cod_override_reason'] = $_POST['cod_override_reason'];
+            }
+            if (function_exists('bakery_current_user')) {
+                $actor = bakery_current_user();
+                if (is_array($actor)) {
+                    $confirmOptions['actor'] = $actor;
+                }
             }
             $clientRequestId = bakery_normalize_client_request_id($_POST['client_request_id'] ?? '');
             if ($clientRequestId !== '') {

@@ -8,6 +8,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/photo_handler.php';
 require_once __DIR__ . '/route_manager_cash.php';
+require_once __DIR__ . '/cod_square_guard.php';
 require_once __DIR__ . '/product_inventory.php';
 require_once __DIR__ . '/product_pack_yields.php';
 
@@ -53,6 +54,13 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
           AND payment_pl.name = 'Pan Dulce'
     ) THEN 'cod' ELSE {$customerPaymentSql} END";
     $amountCollectedSql = $hasAmountCollected ? 'do.amount_collected' : 'NULL';
+    $hasSquareInvoice = column_exists($db, 'daily_orders', 'square_invoice_id');
+    $squareInvoiceSql = $hasSquareInvoice ? 'do.square_invoice_id' : 'NULL';
+    $squareStatusSql = $hasSquareInvoice ? 'do.square_status' : 'NULL';
+    $squarePaidAtSql = $hasSquareInvoice ? 'do.square_paid_at' : 'NULL';
+    $overrideSql = column_exists($db, 'daily_orders', 'cod_square_override_reason')
+        ? 'do.cod_square_override_reason'
+        : 'NULL';
     $deliveryConfirmedSql = $hasDeliveryConfirmedAt
         ? 'do.delivery_confirmed_at'
         : 'NULL';
@@ -86,6 +94,10 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             {$deliveryOrderTotalSql} AS delivery_order_total,
             {$deliveryConfirmedSql} AS delivery_confirmed_at,
             {$amountCollectedSql} AS amount_collected,
+            {$squareInvoiceSql} AS square_invoice_id,
+            {$squareStatusSql} AS square_status,
+            {$squarePaidAtSql} AS square_paid_at,
+            {$overrideSql} AS cod_square_override_reason,
             {$deliveredPiecesSql} AS delivered_pieces,
             {$paymentCollectionSql} AS payment_collection,
             c.id AS customer_id,
@@ -160,6 +172,15 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             'order_total_estimate' => (float)$row['order_total_estimate'],
             'delivery_confirmed_at' => $row['delivery_confirmed_at'] ?? null,
             'amount_collected' => $row['amount_collected'] !== null ? (float)$row['amount_collected'] : null,
+            'square_invoice_id' => trim((string)($row['square_invoice_id'] ?? '')),
+            'square_status' => trim((string)($row['square_status'] ?? '')),
+            'square_paid_at' => trim((string)($row['square_paid_at'] ?? '')),
+            'cod_override_reason' => trim((string)($row['cod_square_override_reason'] ?? '')),
+            'square_prepaid' => bakery_stop_square_prepaid([
+                'square_invoice_id' => $row['square_invoice_id'] ?? '',
+                'square_status' => $row['square_status'] ?? '',
+                'square_paid_at' => $row['square_paid_at'] ?? '',
+            ]),
             'delivered_pieces' => $row['delivered_pieces'] !== null && $row['delivered_pieces'] !== ''
                 ? (int)$row['delivered_pieces']
                 : null,

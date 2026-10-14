@@ -12,6 +12,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/customer_record.php';
 require_once __DIR__ . '/sfb_origin.php';
+require_once __DIR__ . '/billing_header.php';
 
 /**
  * Per-delivery invoice identifier used by Invoice/Billing Center (canonical).
@@ -556,6 +557,10 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['is_fixture_noise'] = bakery_billing_is_fixture_noise($order);
         $order['work_queue'] = bakery_billing_work_queue($order);
         $order['settlement'] = bakery_billing_settlement_row($order);
+        $headerCompare = bakery_billing_header_compare($order, $items);
+        $order['stored_header_amount'] = $headerCompare['stored_header_amount'];
+        $order['line_header_amount'] = $headerCompare['line_header_amount'];
+        $order['header_mismatch'] = $headerCompare['header_mismatch'];
 
         $enriched[] = $order;
     }
@@ -744,6 +749,48 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     );
     $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Read-only list of confirmed invoices whose stored header differs from lines.
+ * Does not update daily_orders.
+ *
+ * @return list<array<string, mixed>>
+ */
+function bakery_billing_header_mismatch_rows(PDO $db): array
+{
+    $orders = bakery_billing_query_orders($db, [
+        'start_date' => '1970-01-01',
+        'end_date' => '2099-12-31',
+        'confirmed_only' => true,
+        'collection' => 'all',
+    ]);
+    $ids = [];
+    foreach ($orders as $order) {
+        $ids[] = (int)$order['id'];
+    }
+    $itemsByOrder = bakery_billing_load_items($db, $ids);
+    $rows = [];
+    foreach ($orders as $order) {
+        if (bakery_billing_is_fixture_noise($order)) {
+            continue;
+        }
+        $orderId = (int)$order['id'];
+        $compared = bakery_billing_header_compare($order, $itemsByOrder[$orderId] ?? []);
+        if (empty($compared['header_mismatch'])) {
+            continue;
+        }
+        $rows[] = [
+            'id' => $orderId,
+            'invoice_number' => bakery_billing_invoice_number($orderId, $order['order_date']),
+            'order_date' => (string)$order['order_date'],
+            'customer_id' => (int)($order['customer_id'] ?? 0),
+            'customer_name' => (string)($order['customer_name'] ?? ''),
+            'stored_header_amount' => $compared['stored_header_amount'],
+            'line_header_amount' => $compared['line_header_amount'],
+        ];
+    }
+    return $rows;
 }
 
 /**
