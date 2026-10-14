@@ -119,6 +119,58 @@ function bakery_route_summary_photo_type_key(string $type): string
     return 'route_summary.photo';
 }
 
+function bakery_route_summary_is_arrival_photo(string $type): bool
+{
+    return strtolower(trim($type)) === 'before';
+}
+
+function bakery_route_summary_is_pod_photo(string $type): bool
+{
+    $normalized = strtolower(trim($type));
+    return $normalized === 'after' || $normalized === 'receipt';
+}
+
+/**
+ * Split a stop's photos into arrival (Before) and proof of delivery (After, Receipt).
+ *
+ * @param array<int, array<string, mixed>> $photos
+ * @return array{arrival:array<int, array<string, mixed>>,pod:array<int, array<string, mixed>>}
+ */
+function bakery_route_summary_classify_photos(array $photos): array
+{
+    $arrival = [];
+    $pod = [];
+    foreach ($photos as $photo) {
+        if (!is_array($photo)) {
+            continue;
+        }
+        $type = (string)($photo['photo_type'] ?? '');
+        if (bakery_route_summary_is_arrival_photo($type)) {
+            $arrival[] = $photo;
+        } elseif (bakery_route_summary_is_pod_photo($type)) {
+            $pod[] = $photo;
+        }
+    }
+    return [
+        'arrival' => $arrival,
+        'pod' => $pod,
+    ];
+}
+
+function bakery_route_summary_photo_status(string $deliveryStatus, bool $hasArrival, bool $hasPod): string
+{
+    if ($hasPod) {
+        return 'pod';
+    }
+    if ($deliveryStatus === 'delivered' && $hasArrival) {
+        return 'arrival_only';
+    }
+    if ($hasArrival) {
+        return 'arrival';
+    }
+    return 'none';
+}
+
 function bakery_route_summary_status_key(string $status): string
 {
     $known = ['pending', 'in_transit', 'delivered', 'failed', 'cancelled', 'rescheduled'];
@@ -131,12 +183,12 @@ function bakery_route_summary_status_key(string $status): string
 function bakery_route_summary_matches_filter(array $stop, string $filter): bool
 {
     $status = (string)($stop['delivery_status'] ?? 'pending');
-    $hasPhotos = !empty($stop['photos']);
+    $hasPod = !empty($stop['has_pod_photo']);
     switch ($filter) {
         case 'photos':
-            return $hasPhotos;
+            return $hasPod;
         case 'missing':
-            return !$hasPhotos && $status !== 'cancelled';
+            return !$hasPod && $status !== 'cancelled';
         case 'delivered':
             return $status === 'delivered';
         case 'pending':
@@ -164,7 +216,10 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
         'failed' => 0,
         'with_photos' => 0,
         'missing_photos' => 0,
+        'arrival_only' => 0,
         'photo_count' => 0,
+        'arrival_photo_count' => 0,
+        'pod_photo_count' => 0,
         'sold' => 0.0,
         'pieces' => 0,
         'drivers' => 0,
@@ -174,11 +229,18 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
         $visibleStops = [];
         $driverPhotos = 0;
         $driverMissing = 0;
+        $driverArrivalOnly = 0;
+        $driverArrivalPhotos = 0;
+        $driverPodPhotos = 0;
         foreach ($driver['deliveries'] ?? [] as $delivery) {
             $driverId = (int)($driver['id'] ?? $delivery['driver_id'] ?? 0);
             $customerId = (int)($delivery['customer_id'] ?? 0);
             $photos = $photosByStop[$driverId . ':' . $customerId] ?? [];
+            $classified = bakery_route_summary_classify_photos($photos);
+            $hasArrival = $classified['arrival'] !== [];
+            $hasPod = $classified['pod'] !== [];
             $status = (string)($delivery['delivery_status'] ?? 'pending');
+            $arrivalOnly = $status === 'delivered' && $hasArrival && !$hasPod;
             $sold = bakery_route_summary_sold_amount($delivery);
             $pieces = bakery_route_summary_pieces($delivery);
             $stop = $delivery;
@@ -186,6 +248,14 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             $stop['driver_name'] = (string)($driver['name'] ?? '');
             $stop['photos'] = $photos;
             $stop['photo_count'] = count($photos);
+            $stop['arrival_photos'] = $classified['arrival'];
+            $stop['pod_photos'] = $classified['pod'];
+            $stop['arrival_count'] = count($classified['arrival']);
+            $stop['pod_count'] = count($classified['pod']);
+            $stop['has_arrival_photo'] = $hasArrival;
+            $stop['has_pod_photo'] = $hasPod;
+            $stop['arrival_only'] = $arrivalOnly;
+            $stop['photo_status'] = bakery_route_summary_photo_status($status, $hasArrival, $hasPod);
             $stop['hero_photo'] = bakery_route_summary_choose_hero_photo($photos);
             $stop['sold_amount'] = $sold;
             $stop['pieces'] = $pieces;
@@ -200,11 +270,22 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             } elseif ($status !== 'cancelled') {
                 $stats['pending']++;
             }
+            $stats['arrival_photo_count'] += count($classified['arrival']);
+            $stats['pod_photo_count'] += count($classified['pod']);
+            $driverArrivalPhotos += count($classified['arrival']);
+            $driverPodPhotos += count($classified['pod']);
             if ($photos !== []) {
-                $stats['with_photos']++;
                 $stats['photo_count'] += count($photos);
                 $driverPhotos += count($photos);
-            } elseif ($status !== 'cancelled') {
+            }
+            if ($status === 'delivered' && $hasPod) {
+                $stats['with_photos']++;
+            }
+            if ($arrivalOnly) {
+                $stats['arrival_only']++;
+                $driverArrivalOnly++;
+            }
+            if ($status !== 'cancelled' && !$hasPod) {
                 $stats['missing_photos']++;
                 $driverMissing++;
             }
@@ -230,6 +311,9 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             'stop_count' => count($visibleStops),
             'sold' => (float)($cashSummary['total_sold'] ?? 0),
             'photo_count' => $driverPhotos,
+            'arrival_photo_count' => $driverArrivalPhotos,
+            'pod_photo_count' => $driverPodPhotos,
+            'arrival_only' => $driverArrivalOnly,
             'missing_photos' => $driverMissing,
             'cash_summary' => $cashSummary,
         ];
@@ -301,4 +385,56 @@ function bakery_route_summary_load(PDO $db, string $date, array $driverIds = [],
     $day['date'] = $date;
     $day['photos_available'] = table_exists($db, 'driver_photos');
     return $day;
+}
+
+/**
+ * Stops on one driver's closeout, with arrival and proof photo status.
+ *
+ * @return list<array<string, mixed>>
+ */
+function bakery_route_closeout_stops(PDO $db, string $date, int $driverId): array
+{
+    if ($driverId <= 0) {
+        return [];
+    }
+    $driversData = route_manager_fetch_deliveries($db, $date, [$driverId]);
+    $photosByStop = route_manager_fetch_photos_for_date($db, $date, [$driverId]);
+    $stops = [];
+    foreach ($driversData as $driver) {
+        if ((int)($driver['id'] ?? 0) !== $driverId) {
+            continue;
+        }
+        foreach ($driver['deliveries'] ?? [] as $delivery) {
+            if (!is_array($delivery)) {
+                continue;
+            }
+            $status = (string)($delivery['delivery_status'] ?? 'pending');
+            if ($status === 'cancelled') {
+                continue;
+            }
+            $customerId = (int)($delivery['customer_id'] ?? 0);
+            $photos = $photosByStop[$driverId . ':' . $customerId] ?? [];
+            $classified = bakery_route_summary_classify_photos($photos);
+            $hasArrival = $classified['arrival'] !== [];
+            $hasPod = $classified['pod'] !== [];
+            $stops[] = [
+                'customer_id' => $customerId,
+                'customer_name' => (string)($delivery['customer_name'] ?? ''),
+                'route_order' => (int)($delivery['route_order'] ?? 0),
+                'delivery_status' => $status,
+                'photo_status' => bakery_route_summary_photo_status($status, $hasArrival, $hasPod),
+                'arrival_only' => $status === 'delivered' && $hasArrival && !$hasPod,
+                'has_arrival_photo' => $hasArrival,
+                'has_pod_photo' => $hasPod,
+            ];
+        }
+    }
+    usort($stops, static function ($a, $b) {
+        $order = ((int)$a['route_order']) <=> ((int)$b['route_order']);
+        if ($order !== 0) {
+            return $order;
+        }
+        return strcasecmp((string)$a['customer_name'], (string)$b['customer_name']);
+    });
+    return $stops;
 }

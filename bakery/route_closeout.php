@@ -5,6 +5,7 @@ require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/operational_exceptions.php';
+require_once 'includes/route_summary.php';
 
 $selectedDate = $_GET['date'] ?? $_POST['delivery_date'] ?? date('Y-m-d');
 try {
@@ -125,7 +126,7 @@ require_once 'includes/nav.php';
 <p class="manager-desktop-only-hint"><?php bakery_te('manager_phone.desktop_use_manager'); ?>
   <a href="<?php echo htmlspecialchars((defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.manager_today'); ?></a>
 </p>
-<main class="closeout-page container manager-desktop-only">
+<main class="closeout-page container">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <div class="closeout-heading">
         <div>
@@ -234,6 +235,37 @@ require_once 'includes/nav.php';
                 </div>
             </div>
 
+            <?php
+            $closeoutStops = bakery_route_closeout_stops($db, $selectedDate, $driverId);
+            $closeoutPhotoKeys = [
+                'pod' => 'closeout.photo_pod',
+                'arrival_only' => 'closeout.photo_arrival_only',
+                'arrival' => 'closeout.photo_arrival',
+                'none' => 'closeout.photo_none',
+            ];
+            ?>
+            <section class="closeout-stops" aria-label="<?php echo htmlspecialchars(bakery_t('closeout.stops_heading'), ENT_QUOTES, 'UTF-8'); ?>">
+                <h3><?php bakery_te('closeout.stops_heading'); ?></h3>
+                <?php if ($closeoutStops === []): ?>
+                    <p class="closeout-stops-empty"><?php bakery_te('closeout.no_stops'); ?></p>
+                <?php else: ?>
+                    <ol class="closeout-stop-list">
+                        <?php foreach ($closeoutStops as $stop):
+                            $photoStatus = (string)($stop['photo_status'] ?? 'none');
+                            $photoKey = $closeoutPhotoKeys[$photoStatus] ?? 'closeout.photo_none';
+                        ?>
+                        <li class="closeout-stop closeout-stop--<?php echo htmlspecialchars($photoStatus, ENT_QUOTES, 'UTF-8'); ?>">
+                            <span class="closeout-stop-order">#<?php echo (int)$stop['route_order']; ?></span>
+                            <span class="closeout-stop-name"><?php echo htmlspecialchars((string)$stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                            <span class="closeout-stop-delivery"><?php bakery_te(bakery_route_summary_status_key((string)$stop['delivery_status'])); ?></span>
+                            <span class="closeout-stop-photo"><?php bakery_te($photoKey); ?></span>
+                        </li>
+                        <?php endforeach; ?>
+                    </ol>
+                <?php endif; ?>
+            </section>
+
+            <div class="manager-desktop-only">
             <?php if (!$hasLoad): ?>
                 <div class="closeout-empty-inline">
                     No pickup load saved for this driver.
@@ -351,6 +383,7 @@ require_once 'includes/nav.php';
                     <?php endif; ?>
                 </form>
             <?php endif; ?>
+            </div>
         </section>
         <?php endforeach; ?>
 
@@ -401,9 +434,23 @@ require_once 'includes/nav.php';
 .closeout-notice.success{background:#e7f6ea;color:#1d6534}
 .closeout-notice.error{background:#fdecec;color:#9b2525}
 .closeout-empty,.closeout-empty-inline{padding:18px;background:var(--bg);border-radius:8px;color:var(--muted)}
+.closeout-stops{margin:12px 0 4px}
+.closeout-stops h3{margin:0 0 8px;font-size:1rem;color:var(--ink)}
+.closeout-stops-empty{margin:0;color:var(--muted)}
+.closeout-stop-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.closeout-stop{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.closeout-stop-order{font-weight:800;color:var(--muted)}
+.closeout-stop-name{font-weight:700;color:var(--ink)}
+.closeout-stop-delivery{grid-column:2;color:var(--muted);font-size:.85rem}
+.closeout-stop-photo{grid-column:3;grid-row:1 / span 2;justify-self:end;padding:3px 8px;border-radius:999px;font-size:.78rem;font-weight:800;background:#eef1ef;color:#5a675f}
+.closeout-stop--pod .closeout-stop-photo{background:#e7f6ea;color:var(--ok)}
+.closeout-stop--arrival_only{border-color:#efd7a8}
+.closeout-stop--arrival_only .closeout-stop-photo{background:#fff6e5;color:var(--warn)}
 @media(max-width:820px){
     .closeout-heading{flex-direction:column}
     .closeout-heading-actions .btn{width:100%;text-align:center}
+    .closeout-stop{grid-template-columns:auto minmax(0,1fr)}
+    .closeout-stop-photo{grid-column:1 / -1;grid-row:auto;justify-self:start}
 }
 </style>
 <script>
