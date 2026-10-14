@@ -1,4 +1,5 @@
 -- Payment terms decide COD cash versus an invoice or a check.
+-- This file is 095 and runs after the Square COD override on 094. The two files do not depend on each other.
 -- Existing signature accounts are invoice terms. COD stays the default.
 -- Store credit is one negative line so a new confirm can match its header.
 -- Historical invoices are not rewritten here.

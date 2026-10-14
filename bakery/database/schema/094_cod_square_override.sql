@@ -1,5 +1,5 @@
 -- Manager reason when COD cash is allowed on a stop that already has Square.
--- 093 is the ingredient price type on the cost pull request. This file is 095.
+-- 093 is the ingredient price type on the cost pull request. This file is 094 and runs before payment terms.
 -- schema_migrations tracks apply-once. Do not re-run after recorded.
 -- owner-approved-core-column: a logged manager reason is required before COD cash can be recorded on a Square prepaid stop.
 
