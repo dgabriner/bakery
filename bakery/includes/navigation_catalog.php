@@ -176,6 +176,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'agent_homebase.php', 'label' => 'Agent Homebase', 'description' => 'Learning studio, whiteboard, bug watchlist, and agent session log for Cursor missions.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'users.php', 'label' => 'User Management', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'login_history.php', 'label' => 'Login History', 'description' => 'Who is on the floor, which screens they use, and whether today looks unusual.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'audit_log.php', 'label' => 'Audit Log', 'description' => 'Who changed an order, a price, or a user, and the value before and after.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'qr_login.php', 'label' => 'Customer QR Login', 'description' => 'Generate a secure portal login QR code for any customer.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'historical_navigation.php', 'label' => 'Historical Navigation', 'description' => 'The prior full menu and retained legacy entry points.', 'roles' => ['administrator'], 'usage' => 'occasional'],
             ],

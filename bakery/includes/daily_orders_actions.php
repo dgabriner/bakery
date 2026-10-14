@@ -165,7 +165,7 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
     $quantity = (int)($input['quantity'] ?? 0);
 
     $stmt = $db->prepare(
-        'SELECT doi.daily_order_id, doi.quantity, doi.product_id, p.name AS product_name,
+        'SELECT doi.daily_order_id, doi.quantity, doi.unit_price, doi.product_id, p.name AS product_name,
                 do.order_date, do.customer_id, c.name AS customer_name
          FROM daily_order_items doi
          JOIN daily_orders do ON do.id = doi.daily_order_id
@@ -178,10 +178,16 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
 
     $dailyOrderId = $itemRow ? (int)$itemRow['daily_order_id'] : null;
     $oldQty = $itemRow ? (int)$itemRow['quantity'] : null;
+    $auditBefore = $itemRow ? [
+        'id' => $itemId,
+        'quantity' => $itemRow['quantity'],
+        'unit_price' => $itemRow['unit_price'],
+    ] : null;
 
     if ($quantity <= 0) {
         $stmt = $db->prepare('DELETE FROM daily_order_items WHERE id = ?');
         $stmt->execute([$itemId]);
+        bakery_audit_daily_line_diff($db, $auditBefore, null);
     } else {
         $stmt = $db->prepare('
             UPDATE daily_order_items 
@@ -189,6 +195,11 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
             WHERE id = ?
         ');
         $stmt->execute([$quantity, $itemId]);
+        bakery_audit_daily_line_diff($db, $auditBefore, [
+            'id' => $itemId,
+            'quantity' => $quantity,
+            'unit_price' => $itemRow['unit_price'] ?? null,
+        ]);
     }
 
     if ($dailyOrderId) {
@@ -311,6 +322,8 @@ function bakery_daily_orders_action_add_item(PDO $db, array $input, ?array $user
         'product_line_name' => $product['product_line_name'] ?? '',
     ]);
 
+    $auditBefore = bakery_audit_daily_line_lookup($db, $orderId, $productId);
+
     if (bakery_order_reprice_zero_catalog_blocked($product, (float)$unitPrice, $noCharge)) {
         return [
             'success' => false,
@@ -347,6 +360,7 @@ function bakery_daily_orders_action_add_item(PDO $db, array $input, ?array $user
     }
 
     bakery_daily_orders_update_order_total($db, $orderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $orderId, $productId));
 
     $orderMeta = $db->prepare(
         'SELECT do.order_date, do.customer_id, c.name AS customer_name, p.name AS product_name
@@ -558,6 +572,22 @@ function bakery_daily_orders_action_set_no_charge(PDO $db, array $input, ?array 
     }
 
     bakery_daily_orders_update_order_total($db, (int)$row['daily_order_id']);
+    bakery_audit_daily_line_diff(
+        $db,
+        ['id' => $itemId, 'quantity' => $row['quantity'], 'unit_price' => $oldPrice],
+        ['id' => $itemId, 'quantity' => $row['quantity'], 'unit_price' => $newPrice]
+    );
+    if ($oldFlag !== $mark) {
+        bakery_audit_write(
+            $db,
+            'daily_order_item',
+            $itemId,
+            'update',
+            'is_no_charge',
+            $oldFlag ? '1' : '0',
+            $mark ? '1' : '0'
+        );
+    }
 
     $changed = $oldFlag !== $mark
         || $oldReason !== $reason

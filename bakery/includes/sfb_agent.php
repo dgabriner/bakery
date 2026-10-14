@@ -415,6 +415,22 @@ function bakery_sfb_agent_strip_wholesale(PDO $db, $customerId) {
         return;
     }
     if (table_exists($db, 'standing_orders')) {
+        $standing = $db->prepare('SELECT id, quantity FROM standing_orders WHERE customer_id = ?');
+        $standing->execute([$customerId]);
+        foreach ($standing->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ((int)$row['quantity'] <= 0) {
+                continue;
+            }
+            bakery_audit_write(
+                $db,
+                'standing_order',
+                (int)$row['id'],
+                'remove',
+                'quantity',
+                (string)(int)$row['quantity'],
+                null
+            );
+        }
         $db->prepare('DELETE FROM standing_orders WHERE customer_id = ?')->execute([$customerId]);
     }
     if (table_exists($db, 'standing_routes')) {

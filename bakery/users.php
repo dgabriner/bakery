@@ -7,6 +7,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/users_admin.php';
 
 // Role and sign-in-code changes are administrator-only. Managers can run every
 // operational workspace module, but cannot change who has access to the app.
@@ -36,134 +37,25 @@ function bakery_users_page_drivers(PDO $db) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     try {
+        if ($action === 'reveal_code') {
+            header('Content-Type: application/json');
+            echo json_encode(bakery_users_reveal_code($db, (int)($_POST['id'] ?? 0)));
+            exit;
+        }
         if ($action === 'create' || $action === 'update') {
-            $id = (int)($_POST['id'] ?? 0);
-            $displayName = trim((string)($_POST['display_name'] ?? ''));
-            $roleSlug = trim((string)($_POST['role_slug'] ?? ''));
-            $code = bakery_normalize_login_code($_POST['login_code'] ?? '');
-            $email = strtolower(trim((string)($_POST['email'] ?? '')));
-            $driverId = (int)($_POST['driver_id'] ?? 0);
-            $isActive = isset($_POST['is_active']) ? 1 : 0;
-
-            if ($displayName === '') {
-                throw new Exception('Name is required.');
-            }
-            if (!isset($roleLabels[$roleSlug])) {
-                throw new Exception('Invalid user type.');
-            }
-            if ($code === '') {
-                throw new Exception('Login code must be exactly 4 digits.');
-            }
-
-            $roleStmt = $db->prepare('SELECT id FROM roles WHERE slug = ? LIMIT 1');
-            $roleStmt->execute([$roleSlug]);
-            $roleId = $roleStmt->fetchColumn();
-            if (!$roleId) {
-                throw new Exception('Role not found.');
-            }
-
-            if (!bakery_is_driver_route_role($roleSlug)) {
-                $driverId = 0;
-            }
-            $driverIdValue = $driverId > 0 ? $driverId : null;
-
-            if ($email === '') {
-                $slug = preg_replace('/[^a-z0-9]+/', '.', strtolower($displayName));
-                $slug = trim($slug, '.') ?: 'user';
-                $email = $slug . '@sourflour.local';
-            }
-
-            $clash = $db->prepare(
-                'SELECT id FROM users WHERE login_code = ? AND id <> ? LIMIT 1'
-            );
-            $clash->execute([$code, $id]);
-            if ($clash->fetchColumn()) {
-                throw new Exception('That login code is already in use.');
-            }
-
-            $emailClash = $db->prepare(
-                'SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id <> ? LIMIT 1'
-            );
-            $emailClash->execute([$email, $id]);
-            if ($emailClash->fetchColumn()) {
-                throw new Exception('That email is already in use.');
-            }
-
-            $hash = password_hash($code, PASSWORD_DEFAULT);
-
-            if ($action === 'create') {
-                $stmt = $db->prepare(
-                    'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
-                     VALUES (?, ?, ?, ?, ?, ?, 1)'
-                );
-                $stmt->execute([$email, $hash, $code, $displayName, (int)$roleId, $driverIdValue]);
-                $id = (int)$db->lastInsertId();
-                $success = 'User created.';
-            } else {
-                if ($id <= 0) {
-                    throw new Exception('Invalid user.');
-                }
-                $stmt = $db->prepare(
-                    'UPDATE users
-                     SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
-                         role_id = ?, driver_id = ?, is_active = ?
-                     WHERE id = ?'
-                );
-                $stmt->execute([
-                    $email,
-                    $hash,
-                    $code,
-                    $displayName,
-                    (int)$roleId,
-                    $driverIdValue,
-                    $isActive,
-                    $id,
-                ]);
-                $success = 'User updated.';
-            }
-
-            $pairingDate = trim((string)($_POST['pairing_date'] ?? ''));
-            if ($roleSlug === 'driver_assistant' && $pairingDate !== '') {
-                $date = DateTimeImmutable::createFromFormat('!Y-m-d', $pairingDate);
-                if (!$date || $date->format('Y-m-d') !== $pairingDate) {
-                    throw new Exception('Route pairing date must use YYYY-MM-DD.');
-                }
-                if ($driverIdValue === null) {
-                    throw new Exception('Choose the driver this assistant will pair with.');
-                }
-                if (!table_exists($db, 'driver_assistant_assignments')) {
-                    throw new Exception('Driver Assistant pairing is not installed yet. Run migration 045.');
-                }
-                $pair = $db->prepare(
-                    'INSERT INTO driver_assistant_assignments (assistant_user_id, driver_id, delivery_date)
-                     VALUES (?, ?, ?)
-                     ON DUPLICATE KEY UPDATE driver_id = VALUES(driver_id)'
-                );
-                $pair->execute([$id, $driverIdValue, $pairingDate]);
-                $success .= ' Route pairing saved for ' . $pairingDate . '.';
-            }
+            $saved = bakery_users_save($db, $_POST);
+            $success = $saved['message'];
         } elseif ($action === 'deactivate') {
-            $id = (int)($_POST['id'] ?? 0);
-            if ($id <= 0) {
-                throw new Exception('Invalid user.');
-            }
-            $current = bakery_current_user();
-            if ($current && (int)$current['id'] === $id) {
-                throw new Exception('You cannot deactivate your own account.');
-            }
-            $stmt = $db->prepare('UPDATE users SET is_active = 0 WHERE id = ?');
-            $stmt->execute([$id]);
-            $success = 'User deactivated.';
+            $success = bakery_users_set_active($db, (int)($_POST['id'] ?? 0), 0);
         } elseif ($action === 'activate') {
-            $id = (int)($_POST['id'] ?? 0);
-            if ($id <= 0) {
-                throw new Exception('Invalid user.');
-            }
-            $stmt = $db->prepare('UPDATE users SET is_active = 1 WHERE id = ?');
-            $stmt->execute([$id]);
-            $success = 'User activated.';
+            $success = bakery_users_set_active($db, (int)($_POST['id'] ?? 0), 1);
         }
     } catch (Exception $e) {
+        if ($action === 'reveal_code') {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            exit;
+        }
         $error = $e->getMessage();
     }
 }
@@ -210,6 +102,7 @@ require_once __DIR__ . '/includes/nav.php';
 .users-table th, .users-table td { text-align: left; padding: 0.65rem 0.5rem; border-bottom: 1px solid #eee; vertical-align: top; }
 .users-table th { color: #555; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .users-code { font-family: Consolas, monospace; font-size: 1.05rem; letter-spacing: 0.12em; font-weight: 700; }
+.users-reveal { margin-left: 0.35rem; border: 0; background: transparent; color: #1a5276; font-weight: 650; cursor: pointer; text-decoration: underline; padding: 0; }
 .users-muted { color: #888; font-size: 0.85rem; }
 .users-badge {
   display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
@@ -280,7 +173,10 @@ require_once __DIR__ . '/includes/nav.php';
                   <div class="users-muted"><?php echo bakery_t($u['role_slug'] === 'driver_assistant' ? 'users.paired_driver' : 'users.driver'); ?>: <?php echo htmlspecialchars($u['driver_name']); ?></div>
                 <?php endif; ?>
               </td>
-              <td><span class="users-code"><?php echo htmlspecialchars($u['login_code'] ?? '————'); ?></span></td>
+              <td>
+                <span class="users-code" id="users-code-<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars(bakery_audit_mask_staff_code($u['login_code'] ?? '')); ?></span>
+                <button type="button" class="users-reveal" data-user-id="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars(bakery_t('users.reveal_code')); ?></button>
+              </td>
               <td>
                 <div class="users-actions">
                   <a href="<?php echo htmlspecialchars(BASE_URL . 'users.php?edit=' . (int)$u['id']); ?>">Edit</a>
@@ -337,9 +233,14 @@ require_once __DIR__ . '/includes/nav.php';
         </select>
 
         <label for="login_code">4-digit code</label>
-        <input type="text" id="login_code" name="login_code" required inputmode="numeric"
+        <input type="text" id="login_code" name="login_code" inputmode="numeric"
                pattern="[0-9]{4}" maxlength="4" minlength="4"
-               value="<?php echo htmlspecialchars($editUser['login_code'] ?? ($_POST['login_code'] ?? '')); ?>">
+               <?php echo $editUser ? '' : 'required'; ?>
+               placeholder="<?php echo $editUser ? htmlspecialchars(bakery_audit_mask_staff_code($editUser['login_code'] ?? '')) : ''; ?>"
+               value="<?php echo htmlspecialchars($editUser ? (($_POST['login_code'] ?? '') !== '' && $error ? (string)$_POST['login_code'] : '') : (string)($_POST['login_code'] ?? '')); ?>">
+        <?php if ($editUser): ?>
+          <div class="users-muted"><?php echo htmlspecialchars(bakery_t('users.code_keep')); ?></div>
+        <?php endif; ?>
 
         <div class="driver-link-fields" id="driverFields">
           <label for="driver_id"><?php bakery_te('users.route_driver'); ?></label>
@@ -406,6 +307,29 @@ require_once __DIR__ . '/includes/nav.php';
       this.value = this.value.replace(/\D/g, '').slice(0, 4);
     });
   }
+  document.querySelectorAll('.users-reveal').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-user-id');
+      var token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+      var body = new URLSearchParams();
+      body.set('action', 'reveal_code');
+      body.set('id', id);
+      body.set('csrf_token', token);
+      fetch('users.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: body.toString()
+      }).then(function (response) { return response.json(); }).then(function (data) {
+        var slot = document.getElementById('users-code-' + id);
+        if (data && data.ok && slot) {
+          slot.textContent = data.code;
+        }
+      });
+    });
+  });
 })();
 </script>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

@@ -1792,11 +1792,8 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
         $dailyOrderId = (int)$existing['id'];
     }
 
-    $itemStmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $itemStmt->execute([$dailyOrderId, $productId]);
-    $item = $itemStmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $item = $auditBefore;
     $oldQty = $item ? (int)$item['quantity'] : null;
     $itemId = $item ? (int)$item['id'] : null;
 
@@ -1826,6 +1823,7 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
     }
 
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
     $changed = $created || $oldQty === null || $oldQty !== $quantity;
     if ($changed) {
         if (!isset($product) || !is_array($product)) {

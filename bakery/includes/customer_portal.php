@@ -1189,12 +1189,6 @@ function bakery_portal_add_to_standing_order(PDO $db, array $customer, $dayOfWee
     $existingQty = (int)$existingStmt->fetchColumn();
     $newQty = $existingQty + $quantity;
 
-    $deleteStmt = $db->prepare(
-        'DELETE FROM standing_orders
-         WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $dayClause['sql']
-    );
-    $deleteStmt->execute(array_merge([$customerId, $productId], $dayClause['values']));
-
     bakery_standing_order_upsert($db, $customerId, $productId, $dayOfWeek, $newQty);
 
     $dayLabels = bakery_standing_day_labels();

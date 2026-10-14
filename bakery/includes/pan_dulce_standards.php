@@ -183,7 +183,9 @@ function bakery_apply_pan_dulce_daily_standard(PDO $db, $orderId, $multiplier = 
         }
 
         $lineTotal = $qty * $unitPrice;
+        $auditBefore = bakery_audit_daily_line_lookup($db, $orderId, (int)$product['id']);
         $upsert->execute([$orderId, (int)$product['id'], $qty, $unitPrice, $lineTotal]);
+        bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $orderId, (int)$product['id']));
         $updated++;
     }
 

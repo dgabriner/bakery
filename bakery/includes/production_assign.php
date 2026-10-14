@@ -801,11 +801,8 @@ function bakery_production_assign_save_daily_line(
     }
 
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : 0;
     if ($oldQty === $quantity) {
         return;
@@ -831,6 +828,7 @@ function bakery_production_assign_save_daily_line(
         $del->execute([(int)$existing['id']]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
 
     bakery_record_operational_event(
         $db,
@@ -1140,11 +1138,8 @@ function bakery_production_store_demand_save(
     }
 
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : 0;
     $unitPrice = bakery_resolve_customer_price($db, $customer, $product);
     $lineTotal = round($quantity * $unitPrice, 2);
@@ -1161,6 +1156,7 @@ function bakery_production_store_demand_save(
         $ins->execute([$dailyOrderId, $productId, $quantity, $unitPrice, $lineTotal]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
     if ($oldQty !== $quantity) {
         bakery_record_operational_event(
             $db,
