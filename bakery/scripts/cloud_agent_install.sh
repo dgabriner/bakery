@@ -20,10 +20,14 @@ if ! command -v php >/dev/null 2>&1 || ! command -v mariadb >/dev/null 2>&1; the
   export DEBIAN_FRONTEND=noninteractive
   sudo apt-get update -qq
   sudo apt-get install -y -qq \
-    php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-curl php8.3-gd \
+    php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-curl php8.3-gd php8.3-zip \
     mariadb-server python3 python3-paramiko >/dev/null
 else
   log "php and mariadb already installed"
+fi
+if ! php -m | grep -qx zip; then
+  log "installing php8.3-zip so xlsx uploads can be read"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq php8.3-zip >/dev/null
 fi
 if ! python3 -c 'import paramiko' >/dev/null 2>&1; then
   log "installing python3-paramiko for scripts/sftp_upload.py target checks"
