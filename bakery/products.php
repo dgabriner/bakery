@@ -8,6 +8,7 @@ require_once 'includes/database.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/catalog_gaps.php';
 require_once 'includes/order_reprice.php';
+require_once 'includes/audit_log.php';
 bakery_ensure_portal_schema($db);
 
 // Set page title
@@ -28,14 +29,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         break;
                     }
                     $stmt = $db->prepare("INSERT INTO products (name, description, price, wholesale_price, weight_grams, dough_type_id) VALUES (?, ?, ?, ?, ?, ?)");
+                    $createdFields = [
+                        'name' => $_POST['name'],
+                        'description' => $_POST['description'],
+                        'price' => $newPrice,
+                        'wholesale_price' => empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
+                        'weight_grams' => $_POST['weight_grams'] ?: null,
+                        'dough_type_id' => $_POST['dough_type_id'] ?: null,
+                    ];
                     $stmt->execute([
-                        $_POST['name'],
-                        $_POST['description'],
-                        $newPrice,
-                        empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
-                        $_POST['weight_grams'] ?: null,
-                        $_POST['dough_type_id'] ?: null // Convert empty string to null
+                        $createdFields['name'],
+                        $createdFields['description'],
+                        $createdFields['price'],
+                        $createdFields['wholesale_price'],
+                        $createdFields['weight_grams'],
+                        $createdFields['dough_type_id'],
                     ]);
+                    bakery_audit_product_fields($db, (int)$db->lastInsertId(), [], $createdFields, 'create');
                     header("Location: products.php?success=created");
                     exit;
                 } catch (Exception $e) {
@@ -52,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$oldProduct) {
                         throw new RuntimeException('Product not found');
                     }
+                    $auditBefore = bakery_audit_product_row($db, $productId) ?: [];
                     $newPrice = bakery_product_editor_next_price($_POST, $oldProduct['price']);
                     $newWholesale = bakery_product_editor_next_wholesale($_POST, $oldProduct['wholesale_price']);
                     $zeroBlock = bakery_product_save_zero_price_block($oldProduct, $newPrice, $_POST);
@@ -78,6 +89,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $_POST['weight_grams'] ?: null,
                         $_POST['dough_type_id'] ?: null, // Convert empty string to null
                         $productId
+                    ]);
+                    bakery_audit_product_fields($db, $productId, $auditBefore, [
+                        'name' => $_POST['name'],
+                        'description' => $_POST['description'],
+                        'price' => $newPrice,
+                        'wholesale_price' => $newWholesale,
+                        'weight_grams' => $_POST['weight_grams'] ?: null,
+                        'dough_type_id' => $_POST['dough_type_id'] ?: null,
                     ]);
                     $warning = bakery_order_reprice_note_price_change(
                         $db,
@@ -130,8 +149,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'delete':
                 try {
+                    $deleteId = (int)($_POST['id'] ?? 0);
+                    $auditBefore = bakery_audit_product_row($db, $deleteId) ?: [];
                     $stmt = $db->prepare("DELETE FROM products WHERE id = ?");
-                    $stmt->execute([$_POST['id']]);
+                    $stmt->execute([$deleteId]);
+                    bakery_audit_product_fields($db, $deleteId, $auditBefore, [], 'remove');
                     header("Location: products.php?success=deleted");
                     exit;
                 } catch (Exception $e) {
@@ -146,6 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('Invalid updates');
                     }
                     $oldById = [];
+                    $auditBeforeById = [];
                     $ids = [];
                     foreach ($updates as $update) {
                         $ids[] = (int)($update['id'] ?? 0);
@@ -157,6 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $oldStmt->execute($ids);
                         foreach ($oldStmt->fetchAll(PDO::FETCH_ASSOC) as $oldRow) {
                             $oldById[(int)$oldRow['id']] = $oldRow;
+                            $full = bakery_audit_product_row($db, (int)$oldRow['id']);
+                            if ($full) {
+                                $auditBeforeById[(int)$oldRow['id']] = $full;
+                            }
                         }
                     }
                     foreach ($updates as $update) {
@@ -185,6 +212,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     $db->commit();
+                    foreach ($updates as $update) {
+                        $id = (int)($update['id'] ?? 0);
+                        if (!isset($auditBeforeById[$id])) {
+                            continue;
+                        }
+                        bakery_audit_product_fields($db, $id, $auditBeforeById[$id], [
+                            'name' => $update['name'],
+                            'description' => $update['description'],
+                            'price' => $update['price'],
+                            'weight_grams' => $update['weight_grams'] ?: null,
+                            'dough_type_id' => $update['dough_type_id'] ?: null,
+                        ]);
+                    }
                     $warnings = [];
                     foreach ($updates as $update) {
                         $id = (int)($update['id'] ?? 0);

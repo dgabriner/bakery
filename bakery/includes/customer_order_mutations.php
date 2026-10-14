@@ -9,6 +9,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/audit_log.php';
+
 /**
  * Single write path for standing_orders rows. Quantity ≤ 0 deletes the row.
  * Normalizes Sunday (0 → 7) and clears a legacy day-0 duplicate when writing day 7.
@@ -21,6 +23,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         ? bakery_normalize_standing_day($dayOfWeek)
         : (((int)$dayOfWeek === 0) ? 7 : (int)$dayOfWeek);
     $qty = (int)$qty;
+    $auditBefore = bakery_audit_standing_snapshot($db, $customerId, $productId, $dayOfWeek);
 
     // Reuse prepared statements across a request (copy-week / bulk save hot paths).
     static $boundDb = null;
@@ -51,6 +54,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
             }
             $deleteLegacySundayStmt->execute([$customerId, $productId]);
         }
+        bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
         return;
     }
 
@@ -60,6 +64,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
             'DELETE FROM standing_orders WHERE customer_id = ? AND product_id = ? AND day_of_week ' . $clause['sql']
         );
         $stmt->execute(array_merge([$customerId, $productId], $clause['values']));
+        bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
         return;
     }
 
@@ -69,6 +74,7 @@ function bakery_standing_order_upsert(PDO $db, int $customerId, int $productId, 
         );
     }
     $deleteExactStmt->execute([$customerId, $productId, $dayOfWeek]);
+    bakery_audit_standing_finish($db, $customerId, $productId, $dayOfWeek, $qty, $auditBefore);
 }
 
 /**
@@ -939,11 +945,8 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
     $product = bakery_customer_product_row($db, $productId);
 
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : $regularQty;
 
     if ($quantity > 0) {
@@ -969,6 +972,7 @@ function bakery_customer_save_daily_line(PDO $db, array $customer, $date, $produ
     if ($quantity <= 0) {
         bakery_daily_order_block_standing_fill_if_empty($db, (int)$dailyOrderId);
     }
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
 
     if ($oldQty !== $quantity) {
         bakery_portal_record_event($db, BAKERY_OP_PORTAL_DAILY_CHANGED,
@@ -1029,7 +1033,13 @@ function bakery_customer_skip_delivery(PDO $db, array $customer, $date, $note = 
 
     $daily = bakery_customer_daily_order_row($db, $customerId, $date);
     if ($daily && !$state['locked']) {
+        $skippedLines = $db->prepare('SELECT id, quantity, unit_price FROM daily_order_items WHERE daily_order_id = ?');
+        $skippedLines->execute([(int)$daily['id']]);
+        $skippedRows = $skippedLines->fetchAll(PDO::FETCH_ASSOC);
         $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id = ?')->execute([(int)$daily['id']]);
+        foreach ($skippedRows as $skippedRow) {
+            bakery_audit_daily_line_diff($db, $skippedRow, null);
+        }
         $db->prepare(
             'UPDATE daily_orders SET total_amount = 0, notes = ? WHERE id = ?'
         )->execute(['Customer skipped delivery', (int)$daily['id']]);

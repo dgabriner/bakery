@@ -13,6 +13,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
+require_once __DIR__ . '/includes/audit_log.php';
 require_once __DIR__ . '/includes/product_inventory.php';
 require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/customer_notifications.php';
@@ -567,6 +568,11 @@ function bakery_delivery_repair_missing_item_prices(PDO $db, int $dailyOrderId):
         if ($price > 0) {
             $oldPrice = $item['unit_price'] === null ? null : round((float)$item['unit_price'], 2);
             $update->execute([$price, round((int)$item['quantity'] * $price, 2), (int)$item['id'], $dailyOrderId]);
+            bakery_audit_daily_line_diff(
+                $db,
+                ['id' => (int)$item['id'], 'quantity' => $item['quantity'], 'unit_price' => $oldPrice],
+                ['id' => (int)$item['id'], 'quantity' => $item['quantity'], 'unit_price' => $price]
+            );
             bakery_delivery_log_price_repair($db, $order, $dailyOrderId, $item, $oldPrice, $price, $source);
         }
     }
@@ -591,6 +597,11 @@ function bakery_delivery_enforce_no_charge_prices(PDO $db, int $dailyOrderId, ar
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
         $oldPrice = $item['unit_price'] === null ? null : round((float)$item['unit_price'], 2);
         $update->execute([(int)$item['id'], $dailyOrderId]);
+        bakery_audit_daily_line_diff(
+            $db,
+            ['id' => (int)$item['id'], 'quantity' => $item['quantity'], 'unit_price' => $oldPrice],
+            ['id' => (int)$item['id'], 'quantity' => $item['quantity'], 'unit_price' => 0]
+        );
         if ($oldPrice !== null && abs($oldPrice) < 0.005) {
             continue;
         }
@@ -635,7 +646,7 @@ function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPi
         ? 'is_no_charge'
         : '0 AS is_no_charge';
     $itemStmt = $db->prepare(
-        "SELECT id, quantity, {$noChargeSelect} FROM daily_order_items WHERE daily_order_id = ?"
+        "SELECT id, quantity, unit_price, {$noChargeSelect} FROM daily_order_items WHERE daily_order_id = ?"
     );
     $itemStmt->execute([$dailyOrderId]);
     $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -653,6 +664,11 @@ function bakery_apply_driver_price(PDO $db, int $dailyOrderId, float $pricePerPi
         }
         $lineTotal = round($quantity * $pricePerPiece, 2);
         $updateStmt->execute([$pricePerPiece, $lineTotal, (int)$item['id'], $dailyOrderId]);
+        bakery_audit_daily_line_diff(
+            $db,
+            ['id' => (int)$item['id'], 'quantity' => $quantity, 'unit_price' => $item['unit_price'] ?? null],
+            ['id' => (int)$item['id'], 'quantity' => $quantity, 'unit_price' => $pricePerPiece]
+        );
         $orderTotal += $lineTotal;
     }
 

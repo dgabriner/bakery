@@ -9,6 +9,7 @@ require_once 'includes/zones_catalog.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/sf_baker.php';
 require_once 'includes/billing_aging.php';
+require_once 'includes/audit_log.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
@@ -44,6 +45,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     $newId = (int)$db->lastInsertId();
                     if ($newId > 0) {
+                        bakery_audit_pricing_tier(
+                            $db,
+                            $newId,
+                            null,
+                            in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
+                            'create'
+                        );
                         header('Location: customer_record.php?customer_id=' . $newId . '&created=1');
                     } else {
                         header('Location: customers.php?success=created');
@@ -58,6 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
                     $zoneId = bakery_zone_id_for_name($db, $zoneName);
+                    $customerId = (int)($_POST['id'] ?? 0);
+                    $oldTierStmt = $db->prepare('SELECT pricing_tier FROM customers WHERE id = ?');
+                    $oldTierStmt->execute([$customerId]);
+                    $oldTier = $oldTierStmt->fetchColumn();
+                    $newTier = in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail';
                     $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ?, portal_phone = ?, portal_code = ?, portal_enabled = ?, sf_baker_enabled = ?, pricing_tier = ?, payment_collection = ? WHERE id = ?");
                     $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
                     $stmt->execute([
@@ -74,10 +87,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $portalCode !== '' ? $portalCode : null,
                         !empty($_POST['portal_enabled']) ? 1 : 0,
                         !empty($_POST['sf_baker_enabled']) ? 1 : 0,
-                        in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
+                        $newTier,
                         in_array($_POST['payment_collection'] ?? '', ['cod', 'signature'], true) ? $_POST['payment_collection'] : 'cod',
-                        $_POST['id']
+                        $customerId
                     ]);
+                    bakery_audit_pricing_tier($db, $customerId, $oldTier === false ? null : $oldTier, $newTier);
                     header("Location: customers.php?success=updated");
                     exit;
                 } catch (Exception $e) {
@@ -126,6 +140,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!in_array($field, $allowed_fields)) {
                         throw new Exception("Invalid field");
                     }
+
+                    $oldTier = null;
+                    if ($field === 'pricing_tier') {
+                        $oldTierStmt = $db->prepare('SELECT pricing_tier FROM customers WHERE id = ?');
+                        $oldTierStmt->execute([(int)$id]);
+                        $oldTier = $oldTierStmt->fetchColumn();
+                    }
                     
                     if ($field === 'zone') {
                         $zoneName = empty($value) ? null : $value;
@@ -135,6 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         $stmt = $db->prepare("UPDATE customers SET $field = ? WHERE id = ?");
                         $stmt->execute([empty($value) ? null : $value, $id]);
+                    }
+                    if ($field === 'pricing_tier') {
+                        bakery_audit_pricing_tier($db, (int)$id, $oldTier === false ? null : $oldTier, empty($value) ? null : $value);
                     }
                     
                     echo json_encode(['success' => true]);

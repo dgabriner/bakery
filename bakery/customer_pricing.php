@@ -4,6 +4,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/customer_portal.php';
+require_once __DIR__ . '/includes/audit_log.php';
 bakery_ensure_portal_schema($db);
 
 $page_title = bakery_t('page.customer_pricing');
@@ -17,27 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         exit;
     }
 
-    $upsert = $db->prepare(
-        'INSERT INTO customer_product_prices (customer_id, product_id, unit_price)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE unit_price = VALUES(unit_price)'
-    );
-    $delete = $db->prepare(
-        'DELETE FROM customer_product_prices WHERE customer_id = ? AND product_id = ?'
-    );
-
-    foreach ($prices as $row) {
-        $productId = (int)($row['product_id'] ?? 0);
-        $price = trim((string)($row['unit_price'] ?? ''));
-        if ($productId <= 0) {
-            continue;
-        }
-        if ($price === '') {
-            $delete->execute([$customerId, $productId]);
-        } else {
-            $upsert->execute([$customerId, $productId, (float)$price]);
-        }
-    }
+    bakery_save_customer_custom_prices($db, $customerId, $prices);
 
     echo json_encode(['success' => true]);
     exit;

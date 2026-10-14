@@ -533,6 +533,11 @@ function bakery_order_reprice_write_lines(PDO $db, array $rows, ?array $user, st
         $logRow['line_id'] = $lineId;
         $logRow['order_id'] = $orderId;
         bakery_order_reprice_log($db, $logRow, $user, $oldPrice, $newPrice, $source);
+        bakery_audit_daily_line_diff(
+            $db,
+            ['id' => $lineId, 'unit_price' => $oldPrice],
+            ['id' => $lineId, 'unit_price' => $newPrice]
+        );
     }
     foreach (array_keys($orderIds) as $orderId) {
         bakery_order_reprice_recompute($db, (int)$orderId);
