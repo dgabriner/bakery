@@ -72,12 +72,32 @@ driver_photo_assert(
         && strpos($script, 'function useNativeCamera()') !== false
 );
 driver_photo_assert(
-    'the first stop tap opens the native camera picker synchronously',
+    'stop open shows Take / Library / Skip without auto-launching the camera',
     strpos($script, 'function openNativeCameraPicker()') !== false
-        && strpos($script, 'autoOpenCamera: true') !== false
+        && strpos($script, 'autoOpenCamera: false') !== false
         && strpos($script, "opts.autoOpenCamera && startStep === 'photo'") !== false
         && strpos($script, 'input.click();') !== false
-        && strpos($page, 'openStopDeliveryFromEl(stop, { autoOpenCamera: true })') !== false
+        && strpos($page, 'openStopDeliveryFromEl(stop, { autoOpenCamera: false })') !== false
+        && strpos($script, "setStatus(i18n('native_camera_hint'), '');") !== false
+);
+driver_photo_assert(
+    'Take photo still opens the native picker synchronously on tap',
+    strpos($script, "\$('deliveryFilePickerBtn').addEventListener('click'") !== false
+        && strpos(driver_photo_section($script, "\$('deliveryFilePickerBtn').addEventListener('click'", "\$('deliveryGalleryPickerBtn').addEventListener('click'"), 'openNativeCameraPicker()') !== false
+);
+driver_photo_assert(
+    'mobile photo actions stay in document flow so Library cannot clip off-screen',
+    strpos($styles, 'In-flow action stack') !== false
+        && strpos($styles, '#deliveryPhotoModal.delivery-step-photo .delivery-camera-controls') !== false
+        && strpos($styles, 'position: static') !== false
+        && strpos($styles, '#deliveryPhotoModal.delivery-step-photo .delivery-camera-controls .delivery-gallery-btn') !== false
+        && strpos($styles, 'overflow-y: auto') !== false
+        && strpos($styles, 'touch-action: pan-y') !== false
+);
+driver_photo_assert(
+    'viewport height re-syncs after OS camera returns',
+    strpos($script, 'function syncPhotoModalViewportHeight()') !== false
+        && strpos($script, "visualViewport.addEventListener('resize', syncPhotoModalViewportHeight)") !== false
 );
 driver_photo_assert(
     'driver session refresh returns and applies the current CSRF token',

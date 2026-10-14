@@ -314,17 +314,26 @@
     return window.innerWidth <= 768;
   }
 
-  function lockPhotoModalViewport() {
+  function syncPhotoModalViewportHeight() {
     if (!usesCompactCapture()) return;
     var modal = $('deliveryPhotoModal');
-    if (!modal) return;
-    state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
-    document.body.style.top = '-' + state.scrollLockY + 'px';
+    if (!modal || !document.body.classList.contains('photo-mode-open')) return;
     var height = window.innerHeight;
     if (window.visualViewport && window.visualViewport.height > 0) {
       height = Math.round(window.visualViewport.height);
     }
     modal.style.setProperty('--photo-modal-locked-height', height + 'px');
+  }
+
+  function lockPhotoModalViewport() {
+    if (!usesCompactCapture()) return;
+    var modal = $('deliveryPhotoModal');
+    if (!modal) return;
+    if (!document.body.style.top) {
+      state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+      document.body.style.top = '-' + state.scrollLockY + 'px';
+    }
+    syncPhotoModalViewportHeight();
   }
 
   function unlockPhotoModalViewport() {
@@ -1977,8 +1986,11 @@
     } else {
       // goToStep('photo') starts the camera; other steps keep it off.
       goToStep(startStep);
+      // Do not auto-open the native camera. Drivers need Take / Library / Skip
+      // as peer choices; auto-launch hid Library on short screens and forced
+      // cancel-or-shoot. Take still opens the picker synchronously on tap.
       if (opts.autoOpenCamera && startStep === 'photo' && usesCompactCapture()) {
-        openNativeCameraPicker();
+        setStatus(i18n('native_camera_hint'), '');
       }
     }
     refreshRouteSession().then(function () {
@@ -2120,7 +2132,7 @@
       assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
       startStep: btn.getAttribute('data-start-step') || 'photo',
-      autoOpenCamera: true
+      autoOpenCamera: false
     });
   }
 
@@ -2333,4 +2345,11 @@
   // as it resumes, before the driver continues the photo-to-invoice workflow.
   window.addEventListener('focus', keepRouteSessionAlive);
   window.addEventListener('pageshow', keepRouteSessionAlive);
+  // Returning from the OS camera or keyboard can shrink the visual viewport.
+  // Re-sync locked height so Take / Library / Skip stay on-screen.
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncPhotoModalViewportHeight);
+    window.visualViewport.addEventListener('scroll', syncPhotoModalViewportHeight);
+  }
+  window.addEventListener('resize', syncPhotoModalViewportHeight);
 })();
