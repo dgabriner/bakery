@@ -47,6 +47,30 @@ foreach (['061_surveys.sql', '062_surveys_custom.sql'] as $ddlFile) {
 require_once __DIR__ . '/../includes/twilio_config.php';
 require_once __DIR__ . '/../includes/text_comms.php';
 require_once __DIR__ . '/../includes/surveys.php';
+require_once __DIR__ . '/../includes/auth.php';
+
+/**
+ * @return array<string, string>
+ */
+function survey_db_write_fingerprint(PDO $db): array
+{
+    $out = [];
+    $tables = $db->query('SHOW FULL TABLES')->fetchAll(PDO::FETCH_NUM);
+    foreach ($tables as $table) {
+        $name = (string)($table[0] ?? '');
+        $kind = (string)($table[1] ?? '');
+        if ($name === '' || !preg_match('/^[A-Za-z0-9_]+$/', $name)) {
+            continue;
+        }
+        if ($kind !== '' && stripos($kind, 'BASE TABLE') === false) {
+            continue;
+        }
+        $sum = $db->query('CHECKSUM TABLE `' . $name . '`')->fetch(PDO::FETCH_ASSOC);
+        $out[$name] = (string)($sum['Checksum'] ?? '');
+    }
+    ksort($out);
+    return $out;
+}
 
 $GLOBALS['bakery_text_force_record_only'] = true;
 
@@ -64,6 +88,10 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
 
 $surveyIds = [];
 $messageIds = [];
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 
 try {
     // ---- Schema -------------------------------------------------------------
@@ -324,6 +352,43 @@ try {
     $assert(substr_count($surveyPhp, 'bakery_survey_dual_hub_links') === 1, 'creating hub rows happens in one POST path');
     $assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');
     $assert(strpos($routeOrderRender, 'bakery_survey_dual_hub_existing') !== false, 'route-order sibling link is a lookup');
+
+    $commsPage = (string)file_get_contents(dirname(__DIR__) . '/text_comms.php');
+    $assert(strpos($commsPage, 'texts.survey_today_create') !== false, 'Survey Center offers a Create today link button');
+    $assert(substr_count($commsPage, 'bakery_survey_dual_hub_links') === 2, 'hub rows are created only by the send POST and the today-link POST');
+    $getRegion = substr($commsPage, (int)strpos($commsPage, 'Coverage radar'));
+    $assert(strpos($getRegion, 'bakery_survey_dual_hub_links') === false, 'the Survey Center view does not mint hub rows');
+
+    if (isset($todaySurvey['id'])) {
+        $db->prepare('DELETE FROM surveys WHERE id = ?')->execute([(int)$todaySurvey['id']]);
+    }
+    $_SESSION['user_id'] = 1;
+    $_SESSION['user_email'] = 'survey-get@example.test';
+    $_SESSION['user_display_name'] = 'Survey Get';
+    $_SESSION['user_role_slug'] = 'administrator';
+    $_SESSION['auth_login_at'] = time();
+    $_SESSION['auth_last_activity'] = time();
+    $_SESSION['login_audit_id'] = 1;
+    $_SESSION['csrf_token'] = 'survey-get-csrf';
+    $_GET = ['view' => 'surveys'];
+    $_POST = [];
+    $_REQUEST = ['view' => 'surveys'];
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_SERVER['PHP_SELF'] = '/bakery/text_comms.php';
+    $_SERVER['REQUEST_URI'] = '/bakery/text_comms.php?view=surveys';
+    $beforeGet = survey_db_write_fingerprint($db);
+    ob_start();
+    include dirname(__DIR__) . '/text_comms.php';
+    $surveyCenterHtml = (string)ob_get_clean();
+    $afterGet = survey_db_write_fingerprint($db);
+    $changedTables = [];
+    foreach ($beforeGet as $tableName => $checksum) {
+        if (($afterGet[$tableName] ?? '') !== $checksum) {
+            $changedTables[] = $tableName;
+        }
+    }
+    $assert($changedTables === [], 'a GET of text_comms.php?view=surveys writes nothing' . ($changedTables === [] ? '' : ' (' . implode(', ', $changedTables) . ')'));
+    $assert(strpos($surveyCenterHtml, 'Create today link') !== false, 'GET shows Create today link without inserting a hub');
     } catch (Throwable $e) {
     echo 'FAIL  unexpected exception: ' . $e->getMessage() . "\n";
     $fail++;

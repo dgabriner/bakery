@@ -4798,6 +4798,7 @@ return [
     'texts.not_connected' => 'No conectado, no se entregó nada',
     'texts.survey_today_link' => 'Enlace de encuesta de hoy',
     'texts.survey_today_help' => 'Los textos de la mañana pueden llevar este enlace de hoy. Vence al final del día.',
+    'texts.survey_today_create' => 'Crear enlace de hoy',
     'survey.token_expired_title' => 'El enlace de la encuesta venció',
     'survey.token_expired_body' => 'Este enlace de encuesta ya venció. Pide a la panadería que envíe uno nuevo.',
 

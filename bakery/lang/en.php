@@ -4801,6 +4801,7 @@ return [
     'texts.not_connected' => 'Not connected, nothing delivered',
     'texts.survey_today_link' => 'Today survey link',
     'texts.survey_today_help' => 'Morning texts can carry this link for today. It expires at the end of the day.',
+    'texts.survey_today_create' => 'Create today link',
     'survey.token_expired_title' => 'Survey link expired',
     'survey.token_expired_body' => 'This survey link has expired. Ask the bakery to send a new one.',
 

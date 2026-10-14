@@ -534,7 +534,8 @@ $keys = [
 $tcSrc = (string)file_get_contents($root . '/text_comms.php');
 $assert(strpos($tcSrc, 'survey_step1_title') !== false, 'Survey Center shows step 1 lock-stores card');
 $assert(strpos($tcSrc, 'survey_step2_title') !== false, 'Survey Center shows step 2 set-order card');
-$assert(strpos($tcSrc, 'bakery_survey_dual_hub_links') !== false, 'coverage board mints dual hub links');
+$assert(strpos($tcSrc, 'bakery_survey_dual_hub_existing') !== false, 'coverage board reads hub links without creating them');
+$assert(strpos($tcSrc, "=== 'create_today_link'") !== false, 'today link is created by an explicit POST');
 $assert(strpos($surveyPhp, 'sibling_to_order') !== false, 'store-verify page links forward to order');
 $assert(strpos((string)file_get_contents($root . '/includes/survey_route_order_render.php'), 'sibling_to_verify') !== false, 'order page links back to lock-stores');
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
