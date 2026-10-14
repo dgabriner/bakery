@@ -7,6 +7,9 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/actor_identity.php';
+require_once __DIR__ . '/admin_signin_alerts.php';
+
 function bakery_login_audit_ready(PDO $db): bool
 {
     return function_exists('table_exists') && table_exists($db, 'login_audit');
@@ -38,17 +41,36 @@ function bakery_login_audit_record_activity(PDO $db, int $auditId, string $event
                 $metadata[$key] = substr((string)$details[$key], 0, 100);
             }
         }
-        $stmt = $db->prepare(
-            'INSERT INTO login_audit_activity (login_audit_id, event_type, page_path, page_title, client_metadata)
-             VALUES (?, ?, ?, ?, ?)'
-        );
-        $stmt->execute([
-            $auditId,
-            $eventType,
-            $pagePath ?: null,
-            $pageTitle ?: null,
-            $metadata ? json_encode($metadata, JSON_UNESCAPED_UNICODE) : null,
-        ]);
+        bakery_ensure_actor_identity_schema($db);
+        $actorType = bakery_login_audit_actor_type_for_session($db);
+        $hasActorType = function_exists('column_exists') && column_exists($db, 'login_audit_activity', 'actor_type');
+        if ($hasActorType) {
+            $stmt = $db->prepare(
+                'INSERT INTO login_audit_activity
+                 (login_audit_id, event_type, page_path, page_title, client_metadata, actor_type)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $auditId,
+                $eventType,
+                $pagePath ?: null,
+                $pageTitle ?: null,
+                $metadata ? json_encode($metadata, JSON_UNESCAPED_UNICODE) : null,
+                $actorType,
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                'INSERT INTO login_audit_activity (login_audit_id, event_type, page_path, page_title, client_metadata)
+                 VALUES (?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $auditId,
+                $eventType,
+                $pagePath ?: null,
+                $pageTitle ?: null,
+                $metadata ? json_encode($metadata, JSON_UNESCAPED_UNICODE) : null,
+            ]);
+        }
     } catch (Throwable $e) {
         error_log('Login audit activity record error: ' . $e->getMessage());
     }
@@ -174,32 +196,168 @@ function bakery_login_audit_credential_context(string $credentialCode, string $a
     ];
 }
 
-function bakery_login_audit_record_failure(PDO $db, string $authType, string $principal = 'Unknown', string $credentialCode = ''): void
+function bakery_login_failure_limit(): int
+{
+    return 5;
+}
+
+function bakery_login_failure_window_minutes(): int
+{
+    return 15;
+}
+
+/** @return array{failures:int,limit:int,window_minutes:int,locked:bool} */
+function bakery_login_failure_pressure(PDO $db, string $authType): array
+{
+    $limit = bakery_login_failure_limit();
+    $window = bakery_login_failure_window_minutes();
+    $empty = ['failures' => 0, 'limit' => $limit, 'window_minutes' => $window, 'locked' => true];
+    bakery_ensure_login_audit_schema($db);
+    if (!bakery_login_audit_ready($db)) {
+        return $empty;
+    }
+    $ip = substr(trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')), 0, 64);
+    try {
+        $stmt = $db->prepare(
+            "SELECT COUNT(*) FROM login_audit
+             WHERE auth_type = ? AND outcome = 'failure' AND ip_address = ?
+               AND login_at >= DATE_SUB(NOW(), INTERVAL {$window} MINUTE)"
+        );
+        $stmt->execute([$authType === 'customer' ? 'customer' : 'staff', $ip]);
+        $failures = (int)$stmt->fetchColumn();
+        return [
+            'failures' => $failures,
+            'limit' => $limit,
+            'window_minutes' => $window,
+            'locked' => $failures >= $limit,
+        ];
+    } catch (Throwable $e) {
+        error_log('Login throttle lookup failed: ' . $e->getMessage());
+        return $empty;
+    }
+}
+
+/**
+ * Attempted account for a failed code. A code that matches nobody is "unknown".
+ * An explicit non-generic principal (such as a signup label) is kept.
+ *
+ * @return array{principal:string,user_id:?int,customer_id:?int,actor_type:string}
+ */
+function bakery_login_failure_subject(PDO $db, string $authType, string $credentialCode, string $fallbackPrincipal = ''): array
+{
+    $code = function_exists('bakery_normalize_login_code') ? bakery_normalize_login_code($credentialCode) : '';
+    $authType = $authType === 'customer' ? 'customer' : 'staff';
+    if ($code !== '' && $authType === 'customer'
+        && function_exists('table_exists') && table_exists($db, 'customers')
+        && function_exists('column_exists') && column_exists($db, 'customers', 'portal_code')) {
+        $stmt = $db->prepare('SELECT id, name FROM customers WHERE portal_code = ? LIMIT 1');
+        $stmt->execute([$code]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return [
+                'principal' => substr((string)$row['name'], 0, 255),
+                'user_id' => null,
+                'customer_id' => (int)$row['id'],
+                'actor_type' => 'customer',
+            ];
+        }
+    }
+    if ($code !== '' && $authType === 'staff'
+        && function_exists('table_exists') && table_exists($db, 'users')
+        && function_exists('column_exists') && column_exists($db, 'users', 'login_code')) {
+        $stmt = $db->prepare('SELECT id, display_name, is_bot FROM users WHERE login_code = ? LIMIT 1');
+        try {
+            $stmt->execute([$code]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $stmt = $db->prepare('SELECT id, display_name FROM users WHERE login_code = ? LIMIT 1');
+            $stmt->execute([$code]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                $row['is_bot'] = 0;
+            }
+        }
+        if ($row) {
+            $actor = bakery_actor_type_for_action([
+                'id' => (int)$row['id'],
+                'display_name' => (string)$row['display_name'],
+                'is_bot' => (int)($row['is_bot'] ?? 0),
+            ], null, null);
+            return [
+                'principal' => substr((string)$row['display_name'], 0, 255),
+                'user_id' => (int)$row['id'],
+                'customer_id' => null,
+                'actor_type' => $actor,
+            ];
+        }
+    }
+    $fallback = trim($fallbackPrincipal);
+    $generic = ['', 'unknown', 'Unknown', 'Staff login', 'Customer portal login'];
+    if (!in_array($fallback, $generic, true)) {
+        return [
+            'principal' => substr($fallback, 0, 255),
+            'user_id' => null,
+            'customer_id' => null,
+            'actor_type' => $authType === 'customer' ? 'customer' : 'human',
+        ];
+    }
+    return [
+        'principal' => 'unknown',
+        'user_id' => null,
+        'customer_id' => null,
+        'actor_type' => $authType === 'customer' ? 'customer' : 'human',
+    ];
+}
+
+function bakery_login_audit_actor_type_for_session(PDO $db): string
+{
+    $authType = (string)($_SESSION['login_audit_auth_type'] ?? '');
+    if ($authType === 'customer' || !empty($_SESSION['portal_customer_id'])) {
+        return 'customer';
+    }
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    $user = bakery_actor_user_with_bot_flag($db, $user);
+    return bakery_actor_type_for_action($user, (string)($user['role_slug'] ?? ''), null);
+}
+
+function bakery_login_audit_record_failure(PDO $db, string $authType, string $principal = 'unknown', string $credentialCode = ''): void
 {
     try {
         bakery_ensure_login_audit_schema($db);
+        bakery_ensure_actor_identity_schema($db);
         if (!bakery_login_audit_ready($db)) {
             return;
         }
+        $subject = bakery_login_failure_subject($db, $authType, $credentialCode, $principal);
+        $pressure = bakery_login_failure_pressure($db, $authType);
         $context = bakery_login_audit_request_context();
         $credential = bakery_login_audit_credential_context($credentialCode, $authType);
+        $hasActorType = function_exists('column_exists') && column_exists($db, 'login_audit', 'actor_type');
+        $actorColumn = $hasActorType ? ', actor_type' : '';
+        $actorPlaceholder = $hasActorType ? ', ?' : '';
         $stmt = $db->prepare(
             'INSERT INTO login_audit
-             (auth_type, principal, outcome, failure_reason, credential_method, credential_fingerprint, credential_suffix,
+             (auth_type, user_id, customer_id, principal, outcome, failure_reason, credential_method, credential_fingerprint, credential_suffix,
               ip_address, request_method, request_uri, referer, accept_language, forwarded_for, server_protocol,
-              server_port, session_id_hash, user_agent, browser, operating_system, device_type)
-             VALUES (?, ?, \'failure\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              server_port, session_id_hash, user_agent, browser, operating_system, device_type' . $actorColumn . ')
+             VALUES (?, ?, ?, ?, \'failure\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $actorPlaceholder . ')'
         );
-        $stmt->execute([
+        $values = [
             $authType === 'customer' ? 'customer' : 'staff',
-            substr(trim($principal) !== '' ? trim($principal) : 'Unknown', 0, 255),
-            'Invalid credentials',
+            $subject['user_id'],
+            $subject['customer_id'],
+            $subject['principal'],
+            $pressure['locked'] ? 'rate_limited' : 'Invalid credentials',
             $credential['method'], $credential['fingerprint'], $credential['suffix'],
             $context['ip_address'], $context['request_method'], $context['request_uri'], $context['referer'],
             $context['accept_language'], $context['forwarded_for'], $context['server_protocol'], $context['server_port'],
             $context['session_id_hash'], $context['user_agent'], $context['browser'], $context['operating_system'],
             $context['device_type'],
-        ]);
+        ];
+        if ($hasActorType) {
+            $values[] = $subject['actor_type'];
+        }
+        $stmt->execute($values);
     } catch (Throwable $e) {
         error_log('Login audit failure record error: ' . $e->getMessage());
     }
@@ -209,6 +367,7 @@ function bakery_login_audit_start(PDO $db, string $authType, array $identity): v
 {
     try {
         bakery_ensure_login_audit_schema($db);
+        bakery_ensure_actor_identity_schema($db);
         if (!bakery_login_audit_ready($db)) {
             return;
         }
@@ -221,19 +380,32 @@ function bakery_login_audit_start(PDO $db, string $authType, array $identity): v
             $metadata['impersonated_by_user_id'] = (int)$identity['impersonated_by_user_id'];
             $metadata['impersonated_by'] = (string)($identity['impersonated_by'] ?? 'SFAdmin');
         }
+        $actorUser = !empty($identity['user_id'])
+            ? bakery_actor_user_with_bot_flag($db, [
+                'id' => (int)$identity['user_id'],
+                'display_name' => (string)($identity['display_name'] ?? ''),
+                'role_slug' => $authType === 'customer' ? 'customer' : '',
+            ])
+            : null;
+        $actorType = $authType === 'customer'
+            ? 'customer'
+            : bakery_actor_type_for_action($actorUser, (string)($actorUser['role_slug'] ?? ''), null);
+        $hasActorType = function_exists('column_exists') && column_exists($db, 'login_audit', 'actor_type');
+        $actorColumn = $hasActorType ? ', actor_type' : '';
+        $actorPlaceholder = $hasActorType ? ', ?' : '';
         $stmt = $db->prepare(
             'INSERT INTO login_audit
              (auth_type, user_id, customer_id, principal, outcome, failure_reason, credential_method,
               credential_fingerprint, credential_suffix, login_at, last_seen_at, ip_address, request_method,
               request_uri, referer, accept_language, forwarded_for, server_protocol, server_port, session_id_hash,
-              user_agent, browser, operating_system, device_type, client_metadata)
-             VALUES (?, ?, ?, ?, \'success\', NULL, ?, ?, ?, COALESCE(?, NOW()), COALESCE(?, NOW()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              user_agent, browser, operating_system, device_type, client_metadata' . $actorColumn . ')
+             VALUES (?, ?, ?, ?, \'success\', NULL, ?, ?, ?, COALESCE(?, NOW()), COALESCE(?, NOW()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $actorPlaceholder . ')'
         );
         $credential = bakery_login_audit_credential_context((string)($identity['credential_code'] ?? ''), $authType);
         $loginAt = !empty($identity['login_at'])
             ? date('Y-m-d H:i:s', (int)$identity['login_at'])
             : null;
-        $stmt->execute([
+        $values = [
             $authType === 'customer' ? 'customer' : 'staff',
             !empty($identity['user_id']) ? (int)$identity['user_id'] : null,
             !empty($identity['customer_id']) ? (int)$identity['customer_id'] : null,
@@ -245,12 +417,19 @@ function bakery_login_audit_start(PDO $db, string $authType, array $identity): v
             $context['session_id_hash'], $context['user_agent'], $context['browser'], $context['operating_system'],
             $context['device_type'],
             json_encode($metadata, JSON_UNESCAPED_UNICODE),
-        ]);
+        ];
+        if ($hasActorType) {
+            $values[] = $actorType;
+        }
+        $stmt->execute($values);
         $_SESSION['login_audit_id'] = (int)$db->lastInsertId();
         $_SESSION['login_audit_auth_type'] = $authType === 'customer' ? 'customer' : 'staff';
         bakery_login_audit_record_activity($db, (int)$_SESSION['login_audit_id'], 'session_started', [
             'page_path' => $context['request_uri'] ?? null,
         ]);
+        if ($authType !== 'customer' && !empty($identity['user_id'])) {
+            bakery_admin_signin_consider($db, (int)$_SESSION['login_audit_id'], (int)$identity['user_id']);
+        }
     } catch (Throwable $e) {
         error_log('Login audit start error: ' . $e->getMessage());
     }

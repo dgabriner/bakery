@@ -6,6 +6,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/actor_identity.php';
+
 /** Event type slugs stored in operational_events.event_type */
 define('BAKERY_OP_DAILY_ORDER_GENERATED', 'daily_order_generated');
 define('BAKERY_OP_DEMAND_CONFIRMED', 'demand_confirmed');
@@ -66,24 +68,64 @@ function bakery_ensure_operational_events_schema(PDO $db): void
     $db->exec($sql);
 }
 
+/** Scripts whose current request is itself a driver's route, not a leftover filter. */
+function bakery_operational_route_context_scripts(): array
+{
+    return [
+        'driver.php',
+        'complete_delivery.php',
+        'driver_load.php',
+        'driver_assignment.php',
+        'driver_stops.php',
+        'route_closeout.php',
+        'upload_driver_photo.php',
+        'get_driver_orders.php',
+        'daily_route.php',
+        'driver_overview.php',
+    ];
+}
+
+function bakery_operational_request_driver_id(): int
+{
+    if (isset($_POST['driver_id']) && $_POST['driver_id'] !== '') {
+        return max(0, (int)$_POST['driver_id']);
+    }
+    if (isset($_GET['driver_id']) && $_GET['driver_id'] !== '') {
+        return max(0, (int)$_GET['driver_id']);
+    }
+    return 0;
+}
+
+/**
+ * Driver attached to a new timeline row.
+ * A route worker uses their own route. Everyone else gets a driver only when
+ * this request is a route screen that names that driver. A selected-driver
+ * session or cookie left over from an earlier screen is not this action.
+ */
 function bakery_operational_driver_id(): ?int
 {
     $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
-    if ($user && function_exists('bakery_is_driver_route_role')
-        && bakery_is_driver_route_role($user['role_slug'] ?? '')
-        && isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO
-        && function_exists('bakery_route_worker_driver_id')) {
-        $driverId = bakery_route_worker_driver_id($GLOBALS['db'], $user, date('Y-m-d'));
-        return $driverId > 0 ? $driverId : null;
+    $role = (string)($user['role_slug'] ?? '');
+    if ($user && function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($role)) {
+        if (isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO
+            && function_exists('bakery_route_worker_driver_id')) {
+            $driverId = (int)bakery_route_worker_driver_id($GLOBALS['db'], $user, date('Y-m-d'));
+            if ($driverId > 0) {
+                return $driverId;
+            }
+        }
+        if (!empty($user['driver_id'])) {
+            return (int)$user['driver_id'];
+        }
+        return null;
     }
-    if ($user && !empty($user['driver_id'])) {
-        return (int)$user['driver_id'];
+
+    $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? $_SERVER['PHP_SELF'] ?? ''));
+    if (!in_array($script, bakery_operational_route_context_scripts(), true)) {
+        return null;
     }
-    if (function_exists('bakery_get_selected_driver_id')) {
-        $selected = (int)bakery_get_selected_driver_id();
-        return $selected > 0 ? $selected : null;
-    }
-    return null;
+    $requestDriver = bakery_operational_request_driver_id();
+    return $requestDriver > 0 ? $requestDriver : null;
 }
 
 /**
@@ -170,9 +212,16 @@ function bakery_record_operational_event(PDO $db, string $eventType, string $sum
             $summary = substr($summary, 0, 497) . '...';
         }
 
+        bakery_ensure_actor_identity_schema($db);
         $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
         $actorUserId = $options['actor_user_id'] ?? ($user['id'] ?? null);
         $actorRole = $options['actor_role'] ?? ($user['role_slug'] ?? null);
+        $actorUser = $user;
+        if ($actorUserId && (!$actorUser || (int)($actorUser['id'] ?? 0) !== (int)$actorUserId)) {
+            $actorUser = ['id' => (int)$actorUserId, 'role_slug' => $actorRole];
+        }
+        $actorUser = bakery_actor_user_with_bot_flag($db, $actorUser);
+        $actorType = bakery_actor_type_for_action($actorUser, is_string($actorRole) ? $actorRole : null, $eventType);
 
         $driverId = array_key_exists('driver_id', $options)
             ? $options['driver_id']
@@ -185,15 +234,18 @@ function bakery_record_operational_event(PDO $db, string $eventType, string $sum
 
         $gps = is_array($options['gps'] ?? null) ? $options['gps'] : [];
 
+        $hasActorType = function_exists('column_exists') && column_exists($db, 'operational_events', 'actor_type');
+        $actorColumn = $hasActorType ? ', actor_type' : '';
+        $actorPlaceholder = $hasActorType ? ', ?' : '';
         $stmt = $db->prepare(
             'INSERT INTO operational_events (
                 event_type, operational_date, actor_user_id, actor_role, driver_id,
                 customer_id, daily_order_id, assignment_id, invoice_ref, product_id,
                 summary, metadata,
-                gps_latitude, gps_longitude, gps_accuracy_m, gps_status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                gps_latitude, gps_longitude, gps_accuracy_m, gps_status' . $actorColumn . '
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $actorPlaceholder . ')'
         );
-        $stmt->execute([
+        $values = [
             $eventType,
             $options['operational_date'] ?? null,
             $actorUserId,
@@ -210,7 +262,11 @@ function bakery_record_operational_event(PDO $db, string $eventType, string $sum
             $gps['longitude'] ?? null,
             $gps['accuracy_m'] ?? null,
             $gps['status'] ?? null,
-        ]);
+        ];
+        if ($hasActorType) {
+            $values[] = $actorType;
+        }
+        $stmt->execute($values);
 
         return (int)$db->lastInsertId();
     } catch (Throwable $e) {
@@ -312,9 +368,17 @@ function bakery_operational_event_category(string $eventType): string
 /**
  * @return list<array<string,mixed>>
  */
+function bakery_operational_timeline_view_limit(): int
+{
+    return 150;
+}
+
 function bakery_operational_timeline_fetch(PDO $db, array $filters = []): array
 {
-    $limit = max(1, min(500, (int)($filters['limit'] ?? 100)));
+    $export = !empty($filters['export']);
+    $requested = (int)($filters['limit'] ?? ($export ? 1000000 : 100));
+    $limit = $export ? max(1, $requested) : max(1, min(500, $requested));
+    $filters['sql_limit'] = $limit;
     $entries = [];
 
     if (bakery_operational_events_ready($db)) {
@@ -375,6 +439,11 @@ function bakery_operational_timeline_from_events(PDO $db, array $filters): array
         $params[] = $filters['until'];
     }
 
+    $sqlLimit = max(1, (int)($filters['sql_limit'] ?? 500));
+    $actorTypeSql = function_exists('column_exists') && column_exists($db, 'operational_events', 'actor_type')
+        ? ', oe.actor_type' : '';
+    $botSql = function_exists('column_exists') && column_exists($db, 'users', 'is_bot')
+        ? ', u.is_bot AS actor_is_bot' : '';
     $sql = '
         SELECT oe.id, oe.event_type, oe.operational_date, oe.occurred_at,
                oe.actor_user_id, oe.actor_role, oe.driver_id, oe.customer_id,
@@ -384,7 +453,7 @@ function bakery_operational_timeline_from_events(PDO $db, array $filters): array
                u.display_name AS actor_name,
                d.name AS driver_name,
                c.name AS customer_name,
-               p.name AS product_name
+               p.name AS product_name' . $actorTypeSql . $botSql . '
         FROM operational_events oe
         LEFT JOIN users u ON u.id = oe.actor_user_id
         LEFT JOIN drivers d ON d.id = oe.driver_id
@@ -392,7 +461,7 @@ function bakery_operational_timeline_from_events(PDO $db, array $filters): array
         LEFT JOIN products p ON p.id = oe.product_id
         WHERE ' . implode(' AND ', $where) . '
         ORDER BY oe.occurred_at DESC
-        LIMIT 500';
+        LIMIT ' . $sqlLimit;
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -424,6 +493,16 @@ function bakery_operational_timeline_from_events(PDO $db, array $filters): array
             'actor_user_id' => $row['actor_user_id'] !== null ? (int)$row['actor_user_id'] : null,
             'actor_name' => (string)($row['actor_name'] ?? ''),
             'actor_role' => (string)($row['actor_role'] ?? ''),
+            'actor_type' => bakery_actor_type_for_action(
+                [
+                    'id' => $row['actor_user_id'],
+                    'display_name' => (string)($row['actor_name'] ?? ''),
+                    'is_bot' => (int)($row['actor_is_bot'] ?? 0),
+                    'role_slug' => (string)($row['actor_role'] ?? ''),
+                ],
+                (string)($row['actor_role'] ?? ''),
+                $eventType
+            ),
             'driver_id' => $row['driver_id'] !== null ? (int)$row['driver_id'] : null,
             'driver_name' => (string)($row['driver_name'] ?? ''),
             'customer_id' => $row['customer_id'] !== null ? (int)$row['customer_id'] : null,
@@ -503,7 +582,7 @@ function bakery_operational_timeline_from_inventory(PDO $db, array $filters): ar
         LEFT JOIN customers c ON c.id = do.customer_id
         WHERE ' . implode(' AND ', $where) . '
         ORDER BY im.created_at DESC
-        LIMIT 500';
+        LIMIT ' . max(1, (int)($filters['sql_limit'] ?? 500));
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -635,7 +714,7 @@ function bakery_operational_timeline_from_photos(PDO $db, array $filters): array
         LEFT JOIN customers c ON c.id = dp.customer_id
         WHERE ' . implode(' AND ', $where) . '
         ORDER BY dp.created_at DESC
-        LIMIT 200';
+        LIMIT ' . max(1, (int)($filters['sql_limit'] ?? 200));
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -664,6 +743,7 @@ function bakery_operational_timeline_from_photos(PDO $db, array $filters): array
             'operational_date' => $row['delivery_date'],
             'summary' => $summary,
             'actor_name' => $driverName,
+            'actor_type' => 'human',
             'driver_id' => (int)$row['driver_id'],
             'driver_name' => $driverName,
             'customer_id' => $row['customer_id'] !== null ? (int)$row['customer_id'] : null,
@@ -687,6 +767,18 @@ function bakery_operational_timeline_from_photos(PDO $db, array $filters): array
 function bakery_operational_timeline_normalize_row(array $row): array
 {
     $row['actor_user_id'] = $row['actor_user_id'] ?? null;
+    if (empty($row['actor_type'])) {
+        $row['actor_type'] = bakery_actor_type_for_action(
+            [
+                'id' => $row['actor_user_id'],
+                'display_name' => (string)($row['actor_name'] ?? ''),
+                'is_bot' => (int)($row['actor_is_bot'] ?? 0),
+                'role_slug' => (string)($row['actor_role'] ?? ''),
+            ],
+            (string)($row['actor_role'] ?? ''),
+            (string)($row['event_type'] ?? '')
+        );
+    }
     $row['driver_id'] = $row['driver_id'] ?? null;
     $row['customer_id'] = $row['customer_id'] ?? null;
     $row['daily_order_id'] = $row['daily_order_id'] ?? null;
@@ -855,4 +947,35 @@ function bakery_operational_log_user_action(PDO $db, string $action, string $ent
             'legacy_details' => is_string($details) ? $details : $details,
         ],
     ]);
+}
+
+function bakery_operational_timeline_csv_headers(): array
+{
+    return ['occurred_at', 'actor_name', 'actor_type', 'actor_role', 'driver_name', 'event_type', 'summary', 'customer_name'];
+}
+
+function bakery_operational_timeline_csv_row(array $entry): array
+{
+    return [
+        (string)($entry['occurred_at'] ?? ''),
+        (string)($entry['actor_name'] ?? ''),
+        (string)($entry['actor_type'] ?? ''),
+        (string)($entry['actor_role'] ?? ''),
+        (string)($entry['driver_name'] ?? ''),
+        (string)($entry['event_type'] ?? ''),
+        (string)($entry['summary'] ?? ''),
+        (string)($entry['customer_name'] ?? ''),
+    ];
+}
+
+/**
+ * Full timeline export. The on-screen view stays capped; this does not.
+ *
+ * @param array<string,mixed> $filters
+ */
+function bakery_operational_timeline_export_rows(PDO $db, array $filters): array
+{
+    $filters['export'] = true;
+    $filters['limit'] = 1000000;
+    return bakery_operational_timeline_fetch($db, $filters);
 }

@@ -7,11 +7,13 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/user_activity.php';
 
 // Role and sign-in-code changes are administrator-only. Managers can run every
 // operational workspace module, but cannot change who has access to the app.
 bakery_require_role(['administrator']);
 bakery_ensure_login_code_column($db);
+bakery_ensure_actor_identity_schema($db);
 
 $page_title = bakery_t('page.users');
 $error = '';
@@ -44,6 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $email = strtolower(trim((string)($_POST['email'] ?? '')));
             $driverId = (int)($_POST['driver_id'] ?? 0);
             $isActive = isset($_POST['is_active']) ? 1 : 0;
+            $isBot = in_array($displayName, bakery_known_bot_display_names(), true) || isset($_POST['is_bot']) ? 1 : 0;
+            $hasBot = function_exists('column_exists') && column_exists($db, 'users', 'is_bot');
 
             if ($displayName === '') {
                 throw new Exception('Name is required.');
@@ -92,33 +96,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hash = password_hash($code, PASSWORD_DEFAULT);
 
             if ($action === 'create') {
-                $stmt = $db->prepare(
-                    'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
-                     VALUES (?, ?, ?, ?, ?, ?, 1)'
-                );
-                $stmt->execute([$email, $hash, $code, $displayName, (int)$roleId, $driverIdValue]);
+                if ($hasBot) {
+                    $stmt = $db->prepare(
+                        'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active, is_bot)
+                         VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+                    );
+                    $stmt->execute([$email, $hash, $code, $displayName, (int)$roleId, $driverIdValue, $isBot]);
+                } else {
+                    $stmt = $db->prepare(
+                        'INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, 1)'
+                    );
+                    $stmt->execute([$email, $hash, $code, $displayName, (int)$roleId, $driverIdValue]);
+                }
                 $id = (int)$db->lastInsertId();
                 $success = 'User created.';
             } else {
                 if ($id <= 0) {
                     throw new Exception('Invalid user.');
                 }
-                $stmt = $db->prepare(
-                    'UPDATE users
-                     SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
-                         role_id = ?, driver_id = ?, is_active = ?
-                     WHERE id = ?'
-                );
-                $stmt->execute([
-                    $email,
-                    $hash,
-                    $code,
-                    $displayName,
-                    (int)$roleId,
-                    $driverIdValue,
-                    $isActive,
-                    $id,
-                ]);
+                if ($hasBot) {
+                    $stmt = $db->prepare(
+                        'UPDATE users
+                         SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
+                             role_id = ?, driver_id = ?, is_active = ?, is_bot = ?
+                         WHERE id = ?'
+                    );
+                    $stmt->execute([
+                        $email,
+                        $hash,
+                        $code,
+                        $displayName,
+                        (int)$roleId,
+                        $driverIdValue,
+                        $isActive,
+                        $isBot,
+                        $id,
+                    ]);
+                } else {
+                    $stmt = $db->prepare(
+                        'UPDATE users
+                         SET email = ?, password_hash = ?, login_code = ?, display_name = ?,
+                             role_id = ?, driver_id = ?, is_active = ?
+                         WHERE id = ?'
+                    );
+                    $stmt->execute([
+                        $email,
+                        $hash,
+                        $code,
+                        $displayName,
+                        (int)$roleId,
+                        $driverIdValue,
+                        $isActive,
+                        $id,
+                    ]);
+                }
                 $success = 'User updated.';
             }
 
@@ -144,15 +176,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'deactivate') {
             $id = (int)($_POST['id'] ?? 0);
-            if ($id <= 0) {
-                throw new Exception('Invalid user.');
+            $reason = (string)($_POST['reason'] ?? 'admin');
+            $result = bakery_users_deactivate_account($db, $id, $reason);
+            if (empty($result['ok'])) {
+                throw new Exception((string)($result['error'] ?? 'Invalid user.'));
             }
-            $current = bakery_current_user();
-            if ($current && (int)$current['id'] === $id) {
-                throw new Exception('You cannot deactivate your own account.');
-            }
-            $stmt = $db->prepare('UPDATE users SET is_active = 0 WHERE id = ?');
-            $stmt->execute([$id]);
             $success = 'User deactivated.';
         } elseif ($action === 'activate') {
             $id = (int)($_POST['id'] ?? 0);
@@ -170,14 +198,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $roles = bakery_users_page_roles($db);
 $drivers = bakery_users_page_drivers($db);
+$botSelect = function_exists('column_exists') && column_exists($db, 'users', 'is_bot')
+    ? 'u.is_bot'
+    : '0 AS is_bot';
 $users = $db->query(
-    "SELECT u.id, u.email, u.login_code, u.display_name, u.driver_id, u.is_active,
+    "SELECT u.id, u.email, u.login_code, u.display_name, u.driver_id, u.is_active, {$botSelect},
             u.last_login_at, r.slug AS role_slug, r.name AS role_name, d.name AS driver_name
      FROM users u
      JOIN roles r ON r.id = u.role_id
      LEFT JOIN drivers d ON d.id = u.driver_id
      ORDER BY r.name, u.display_name"
 )->fetchAll(PDO::FETCH_ASSOC);
+$inactiveAccounts = bakery_users_inactive_accounts($db);
 
 $editId = (int)($_GET['edit'] ?? 0);
 $editUser = null;
@@ -248,6 +280,47 @@ require_once __DIR__ . '/includes/nav.php';
     <div class="users-alert success"><?php echo htmlspecialchars($success); ?></div>
   <?php endif; ?>
 
+  <div class="users-panel" style="margin-bottom: 1.5rem;">
+    <h2><?php bakery_te('users.inactive_title'); ?></h2>
+    <p class="lead"><?php bakery_te('users.inactive_lead'); ?></p>
+    <?php if (!$inactiveAccounts): ?>
+      <p class="users-muted"><?php bakery_te('users.inactive_none'); ?></p>
+    <?php else: ?>
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th><?php bakery_te('users.last_activity'); ?></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($inactiveAccounts as $quiet): ?>
+            <tr>
+              <td><strong><?php echo htmlspecialchars((string)$quiet['display_name']); ?></strong></td>
+              <td><?php echo htmlspecialchars((string)$quiet['role_name']); ?></td>
+              <td class="users-muted">
+                <?php echo $quiet['last_activity_at']
+                    ? htmlspecialchars((string)$quiet['last_activity_at'])
+                    : htmlspecialchars(bakery_t('users.never')); ?>
+              </td>
+              <td>
+                <form method="post" style="display:inline" onsubmit="return confirm('Deactivate this user?');">
+                  <?php echo bakery_csrf_field(); ?>
+                  <input type="hidden" name="action" value="deactivate">
+                  <input type="hidden" name="reason" value="inactive_60_days">
+                  <input type="hidden" name="id" value="<?php echo (int)$quiet['id']; ?>">
+                  <button type="submit" class="danger"><?php bakery_te('users.inactive_deactivate'); ?></button>
+                </form>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
   <div class="users-grid">
     <div class="users-panel">
       <h2>Staff</h2>
@@ -276,6 +349,9 @@ require_once __DIR__ . '/includes/nav.php';
               </td>
               <td>
                 <strong><?php echo htmlspecialchars($u['display_name']); ?></strong>
+                <?php if (!empty($u['is_bot'])): ?>
+                  <span class="users-badge"><?php bakery_te('actor.bot'); ?></span>
+                <?php endif; ?>
                 <?php if (bakery_is_driver_route_role($u['role_slug']) && !empty($u['driver_name'])): ?>
                   <div class="users-muted"><?php echo bakery_t($u['role_slug'] === 'driver_assistant' ? 'users.paired_driver' : 'users.driver'); ?>: <?php echo htmlspecialchars($u['driver_name']); ?></div>
                 <?php endif; ?>
@@ -367,6 +443,16 @@ require_once __DIR__ . '/includes/nav.php';
         <label for="email">Email (optional identifier)</label>
         <input type="email" id="email" name="email"
                value="<?php echo htmlspecialchars($editUser['email'] ?? ($_POST['email'] ?? '')); ?>">
+
+        <div class="row-check">
+          <input type="checkbox" id="is_bot" name="is_bot" value="1"
+            <?php
+            $botChecked = !empty($editUser['is_bot'])
+                || in_array((string)($editUser['display_name'] ?? ($_POST['display_name'] ?? '')), bakery_known_bot_display_names(), true);
+            echo $botChecked ? 'checked' : '';
+            ?>>
+          <label for="is_bot"><?php bakery_te('users.bot_account'); ?></label>
+        </div>
 
         <?php if ($editUser): ?>
           <div class="row-check">

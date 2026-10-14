@@ -19,6 +19,9 @@ define('BAKERY_SESSION_IDLE_SECONDS', 30 * 24 * 60 * 60); // 30 days idle
 define('BAKERY_SESSION_ABSOLUTE_SECONDS', 90 * 24 * 60 * 60); // 90 days maximum
 define('BAKERY_DRIVER_SESSION_IDLE_SECONDS', 60 * 24 * 60 * 60); // 60 days idle
 define('BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS', 180 * 24 * 60 * 60); // 180 days maximum
+// A delivery shift is about 12 hours. Idle time slides forward on each request
+// so a driver is not signed out between stops. Logout still ends the session.
+define('BAKERY_DRIVER_SHIFT_SECONDS', 12 * 60 * 60);
 define('BAKERY_DRIVER_TRUST_COOKIE', 'bakery_driver_trusted_device');
 define('BAKERY_DRIVER_TRUST_SECONDS', 400 * 24 * 60 * 60); // Browser-supported rolling maximum
 
@@ -199,22 +202,10 @@ function bakery_normalize_login_code($code) {
 /** Durable IP-based throttle backed by the login audit table. */
 function bakery_login_attempt_allowed(PDO $db, string $authType): bool
 {
-    if (!function_exists('bakery_login_audit_ready') || !bakery_login_audit_ready($db)) {
-        return false; // Fail closed until the durable audit table is installed.
-    }
-    $ip = substr(trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')), 0, 64);
-    try {
-        $stmt = $db->prepare(
-            "SELECT COUNT(*) FROM login_audit
-             WHERE auth_type = ? AND outcome = 'failure' AND ip_address = ?
-               AND login_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)"
-        );
-        $stmt->execute([$authType === 'customer' ? 'customer' : 'staff', $ip]);
-        return (int)$stmt->fetchColumn() < 5;
-    } catch (Throwable $e) {
-        error_log('Login throttle lookup failed: ' . $e->getMessage());
+    if (!function_exists('bakery_login_failure_pressure')) {
         return false;
     }
+    return !bakery_login_failure_pressure($db, $authType)['locked'];
 }
 
 /**
@@ -295,18 +286,40 @@ function bakery_upsert_code_user(PDO $db, array $user) {
     }
 
     $hash = password_hash($code, PASSWORD_DEFAULT);
-    $stmt = $db->prepare(
-        "INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, 1)
-         ON DUPLICATE KEY UPDATE
-           password_hash = VALUES(password_hash),
-           login_code = VALUES(login_code),
-           display_name = VALUES(display_name),
-           role_id = VALUES(role_id),
-           driver_id = VALUES(driver_id),
-           is_active = 1"
-    );
-    $stmt->execute([$email, $hash, $code, $name, (int)$roleId, $driverId]);
+    if (function_exists('bakery_ensure_actor_identity_schema')) {
+        bakery_ensure_actor_identity_schema($db);
+    }
+    $markBot = function_exists('column_exists') && column_exists($db, 'users', 'is_bot')
+        && (array_key_exists('is_bot', $user) || in_array($name, bakery_known_bot_display_names(), true));
+    if ($markBot) {
+        $isBot = (!empty($user['is_bot']) || in_array($name, bakery_known_bot_display_names(), true)) ? 1 : 0;
+        $stmt = $db->prepare(
+            "INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active, is_bot)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+             ON DUPLICATE KEY UPDATE
+               password_hash = VALUES(password_hash),
+               login_code = VALUES(login_code),
+               display_name = VALUES(display_name),
+               role_id = VALUES(role_id),
+               driver_id = VALUES(driver_id),
+               is_active = 1,
+               is_bot = VALUES(is_bot)"
+        );
+        $stmt->execute([$email, $hash, $code, $name, (int)$roleId, $driverId, $isBot]);
+    } else {
+        $stmt = $db->prepare(
+            "INSERT INTO users (email, password_hash, login_code, display_name, role_id, driver_id, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, 1)
+             ON DUPLICATE KEY UPDATE
+               password_hash = VALUES(password_hash),
+               login_code = VALUES(login_code),
+               display_name = VALUES(display_name),
+               role_id = VALUES(role_id),
+               driver_id = VALUES(driver_id),
+               is_active = 1"
+        );
+        $stmt->execute([$email, $hash, $code, $name, (int)$roleId, $driverId]);
+    }
     return true;
 }
 
@@ -642,6 +655,26 @@ function bakery_wants_json() {
     return in_array($script, $jsonScripts, true);
 }
 
+function bakery_slide_driver_session_cookie(): void
+{
+    if (PHP_SAPI === 'cli' || headers_sent() || session_status() !== PHP_SESSION_ACTIVE) {
+        return;
+    }
+    if (!bakery_is_driver_route_role($_SESSION['user_role_slug'] ?? '')) {
+        return;
+    }
+    $params = session_get_cookie_params();
+    $lifetime = max((int)($params['lifetime'] ?? 0), BAKERY_DRIVER_SHIFT_SECONDS);
+    setcookie(session_name(), session_id(), [
+        'expires' => time() + $lifetime,
+        'path' => ($params['path'] ?? '') !== '' ? $params['path'] : '/',
+        'domain' => (string)($params['domain'] ?? ''),
+        'secure' => (bool)($params['secure'] ?? false),
+        'httponly' => (bool)($params['httponly'] ?? true),
+        'samesite' => (string)($params['samesite'] ?? 'Lax'),
+    ]);
+}
+
 function bakery_touch_session() {
     $now = time();
     if (!isset($_SESSION['auth_login_at'])) {
@@ -649,7 +682,9 @@ function bakery_touch_session() {
     }
     $isDriver = bakery_is_driver_route_role($_SESSION['user_role_slug'] ?? '');
     $absoluteSeconds = $isDriver ? BAKERY_DRIVER_SESSION_ABSOLUTE_SECONDS : BAKERY_SESSION_ABSOLUTE_SECONDS;
-    $idleSeconds = $isDriver ? BAKERY_DRIVER_SESSION_IDLE_SECONDS : BAKERY_SESSION_IDLE_SECONDS;
+    $idleSeconds = $isDriver
+        ? max(BAKERY_DRIVER_SESSION_IDLE_SECONDS, BAKERY_DRIVER_SHIFT_SECONDS)
+        : BAKERY_SESSION_IDLE_SECONDS;
     if (($now - (int)$_SESSION['auth_login_at']) > $absoluteSeconds) {
         // A trusted driver phone can immediately rebuild a fresh PHP session.
         bakery_logout(false);
@@ -661,6 +696,9 @@ function bakery_touch_session() {
         return;
     }
     $_SESSION['auth_last_activity'] = $now;
+    if ($isDriver && !empty($_SESSION['user_id'])) {
+        bakery_slide_driver_session_cookie();
+    }
 }
 
 function bakery_driver_trusted_devices_ready(PDO $db): bool {
