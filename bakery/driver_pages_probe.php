@@ -68,7 +68,7 @@ try {
     step('bakery_json_for_html: ' . (function_exists('bakery_json_for_html') ? 'yes' : 'NO'));
 
     if (!function_exists('bakery_get_drivers')) {
-        throw new RuntimeException('common_functions.php is missing bakery_get_drivers — redeploy full ZIP');
+        throw new RuntimeException('common_functions.php is missing bakery_get_drivers. Redeploy full ZIP');
     }
 
     $drivers = bakery_get_drivers($db);

@@ -137,6 +137,12 @@
   position: relative;
 }
 
+.bakery-nav__alerts-toggle[hidden],
+.bakery-nav__alerts-panel[hidden],
+.bakery-nav__alerts-badge[hidden] {
+  display: none !important;
+}
+
 .bakery-nav__alerts-toggle:hover,
 .bakery-nav__alerts-toggle:focus-visible {
   background: rgba(255, 255, 255, 0.22);
@@ -656,6 +662,63 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+.bakery-nav--manager .bakery-nav__more {
+  position: relative;
+  min-width: 0;
+}
+
+.bakery-nav--manager .bakery-nav__more-toggle {
+  list-style: none;
+  width: 100%;
+  cursor: pointer;
+}
+
+.bakery-nav--manager .bakery-nav__more-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.bakery-nav--manager .bakery-nav__more-sheet {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(280px, calc(100vw - 24px));
+  max-height: min(70vh, 28rem);
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  background: #14343c;
+  box-shadow: 0 12px 28px rgba(8, 24, 28, 0.28);
+}
+
+.bakery-nav--manager .bakery-nav__more-link,
+.bakery-nav--manager .bakery-nav__more-sheet .bakery-nav__logout-btn,
+.bakery-nav--manager .bakery-nav__more-sheet .bakery-lang-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4fbf9;
+  font-size: 0.92rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.bakery-nav--manager .bakery-nav__more-group {
+  margin: 0.35rem 0 0;
+  color: rgba(244, 251, 249, 0.72);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .bakery-nav__label-short {
   display: none;
 }
@@ -717,6 +780,36 @@
   display: none;
 }
 
+.bakery-nav__clock {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.bakery-nav__clock-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  min-height: var(--sf-touch-min);
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+.bakery-nav__clock-btn--out {
+  background: #1f6b3a;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.bakery-nav__clock-btn--in {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f4fbf9;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 @media (max-width: 1180px) {
   .bakery-nav:not(.bakery-nav--focused) {
     z-index: 1100;
@@ -765,6 +858,7 @@
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__menu-toggle {
     display: inline-flex;
+    flex: 0 0 auto;
     min-height: var(--sf-touch-min);
     padding: var(--sf-space-2) 0.7rem;
   }
@@ -820,6 +914,7 @@
     align-items: center;
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     display: flex;
+    flex-wrap: wrap;
     gap: var(--sf-space-2);
     justify-content: space-between;
     padding: var(--sf-space-3) var(--sf-space-4);
@@ -1063,6 +1158,28 @@
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
+  .bakery-nav--manager .bakery-nav__alerts {
+    position: absolute;
+    right: 8px;
+    bottom: calc(100% + 8px);
+    z-index: 2;
+  }
+
+  .bakery-nav--focused .bakery-nav__alerts-panel {
+    top: auto;
+    bottom: calc(100% + 8px);
+  }
+
+  .bakery-nav--focused .bakery-nav__more-sheet .bakery-lang-switch--nav {
+    display: inline-flex;
+  }
+
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__manager-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+    display: none;
+  }
+
   .bakery-nav--manager .bakery-nav__more {
     position: relative;
     min-width: 0;
@@ -1221,6 +1338,36 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .bakery-nav__clock {
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .bakery-nav__clock-btn {
+    appearance: none;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 800;
+    min-height: var(--sf-touch-min);
+    padding: 4px 12px;
+    white-space: nowrap;
+  }
+
+  .bakery-nav__clock-btn--out {
+    background: #1f6b3a;
+    color: #fff;
+    font-size: 0.95rem;
+  }
+
+  .bakery-nav__clock-btn--in {
+    background: rgba(255, 255, 255, 0.14);
+    color: #f4fbf9;
+    font-size: 0.75rem;
+    font-weight: 700;
   }
 
   .bakery-nav__driver-bar .bakery-nav__date-hint {

@@ -515,7 +515,7 @@ function bakery_ops_render_return_banner(?array $returnTarget, string $attention
                 ? bakery_t('ops.back_to_date', ['label' => $label, 'date' => $dateBit])
                 : bakery_t('ops.back_to', ['label' => $label]);
         } else {
-            $backLabel = $dateBit !== '' ? ('Back to ' . $label . ' — ' . $dateBit) : ('Back to ' . $label);
+            $backLabel = $dateBit !== '' ? ('Back to ' . $label . ' - ' . $dateBit) : ('Back to ' . $label);
         }
         $html .= '<a class="ops-return-link" href="' . htmlspecialchars($returnTarget['href']) . '">'
             . htmlspecialchars($backLabel) . '</a>';

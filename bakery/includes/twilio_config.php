@@ -79,10 +79,26 @@ function twilio_credentials_look_sane(): bool
  * @param array  $form   Form fields for POST
  * @return array
  */
+/**
+ * Tests must never place a real Twilio HTTP call, even if credentials are present.
+ */
+function bakery_twilio_live_http_blocked(): bool
+{
+    if (defined('DB_NAME') && DB_NAME === 'bakerysf_test') {
+        return true;
+    }
+    $name = (string)(getenv('DB_NAME') ?: ($_ENV['DB_NAME'] ?? ''));
+    return $name === 'bakerysf_test';
+}
+
 function twilio_api_request(string $method, string $path, array $form = []): array
 {
     if (isset($GLOBALS['bakery_twilio_api_handler']) && is_callable($GLOBALS['bakery_twilio_api_handler'])) {
         return (array)call_user_func($GLOBALS['bakery_twilio_api_handler'], $method, $path, $form);
+    }
+
+    if (bakery_twilio_live_http_blocked()) {
+        throw new RuntimeException('Twilio live HTTP is blocked in tests');
     }
 
     if (!twilio_is_configured()) {

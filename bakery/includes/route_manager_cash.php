@@ -39,6 +39,7 @@ function route_manager_compute_cash_summary(array $deliveries, ?float $cashTurne
     $codDeliveredCount = 0;
     $cashRecordedCount = 0;
     $cashUnrecordedCount = 0;
+    $prepaidStopCount = 0;
 
     foreach ($deliveries as $delivery) {
         $status = $delivery['delivery_status'] ?? 'pending';
@@ -50,7 +51,12 @@ function route_manager_compute_cash_summary(array $deliveries, ?float $cashTurne
         $estimate = route_manager_estimate_amount($delivery);
         $totalSold += $estimate;
 
-        if ($payment !== 'cod') {
+        $prepaid = !empty($delivery['square_prepaid'])
+            && trim((string)($delivery['cod_override_reason'] ?? '')) === '';
+        if ($prepaid) {
+            $prepaidStopCount++;
+        }
+        if ($payment !== 'cod' || $prepaid) {
             continue;
         }
 
@@ -85,5 +91,6 @@ function route_manager_compute_cash_summary(array $deliveries, ?float $cashTurne
         'cash_turned_in' => $turnedIn,
         'cash_still_owed' => $stillOwed,
         'total_sold' => round($totalSold, 2),
+        'prepaid_stop_count' => $prepaidStopCount,
     ];
 }

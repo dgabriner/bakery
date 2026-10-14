@@ -7,6 +7,8 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/catalog_gaps.php';
+require_once 'includes/order_reprice.php';
+require_once 'includes/audit_log.php';
 bakery_ensure_portal_schema($db);
 
 // Set page title
@@ -14,19 +16,36 @@ $page_title = bakery_t('page.products');
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    bakery_require_csrf();
+    bakery_require_role(['administrator', 'manager']);
     if (isset($_POST['action'])) {
         switch ($_POST['action']) {
             case 'create':
                 try {
+                    $newPrice = $_POST['price'] === '' ? null : $_POST['price'];
+                    $zeroBlock = bakery_product_save_zero_price_block([], $newPrice, $_POST);
+                    if ($zeroBlock !== null) {
+                        $error = bakery_t($zeroBlock);
+                        break;
+                    }
                     $stmt = $db->prepare("INSERT INTO products (name, description, price, wholesale_price, weight_grams, dough_type_id) VALUES (?, ?, ?, ?, ?, ?)");
+                    $createdFields = [
+                        'name' => $_POST['name'],
+                        'description' => $_POST['description'],
+                        'price' => $newPrice,
+                        'wholesale_price' => empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
+                        'weight_grams' => $_POST['weight_grams'] ?: null,
+                        'dough_type_id' => $_POST['dough_type_id'] ?: null,
+                    ];
                     $stmt->execute([
-                        $_POST['name'],
-                        $_POST['description'],
-                        $_POST['price'] === '' ? null : $_POST['price'],
-                        empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
-                        $_POST['weight_grams'] ?: null,
-                        $_POST['dough_type_id'] ?: null // Convert empty string to null
+                        $createdFields['name'],
+                        $createdFields['description'],
+                        $createdFields['price'],
+                        $createdFields['wholesale_price'],
+                        $createdFields['weight_grams'],
+                        $createdFields['dough_type_id'],
                     ]);
+                    bakery_audit_product_fields($db, (int)$db->lastInsertId(), [], $createdFields, 'create');
                     header("Location: products.php?success=created");
                     exit;
                 } catch (Exception $e) {
@@ -36,20 +55,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'update':
                 try {
+                    $productId = (int)($_POST['id'] ?? 0);
+                    $oldStmt = $db->prepare('SELECT ' . bakery_product_editor_select_sql($db) . ' FROM products WHERE id = ?');
+                    $oldStmt->execute([$productId]);
+                    $oldProduct = $oldStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$oldProduct) {
+                        throw new RuntimeException('Product not found');
+                    }
+                    $auditBefore = bakery_audit_product_row($db, $productId) ?: [];
+                    $newPrice = bakery_product_editor_next_price($_POST, $oldProduct['price']);
+                    $newWholesale = bakery_product_editor_next_wholesale($_POST, $oldProduct['wholesale_price']);
+                    $zeroBlock = bakery_product_save_zero_price_block($oldProduct, $newPrice, $_POST);
+                    if ($zeroBlock !== null) {
+                        if (isset($_POST['inline']) && $_POST['inline'] === '1') {
+                            http_response_code(422);
+                            header('Content-Type: application/json');
+                            echo json_encode([
+                                'success' => false,
+                                'code' => 'zero_price_confirm',
+                                'message' => bakery_t($zeroBlock),
+                            ]);
+                            exit;
+                        }
+                        $error = bakery_t($zeroBlock);
+                        break;
+                    }
                     $stmt = $db->prepare("UPDATE products SET name = ?, description = ?, price = ?, wholesale_price = ?, weight_grams = ?, dough_type_id = ? WHERE id = ?");
                     $stmt->execute([
                         $_POST['name'],
                         $_POST['description'],
-                        $_POST['price'] === '' ? null : $_POST['price'],
-                        empty($_POST['wholesale_price']) ? null : $_POST['wholesale_price'],
+                        $newPrice,
+                        $newWholesale,
                         $_POST['weight_grams'] ?: null,
                         $_POST['dough_type_id'] ?: null, // Convert empty string to null
-                        $_POST['id']
+                        $productId
                     ]);
+                    bakery_audit_product_fields($db, $productId, $auditBefore, [
+                        'name' => $_POST['name'],
+                        'description' => $_POST['description'],
+                        'price' => $newPrice,
+                        'wholesale_price' => $newWholesale,
+                        'weight_grams' => $_POST['weight_grams'] ?: null,
+                        'dough_type_id' => $_POST['dough_type_id'] ?: null,
+                    ]);
+                    $warning = bakery_order_reprice_note_price_change(
+                        $db,
+                        $productId,
+                        $oldProduct['price'],
+                        $oldProduct['wholesale_price'],
+                        $newPrice,
+                        $newWholesale
+                    );
                     if (isset($_POST['inline']) && $_POST['inline'] === '1') {
                         header('Content-Type: application/json');
-                        echo json_encode(['success' => true]);
+                        echo json_encode(['success' => true, 'reprice_warning' => $warning]);
                         exit;
+                    }
+                    if ($warning) {
+                        $_SESSION['product_reprice_warnings'] = [$warning];
                     }
                     header("Location: products.php?success=updated");
                     exit;
@@ -64,10 +127,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
+            case 'reprice_open_orders':
+                $productId = (int)($_POST['product_id'] ?? 0);
+                $oldPrice = ($_POST['old_price'] ?? '') === '' ? null : $_POST['old_price'];
+                $oldWholesale = ($_POST['old_wholesale'] ?? '') === '' ? null : $_POST['old_wholesale'];
+                $result = bakery_order_reprice_apply_product(
+                    $db,
+                    $productId,
+                    $oldPrice,
+                    $oldWholesale,
+                    function_exists('bakery_current_user') ? bakery_current_user() : null,
+                    null,
+                    true
+                );
+                $_SESSION['product_reprice_result'] = [
+                    'ok' => !empty($result['ok']),
+                    'message' => (string)($result['message'] ?? ''),
+                ];
+                header('Location: products.php?reprice=1');
+                exit;
+
             case 'delete':
                 try {
+                    $deleteId = (int)($_POST['id'] ?? 0);
+                    $auditBefore = bakery_audit_product_row($db, $deleteId) ?: [];
                     $stmt = $db->prepare("DELETE FROM products WHERE id = ?");
-                    $stmt->execute([$_POST['id']]);
+                    $stmt->execute([$deleteId]);
+                    bakery_audit_product_fields($db, $deleteId, $auditBefore, [], 'remove');
                     header("Location: products.php?success=deleted");
                     exit;
                 } catch (Exception $e) {
@@ -78,6 +164,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'batch_update':
                 try {
                     $updates = json_decode($_POST['updates'], true);
+                    if (!is_array($updates)) {
+                        throw new RuntimeException('Invalid updates');
+                    }
+                    $oldById = [];
+                    $auditBeforeById = [];
+                    $ids = [];
+                    foreach ($updates as $update) {
+                        $ids[] = (int)($update['id'] ?? 0);
+                    }
+                    $ids = array_values(array_filter($ids));
+                    if ($ids !== []) {
+                        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                        $oldStmt = $db->prepare('SELECT ' . bakery_product_editor_select_sql($db) . " FROM products WHERE id IN ($placeholders)");
+                        $oldStmt->execute($ids);
+                        foreach ($oldStmt->fetchAll(PDO::FETCH_ASSOC) as $oldRow) {
+                            $oldById[(int)$oldRow['id']] = $oldRow;
+                            $full = bakery_audit_product_row($db, (int)$oldRow['id']);
+                            if ($full) {
+                                $auditBeforeById[(int)$oldRow['id']] = $full;
+                            }
+                        }
+                    }
+                    foreach ($updates as $update) {
+                        $id = (int)($update['id'] ?? 0);
+                        if (!isset($oldById[$id])) {
+                            continue;
+                        }
+                        $zeroBlock = bakery_product_save_zero_price_block($oldById[$id], $update['price'] ?? null, $_POST);
+                        if ($zeroBlock !== null) {
+                            $error = bakery_t($zeroBlock);
+                            break 2;
+                        }
+                    }
                     $db->beginTransaction();
                     
                     $stmt = $db->prepare("UPDATE products SET name = ?, description = ?, price = ?, weight_grams = ?, dough_type_id = ? WHERE id = ?");
@@ -93,6 +212,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     $db->commit();
+                    foreach ($updates as $update) {
+                        $id = (int)($update['id'] ?? 0);
+                        if (!isset($auditBeforeById[$id])) {
+                            continue;
+                        }
+                        bakery_audit_product_fields($db, $id, $auditBeforeById[$id], [
+                            'name' => $update['name'],
+                            'description' => $update['description'],
+                            'price' => $update['price'],
+                            'weight_grams' => $update['weight_grams'] ?: null,
+                            'dough_type_id' => $update['dough_type_id'] ?: null,
+                        ]);
+                    }
+                    $warnings = [];
+                    foreach ($updates as $update) {
+                        $id = (int)($update['id'] ?? 0);
+                        if (!isset($oldById[$id])) {
+                            continue;
+                        }
+                        $warning = bakery_order_reprice_note_price_change(
+                            $db,
+                            $id,
+                            $oldById[$id]['price'],
+                            $oldById[$id]['wholesale_price'],
+                            $update['price'],
+                            $oldById[$id]['wholesale_price']
+                        );
+                        if ($warning) {
+                            $warnings[] = $warning;
+                        }
+                    }
+                    if ($warnings !== []) {
+                        $_SESSION['product_reprice_warnings'] = $warnings;
+                    }
                     header("Location: products.php?success=batch_updated");
                     exit;
                 } catch (Exception $e) {
@@ -158,6 +311,16 @@ require_once 'includes/nav.php';
 
 // Get success message if any
 $success_message = '';
+$reprice_warnings = [];
+if (!empty($_SESSION['product_reprice_warnings']) && is_array($_SESSION['product_reprice_warnings'])) {
+    $reprice_warnings = $_SESSION['product_reprice_warnings'];
+    unset($_SESSION['product_reprice_warnings']);
+}
+$reprice_result = null;
+if (!empty($_SESSION['product_reprice_result']) && is_array($_SESSION['product_reprice_result'])) {
+    $reprice_result = $_SESSION['product_reprice_result'];
+    unset($_SESSION['product_reprice_result']);
+}
 if (isset($_GET['success'])) {
     switch ($_GET['success']) {
         case 'created':
@@ -263,6 +426,51 @@ foreach ($products as $product) {
         </div>
     <?php endif; ?>
 
+    <?php if (is_array($reprice_result) && !empty($reprice_result['message'])): ?>
+        <div class="<?php echo !empty($reprice_result['ok']) ? 'success-message' : 'error'; ?>">
+            <?php echo htmlspecialchars((string)$reprice_result['message']); ?>
+        </div>
+    <?php endif; ?>
+
+    <div id="repriceWarnings" class="reprice-warning" <?php echo $reprice_warnings === [] ? 'hidden' : ''; ?>>
+        <?php foreach ($reprice_warnings as $warning): ?>
+            <?php
+                $warningLines = is_array($warning['lines'] ?? null) ? $warning['lines'] : [];
+                if ($warningLines === []) {
+                    continue;
+                }
+            ?>
+            <form method="post" action="products.php" class="reprice-warning-form">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="reprice_open_orders">
+                <input type="hidden" name="product_id" value="<?php echo (int)($warning['product_id'] ?? 0); ?>">
+                <input type="hidden" name="old_price" value="<?php echo htmlspecialchars((string)($warning['old_price'] ?? ''), ENT_QUOTES); ?>">
+                <input type="hidden" name="old_wholesale" value="<?php echo htmlspecialchars((string)($warning['old_wholesale'] ?? ''), ENT_QUOTES); ?>">
+                <strong><?php echo htmlspecialchars(bakery_t('reprice.warn_title')); ?></strong>
+                <p><?php echo htmlspecialchars(bakery_t('reprice.warn_body', [
+                    'product' => (string)($warning['product_name'] ?? ''),
+                    'count' => (string)count($warningLines),
+                ])); ?></p>
+                <?php if (empty($warning['standing_orders_store_price'])): ?>
+                    <p><?php echo htmlspecialchars(bakery_t('reprice.warn_standing')); ?></p>
+                <?php endif; ?>
+                <ul>
+                    <?php foreach ($warningLines as $line): ?>
+                        <li><?php echo htmlspecialchars(bakery_t('reprice.warn_line', [
+                            'order' => (string)($line['order_id'] ?? ''),
+                            'date' => (string)($line['order_date'] ?? ''),
+                            'customer' => (string)($line['customer_name'] ?? ''),
+                            'qty' => (string)($line['quantity'] ?? ''),
+                            'old' => number_format((float)($line['old_unit_price'] ?? 0), 2, '.', ''),
+                            'new' => number_format((float)($line['new_unit_price'] ?? 0), 2, '.', ''),
+                        ])); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <button type="submit" class="btn-primary"><?php echo htmlspecialchars(bakery_t('reprice.action')); ?></button>
+            </form>
+        <?php endforeach; ?>
+    </div>
+
     <section class="catalog-summary" aria-label="Product catalog summary">
         <div class="summary-card">
             <span class="summary-label">Total products</span>
@@ -285,6 +493,13 @@ foreach ($products as $product) {
                     <span class="sr-only">Search products</span>
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
                     <input id="productSearch" type="search" placeholder="Search name or description" autocomplete="off">
+                </label>
+                <label class="select-field" for="priceFilter">
+                    <span class="sr-only"><?php echo htmlspecialchars(bakery_t('reprice.filter_price')); ?></span>
+                    <select id="priceFilter">
+                        <option value=""><?php echo htmlspecialchars(bakery_t('reprice.filter_all_prices')); ?></option>
+                        <option value="none"><?php echo htmlspecialchars(bakery_t('reprice.filter_no_price')); ?></option>
+                    </select>
                 </label>
                 <label class="select-field" for="doughTypeFilter">
                     <span class="sr-only">Filter by dough type</span>
@@ -347,6 +562,8 @@ foreach ($products as $product) {
                         data-name="<?php echo htmlspecialchars(strtolower($product['name']), ENT_QUOTES); ?>"
                         data-description="<?php echo htmlspecialchars((string)($product['description'] ?? ''), ENT_QUOTES); ?>"
                         data-price="<?php echo htmlspecialchars((string)($product['price'] ?? ''), ENT_QUOTES); ?>"
+                        data-no-price="<?php echo bakery_product_shows_in_no_price_filter($product) ? '1' : '0'; ?>"
+                        data-active="<?php echo bakery_product_is_active_row($product) ? '1' : '0'; ?>"
                         data-wholesale-price="<?php echo htmlspecialchars((string)($product['wholesale_price'] ?? ''), ENT_QUOTES); ?>"
                         data-weight="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>"
                         data-dough="<?php echo htmlspecialchars(empty($product['dough_type_id']) ? 'unassigned' : strtolower($product['dough_type_name']), ENT_QUOTES); ?>">
@@ -362,7 +579,7 @@ foreach ($products as $product) {
                             <label class="inline-number-control"><span aria-hidden="true">$</span><span class="sr-only">Price</span><input class="inline-product-control" data-field="price" type="number" value="<?php echo htmlspecialchars((string)($product['price'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="0.00"></label>
                         </td>
                         <td class="weight-cell">
-                            <label class="inline-number-control"><span class="sr-only">Weight in grams</span><input class="inline-product-control" data-field="weight_grams" type="number" value="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="—"><span aria-hidden="true">g</span></label>
+                            <label class="inline-number-control"><span class="sr-only">Weight in grams</span><input class="inline-product-control" data-field="weight_grams" type="number" value="<?php echo htmlspecialchars((string)($product['weight_grams'] ?? ''), ENT_QUOTES); ?>" min="0" step="0.01" placeholder="-"><span aria-hidden="true">g</span></label>
                         </td>
                         <td class="dough-type-cell">
                             <label class="sr-only" for="product-dough-<?php echo (int)$product['id']; ?>">Dough type</label>
@@ -395,7 +612,7 @@ foreach ($products as $product) {
         <div class="modal-content">
             <button class="close" type="button" onclick="hideProductModal()" aria-label="Close product form">&times;</button>
             <h2 id="modalTitle">Add New Product</h2>
-            <form id="productForm" method="POST">
+            <form id="productForm" method="POST" onsubmit="return confirmZeroProductPrice(this)">
                 <input type="hidden" name="action" value="create">
                 <input type="hidden" name="id" value="">
 
@@ -495,11 +712,56 @@ foreach ($products as $product) {
     <?php endif; ?>
 
     <script>
+        const zeroPriceConfirm = <?php echo json_encode(bakery_t('reprice.zero_save_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+        const repriceCopy = <?php echo json_encode([
+            'title' => bakery_t('reprice.warn_title'),
+            'body' => bakery_t('reprice.warn_body'),
+            'line' => bakery_t('reprice.warn_line'),
+            'standing' => bakery_t('reprice.warn_standing'),
+            'action' => bakery_t('reprice.action'),
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
         let originalValues = {};
         let isEditingAll = false;
         let originalTableState = {};
 
         // Modal functions
+        function productRetailIsZero(value) {
+            if (value === null || value === undefined) return false;
+            const text = String(value).trim();
+            if (text === '' || Number.isNaN(Number(text))) return false;
+            return Math.abs(Number(text)) < 0.005;
+        }
+
+        function productPriceIsMissing(value) {
+            if (value === null || value === undefined) return true;
+            const text = String(value).trim();
+            return text === '' || productRetailIsZero(text);
+        }
+
+        function needsZeroPriceConfirm(previous, next) {
+            return productRetailIsZero(next) && !productRetailIsZero(previous);
+        }
+
+        function confirmZeroProductPrice(form) {
+            const price = form.elements.price ? form.elements.price.value : '';
+            const action = form.elements.action ? form.elements.action.value : '';
+            let previous = '';
+            if (action === 'update' && form.elements.id) {
+                const row = document.getElementById('product-' + form.elements.id.value);
+                previous = row ? (row.dataset.price || '') : '';
+            }
+            if (!needsZeroPriceConfirm(previous, price)) return true;
+            if (!window.confirm(zeroPriceConfirm)) return false;
+            if (!form.elements.confirm_zero_price) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'confirm_zero_price';
+                form.appendChild(input);
+            }
+            form.elements.confirm_zero_price.value = '1';
+            return true;
+        }
+
         function showProductModal(id = null) {
             const modal = document.getElementById('productModal');
             const form = document.getElementById('productForm');
@@ -793,6 +1055,74 @@ foreach ($products as $product) {
             });
         }
 
+        function repriceFill(template, values) {
+            return String(template || '').replace(/:([a-z_]+)/g, function (_, key) {
+                return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : ':' + key;
+            });
+        }
+
+        function showProductRepriceWarning(warning) {
+            if (!warning || !Array.isArray(warning.lines) || warning.lines.length === 0) return;
+            const panel = document.getElementById('repriceWarnings');
+            if (!panel) return;
+            const form = document.createElement('form');
+            form.method = 'post';
+            form.action = 'products.php';
+            form.className = 'reprice-warning-form';
+            const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+            const fields = {
+                csrf_token: token,
+                action: 'reprice_open_orders',
+                product_id: String(warning.product_id || ''),
+                old_price: warning.old_price || '',
+                old_wholesale: warning.old_wholesale || ''
+            };
+            Object.keys(fields).forEach(function (name) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = fields[name];
+                form.appendChild(input);
+            });
+            const title = document.createElement('strong');
+            title.textContent = repriceCopy.title;
+            form.appendChild(title);
+            const body = document.createElement('p');
+            body.textContent = repriceFill(repriceCopy.body, {
+                product: warning.product_name || '',
+                count: String(warning.lines.length)
+            });
+            form.appendChild(body);
+            if (!warning.standing_orders_store_price) {
+                const standing = document.createElement('p');
+                standing.textContent = repriceCopy.standing;
+                form.appendChild(standing);
+            }
+            const list = document.createElement('ul');
+            warning.lines.forEach(function (line) {
+                const item = document.createElement('li');
+                const oldPrice = Number(line.old_unit_price || 0).toFixed(2);
+                const newPrice = Number(line.new_unit_price || 0).toFixed(2);
+                item.textContent = repriceFill(repriceCopy.line, {
+                    order: line.order_id,
+                    date: line.order_date,
+                    customer: line.customer_name,
+                    qty: line.quantity,
+                    old: oldPrice,
+                    new: newPrice
+                });
+                list.appendChild(item);
+            });
+            form.appendChild(list);
+            const button = document.createElement('button');
+            button.type = 'submit';
+            button.className = 'btn-primary';
+            button.textContent = repriceCopy.action;
+            form.appendChild(button);
+            panel.hidden = false;
+            panel.appendChild(form);
+        }
+
         async function saveInlineProduct(row) {
             const controls = Array.from(row.querySelectorAll('.inline-product-control'));
             const status = row.querySelector('.inline-save-status');
@@ -804,6 +1134,15 @@ foreach ($products as $product) {
             }
 
             const field = name => row.querySelector(`[data-field="${name}"]`);
+            const nextPrice = field('price').value;
+            if (row.dataset.active !== '0' && needsZeroPriceConfirm(row.dataset.price || '', nextPrice)) {
+                if (!window.confirm(zeroPriceConfirm)) {
+                    field('price').value = row.dataset.price || '';
+                    status.textContent = 'Saved';
+                    status.className = 'inline-save-status is-saved';
+                    return;
+                }
+            }
             const payload = new URLSearchParams({
                 action: 'update',
                 inline: '1',
@@ -811,15 +1150,21 @@ foreach ($products as $product) {
                 name: field('name').value.trim(),
                 description: field('description').value.trim(),
                 price: field('price').value,
+                wholesale_price: row.dataset.wholesalePrice || '',
                 weight_grams: field('weight_grams').value,
                 dough_type_id: field('dough_type_id').value
             });
+            if (needsZeroPriceConfirm(row.dataset.price || '', field('price').value)) {
+                payload.set('confirm_zero_price', '1');
+            }
 
             status.textContent = 'Saving…';
             status.className = 'inline-save-status is-saving';
             try {
                 const response = await fetch('products.php', { method: 'POST', body: payload });
                 if (!response.ok) throw new Error('Save failed');
+                const data = await response.json();
+                if (data && data.reprice_warning) showProductRepriceWarning(data.reprice_warning);
 
                 const doughSelect = field('dough_type_id');
                 const selectedOption = doughSelect.options[doughSelect.selectedIndex];
@@ -828,6 +1173,7 @@ foreach ($products as $product) {
                 row.dataset.name = field('name').value.trim().toLowerCase();
                 row.dataset.description = field('description').value.trim();
                 row.dataset.price = field('price').value;
+                row.dataset.noPrice = (row.dataset.active !== '0' && productPriceIsMissing(field('price').value)) ? '1' : '0';
                 row.dataset.weight = field('weight_grams').value;
                 row.dataset.dough = doughSelect.value ? (selectedOption.dataset.name || selectedOption.textContent.trim().toLowerCase()) : 'unassigned';
                 if (targetGroup && row.parentElement !== targetGroup) targetGroup.appendChild(row);
@@ -865,6 +1211,7 @@ foreach ($products as $product) {
 
         const productSearch = document.getElementById('productSearch');
         const doughTypeFilter = document.getElementById('doughTypeFilter');
+        const priceFilter = document.getElementById('priceFilter');
         const clearProductFilters = document.getElementById('clearProductFilters');
         const productResultCount = document.getElementById('productResultCount');
         const noProductResults = document.getElementById('noProductResults');
@@ -876,12 +1223,14 @@ foreach ($products as $product) {
         function applyProductFilters() {
             const query = productSearch.value.trim().toLowerCase();
             const doughType = doughTypeFilter.value;
+            const priceMode = priceFilter ? priceFilter.value : '';
             let visibleCount = 0;
 
             getProductRows().forEach(row => {
                 const matchesQuery = !query || row.dataset.name.includes(query) || row.dataset.description.toLowerCase().includes(query);
                 const matchesDough = !doughType || row.dataset.dough === doughType;
-                const isVisible = matchesQuery && matchesDough;
+                const matchesPrice = priceMode !== 'none' || row.dataset.noPrice === '1';
+                const isVisible = matchesQuery && matchesDough && matchesPrice;
                 row.hidden = !isVisible;
                 if (isVisible) visibleCount += 1;
             });
@@ -892,14 +1241,16 @@ foreach ($products as $product) {
 
             productResultCount.textContent = `${visibleCount} product${visibleCount === 1 ? '' : 's'}`;
             noProductResults.hidden = visibleCount !== 0;
-            clearProductFilters.hidden = !query && !doughType;
+            clearProductFilters.hidden = !query && !doughType && !priceMode;
         }
 
         productSearch.addEventListener('input', applyProductFilters);
         doughTypeFilter.addEventListener('change', applyProductFilters);
+        if (priceFilter) priceFilter.addEventListener('change', applyProductFilters);
         clearProductFilters.addEventListener('click', () => {
             productSearch.value = '';
             doughTypeFilter.value = '';
+            if (priceFilter) priceFilter.value = '';
             applyProductFilters();
             productSearch.focus();
         });
@@ -1025,6 +1376,21 @@ foreach ($products as $product) {
             color: #2e7d32;
             border: 1px solid #c8e6c9;
         }
+
+        .reprice-warning {
+            background: #fff8e1;
+            color: #6d4c00;
+            border: 1px solid #ffe082;
+            border-radius: 4px;
+            padding: 12px 14px;
+            margin-bottom: 20px;
+        }
+
+        .reprice-warning[hidden] { display: none; }
+
+        .reprice-warning-form + .reprice-warning-form { margin-top: 14px; }
+
+        .reprice-warning ul { margin: 8px 0 12px; padding-left: 18px; }
         
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }

@@ -1031,6 +1031,30 @@ body.pickup-sheet-open {
     color: #856404;
 }
 
+.payment-badge--prepaid {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+
+.cod-override-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.cod-override-form input {
+    min-height: 40px;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.cod-override-note {
+    margin: 8px 0 0;
+    color: #1e3a8a;
+    font-size: 0.85rem;
+}
+
 .payment-badge--signature {
     background: #e9ecef;
     color: #495057;

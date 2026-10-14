@@ -26,9 +26,9 @@ customers / standing demand → dated orders → confirmed demand → production
 
 **North star:** by looking at one date, every role can see what must happen next, do that work, and leave a trustworthy record for the next role.
 
-**Refined thesis:** the operational spine exists (`daily_run.php`, 8 gated stages). Several stages still do not fully close. Product work is closing those loops — not adding screens.
+**Refined thesis:** the operational spine exists (`daily_run.php`, 8 gated stages). Several stages still do not fully close. Product work is closing those loops, not adding screens.
 
-Canonical manual: `BAKERY_PRODUCT_CONTEXT.md`. When the doc and the code disagree, the code wins — then fix the doc.
+Canonical manual: `BAKERY_PRODUCT_CONTEXT.md`. When the doc and the code disagree, the code wins, then fix the doc.
 MD
         ],
         [
@@ -57,7 +57,7 @@ MD
             'sort_order' => 30,
             'is_required' => 1,
             'body_md' => <<<'MD'
-From `BAKERY_PRODUCT_CONTEXT.md` §4 — violating these breaks operations even if the code “works”:
+From `BAKERY_PRODUCT_CONTEXT.md` §4. Violating these breaks operations even if the code “works”:
 
 1. Dated beats standing **per customer**, never all-or-nothing per date.
 2. Standing is a template. Daily is the commercial commitment. They do not rewrite each other.
@@ -121,12 +121,12 @@ MD
             'body_md' => <<<'MD'
 Highest-value **open** loops (verify against code and the Bugs board):
 
-- **Baker UX:** commit path shipped (schema 048). Daily Production bakes the committed snapshot with demand alongside and drift flags. Bakers still do not open Production Center — that is their home; do not rebuild a second planner.
+- **Baker UX:** commit path shipped (schema 048). Daily Production bakes the committed snapshot with demand alongside and drift flags. Bakers still do not open Production Center. That is their home; do not rebuild a second planner.
 - Bake-sheet **waste** is still unlogged (confirm itself is stale-guarded).
 - Exception ownership exists; staff are not pinged. Completing work must never hide a still-true operational fact.
 - Overlapping route screens. Driver Assignment is canonical.
 
-**Shipped — do not reopen:** Billing Center send/record of the portal invoice; door credits as FG returns at confirm; legacy invoice generators redirect to Billing Center; `product_distribution.php` demand-flip (dated beats standing per customer via `bakery_operating_demand_*`); bake-sheet confirm re-entry double-count; order/assignment load+skip alignment.
+**Shipped. Do not reopen:** Billing Center send/record of the portal invoice; door credits as FG returns at confirm; legacy invoice generators redirect to Billing Center; `product_distribution.php` demand-flip (dated beats standing per customer via `bakery_operating_demand_*`); bake-sheet confirm re-entry double-count; order/assignment load+skip alignment.
 
 When you find a new durable bug, log it: `php scripts/agent_homebase.php bug --title= --detail=`.
 MD
@@ -135,7 +135,7 @@ MD
             'slug' => 'craft-homebase',
             'track' => 'craft',
             'title' => 'Professional craft: live in this Homebase',
-            'summary' => 'Every mission checks in, learns, pins, and hands off here — not only in chat.',
+            'summary' => 'Every mission checks in, learns, pins, and hands off here. Not only in chat.',
             'sort_order' => 70,
             'is_required' => 0,
             'body_md' => <<<'MD'
@@ -159,9 +159,9 @@ MD
 1. What you investigated (files/workflows actually read).
 2. Decisions made and why (especially §4-adjacent).
 3. Files changed (explicit paths).
-4. User-visible behavior changed — per role, per screen.
-5. Business rules preserved — which invariants you touched and how you kept them.
-6. Tests/checks performed — which `tests/run_*.php` suites and results.
+4. User-visible behavior changed, per role, per screen.
+5. Business rules preserved. Which invariants you touched and how you kept them.
+6. Tests/checks performed. Which `tests/run_*.php` suites and results.
 7. Unresolved questions for the owner or next agent.
 8. Recommendations for the next agent.
 
@@ -254,8 +254,8 @@ function bakery_agent_homebase_seed_whiteboard(): array
     return [
         [
             'column_key' => 'now',
-            'title' => 'Exception workability (prompts 10–12)',
-            'body' => 'Connections, mobile desk, desktop workshop. Paste-ready in docs/prompts/10–12. Do not invent a ticketing product.',
+            'title' => 'Exception workability (prompts 10 to 12)',
+            'body' => 'Connections, mobile desk, desktop workshop. Paste-ready in docs/prompts/10 to 12. Do not invent a ticketing product.',
             'agent_name' => 'homebase',
             'sort_order' => 10,
         ],
@@ -283,7 +283,7 @@ function bakery_agent_homebase_seed_whiteboard(): array
         [
             'column_key' => 'parked',
             'title' => 'Deferred on purpose',
-            'body' => 'Full AR/aging, offline driver confirm, ingredient receiving/lots, CI/CD, containerization, Laravel. See BAKERY_PRODUCT_CONTEXT §7–9.',
+            'body' => 'Full AR/aging, offline driver confirm, ingredient receiving/lots, CI/CD, containerization, Laravel. See BAKERY_PRODUCT_CONTEXT §7 to 9.',
             'agent_name' => 'homebase',
             'sort_order' => 10,
         ],

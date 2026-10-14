@@ -29,13 +29,13 @@ if ($workshopBatch['mix_minutes'] !== null && $workshopBatch['mix_minutes'] !== 
     $timeBits[] = bakery_t('sfb.phase_mix') . ' ' . (int)$workshopBatch['mix_minutes'] . ' min';
 }
 if (!empty($workshopBatch['bulk_started_at'])) {
-    $timeBits[] = bakery_t('sfb.bulk_started') . ' ' . date('D g:ia', strtotime((string)$workshopBatch['bulk_started_at']));
+    $timeBits[] = bakery_t('sfb.bulk_started') . ' ' . bakery_format_user_stamp(strtotime((string)$workshopBatch['bulk_started_at']), 'D g:ia');
 }
 if (!empty($workshopBatch['shaped_at'])) {
-    $timeBits[] = bakery_t('sfb.shaped_at') . ' ' . date('D g:ia', strtotime((string)$workshopBatch['shaped_at']));
+    $timeBits[] = bakery_t('sfb.shaped_at') . ' ' . bakery_format_user_stamp(strtotime((string)$workshopBatch['shaped_at']), 'D g:ia');
 }
 if (!empty($workshopBatch['bake_started_at'])) {
-    $timeBits[] = bakery_t('sfb.bake_started') . ' ' . date('D g:ia', strtotime((string)$workshopBatch['bake_started_at']));
+    $timeBits[] = bakery_t('sfb.bake_started') . ' ' . bakery_format_user_stamp(strtotime((string)$workshopBatch['bake_started_at']), 'D g:ia');
 }
 ?>
 
@@ -99,7 +99,7 @@ if (!empty($workshopBatch['bake_started_at'])) {
       <?php foreach ($workshopTurns as $turn): ?>
         <p style="margin:10px 0 0;">
           <?php echo htmlspecialchars(bakery_sfb_turn_type_label($turn['turn_type']), ENT_QUOTES, 'UTF-8'); ?>
-          · <?php echo htmlspecialchars(date('D g:ia', strtotime((string)$turn['occurred_at'])), ENT_QUOTES, 'UTF-8'); ?>
+          · <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime((string)$turn['occurred_at']), 'D g:ia'), ENT_QUOTES, 'UTF-8'); ?>
           <?php if ($turn['dough_temp_f'] !== null): ?> · <?php echo (float)$turn['dough_temp_f']; ?>°F<?php endif; ?>
           <?php if (!empty($turn['notes'])): ?> · <?php echo htmlspecialchars((string)$turn['notes'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
           <?php if ($workshopEditable): ?>

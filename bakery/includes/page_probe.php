@@ -124,13 +124,13 @@ function bakery_page_probe_bootstrap(string $scriptLabel, array $allowedRoles): 
     bakery_page_probe_step('C database.php included');
 
     if (!isset($db) || !($db instanceof PDO)) {
-        bakery_page_probe_step('D $db missing — connecting manually');
+        bakery_page_probe_step('D $db missing. Connecting manually');
         try {
             $db = check_mysql_connection();
             bakery_page_probe_step('E manual connect OK');
         } catch (Throwable $e) {
             bakery_page_probe_step('E CONNECT FAILED: ' . $e->getMessage());
-            bakery_page_probe_finish('STOPPED — database connection');
+            bakery_page_probe_finish('STOPPED. Database connection');
             exit;
         }
     } else {
@@ -143,7 +143,7 @@ function bakery_page_probe_bootstrap(string $scriptLabel, array $allowedRoles): 
 
     if (!function_exists('bakery_get_drivers') || !function_exists('bakery_json_for_html')) {
         bakery_page_probe_step('FAIL: includes/common_functions.php is outdated or missing on server');
-        bakery_page_probe_finish('STOPPED — redeploy full ZIP');
+        bakery_page_probe_finish('STOPPED. Redeploy full ZIP');
         exit;
     }
 
@@ -158,8 +158,8 @@ function bakery_page_probe_bootstrap(string $scriptLabel, array $allowedRoles): 
         bakery_page_probe_step('AUTH FAIL: not logged in');
         bakery_page_probe_step('Normal driver_list.php redirects to login (empty body looks blank).');
         bakery_page_probe_step('Fix: log in at ' . $loginUrl . ' in this same browser, then retry ?probe=1');
-        bakery_page_probe_step('Use the same path consistently (e.g. only /6/… — do not mix with /bakery/).');
-        bakery_page_probe_finish('STOPPED — login required');
+        bakery_page_probe_step('Use the same path consistently (e.g. only /6/…, do not mix with /bakery/).');
+        bakery_page_probe_finish('STOPPED. Login required');
         exit;
     }
 
@@ -168,7 +168,7 @@ function bakery_page_probe_bootstrap(string $scriptLabel, array $allowedRoles): 
     if (!bakery_user_has_role($allowedRoles)) {
         bakery_page_probe_step('AUTH FAIL: role "' . $user['role_slug'] . '" cannot access ' . $scriptLabel);
         bakery_page_probe_step('Allowed: ' . implode(', ', $allowedRoles));
-        bakery_page_probe_finish('STOPPED — insufficient role');
+        bakery_page_probe_finish('STOPPED. Insufficient role');
         exit;
     }
 
@@ -179,11 +179,11 @@ function bakery_page_probe_bootstrap(string $scriptLabel, array $allowedRoles): 
         bakery_page_probe_step('K drivers count=' . count($drivers));
     } catch (Throwable $e) {
         bakery_page_probe_step('K bakery_get_drivers FAILED: ' . $e->getMessage());
-        bakery_page_probe_finish('STOPPED — drivers query');
+        bakery_page_probe_finish('STOPPED. Drivers query');
         exit;
     }
 
-    bakery_page_probe_step('L bootstrap complete — continuing page load');
+    bakery_page_probe_step('L bootstrap complete. Continuing page load');
 }
 
 /** @deprecated kept so older driver_list.php copies do not fatal */

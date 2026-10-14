@@ -998,8 +998,8 @@ function ingredients_format_cost($value) {
                             <h2 class="inventory-item-name"><?php echo htmlspecialchars($ingredient['name'] ?? ''); ?></h2>
                             <?php $rowPrice = $current_prices[(int)$ingredient['id']] ?? null; ?>
                             <div class="inventory-meta">
-                                <span><?php bakery_te('ingredient_prices.cost_per_kg'); ?> <?php echo $rowPrice ? '$' . htmlspecialchars(bakery_ingredient_format_cost_per_kg($rowPrice['cost_per_kg'])) : '—'; ?></span>
-                                <span><?php bakery_te('ingredient_prices.vendor'); ?> <?php echo htmlspecialchars((string)($rowPrice['vendor'] ?? ($ingredient['supplier_name'] ?? '—'))); ?></span>
+                                <span><?php bakery_te('ingredient_prices.cost_per_kg'); ?> <?php echo $rowPrice ? '$' . htmlspecialchars(bakery_ingredient_format_cost_per_kg($rowPrice['cost_per_kg'])) : '-'; ?></span>
+                                <span><?php bakery_te('ingredient_prices.vendor'); ?> <?php echo htmlspecialchars((string)($rowPrice['vendor'] ?? ($ingredient['supplier_name'] ?? '-'))); ?></span>
                             </div>
                         </div>
                     </a>
@@ -1090,7 +1090,7 @@ function ingredients_format_cost($value) {
                 <ul>
                     <?php foreach ($low_stock_ingredients as $low): ?>
                         <li>
-                            <?php echo htmlspecialchars($low['name']); ?> —
+                            <?php echo htmlspecialchars($low['name']); ?> -
                             <?php echo htmlspecialchars(ingredients_format_qty($low['quantity_on_hand'] ?? 0)); ?>
                             <?php echo htmlspecialchars($low['unit'] ?? ''); ?>
                             (reorder at <?php echo htmlspecialchars(ingredients_format_qty($low['reorder_level'])); ?>)
@@ -1266,10 +1266,10 @@ function ingredients_format_cost($value) {
                     <?php if ($isLowStock): ?><span class="low-stock-badge reorder-flag"><?php bakery_te('ingredient_prices.reorder_flag'); ?></span><?php endif; ?>
                 </h3>
                 <div class="meta">
-                    Unit: <?php echo htmlspecialchars($ingredient['unit'] ?? '—'); ?><br>
+                    Unit: <?php echo htmlspecialchars($ingredient['unit'] ?? '-'); ?><br>
                     <?php if ($inventory_ready): ?>
-                        On hand: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['quantity_on_hand'] ?? '') ?: '—'); ?><br>
-                        <?php bakery_te('ingredient_prices.reorder_point'); ?>: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'] ?? '') ?: '—'); ?><br>
+                        On hand: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['quantity_on_hand'] ?? '') ?: '-'); ?><br>
+                        <?php bakery_te('ingredient_prices.reorder_point'); ?>: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'] ?? '') ?: '-'); ?><br>
                     <?php endif; ?>
                     <?php if ($purchasing_ready && $packageLabel): ?>
                         Package: <?php echo htmlspecialchars($packageLabel); ?><br>

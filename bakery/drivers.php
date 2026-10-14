@@ -420,7 +420,7 @@ require_once 'includes/nav.php';
                         <div>
                             <h2><?php echo htmlspecialchars($selectedDriver['name']); ?></h2>
                             <span class="panel-subtitle">
-                                <?php echo $viewingArchived ? 'Archived Driver — Standing Routes (read-only)' : 'Standing Routes'; ?>
+                                <?php echo $viewingArchived ? 'Archived Driver. Standing Routes (read-only)' : 'Standing Routes'; ?>
                             </span>
                         </div>
                     </div>

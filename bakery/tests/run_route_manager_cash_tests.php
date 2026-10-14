@@ -35,6 +35,7 @@ route_manager_cash_assert_same([
     'cash_turned_in' => null,
     'cash_still_owed' => 96.75,
     'total_sold' => 204.75,
+    'prepaid_stop_count' => 0,
 ], $summary, 'Route Manager includes completed Pan Dulce cash from the final delivery total when cash was not recorded');
 
 $defaultCod = route_manager_compute_cash_summary([
@@ -54,6 +55,7 @@ route_manager_cash_assert_same([
     'cash_turned_in' => null,
     'cash_still_owed' => 12.5,
     'total_sold' => 12.5,
+    'prepaid_stop_count' => 0,
 ], $defaultCod, 'Missing payment_collection defaults to COD and cancelled stops are excluded from sold');
 
 $withTurnin = route_manager_compute_cash_summary([

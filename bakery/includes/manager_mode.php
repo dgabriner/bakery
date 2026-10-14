@@ -219,7 +219,7 @@ function bakery_manager_route_plan(PDO $db, string $date): array
         $plan['drivers'][] = [
             'id' => $id, 'name' => (string)$driver['name'], 'stop_count' => $stops,
             'open_count' => (int)($count['open_count'] ?? 0), 'failed_count' => (int)($count['failed_count'] ?? 0),
-            'availability' => $inTransit > 0 ? 'In transit — do not interrupt' : ($stops === 0 ? 'Available for route planning' : 'Planned route'),
+            'availability' => $inTransit > 0 ? 'In transit. Do not interrupt' : ($stops === 0 ? 'Available for route planning' : 'Planned route'),
             'capacity' => 'No configured stop capacity; review route count',
             'zone_counts' => $zoneCounts[$id] ?? [],
         ];

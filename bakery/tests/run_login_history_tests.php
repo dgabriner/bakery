@@ -143,8 +143,27 @@ login_history_assert($page !== false && strpos($page, "export' => 'csv'") !== fa
 login_history_assert($page !== false && strpos($page, 'login-history-roles') !== false, 'portal exposes a role presence board');
 login_history_assert($page !== false && strpos($page, 'history-day') !== false, 'investigation timeline is grouped by day');
 login_history_assert($page !== false && strpos($page, 'login-history-filters__more') !== false, 'advanced filters sit behind a collapsed details block');
+login_history_assert($page !== false && strpos($page, "'timeline' => \$filterKey") !== false, 'timeline filter is URL-backed');
+login_history_assert($page !== false && strpos($page, 'login_history.load_older') !== false, 'older events can be loaded');
+login_history_assert($page !== false && strpos($page, 'login_history.investigate_actions') !== false, 'session cards link to action history');
+login_history_assert($page !== false && strpos($page, 'login_history.show_session_trail') !== false, 'session cards can expand a trail');
 login_history_assert($css !== false && strpos($css, '.login-history-briefing') !== false, 'CSS includes briefing chrome');
+login_history_assert($css !== false && strpos($css, '.login-history-session-trail') !== false, 'CSS includes session trail chrome');
 login_history_assert($insights !== false && strpos($insights, 'bakery_login_history_load_dwell') !== false, 'dwell time is aggregated from consecutive page views');
+login_history_assert($insights !== false && strpos($insights, 'function bakery_login_history_load_session_trail') !== false, 'session trail helper exists');
+$trailAt = strpos((string)$insights, 'function bakery_login_history_load_session_trail');
+$dwellAt = strpos((string)$insights, 'function bakery_login_history_load_dwell');
+$trailSection = ($trailAt !== false && $dwellAt > $trailAt) ? substr((string)$insights, $trailAt, $dwellAt - $trailAt) : '';
+login_history_assert(
+    strpos($trailSection, "bakery_login_history_translate('login_history.activity_action'") !== false
+        && strpos($trailSection, 'ucwords(') === false,
+    'session trail titles without a page name use the translated activity label'
+);
+login_history_assert($insights !== false && strpos($insights, "'timeline' =>") !== false, 'filters parse timeline kind');
+
+$timelineFilters = bakery_login_history_parse_filters(['timeline' => 'action', 'timeline_offset' => 500, 'user_id' => 3], '2026-08-17');
+login_history_assert($timelineFilters['timeline'] === 'action' && $timelineFilters['timeline_offset'] === 500, 'timeline filter and offset parse');
+login_history_assert(strpos(bakery_login_history_url(['timeline' => 'action'], $timelineFilters), 'timeline=action') !== false, 'action timeline stays in URLs');
 
 $auditHelper = file_get_contents($root . '/includes/login_audit.php');
 $migrations = file_get_contents($root . '/scripts/run_migrations.php');
@@ -164,6 +183,32 @@ foreach ($enKeys as $key) {
 }
 login_history_assert($missingEs === [], 'login history i18n keys exist in es.php' . ($missingEs ? (' missing: ' . implode(',', $missingEs)) : ''));
 login_history_assert(($en['page.login_history'] ?? '') === 'Login History', 'English page title exists');
+login_history_assert(bakery_login_history_event_type_label('delivery_completed') === 'Delivery completed', 'event type titles use the English lang key');
+$_SESSION['locale'] = 'es';
+bakery_reset_locale_cache();
+login_history_assert(bakery_login_history_event_type_label('delivery_completed') === 'Entrega completada', 'event type titles use the Spanish lang key');
+$unknownEvent = bakery_login_history_event_type_label('not_a_known_type');
+login_history_assert(
+    $unknownEvent === 'Acción registrada (not_a_known_type)' && strpos($unknownEvent, 'Not A Known') === false,
+    'unknown event types are not title-cased in English'
+);
+$_SESSION['locale'] = 'en';
+bakery_reset_locale_cache();
+foreach (['login_history.actions_lead', 'login_history.browser_errors_lead'] as $dashKey) {
+    login_history_assert(
+        strpos((string)($en[$dashKey] ?? ''), "\u{2014}") === false
+            && strpos((string)($en[$dashKey] ?? ''), "\u{2013}") === false
+            && strpos((string)($es[$dashKey] ?? ''), "\u{2014}") === false
+            && strpos((string)($es[$dashKey] ?? ''), "\u{2013}") === false,
+        $dashKey . ' has no em dash or en dash'
+    );
+}
+login_history_assert(
+    strpos((string)$insights, "ucwords(str_replace('_', ' ', (string)\$row['event_type']))") === false
+        && strpos((string)$insights, "ucwords(str_replace('_', ' ', (string)\$action['event_type']))") === false
+        && strpos((string)$insights, 'function bakery_login_history_event_type_label') !== false,
+    'event type titles go through lang keys'
+);
 
 $adminItems = [];
 foreach (bakery_navigation_groups_for_role('administrator') as $group) {

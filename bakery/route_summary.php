@@ -82,8 +82,8 @@ require_once 'includes/nav.php';
   <section class="rs-stats" aria-label="<?php echo htmlspecialchars(bakery_t('route_summary.day_totals')); ?>">
     <div><span><?php bakery_te('route_summary.stat_stops'); ?></span><strong><?php echo (int)$stats['stops']; ?></strong><small><?php echo (int)$stats['delivered']; ?> / <?php echo (int)$stats['stops']; ?> <?php bakery_te('route_summary.stat_delivered'); ?></small></div>
     <div><span><?php bakery_te('route_summary.stat_sold'); ?></span><strong><?php echo htmlspecialchars(bakery_route_summary_format_money((float)$stats['sold'])); ?></strong><small><?php echo (int)$stats['pieces']; ?> <?php bakery_te('route_summary.stat_pieces'); ?></small></div>
-    <div><span><?php bakery_te('route_summary.stat_photos'); ?></span><strong><?php echo (int)$stats['photo_count']; ?></strong><small><?php echo (int)$stats['with_photos']; ?> <?php bakery_te('route_summary.stops_with_photos'); ?></small></div>
-    <div<?php echo (int)$stats['missing_photos'] > 0 ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php bakery_te('route_summary.missing_help'); ?></small></div>
+    <div><span><?php bakery_te('route_summary.stat_pod'); ?></span><strong><?php echo (int)$stats['pod_photo_count']; ?></strong><small><?php echo (int)$stats['with_photos']; ?> <?php bakery_te('route_summary.stops_with_proof'); ?></small></div>
+    <div<?php echo ((int)$stats['missing_photos'] > 0 || (int)$stats['arrival_only'] > 0) ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php if ((int)$stats['arrival_only'] > 0): ?><?php echo (int)$stats['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php else: ?><?php bakery_te('route_summary.missing_help'); ?><?php endif; ?></small></div>
   </section>
 
   <nav class="rs-filters" aria-label="<?php echo htmlspecialchars(bakery_t('route_summary.filter_label')); ?>">
@@ -91,6 +91,10 @@ require_once 'includes/nav.php';
       <a class="rs-filter<?php echo $filter === $filterKey ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars(bakery_route_summary_query($selectedDate, $selectedDriverId, $filterKey)); ?>"<?php echo $filter === $filterKey ? ' aria-current="page"' : ''; ?>><?php bakery_te($filterLabelKey); ?></a>
     <?php endforeach; ?>
   </nav>
+
+  <?php if ((int)$stats['arrival_only'] > 0): ?>
+    <p class="rs-note rs-note--warn" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
+  <?php endif; ?>
 
   <?php if (!$day['photos_available']): ?>
     <div class="rs-note" role="status"><?php bakery_te('route_summary.photos_unavailable'); ?></div>
@@ -112,7 +116,7 @@ require_once 'includes/nav.php';
         <header class="rs-driver__head">
           <div>
             <h2 id="rs-driver-<?php echo (int)$driver['id']; ?>"><?php echo htmlspecialchars((string)$driver['name']); ?></h2>
-            <p><?php echo (int)$driver['stop_count']; ?> <?php bakery_te('route_summary.stops'); ?> · <?php echo htmlspecialchars(bakery_route_summary_format_money((float)$driver['sold'])); ?> · <?php echo (int)$driver['photo_count']; ?> <?php bakery_te('route_summary.photos'); ?><?php if ((int)$driver['missing_photos'] > 0): ?> · <?php echo (int)$driver['missing_photos']; ?> <?php bakery_te('route_summary.missing_short'); ?><?php endif; ?></p>
+            <p><?php echo (int)$driver['stop_count']; ?> <?php bakery_te('route_summary.stops'); ?> · <?php echo htmlspecialchars(bakery_route_summary_format_money((float)$driver['sold'])); ?> · <?php echo (int)$driver['pod_photo_count']; ?> <?php bakery_te('route_summary.proof_photos'); ?><?php if ((int)$driver['arrival_only'] > 0): ?> · <?php echo (int)$driver['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php elseif ((int)$driver['missing_photos'] > 0): ?> · <?php echo (int)$driver['missing_photos']; ?> <?php bakery_te('route_summary.missing_short'); ?><?php endif; ?></p>
           </div>
         </header>
         <div class="rs-grid">
@@ -130,9 +134,9 @@ require_once 'includes/nav.php';
                       'created_at' => bakery_route_summary_format_time($photo['created_at'] ?? null),
                   ];
               }
-              $cardLabel = $stop['customer_name'] . ' — ' . bakery_route_summary_format_money((float)$stop['sold_amount']);
+              $cardLabel = $stop['customer_name'] . ' - ' . bakery_route_summary_format_money((float)$stop['sold_amount']);
             ?>
-            <article class="rs-card status-<?php echo htmlspecialchars($status); ?><?php echo $hero ? ' has-photo' : ' no-photo'; ?>" data-stop-id="<?php echo (int)$stop['daily_order_id']; ?>">
+            <article class="rs-card status-<?php echo htmlspecialchars($status); ?><?php echo !empty($stop['arrival_only']) ? ' is-arrival-only' : ''; ?><?php echo $hero ? ' has-photo' : ' no-photo'; ?>" data-stop-id="<?php echo (int)$stop['daily_order_id']; ?>">
               <button type="button" class="rs-card__photo" data-photos="<?php echo htmlspecialchars(json_encode($photoPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>" data-customer="<?php echo htmlspecialchars((string)$stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars($hero ? bakery_t('route_summary.view_photos') . ': ' . $cardLabel : $cardLabel); ?>">
                 <?php if ($hero): ?>
                   <img src="<?php echo htmlspecialchars((string)$hero['url']); ?>" alt="" loading="lazy" data-fallback="<?php echo htmlspecialchars((string)($hero['fallback_url'] ?? '')); ?>" onerror="if(this.dataset.fallback && !this.dataset.tried){this.dataset.tried='1';this.src=this.dataset.fallback;}">
@@ -156,6 +160,9 @@ require_once 'includes/nav.php';
                   <a class="rs-card__customer" href="<?php echo htmlspecialchars(BASE_URL . 'customer_record.php?customer_id=' . (int)$stop['customer_id'] . '&date=' . urlencode($selectedDate)); ?>"><?php echo htmlspecialchars((string)$stop['customer_name']); ?></a>
                   <span class="rs-status rs-status--<?php echo htmlspecialchars($status); ?>"><?php bakery_te(bakery_route_summary_status_key($status)); ?></span>
                 </div>
+                <?php if (!empty($stop['arrival_only'])): ?>
+                  <p class="rs-flag"><?php bakery_te('route_summary.arrival_only'); ?></p>
+                <?php endif; ?>
                 <p class="rs-card__sold"><?php echo htmlspecialchars(bakery_route_summary_format_money((float)$stop['sold_amount'])); ?><?php if ((int)$stop['pieces'] > 0): ?> <span>· <?php echo (int)$stop['pieces']; ?> <?php bakery_te('route_summary.stat_pieces'); ?></span><?php endif; ?></p>
                 <p class="rs-card__meta">
                   <span><?php echo htmlspecialchars((string)$stop['driver_name']); ?></span>

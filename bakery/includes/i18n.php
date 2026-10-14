@@ -252,6 +252,120 @@ function bakery_localized_month_short(DateTimeInterface $date): string {
 }
 
 /**
+ * Turn a clock value into a DateTime in the server timezone.
+ * Accepts a DateTime, a unix timestamp, or a parseable time string.
+ */
+function bakery_locale_moment($when): ?DateTimeImmutable {
+    if ($when instanceof DateTimeInterface) {
+        return DateTimeImmutable::createFromInterface($when);
+    }
+    if ($when === false || $when === null || $when === '') {
+        return null;
+    }
+    if (is_int($when)) {
+        $moment = new DateTimeImmutable('@' . $when);
+        return $moment->setTimezone(new DateTimeZone(date_default_timezone_get()));
+    }
+    $text = trim((string)$when);
+    if ($text === '') {
+        return null;
+    }
+    try {
+        return new DateTimeImmutable($text);
+    } catch (Throwable $e) {
+        $timestamp = strtotime($text);
+        if ($timestamp === false) {
+            return null;
+        }
+        $moment = new DateTimeImmutable('@' . $timestamp);
+        return $moment->setTimezone(new DateTimeZone(date_default_timezone_get()));
+    }
+}
+
+/** English AM/PM, Spanish a. m./p. m. */
+function bakery_locale_meridiem(int $hour24): string {
+    $afternoon = $hour24 >= 12;
+    if (bakery_locale() === 'es') {
+        return $afternoon ? 'p. m.' : 'a. m.';
+    }
+    return $afternoon ? 'PM' : 'AM';
+}
+
+/**
+ * Clock time for the active locale.
+ * English: 8:12 AM. Spanish: 8:12 a. m.
+ *
+ * @param DateTimeInterface|int|string|false|null $when
+ */
+function bakery_locale_time($when, bool $withSeconds = false): string {
+    $moment = bakery_locale_moment($when);
+    if (!$moment) {
+        return is_scalar($when) ? (string)$when : '';
+    }
+    $hour24 = (int)$moment->format('G');
+    $hour12 = $hour24 % 12;
+    if ($hour12 === 0) {
+        $hour12 = 12;
+    }
+    $clock = $hour12 . ':' . $moment->format('i');
+    if ($withSeconds) {
+        $clock .= ':' . $moment->format('s');
+    }
+    return $clock . ' ' . bakery_locale_meridiem($hour24);
+}
+
+/** Hour label without minutes. English: 8 AM. Spanish: 8 a. m. */
+function bakery_locale_hour_label(int $hour24): string {
+    if ($hour24 < 0 || $hour24 > 23) {
+        return '';
+    }
+    $hour12 = $hour24 % 12;
+    if ($hour12 === 0) {
+        $hour12 = 12;
+    }
+    return $hour12 . ' ' . bakery_locale_meridiem($hour24);
+}
+
+/** Word between two ends of a range. English: to. Spanish: a. */
+function bakery_locale_range_word(): string {
+    return bakery_locale() === 'es' ? 'a' : 'to';
+}
+
+/**
+ * Format a stamp with PHP date tokens, swapping clock tokens for the locale clock.
+ *
+ * @param DateTimeInterface|int|string|false|null $when
+ */
+function bakery_format_user_stamp($when, string $format): string {
+    $moment = bakery_locale_moment($when);
+    if (!$moment) {
+        return is_scalar($when) ? (string)$when : '';
+    }
+    $withSeconds = strpos($format, 'g:i:s') !== false || strpos($format, 'h:i:s') !== false;
+    $tokens = ['g:i:s A', 'g:i:s a', 'h:i:s A', 'h:i:s a', 'g:ia', 'g:i A', 'g:i a', 'h:i A', 'h:i a'];
+    $replaced = $format;
+    foreach ($tokens as $token) {
+        $replaced = str_replace($token, "\x1F", $replaced);
+    }
+    if ($replaced === $format) {
+        return $moment->format($format);
+    }
+    $clock = bakery_locale_time($moment, $withSeconds);
+    $parts = explode("\x1F", $replaced);
+    $out = '';
+    $last = count($parts) - 1;
+    foreach ($parts as $index => $part) {
+        if ($part !== '') {
+            $out .= $moment->format($part);
+        }
+        if ($index < $last) {
+            $out .= $clock;
+        }
+    }
+    return $out;
+}
+
+/**
  * Handle ?locale=en|es on any page (GET redirect back).
  */
 function bakery_handle_locale_request(): void {

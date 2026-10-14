@@ -21,12 +21,17 @@ class ShopPhotoHandler {
     private $thumbSize;
 
     public static function categories(): array {
-        return [
-            'window_display' => 'Window Display',
-            'trays'          => 'Trays',
-            'general'        => 'General',
-            'other'          => 'Other',
+        $labels = [
+            'window_display' => 'shop_photos.category.window_display',
+            'trays' => 'shop_photos.category.trays',
+            'general' => 'shop_photos.category.general',
+            'other' => 'shop_photos.category.other',
         ];
+        $out = [];
+        foreach ($labels as $key => $i18nKey) {
+            $out[$key] = function_exists('bakery_t') ? bakery_t($i18nKey) : $key;
+        }
+        return $out;
     }
 
     public function __construct() {

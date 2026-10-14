@@ -206,7 +206,7 @@ $portalCustomerName = $customer['name'];
                   <br>
                   <small class="muted">
                     <?php if ($last): ?>
-                      <?php echo htmlspecialchars(bakery_t('sfb.last_fed', ['when' => date('D, M j · g:ia', strtotime($last['fed_at']))])); ?>
+                      <?php echo htmlspecialchars(bakery_t('sfb.last_fed', ['when' => bakery_format_user_stamp(strtotime($last['fed_at']), 'D, M j · g:ia')])); ?>
                       · <?php echo htmlspecialchars(bakery_sfb_feeding_ratio($last)); ?>
                     <?php else: ?>
                       <?php bakery_te('sfb.never_fed'); ?>

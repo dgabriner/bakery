@@ -361,6 +361,16 @@ if (PHP_SAPI !== 'cli') {
     $sessionLifetime = 180 * 24 * 60 * 60;
     ini_set('session.gc_maxlifetime', (string)$sessionLifetime);
     ini_set('session.cookie_lifetime', (string)$sessionLifetime);
+    // Keep bakery sessions out of the shared /tmp pile. Other PHP apps garbage-
+    // collect that directory on the default 24-minute lifetime and drop a driver
+    // between stops. This directory uses the bakery lifetime, which covers a shift.
+    $sessionDir = dirname(__DIR__) . '/tmp/sessions';
+    if (!is_dir($sessionDir)) {
+        @mkdir($sessionDir, 0700, true);
+    }
+    if (is_dir($sessionDir) && is_writable($sessionDir)) {
+        session_save_path($sessionDir);
+    }
     if (isHTTPS()) {
         ini_set('session.cookie_secure', '1');
     }
@@ -435,6 +445,12 @@ function format_price($amount) {
 
 function format_date($date, $format = 'M j, Y') {
     try {
+        if ($date === null || $date === '') {
+            return '';
+        }
+        if (function_exists('bakery_format_user_stamp') && preg_match('/[gh]:i/', (string)$format)) {
+            return bakery_format_user_stamp($date, (string)$format);
+        }
         return date($format, strtotime($date));
     } catch (Exception $e) {
         return $date;

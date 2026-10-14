@@ -283,8 +283,8 @@ if (PHP_SAPI !== 'cli') {
         }
     } catch (Exception $e) {
         if (function_exists('bakery_page_probe_step')) {
-            bakery_page_probe_step('db: CONNECTION FAILED — ' . $e->getMessage());
-            bakery_page_probe_finish('STOPPED — database error');
+            bakery_page_probe_step('db: CONNECTION FAILED.' . $e->getMessage());
+            bakery_page_probe_finish('STOPPED. Database error');
             exit;
         }
         error_log("Database connection failed: " . $e->getMessage());
@@ -294,7 +294,7 @@ if (PHP_SAPI !== 'cli') {
             $detail = '<br><small style="font-weight:normal">'
                 . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')
                 . '<br>Mode: ' . htmlspecialchars($mode, ENT_QUOTES, 'UTF-8')
-                . ' — target ' . htmlspecialchars((defined('DB_NAME') ? DB_NAME : '?') . '@' . (defined('DB_HOST') ? DB_HOST : '?'), ENT_QUOTES, 'UTF-8')
+                . '. Target ' . htmlspecialchars((defined('DB_NAME') ? DB_NAME : '?') . '@' . (defined('DB_HOST') ? DB_HOST : '?'), ENT_QUOTES, 'UTF-8')
                 . '<br>CLI: php scripts/diag_db_connect.php</small>';
         }
         die('<div class="error"><strong>Connection Error:</strong> Unable to connect to database. Please try again later.' . $detail . '</div>');

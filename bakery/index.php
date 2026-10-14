@@ -16,6 +16,20 @@ require_once 'includes/demand_confirmation.php';
 require_once 'includes/operational_exceptions.php';
 
 $user = bakery_current_user();
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_POST['action'] ?? '') === 'dismiss_admin_signin_alert') {
+    bakery_require_csrf();
+    if ($user && ($user['role_slug'] ?? '') === 'administrator') {
+        require_once __DIR__ . '/includes/admin_signin_alerts.php';
+        bakery_admin_signin_dismiss($db, (int)($_POST['alert_id'] ?? 0), (int)$user['id']);
+    }
+    $back = BASE_URL . 'index.php';
+    $postedDate = trim((string)($_GET['date'] ?? ''));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedDate)) {
+        $back .= '?date=' . urlencode($postedDate);
+    }
+    header('Location: ' . $back);
+    exit;
+}
 $isDriver = $user && bakery_is_driver_route_role($user['role_slug'] ?? '');
 $isBaker = $user && $user['role_slug'] === 'baker';
 if ($isDriver) {
@@ -38,6 +52,8 @@ $isToday = ($selectedDate === $today);
 $prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
 $nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 
+bakery_try_build_from_standing_post($db);
+
 $dbError = null;
 $commandCenter = null;
 $chartData = [];
@@ -45,11 +61,6 @@ $tomorrowDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
 $tomorrowReadiness = null;
 
 try {
-    try {
-        bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => !$isBaker]);
-    } catch (Throwable $horizonEx) {
-        error_log('dashboard demand horizon: ' . $horizonEx->getMessage());
-    }
     if ($isBaker) {
         // Baker dashboard needs no ops metrics.
     } else {
@@ -114,6 +125,9 @@ require_once 'includes/nav.php';
                     <span class="ops-date-pill ops-date-pill-muted"><?php bakery_te('common.selected_day'); ?></span>
                 <?php endif; ?>
             </p>
+            <?php if (!$isBaker && is_array($commandCenter) && is_array($commandCenter['demand_scheduler'] ?? null)): ?>
+                <?php bakery_render_demand_scheduler_status($commandCenter['demand_scheduler']); ?>
+            <?php endif; ?>
         </div>
         <?php if (!$isBaker): ?>
         <nav class="ops-date-nav" aria-label="<?php bakery_te('dashboard.date_nav_aria'); ?>">
@@ -122,6 +136,7 @@ require_once 'includes/nav.php';
                 <a href="?date=<?php echo urlencode($today); ?>" class="ops-today-link"><?php bakery_te('common.today'); ?></a>
             <?php endif; ?>
             <a href="?date=<?php echo urlencode($nextDate); ?>"><?php bakery_te('common.next'); ?></a>
+            <?php echo bakery_build_from_standing_button($selectedDate, 'ops-inline-action-btn'); ?>
             <form class="ops-date-jump" method="get" action="">
                 <label class="ops-sr-only" for="ops-date-input"><?php bakery_te('common.operating_date'); ?></label>
                 <input id="ops-date-input" type="date" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
@@ -130,6 +145,13 @@ require_once 'includes/nav.php';
         </nav>
         <?php endif; ?>
     </header>
+
+    <?php if ($user && ($user['role_slug'] ?? '') === 'administrator'): ?>
+        <?php
+        require_once __DIR__ . '/includes/admin_signin_alerts.php';
+        echo bakery_admin_signin_alerts_html($db);
+        ?>
+    <?php endif; ?>
 
     <?php if ($isBaker): ?>
         <section class="ops-section">
@@ -156,7 +178,7 @@ require_once 'includes/nav.php';
         <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
         <?php if ($dbError && !$commandCenter): ?>
             <div class="ops-alert ops-alert-danger" role="alert">
-                The command center could not load this day's data. This is <strong>not</strong> a quiet zero day —
+ The command center could not load this day's data. This is <strong>not</strong> a quiet zero day.
                 <?php echo htmlspecialchars($dbError); ?>
             </div>
         <?php elseif ($commandCenter && !empty($commandCenter['section_errors'])): ?>
@@ -271,7 +293,7 @@ require_once 'includes/nav.php';
                         <?php else: ?>
                             <strong><?php bakery_te('dashboard.tomorrow_confirmed'); ?></strong>
                             <span><?php echo htmlspecialchars(bakery_t('dashboard.tomorrow_confirmed_desc', [
-                                'at' => !empty($tr['confirmation']['confirmed_at']) ? date('g:i A', strtotime($tr['confirmation']['confirmed_at'])) : '',
+                                'at' => !empty($tr['confirmation']['confirmed_at']) ? bakery_locale_time(strtotime($tr['confirmation']['confirmed_at'])) : '',
                                 'customers' => (int)$tr['customers_with_daily'],
                                 'units' => number_format((int)$tr['daily_units']),
                             ])); ?></span>

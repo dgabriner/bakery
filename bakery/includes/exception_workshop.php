@@ -1016,7 +1016,7 @@ function bakery_exception_workshop_render_detail(
     } else {
         echo '<ol>';
         foreach ($timeline as $event) {
-            echo '<li><time datetime="' . $h((string)($event['occurred_at'] ?? '')) . '">' . $h(!empty($event['occurred_at']) ? date('g:i A', strtotime((string)$event['occurred_at'])) : '') . '</time>';
+            echo '<li><time datetime="' . $h((string)($event['occurred_at'] ?? '')) . '">' . $h(!empty($event['occurred_at']) ? bakery_locale_time(strtotime((string)$event['occurred_at'])) : '') . '</time>';
             echo '<div><strong>' . $h((string)($event['summary'] ?? '')) . '</strong>';
             if (function_exists('bakery_operational_actor_label')) {
                 echo '<small>' . $h(bakery_operational_actor_label($event)) . '</small>';

@@ -143,7 +143,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
                 <div class="sfb-admin__question-head">
                   <div>
                     <h3><?php echo htmlspecialchars($question['baker_name']); ?> · <?php echo htmlspecialchars($question['batch_name']); ?></h3>
-                    <p class="sfb-admin__question-meta"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($question['created_at']))); ?> · <?php echo htmlspecialchars(bakery_sfb_phase_label(bakery_sfb_batch_phase(['status' => $question['batch_status']]))); ?></p>
+                    <p class="sfb-admin__question-meta"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($question['created_at']), 'M j, g:ia')); ?> · <?php echo htmlspecialchars(bakery_sfb_phase_label(bakery_sfb_batch_phase(['status' => $question['batch_status']]))); ?></p>
                   </div>
                   <a class="sfb-admin__button sfb-admin__button--secondary" href="sfb_admin_batch.php?batch=<?php echo (int)$question['batch_id']; ?>#sfb-admin-conversation"><?php bakery_te('sfb.admin_view_batch'); ?></a>
                 </div>
@@ -177,7 +177,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <input type="hidden" name="action" value="post_message">
           <label><?php bakery_te('sfb.admin_select_batch'); ?>
             <select name="batch_id" required>
-              <option value="">—</option>
+ <option value="">-</option>
               <?php foreach ($batches as $batch): ?>
                 <option value="<?php echo (int)$batch['id']; ?>"><?php echo htmlspecialchars($batch['baker_name'] . ' · ' . $batch['name']); ?></option>
               <?php endforeach; ?>
@@ -225,7 +225,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <input type="hidden" name="action" value="start">
           <label><?php bakery_te('sfb.admin_open_as_baker'); ?>
             <select name="customer_id" required>
-              <option value="">—</option>
+ <option value="">-</option>
               <?php foreach ($bakers as $baker): ?>
                 <option value="<?php echo (int)$baker['id']; ?>"><?php echo htmlspecialchars($baker['name']); ?></option>
               <?php endforeach; ?>
@@ -252,7 +252,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
             <div class="sfb-admin__batch-head">
               <div>
                 <h3><?php echo htmlspecialchars($batch['baker_name']); ?> · <?php echo htmlspecialchars($batch['name']); ?></h3>
-                <p class="sfb-admin__batch-meta"><?php echo htmlspecialchars($batch['formula_name'] ?? '—'); ?> · Started <?php echo htmlspecialchars(date('M j, Y g:ia', strtotime($batch['started_at']))); ?></p>
+                <p class="sfb-admin__batch-meta"><?php echo htmlspecialchars($batch['formula_name'] ?? '-'); ?> · Started <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($batch['started_at']), 'M j, Y g:ia')); ?></p>
               </div>
               <div class="sfb-admin__pills">
                 <span class="sfb-admin__pill <?php echo $batch['status'] === 'completed' ? 'sfb-admin__pill--ok' : ($batch['status'] === 'abandoned' ? 'sfb-admin__pill--muted' : ''); ?>"><?php echo htmlspecialchars(bakery_sfb_phase_label($phase)); ?></span>
@@ -262,7 +262,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
             <div class="sfb-admin__batch-actions">
               <span class="sfb-admin__batch-meta">
                 <?php echo (int)$batch['message_count']; ?> message<?php echo (int)$batch['message_count'] === 1 ? '' : 's'; ?> ·
-                <?php if ($batch['last_message_at']): ?><?php echo htmlspecialchars(bakery_t('sfb.admin_last_activity', ['when' => date('M j, g:ia', strtotime($batch['last_message_at']))])); ?><?php else: ?><?php bakery_te('sfb.admin_no_activity'); ?><?php endif; ?>
+                <?php if ($batch['last_message_at']): ?><?php echo htmlspecialchars(bakery_t('sfb.admin_last_activity', ['when' => bakery_format_user_stamp(strtotime($batch['last_message_at']), 'M j, g:ia')])); ?><?php else: ?><?php bakery_te('sfb.admin_no_activity'); ?><?php endif; ?>
               </span>
               <a class="sfb-admin__button sfb-admin__button--secondary" href="sfb_admin_batch.php?batch=<?php echo (int)$batch['id']; ?>"><?php bakery_te('sfb.admin_view_batch'); ?></a>
             </div>

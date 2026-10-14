@@ -162,7 +162,7 @@ function bakery_agent_program_work_map(): array
             ['42-driver-fast-path', 'prompt-42', 'stop-wizard'],
             ['driver.php', 'includes/driver_delivery.js', 'css/driver.css', 'includes/global_tracking.js'],
             ['tests/run_driver_workflow_tests.php', 'tests/run_driver_photo_ui_tests.php', 'tests/run_credit_return_tests.php'],
-            ['Every write through bakery_confirm_delivery', 'billable_pieces = delivered_pieces - credits_taken_back', 'Driver UX is the reference implementation — change it surgically'],
+            ['Every write through bakery_confirm_delivery', 'billable_pieces = delivered_pieces - credits_taken_back', 'Driver UX is the reference implementation, change it surgically'],
             'docs/prompts/42-driver-fast-path.md',
             'shipped'
         ),
@@ -271,7 +271,7 @@ function bakery_agent_program_work_map(): array
         'overnight-cron' => $m(
             'Overnight demand + digest cron verified from the app',
             ['60-overnight-cron', 'prompt-60', 'cron', 'demand-cron'],
-            ['scripts/demand_scheduler.php', 'scripts/staff_alert_digest.php', 'health_deploy.php', 'includes/dashboard_command_center.php', 'includes/staff_alerts.php', 'docs/CRON_KIT.md'],
+            ['scripts/demand_scheduler.php', 'scripts/staff_alert_digest.php', 'health_deploy.php', 'includes/cron_run.php', 'includes/dashboard_command_center.php', 'includes/staff_alerts.php', 'docs/CRON_KIT.md'],
             ['tests/run_demand_scheduler_tests.php', 'tests/run_staff_alert_tests.php', 'tests/run_tomorrow_confirmed_tests.php'],
             ['Page load still fills the horizon without the cron', 'Dashboard is honest about stale overnight runs'],
             'docs/prompts/60-overnight-cron.md',
@@ -282,7 +282,7 @@ function bakery_agent_program_work_map(): array
             ['61-settlement-story', 'prompt-61', 'cod-turnin', 'money-phase-2'],
             ['billing_center.php', 'includes/billing.php', 'includes/billing_aging.php', 'includes/billing_panel_invoices.php', 'includes/cod_turnins.php', 'route_manager.php', 'includes/manager_phone.php'],
             ['tests/run_invoice_send_tests.php', 'tests/run_square_invoice_tests.php', 'tests/run_route_manager_cash_tests.php', 'tests/run_customer_billing_tests.php'],
-            ['Billing Center does not invent amounts', 'Computed-only Decided — no AR ledger, no weekly rollup'],
+            ['Billing Center does not invent amounts', 'Computed-only Decided. No AR ledger, no weekly rollup'],
             'docs/prompts/61-settlement-story.md',
             'shipped'
         ),
@@ -300,7 +300,7 @@ function bakery_agent_program_work_map(): array
             ['63-ingredient-light', 'prompt-63', 'ingredient-notes'],
             ['ingredient_requirements.php', 'includes/ingredient_requirements.php', 'ingredients.php', 'includes/ingredient_purchase_notes.php'],
             ['tests/run_ingredient_planner_tests.php', 'tests/run_formula_units_tests.php'],
-            ['No PO, receiving, or lot tracking', 'Stock adjust Decided no — notes only'],
+            ['No PO, receiving, or lot tracking', 'Stock adjust Decided no. Notes only'],
             'docs/prompts/63-ingredient-light.md',
             'shipped'
         ),

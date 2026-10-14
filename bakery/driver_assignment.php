@@ -14,6 +14,8 @@ require_once 'includes/customer_record.php';
 $page_title = bakery_t('page.driver_assignment');
 bakery_ensure_standing_routes_order_column($db);
 
+bakery_try_build_from_standing_post($db);
+
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -57,8 +59,7 @@ $ordersByDriver = [];
 $unassignedOrders = [];
 $otherUnassignedOrders = [];
 $standingCustomerIds = [];
-$routeSyncCountByDriver = [];
-$routeSyncLabelsByDriver = [];
+$routeRestoreByDriver = [];
 $standingRoutesByDriver = [];
 $weeklyStandingRoutesByCustomer = [];
 $driversById = [];
@@ -131,7 +132,16 @@ try {
     $stmt->execute([$dayOfWeek]);
     $standingRoutes = $stmt->fetchAll();
 
+    $unassignedOrderIds = [];
+    foreach (bakery_unassigned_for_date($db, $selectedDate) as $gap) {
+        $unassignedOrderIds[(int)$gap['daily_order_id']] = true;
+    }
+
     foreach ($dailyOrders as $order) {
+        if (isset($unassignedOrderIds[(int)$order['id']])) {
+            $unassignedOrders[] = $order;
+            continue;
+        }
         if ($order['assigned_driver_id']) {
             $driverId = $order['assigned_driver_id'];
             if (!isset($ordersByDriver[$driverId])) {
@@ -141,8 +151,6 @@ try {
                 ];
             }
             $ordersByDriver[$driverId]['orders'][] = $order;
-        } else {
-            $unassignedOrders[] = $order;
         }
     }
 
@@ -201,19 +209,9 @@ try {
         }
     }
 
-    $assignedDriverByCustomer = [];
-    foreach ($dailyOrders as $order) {
-        if (!empty($order['assigned_driver_id'])) {
-            $assignedDriverByCustomer[(int)$order['customer_id']] = (int)$order['assigned_driver_id'];
-        }
-    }
-    foreach ($standingRoutes as $route) {
-        $customerId = (int)$route['customer_id'];
-        $driverId = (int)$route['driver_id'];
-        if (($assignedDriverByCustomer[$customerId] ?? 0) !== $driverId) {
-            $routeSyncCountByDriver[$driverId] = ($routeSyncCountByDriver[$driverId] ?? 0) + 1;
-            $routeSyncLabelsByDriver[$driverId][] = bakery_driver_assignment_missing_store_label($route);
-        }
+    $routeRestoreByDriver = [];
+    foreach (bakery_route_missing_standing_by_driver($db, $selectedDate) as $restoreGroup) {
+        $routeRestoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
     }
 
     foreach ($dailyOrders as $order) {
@@ -250,6 +248,7 @@ try {
 
 <?php if ($pageLoadError): ?>
 <div class="container" style="padding:1.5rem;">
+    <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
   <div class="alert alert-danger" style="background:#f8d7da;color:#721c24;padding:1rem;border-radius:6px;">
     <strong>Driver assignment failed to load:</strong>
     <?php echo htmlspecialchars($pageLoadError); ?>
@@ -290,6 +289,7 @@ try {
             </div>
         </div>
         <div class="date-controls">
+            <?php echo bakery_build_from_standing_button($selectedDate, 'btn btn-primary'); ?>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' -1 day'))]))); ?>" class="btn btn-outline">← Previous Day</a>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d')]))); ?>" class="btn btn-primary">Today</a>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' +1 day'))]))); ?>" class="btn btn-outline">Next Day →</a>
@@ -354,10 +354,10 @@ try {
             <?php foreach ($drivers as $driver): ?>
                 <?php
                 $standingDriverRoutes = $standingRoutesByDriver[$driver['id']] ?? [];
-                $missingRouteCount = $routeSyncCountByDriver[$driver['id']] ?? 0;
-                $restoreLabel = $missingRouteCount > 0
-                    ? bakery_driver_assignment_restore_label($missingRouteCount, $routeSyncLabelsByDriver[$driver['id']] ?? [])
-                    : '';
+                $restoreGroup = $routeRestoreByDriver[(int)$driver['id']] ?? null;
+                $missingRouteCount = $restoreGroup ? count($restoreGroup['stops']) : 0;
+                $restoreLabel = $restoreGroup['label'] ?? '';
+                $restoreConfirm = $restoreGroup['confirm'] ?? '';
                 $driverOrders = $ordersByDriver[$driver['id']] ?? ['orders' => []];
                 ?>
                 <div class="driver-section" data-driver-id="<?= $driver['id'] ?>">
@@ -365,7 +365,7 @@ try {
                         <h3><?= htmlspecialchars($driver['name']) ?></h3>
                         <div class="driver-controls">
                             <?php if ($missingRouteCount > 0): ?>
-                                <button class="btn btn-sm btn-warning restore-missing-stops" onclick="assignFromStandingRoutes(<?= $driver['id'] ?>)">
+                                <button class="btn btn-sm btn-warning restore-missing-stops" data-confirm="<?= htmlspecialchars($restoreConfirm, ENT_QUOTES) ?>" onclick="assignFromStandingRoutes(<?= (int)$driver['id'] ?>, this)">
                                     <?= htmlspecialchars($restoreLabel) ?>
                                 </button>
                             <?php endif; ?>
@@ -576,7 +576,7 @@ try {
                                                     title="<?= htmlspecialchars($dayLabel) ?> standing route"
                                                     style="<?= $selectStyle ?>"
                                                     onchange="saveStandingRoute(this)">
-                                                <option value="0">—</option>
+ <option value="0">-</option>
                                                 <?php foreach ($drivers as $driver): ?>
                                                     <option value="<?= (int)$driver['id'] ?>"<?= $selectedDriverId === (int)$driver['id'] ? ' selected' : '' ?>>
                                                         <?= htmlspecialchars($driver['name']) ?>
@@ -664,7 +664,7 @@ try {
                                 data-assigned-driver="<?= $assignedDriverId ?>">
                             <?= htmlspecialchars($customer['name']) ?><?= $statusHint ?>
                             <?php if (!empty($customer['address'])): ?>
-                                — <?= htmlspecialchars($customer['address']) ?>
+                                - <?= htmlspecialchars($customer['address']) ?>
                             <?php endif; ?>
                         </option>
                     <?php endforeach; ?>
@@ -678,7 +678,7 @@ try {
             <div id="add-customer-standing-section" class="add-customer-standing-section" hidden>
                 <div class="add-customer-standing-header">
                     <strong>Standing order for <?= htmlspecialchars($dayName) ?></strong>
-                    <span class="add-customer-standing-hint">Optional — set products for future weeks too</span>
+ <span class="add-customer-standing-hint">Optional. Set products for future weeks too</span>
                 </div>
                 <div class="add-customer-standing-actions">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="applyPanDulceInAddModal()">

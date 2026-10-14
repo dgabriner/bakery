@@ -64,9 +64,10 @@ function bakery_navigation_catalog() {
                 ['href' => 'daily_run.php', 'label' => 'Daily Run', 'description' => 'Step-by-step operating checklist and end-of-day closeout for the selected date.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_brief.php', 'label' => 'Daily Brief', 'description' => 'One-page shift handoff: changes, production, routes, and exceptions.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
-                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow. Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
-                ['href' => 'cashier_shop_photos.php', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'time_clock.php', 'nav_key' => 'time_clock', 'label' => 'Time Clock', 'description' => 'Clock in and out. Managers see who is working and today\'s punches.', 'roles' => ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'cashier_shop_photos.php', 'nav_key' => 'cashier_shop_photos', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'cashier_add_product.php', 'nav_key' => 'cashier_add_product', 'label' => 'Add Product', 'description' => 'Quickly add a bakery or store item and take its photo.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
             ],
         ],
@@ -107,8 +108,8 @@ function bakery_navigation_catalog() {
                 ['href' => 'pan_dulce_pricing.php', 'label' => 'Pan Dulce Pricing', 'description' => 'Zone-specific Pan Dulce pricing.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'customer_pricing.php', 'label' => 'Customer Custom Pricing', 'description' => 'Per-product prices for customers on the custom tier.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'pan_dulce_quantities.php', 'label' => 'Pan Dulce Standards', 'description' => 'Default Pan Dulce quantities by customer or route.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
-                ['href' => 'service_issues.php', 'label' => 'Service Issues', 'description' => 'Customer-reported delivery problems — quantity disputes, damage, and billing questions.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
-                ['href' => 'operational_timeline.php', 'label' => 'Operational Timeline', 'description' => 'Who did what — deliveries, production, loads, and order changes for a day or customer.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'service_issues.php', 'label' => 'Service Issues', 'description' => 'Customer-reported delivery problems. Quantity disputes, damage, and billing questions.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'operational_timeline.php', 'label' => 'Operational Timeline', 'description' => 'Who did what. Deliveries, production, loads, and order changes for a day or customer.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'leads.php', 'label' => 'Sales Leads', 'description' => 'Track prospective customers and follow-up.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
             ],
         ],
@@ -121,7 +122,7 @@ function bakery_navigation_catalog() {
             'items' => [
                 ['href' => 'driver.php?change_driver=1', 'label' => 'My Route', 'description' => 'Choose a driver identity and work that driver\'s delivery route.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'driver_assignment.php', 'label' => 'Driver Assignment', 'description' => 'Assign delivery work to drivers for a selected date.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
-                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow — Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow. Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'daily_route.php', 'label' => 'Daily Route', 'description' => 'See the daily route plan by day, month, or list.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'drivers.php', 'label' => 'Driver Management', 'description' => 'Maintain driver records and their recurring routes.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'standing_routes.php', 'label' => 'Standing Routes', 'description' => 'Maintain the recurring customer-to-driver route plan.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -130,6 +131,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'route_closeout.php', 'label' => 'Route Closeout', 'description' => 'End-of-route loaded vs delivered vs returned vs waste; required before Daily Run closeout.', 'roles' => ['administrator', 'manager', 'driver'], 'usage' => 'everyday'],
                 ['href' => 'route_analysis.php', 'label' => 'Route Analysis', 'description' => 'Compare planned and actual timing for a driver route, and update default stop times when needed.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'map.php', 'label' => 'Customer Map', 'description' => 'Map customer locations and delivery zones.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'call_headquarters.php', 'label' => 'Call Headquarters', 'description' => 'Call the bakery from the route.', 'roles' => ['administrator', 'manager', 'driver'], 'usage' => 'occasional'],
             ],
         ],
         [
@@ -170,9 +172,11 @@ function bakery_navigation_catalog() {
                 ['href' => 'sfb_admin_overview.php', 'label' => 'SF Baker Engagement', 'description' => 'Review SF Baker batches, respond to questions, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'sfb_admin_intensive.php', 'label' => 'Full Week Intensive', 'description' => 'Enroll a baker, follow three guided bakes, and leave coaching notes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'sfb_admin_studio.php', 'label' => 'Synthetic Manager', 'description' => 'Pace the synthetic baker clock, read the action log, and inspect a baker.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'sfb_admin_learn.php', 'label' => 'Learning Center', 'description' => 'Author courses, lessons, and steps for SF Bakers.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'agent_homebase.php', 'label' => 'Agent Homebase', 'description' => 'Learning studio, whiteboard, bug watchlist, and agent session log for Cursor missions.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'users.php', 'label' => 'User Management', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'login_history.php', 'label' => 'Login History', 'description' => 'Who is on the floor, which screens they use, and whether today looks unusual.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'audit_log.php', 'label' => 'Audit Log', 'description' => 'Who changed an order, a price, or a user, and the value before and after.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'qr_login.php', 'label' => 'Customer QR Login', 'description' => 'Generate a secure portal login QR code for any customer.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'historical_navigation.php', 'label' => 'Historical Navigation', 'description' => 'The prior full menu and retained legacy entry points.', 'roles' => ['administrator'], 'usage' => 'occasional'],
             ],
@@ -351,6 +355,18 @@ function bakery_historical_navigation_catalog() {
 }
 
 /**
+ * Pages that must stay unreachable. They are omitted from the role allowlist
+ * on purpose: the file itself refuses the request. Do not register them as
+ * administrator pages just to satisfy catalog coverage.
+ *
+ * @return list<string>
+ */
+function bakery_navigation_disabled_scripts(): array
+{
+    return ['get_customers_no_address.php'];
+}
+
+/**
  * Extra script→roles registrations for JSON/handlers not shown in the menu.
  * Catalog item roles still win for menu pages; this is the escape hatch.
  *
@@ -392,6 +408,7 @@ function &bakery_navigation_script_registry(): array
         ] as $script) {
             $boot($registry, $script, $cashierRoles);
         }
+        $boot($registry, 'time_clock.php', ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager']);
         $bakerRoles = ['baker', 'administrator', 'manager'];
         foreach (['production.php', 'baker_mix.php', 'pack_list.php'] as $script) {
             $boot($registry, $script, $bakerRoles);
@@ -400,7 +417,9 @@ function &bakery_navigation_script_registry(): array
         foreach ([
             'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'daily_status_api.php', 'text_comms_api.php', 'service_issues_api.php',
             'staff_alerts_api.php', 'auto_push_api.php', 'ping.php',
-            'billing_export.php', 'generate_invoice.php', 'invoice_center.php',
+            'billing_export.php', 'generate_invoice.php',
+            'generate_invoice_simple.php', 'simple_invoice.php',
+            'invoice_center.php',
             'text_media.php', 'ai_photo_text.php', 'customer_statement.php',
             'account_health.php', 'cost_margin.php', 'today.php', 'catalog_gaps.php',
         ] as $script) {
@@ -410,6 +429,7 @@ function &bakery_navigation_script_registry(): array
         $adminOnly = ['administrator'];
         foreach ([
             'standing_orders.php', 'bread_distribution.php', 'orders.php', 'driver_overview.php',
+            'products_new.php',
             'driver_pages_probe.php', 'trace_driver_list.php',
             'build_id.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
             'health_deploy.php', 'health_driver.php', 'health_prod.php',

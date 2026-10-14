@@ -20,6 +20,15 @@ const paymentLabels = {
     signature: 'Signature'
 };
 
+function routeCopy(key, fallback) {
+    const copy = (window.__ROUTE_MANAGER__ && window.__ROUTE_MANAGER__.copy) || {};
+    return copy[key] || fallback || key;
+}
+
+function stopIsSquarePrepaid(delivery) {
+    return !!(delivery && delivery.square_prepaid);
+}
+
 function formatMoney(amount) {
     return '$' + Number(amount || 0).toFixed(2);
 }
@@ -103,14 +112,18 @@ function driverColor(driverId) {
 }
 
 function formatTime(value) {
-    if (!value) return '—';
+    if (!value) return '-';
     const parts = String(value).split(':');
     if (parts.length < 2) return value;
-    let hours = parseInt(parts[0], 10);
-    const minutes = parts[1];
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return hours + ':' + minutes + ' ' + ampm;
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return value;
+    if (window.bakeryLocaleTime) {
+        return window.bakeryLocaleTime(new Date(2026, 0, 1, hours, minutes, 0));
+    }
+    const suffix = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return hour12 + ':' + String(minutes).padStart(2, '0') + ' ' + suffix;
 }
 
 function loadDeliveries(options) {
@@ -263,7 +276,7 @@ function formatGpsActivityTime(value) {
     if (!value) return 'Time unavailable';
     const parsed = new Date(String(value).replace(' ', 'T'));
     if (Number.isNaN(parsed.getTime())) return String(value);
-    return parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return window.bakeryLocaleTime ? window.bakeryLocaleTime(parsed) : '';
 }
 
 function renderGpsActivity(data) {
@@ -347,7 +360,7 @@ function deliveryInfoHtml(driverName, delivery, driverId) {
            </button>`;
     return `
         <div class="map-info-window">
-            <strong>#${delivery.route_order || '—'} ${escapeHtml(delivery.customer_name)}</strong><br>
+ <strong>#${delivery.route_order || '-'} ${escapeHtml(delivery.customer_name)}</strong><br>
             <span>${escapeHtml(driverName)}</span><br>
             <span>${escapeHtml(delivery.address || 'No address')}</span><br>
             <span>Zone: ${escapeHtml(delivery.zone)}</span><br>
@@ -491,7 +504,7 @@ function updateLegend() {
         const count = driverData.deliveries.length;
         const cash = driverData.cash_summary || {};
         const cashLine = (cash.cod_stop_count || 0) > 0
-            ? `<div class="legend-details">Cash: ${formatMoney(cash.cash_on_hand)} collected · ${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '—'} turned in</div>`
+            ? `<div class="legend-details">Cash: ${formatMoney(cash.cash_on_hand)} collected · ${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '-'} turned in</div>`
             : '';
         const soldLine = Number(cash.total_sold) > 0
             ? `<div class="legend-details">Sold: ${formatMoney(cash.total_sold)}</div>`
@@ -534,7 +547,7 @@ function pickupWorkingPieces(cell) {
 
 function pickupCellLabel(cell, unit, perTray, perBox) {
     const pieces = pickupWorkingPieces(cell);
-    if (pieces <= 0) return '—';
+    if (pieces <= 0) return '-';
     if (unit === 'trays') {
         if (!(Number(perTray) > 1)) return String(pieces);
         const split = pickupSplit(pieces, perTray);
@@ -640,7 +653,7 @@ function renderPickupBoard() {
                 const skuCount = (cell.products || []).length;
                 return '<td class="pickup-qty"><button type="button" class="pickup-cell-btn" data-store-id="' +
                     escapeHtml(String(store.customer_id)) + '" data-driver-id="' + escapeHtml(String(cell.driver_id)) + '">' +
-                    escapeHtml(qty ? String(qty) : '—') + extra +
+                    escapeHtml(qty ? String(qty) : '-') + extra +
                     (skuCount ? '<small>' + skuCount + '</small>' : '') +
                     '</button></td>';
             }).join('');
@@ -796,7 +809,7 @@ function pickupSheetLabel(board) {
     const state = pickupSheetState;
     if (!state) return '';
     if (state.hand > 0 && state.source) {
-        return (board.dataset.hand || ':n in hand — tap where they go').replace(':n', String(state.hand))
+        return (board.dataset.hand || ':n in hand. Tap where they go').replace(':n', String(state.hand))
             + (state.source ? ' · −' + escapeHtml(state.source) : '');
     }
     if (state.source && state.dest) {
@@ -1416,9 +1429,12 @@ function updateDeliveryList() {
             const isLast = stopIndex === stops.length - 1;
             const isCod = (d.payment_collection || 'cod') === 'cod';
             const cashAmount = stopPaymentAmount(d);
-            const paymentBadge = isCod
+            const prepaid = stopIsSquarePrepaid(d);
+            const paymentBadge = prepaid
+                ? `<span class="payment-badge payment-badge--prepaid">${escapeHtml(routeCopy('prepaid', 'Prepaid'))}</span>`
+                : (isCod
                 ? `<span class="payment-badge payment-badge--cod">${isDelivered ? 'COD cash ' + formatMoney(cashAmount) : 'COD expected ' + formatMoney(cashAmount)}</span>`
-                : `<span class="payment-badge payment-badge--signature">Signature</span>`;
+                : `<span class="payment-badge payment-badge--signature">Signature</span>`);
             const mapsLink = d.address
                 ? `<a class="stop-external-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(d.address)}" target="_blank" rel="noopener">Map</a>`
                 : '';
@@ -1439,7 +1455,7 @@ function updateDeliveryList() {
                     tabindex="0"
                     title="${isRouteLocked ? 'This stop is locked in route history' : 'Move with ↑ ↓ · Tap to view stop details'}">
                     ${isRouteLocked ? '' : '<span class="drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>'}
-                    <div class="stop-order">${d.route_order > 0 ? d.route_order : '—'}</div>
+ <div class="stop-order">${d.route_order > 0 ? d.route_order : '-'}</div>
                     <div class="stop-body">
                         <div class="stop-name">
                             <button type="button" class="customer-hub-link stop-detail-trigger">${escapeHtml(d.customer_name)}</button>
@@ -1475,7 +1491,7 @@ function updateDeliveryList() {
         const cashBits = [];
         if ((cash.cod_stop_count || 0) > 0) {
             cashBits.push(`Collected: <strong>${formatMoney(cash.cash_on_hand)}</strong>`);
-            cashBits.push(`Turned in: <strong>${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '—'}</strong>`);
+            cashBits.push(`Turned in: <strong>${cash.cash_turned_in != null ? formatMoney(cash.cash_turned_in) : '-'}</strong>`);
             if (cash.cash_still_owed != null && Number(cash.cash_still_owed) > 0.005) {
                 cashBits.push(`Still owed: <strong>${formatMoney(cash.cash_still_owed)}</strong>`);
             }
@@ -1855,21 +1871,19 @@ function findDelivery(driverId, orderId) {
 }
 
 function formatDateTime(value) {
-    if (!value) return '—';
+    if (!value) return '-';
     const date = new Date(String(value).replace(' ', 'T'));
     if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-    });
+    const datePart = date.toLocaleString(undefined, { month: 'short', day: 'numeric' });
+    const timePart = window.bakeryLocaleTime ? window.bakeryLocaleTime(date) : '';
+    return timePart ? datePart + ' ' + timePart : datePart;
 }
 
 function formatReceivingWindow(deliverAfter, deliverBy) {
-    if (!deliverAfter && !deliverBy) return '—';
+    if (!deliverAfter && !deliverBy) return '-';
     if (deliverAfter && deliverBy) {
-        return formatTime(deliverAfter) + ' – ' + formatTime(deliverBy);
+        const rangeWord = window.__BAKERY_LOCALE__ === 'es' ? 'a' : 'to';
+        return formatTime(deliverAfter) + ' ' + rangeWord + ' ' + formatTime(deliverBy);
     }
     if (deliverAfter) return 'After ' + formatTime(deliverAfter);
     return 'By ' + formatTime(deliverBy);
@@ -1966,14 +1980,16 @@ function viewStopDetail(driverId, orderId) {
     const photosGrid = document.getElementById('stopDetailPhotos');
 
     const status = statusLabels[delivery.delivery_status] || delivery.delivery_status;
-    const paymentType = paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature';
+    const paymentType = stopIsSquarePrepaid(delivery)
+        ? routeCopy('prepaid_square', 'Prepaid in Square')
+        : (paymentLabels[delivery.payment_collection] || delivery.payment_collection || 'Signature');
     const paymentAmount = stopPaymentAmount(delivery);
     const customerRecordUrl = `customer_record.php?customer_id=${encodeURIComponent(delivery.customer_id)}&date=${encodeURIComponent(selectedDate)}`;
     const mapsUrl = delivery.address
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(delivery.address)}`
         : '';
 
-    kicker.textContent = `${driverData.name} · Stop #${delivery.route_order || '—'} · ${selectedDate}`;
+    kicker.textContent = `${driverData.name} · Stop #${delivery.route_order || '-'} · ${selectedDate}`;
     title.textContent = delivery.customer_name;
 
     actions.innerHTML = `
@@ -1991,13 +2007,65 @@ function viewStopDetail(driverId, orderId) {
 
     statusEl.innerHTML = renderDetailGrid([
         ['Status', `<span class="stop-detail-status status-${escapeHtml(delivery.delivery_status)}">${escapeHtml(status)}</span>`],
-        ['Zone', escapeHtml(delivery.zone || '—')],
+        ['Zone', escapeHtml(delivery.zone || '-')],
         ['Address', escapeHtml(delivery.address || 'No address')],
         ['Payment', escapeHtml(paymentType)],
-        ['Amount', paymentAmount != null ? formatMoney(paymentAmount) : '—'],
-        ['Collected', delivery.amount_collected != null ? formatMoney(delivery.amount_collected) : '—'],
-        ['Items ordered', delivery.item_count ? String(delivery.item_count) : '—'],
+        ['Amount', paymentAmount != null ? formatMoney(paymentAmount) : '-'],
+        ['Collected', delivery.amount_collected != null ? formatMoney(delivery.amount_collected) : '-'],
+        ['Items ordered', delivery.item_count ? String(delivery.item_count) : '-'],
     ]);
+
+    const existingOverride = statusEl.querySelector('[data-cod-override]');
+    if (existingOverride) {
+        existingOverride.remove();
+    }
+    if (stopIsSquarePrepaid(delivery) && !delivery.cod_override_reason) {
+        const form = document.createElement('form');
+        form.setAttribute('data-cod-override', '1');
+        form.className = 'cod-override-form';
+        form.innerHTML = `
+            <p class="cod-override-note">${escapeHtml(routeCopy('prepaid_square', 'Prepaid in Square'))}</p>
+            <label>${escapeHtml(routeCopy('cod_override_reason', 'Reason'))}
+                <input type="text" name="reason" maxlength="255" required>
+            </label>
+            <button type="submit" class="btn btn-secondary">${escapeHtml(routeCopy('cod_override_save', 'Save reason'))}</button>
+        `;
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const reason = (form.querySelector('input[name="reason"]').value || '').trim();
+            if (!reason) {
+                return;
+            }
+            const body = new URLSearchParams();
+            body.set('action', 'record_cod_square_override');
+            body.set('daily_order_id', String(delivery.daily_order_id));
+            body.set('reason', reason);
+            body.set('csrf_token', pickupCsrfToken());
+            fetch(window.location.pathname + window.location.search, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    showError(data.error || 'Could not record the COD override');
+                    return;
+                }
+                delivery.cod_override_reason = reason;
+                loadDeliveries({ background: true, skipMap: true });
+                viewStopDetail(driverId, orderId);
+            })
+            .catch(() => showError('Could not record the COD override'));
+        });
+        statusEl.appendChild(form);
+    } else if (stopIsSquarePrepaid(delivery) && delivery.cod_override_reason) {
+        const note = document.createElement('p');
+        note.setAttribute('data-cod-override', '1');
+        note.className = 'cod-override-note';
+        note.textContent = routeCopy('cod_override_saved', 'COD override saved') + ': ' + delivery.cod_override_reason;
+        statusEl.appendChild(note);
+    }
 
     invoiceStatus.textContent = 'Loading order details…';
     invoiceStatus.style.display = 'block';
@@ -2114,7 +2182,7 @@ window.viewDeliveryPhotos = viewDeliveryPhotos;
 window.viewStopDetail = viewStopDetail;
 
 function updateLastRefreshTime() {
-    document.getElementById('last-update-time').textContent = new Date().toLocaleTimeString();
+    document.getElementById('last-update-time').textContent = window.bakeryLocaleTime ? window.bakeryLocaleTime(new Date()) : new Date().toLocaleTimeString();
 }
 
 function showError(message) {
@@ -2300,4 +2368,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-window.initMap = initMap;
+window.initMap = initMap;"

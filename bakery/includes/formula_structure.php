@@ -49,6 +49,7 @@ function bakery_formula_positive_or_null($value): ?float
  *   batch_size_mode: ?string,
  *   standard_batch_dough_grams: ?float,
  *   standard_batch_pieces: ?float,
+ *   pieces_per_batch: ?float,
  *   batch_multiplier: ?float,
  *   dough_loss_grams: ?float,
  *   starters: list<array<string, mixed>>
@@ -81,6 +82,7 @@ function bakery_formula_normalize_structure(?array $raw): array
         'batch_size_mode' => $mode,
         'standard_batch_dough_grams' => bakery_formula_positive_or_null($raw['standard_batch_dough_grams'] ?? null),
         'standard_batch_pieces' => bakery_formula_positive_or_null($raw['standard_batch_pieces'] ?? null),
+        'pieces_per_batch' => bakery_formula_positive_or_null($raw['pieces_per_batch'] ?? null),
         'batch_multiplier' => $multiplier,
         'dough_loss_grams' => $loss,
         'starters' => $starters,
@@ -140,6 +142,30 @@ function bakery_formula_batch_reference(array $structure, ?float $pieceWeightGra
     }
 
     return $base;
+}
+
+/**
+ * Mix-sheet batch math for one dough.
+ * Gram batches use the standard batch weight. Piece batches use pieces_per_batch.
+ * A blank yield stays null and is not inferred from piece weight.
+ *
+ * @return array{
+ *   standard_batch_dough_grams: ?float,
+ *   pieces_per_batch: ?float,
+ *   theoretical_batches: ?float,
+ *   batches_from_pieces: ?float
+ * }
+ */
+function bakery_formula_mix_batch_math($standardBatchGrams, $piecesPerBatch, float $doughGrams, float $plannedPieces): array
+{
+    $grams = bakery_formula_positive_or_null($standardBatchGrams);
+    $pieces = bakery_formula_positive_or_null($piecesPerBatch);
+    return [
+        'standard_batch_dough_grams' => $grams,
+        'pieces_per_batch' => $pieces,
+        'theoretical_batches' => ($grams !== null && $doughGrams > 0) ? $doughGrams / $grams : null,
+        'batches_from_pieces' => ($pieces !== null && $plannedPieces > 0) ? $plannedPieces / $pieces : null,
+    ];
 }
 
 /**
@@ -411,6 +437,96 @@ function bakery_formula_ingredient_is_water(string $name, array $roles): bool
 }
 
 /**
+ * Flour and water inside a preferment whose composition is another dough formula.
+ * Null when that formula has no flour to fold. A dough type already on the stack is skipped.
+ *
+ * @param array<string, mixed> $subformula
+ * @param list<int> $stack
+ * @return array{flour_grams:float, water_grams:float, parts:list<array<string, mixed>>}|null
+ */
+function bakery_formula_preferment_expansion(float $grams, array $subformula, array $stack = []): ?array
+{
+    $doughId = (int) ($subformula['dough_type_id'] ?? 0);
+    if ($doughId > 0 && in_array($doughId, $stack, true)) {
+        return null;
+    }
+    $nextStack = $stack;
+    if ($doughId > 0) {
+        $nextStack[] = $doughId;
+    }
+
+    $lines = [];
+    foreach ($subformula['lines'] ?? [] as $line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        $child = (isset($line['subformula']) && is_array($line['subformula'])) ? $line['subformula'] : null;
+        $childId = (int) ($child['dough_type_id'] ?? 0);
+        if ($child !== null && $childId > 0 && in_array($childId, $nextStack, true)) {
+            continue;
+        }
+        $lines[] = $line;
+    }
+
+    $totalPct = 0.0;
+    foreach ($lines as $line) {
+        $totalPct += (float) ($line['percentage'] ?? 0);
+    }
+    if ($totalPct <= 0 || $grams <= 0) {
+        return null;
+    }
+
+    $flourBase = $grams / ($totalPct / 100.0);
+    $parts = [];
+    $flour = 0.0;
+    $water = 0.0;
+    foreach ($lines as $line) {
+        $id = (int) ($line['ingredient_id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        $partGrams = $flourBase * (((float) ($line['percentage'] ?? 0)) / 100.0);
+        $child = (isset($line['subformula']) && is_array($line['subformula'])) ? $line['subformula'] : null;
+        if ($child !== null) {
+            $nested = bakery_formula_preferment_expansion($partGrams, $child, $nextStack);
+            if ($nested !== null) {
+                foreach ($nested['parts'] as $nestedPart) {
+                    $parts[] = $nestedPart;
+                }
+                $flour += (float) $nested['flour_grams'];
+                $water += (float) $nested['water_grams'];
+                continue;
+            }
+        }
+        $name = (string) ($line['ingredient_name'] ?? $line['name'] ?? '');
+        $unit = (string) ($line['unit'] ?? '');
+        $isFlour = bakery_formula_ingredient_is_flour($name, []);
+        $isWater = bakery_formula_ingredient_is_water($name, []);
+        $parts[] = [
+            'ingredient_id' => $id,
+            'ingredient_name' => $name,
+            'unit' => $unit,
+            'grams' => $partGrams,
+            'line_role' => $isFlour ? 'flour' : ($isWater ? 'water' : 'other'),
+        ];
+        if ($isFlour) {
+            $flour += $partGrams;
+        }
+        if ($isWater) {
+            $water += $partGrams;
+        }
+    }
+    if ($flour <= 0) {
+        return null;
+    }
+    return [
+        'flour_grams' => $flour,
+        'water_grams' => $water,
+        'parts' => $parts,
+    ];
+}
+
+/**
  * Scale a dough formula. Foldable starters move their flour and water into
  * those ingredients and stay on a prep line so they are not counted twice.
  *
@@ -449,6 +565,46 @@ function bakery_formula_fold_formula(array $lines, array $starters, float $dough
         $grams = $flourBase * ($pct / 100.0);
         $name = (string) ($line['ingredient_name'] ?? $line['name'] ?? '');
         $unit = (string) ($line['unit'] ?? '');
+        $subformula = (isset($line['subformula']) && is_array($line['subformula'])) ? $line['subformula'] : null;
+        if ($subformula !== null) {
+            $expanded = bakery_formula_preferment_expansion($grams, $subformula, []);
+            if ($expanded !== null) {
+                $folded = true;
+                $prep[] = [
+                    'ingredient_id' => $id,
+                    'ingredient_name' => $name,
+                    'unit' => $unit,
+                    'grams' => $grams,
+                    'stored_percentage' => $pct,
+                    'folded_bakers_percent' => null,
+                    'counts_in_totals' => false,
+                    'source' => 'starter_prep',
+                    'label_key' => 'formula_structure.starter_folded_note',
+                ];
+                foreach ($expanded['parts'] as $part) {
+                    $partId = (int) $part['ingredient_id'];
+                    if (!isset($buckets[$partId])) {
+                        $buckets[$partId] = [
+                            'ingredient_id' => $partId,
+                            'ingredient_name' => (string) $part['ingredient_name'],
+                            'unit' => (string) $part['unit'],
+                            'grams' => 0.0,
+                            'stored_percentage' => null,
+                            'roles' => [],
+                        ];
+                    }
+                    $buckets[$partId]['grams'] += (float) $part['grams'];
+                    $buckets[$partId]['roles'][(string) $part['line_role']] = true;
+                    if ($buckets[$partId]['ingredient_name'] === '' && $part['ingredient_name'] !== '') {
+                        $buckets[$partId]['ingredient_name'] = (string) $part['ingredient_name'];
+                    }
+                    if ($buckets[$partId]['unit'] === '' && $part['unit'] !== '') {
+                        $buckets[$partId]['unit'] = (string) $part['unit'];
+                    }
+                }
+                continue;
+            }
+        }
         if (isset($parsed[$id])) {
             $folded = true;
             $prep[] = [
@@ -794,8 +950,11 @@ function bakery_formula_structure_load_map(PDO $db, array $doughIds): array
     }
 
     $placeholders = implode(',', array_fill(0, count($doughIds), '?'));
+    $piecesSql = (function_exists('column_exists') && column_exists($db, 'dough_types', 'pieces_per_batch'))
+        ? 'pieces_per_batch'
+        : 'NULL AS pieces_per_batch';
     $stmt = $db->prepare(
-        "SELECT id, batch_size_mode, standard_batch_dough_grams, standard_batch_pieces, batch_multiplier, dough_loss_grams
+        "SELECT id, batch_size_mode, standard_batch_dough_grams, standard_batch_pieces, $piecesSql, batch_multiplier, dough_loss_grams
          FROM dough_types WHERE id IN ($placeholders)"
     );
     $stmt->execute($doughIds);
@@ -942,6 +1101,7 @@ function bakery_formula_structure_save_batch(PDO $db, int $doughTypeId, array $p
         'batch_size_mode' => $post['batch_size_mode'] ?? '',
         'standard_batch_dough_grams' => $post['standard_batch_dough_grams'] ?? '',
         'standard_batch_pieces' => $post['standard_batch_pieces'] ?? '',
+        'pieces_per_batch' => $post['pieces_per_batch'] ?? '',
         'batch_multiplier' => $post['batch_multiplier'] ?? '',
         'dough_loss_grams' => $post['dough_loss_grams'] ?? '',
     ]);
@@ -952,6 +1112,25 @@ function bakery_formula_structure_save_batch(PDO $db, int $doughTypeId, array $p
     $postedLoss = bakery_formula_normalize_optional_number($post['dough_loss_grams'] ?? null);
     if ($postedLoss !== null && $postedLoss < 0) {
         throw new RuntimeException(bakery_t('formula_structure.loss_invalid'));
+    }
+    $piecesReady = function_exists('column_exists') && column_exists($db, 'dough_types', 'pieces_per_batch');
+    if ($piecesReady) {
+        $stmt = $db->prepare(
+            'UPDATE dough_types
+             SET batch_size_mode = ?, standard_batch_dough_grams = ?, standard_batch_pieces = ?,
+                 pieces_per_batch = ?, batch_multiplier = ?, dough_loss_grams = ?
+             WHERE id = ?'
+        );
+        $stmt->execute([
+            $normalized['batch_size_mode'],
+            $normalized['standard_batch_dough_grams'],
+            $normalized['standard_batch_pieces'],
+            $normalized['pieces_per_batch'],
+            $normalized['batch_multiplier'],
+            $normalized['dough_loss_grams'],
+            $doughTypeId,
+        ]);
+        return;
     }
     $stmt = $db->prepare(
         'UPDATE dough_types
@@ -1207,4 +1386,130 @@ function bakery_formula_structure_assert_dough(PDO $db, int $doughTypeId): void
     if (!$stmt->fetchColumn()) {
         throw new RuntimeException(bakery_t('formula_structure.save_failed'));
     }
+}
+
+function bakery_formula_subformula_link_ready(PDO $db): bool
+{
+    return function_exists('column_exists') && column_exists($db, 'ingredients', 'subformula_dough_type_id');
+}
+
+/**
+ * Ingredient id => dough type whose formula is that ingredient's composition.
+ *
+ * @return array{links: array<int, int>, lines: array<int, list<array<string, mixed>>>}
+ */
+function bakery_formula_subformula_catalog(PDO $db): array
+{
+    $empty = ['links' => [], 'lines' => []];
+    if (!bakery_formula_subformula_link_ready($db) || !function_exists('table_exists') || !table_exists($db, 'formula_ingredients')) {
+        return $empty;
+    }
+    $links = [];
+    $linkRows = $db->query(
+        'SELECT id, subformula_dough_type_id
+         FROM ingredients
+         WHERE subformula_dough_type_id IS NOT NULL'
+    );
+    foreach ($linkRows as $row) {
+        $doughId = (int) $row['subformula_dough_type_id'];
+        if ($doughId > 0) {
+            $links[(int) $row['id']] = $doughId;
+        }
+    }
+    $lines = [];
+    $formulaRows = $db->query(
+        'SELECT fi.dough_type_id, fi.ingredient_id, i.name AS ingredient_name, i.unit, fi.percentage
+         FROM formula_ingredients fi
+         JOIN ingredients i ON i.id = fi.ingredient_id'
+    );
+    foreach ($formulaRows as $row) {
+        $lines[(int) $row['dough_type_id']][] = [
+            'ingredient_id' => (int) $row['ingredient_id'],
+            'ingredient_name' => (string) $row['ingredient_name'],
+            'unit' => (string) ($row['unit'] ?? ''),
+            'percentage' => (float) $row['percentage'],
+        ];
+    }
+    return ['links' => $links, 'lines' => $lines];
+}
+
+/**
+ * @param list<array<string, mixed>> $lines
+ * @param array{links: array<int, int>, lines: array<int, list<array<string, mixed>>>} $catalog
+ * @param list<int> $stack
+ * @return list<array<string, mixed>>
+ */
+function bakery_formula_decorate_subformulas(array $lines, array $catalog, array $stack = []): array
+{
+    $links = $catalog['links'] ?? [];
+    $byDough = $catalog['lines'] ?? [];
+    foreach ($lines as &$line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        $ingredientId = (int) ($line['ingredient_id'] ?? 0);
+        $doughId = (int) ($links[$ingredientId] ?? 0);
+        if ($doughId <= 0 || in_array($doughId, $stack, true)) {
+            continue;
+        }
+        $childLines = $byDough[$doughId] ?? [];
+        $line['subformula'] = [
+            'dough_type_id' => $doughId,
+            'lines' => bakery_formula_decorate_subformulas($childLines, $catalog, array_merge($stack, [$doughId])),
+        ];
+    }
+    unset($line);
+    return $lines;
+}
+
+/**
+ * @param list<array<string, mixed>> $lines
+ * @return list<int>
+ */
+function bakery_formula_collect_ingredient_ids(array $lines): array
+{
+    $ids = [];
+    foreach ($lines as $line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        $id = (int) ($line['ingredient_id'] ?? 0);
+        if ($id > 0) {
+            $ids[$id] = true;
+        }
+        $child = $line['subformula']['lines'] ?? null;
+        if (is_array($child)) {
+            foreach (bakery_formula_collect_ingredient_ids($child) as $childId) {
+                $ids[$childId] = true;
+            }
+        }
+    }
+    return array_map('intval', array_keys($ids));
+}
+
+function bakery_formula_save_ingredient_subformula(PDO $db, int $ingredientId, ?int $doughTypeId): void
+{
+    if (!bakery_formula_subformula_link_ready($db)) {
+        throw new RuntimeException(bakery_t('formula_structure.not_ready'));
+    }
+    if ($ingredientId <= 0) {
+        throw new RuntimeException(bakery_t('formula_structure.subformula_invalid'));
+    }
+    $ingredient = $db->prepare('SELECT id FROM ingredients WHERE id = ?');
+    $ingredient->execute([$ingredientId]);
+    if (!$ingredient->fetchColumn()) {
+        throw new RuntimeException(bakery_t('formula_structure.subformula_invalid'));
+    }
+    if ($doughTypeId !== null && $doughTypeId <= 0) {
+        $doughTypeId = null;
+    }
+    if ($doughTypeId !== null) {
+        $dough = $db->prepare('SELECT id FROM dough_types WHERE id = ?');
+        $dough->execute([$doughTypeId]);
+        if (!$dough->fetchColumn()) {
+            throw new RuntimeException(bakery_t('formula_structure.subformula_invalid'));
+        }
+    }
+    $update = $db->prepare('UPDATE ingredients SET subformula_dough_type_id = ? WHERE id = ?');
+    $update->execute([$doughTypeId, $ingredientId]);
 }

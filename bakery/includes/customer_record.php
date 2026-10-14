@@ -293,6 +293,7 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
                     'delivery_order_total' => $dailyOrder['delivery_order_total'] ?? null,
                     'delivered_pieces' => $dailyOrder['delivered_pieces'] ?? null,
                     'credits_taken_back' => $dailyOrder['credits_taken_back'] ?? null,
+                    'unallocated_delivered_pieces' => (int)($dailyOrder['unallocated_delivered_pieces'] ?? 0),
                     'item_id' => null,
                     'product_id' => null,
                     'quantity' => null,
@@ -311,10 +312,12 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
                         'delivery_order_total' => $dailyOrder['delivery_order_total'] ?? null,
                         'delivered_pieces' => $dailyOrder['delivered_pieces'] ?? null,
                         'credits_taken_back' => $dailyOrder['credits_taken_back'] ?? null,
+                        'unallocated_delivered_pieces' => (int)($dailyOrder['unallocated_delivered_pieces'] ?? 0),
                         'item_id' => (int)($item['item_id'] ?? $item['id'] ?? 0),
                         'product_id' => $item['product_id'] ?? null,
                         'quantity' => $item['quantity'] ?? null,
                         'delivered_quantity' => $item['delivered_quantity'] ?? null,
+                        'delivered_quantity_estimated' => (int)($item['delivered_quantity_estimated'] ?? 0) === 1 ? 1 : 0,
                         'unit_price' => $item['unit_price'] ?? null,
                         'product_name' => $item['product_name'] ?? null,
                     ];
@@ -322,12 +325,19 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
             }
         }
     } else {
+        $estimatedSelect = column_exists($db, 'daily_order_items', 'delivered_quantity_estimated')
+            ? 'doi.delivered_quantity_estimated'
+            : '0 AS delivered_quantity_estimated';
+        $unallocatedSelect = column_exists($db, 'daily_orders', 'unallocated_delivered_pieces')
+            ? 'do.unallocated_delivered_pieces'
+            : '0 AS unallocated_delivered_pieces';
         $dailyStmt = $db->prepare("
             SELECT do.id AS daily_order_id, do.status, do.total_amount, do.notes,
                    do.delivery_confirmed_at, do.delivery_order_total,
                    do.delivered_pieces, do.credits_taken_back,
+                   {$unallocatedSelect},
                    doi.id AS item_id, doi.product_id, doi.quantity,
-                   doi.delivered_quantity, doi.unit_price,
+                   doi.delivered_quantity, {$estimatedSelect}, doi.unit_price,
                    p.name AS product_name
             FROM daily_orders do
             LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
@@ -345,6 +355,7 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
     $orderNotes = null;
     $deliveryConfirmedAt = null;
     $deliveryOrderTotal = null;
+    $unallocatedDeliveredPieces = 0;
     $lineMap = [];
 
     foreach ($standingRows as $row) {
@@ -355,6 +366,7 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
             'standing_qty' => (int)$row['quantity'],
             'daily_qty' => null,
             'delivered_quantity' => null,
+            'delivered_quantity_estimated' => 0,
             'item_id' => null,
             'unit_price' => null,
         ];
@@ -371,6 +383,9 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
                 ? (float)$row['delivery_order_total']
                 : null;
         }
+        if (isset($row['unallocated_delivered_pieces'])) {
+            $unallocatedDeliveredPieces = max($unallocatedDeliveredPieces, (int)$row['unallocated_delivered_pieces']);
+        }
         if ($row['product_id'] === null) {
             continue;
         }
@@ -382,12 +397,14 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
                 'standing_qty' => null,
                 'daily_qty' => null,
                 'delivered_quantity' => null,
+                'delivered_quantity_estimated' => 0,
                 'item_id' => null,
                 'unit_price' => null,
             ];
         }
         $lineMap[$pid]['daily_qty'] = (int)$row['quantity'];
         $lineMap[$pid]['delivered_quantity'] = $row['delivered_quantity'];
+        $lineMap[$pid]['delivered_quantity_estimated'] = (int)($row['delivered_quantity_estimated'] ?? 0) === 1 ? 1 : 0;
         $lineMap[$pid]['item_id'] = (int)$row['item_id'];
         $lineMap[$pid]['unit_price'] = $row['unit_price'];
         $lineMap[$pid]['product_name'] = $row['product_name'];
@@ -436,6 +453,7 @@ function bakery_customer_record_date_context(PDO $db, $customerId, $date, $dayOf
         'state' => $state,
         'standing_units' => $standingUnits,
         'daily_units' => $dailyUnits,
+        'unallocated_delivered_pieces' => $unallocatedDeliveredPieces,
         'standing_route' => $standingRoute,
         'dated_route' => $datedRoute,
     ];
@@ -522,7 +540,7 @@ function bakery_customer_record_recent_orders(PDO $db, $customerId, $limit = 12)
                    SELECT COALESCE(SUM(COALESCE(doi.delivered_quantity, doi.quantity)), 0)
                    FROM daily_order_items doi
                    WHERE doi.daily_order_id = do.id
-               ) AS delivered_units
+               ) AS line_delivered_units
         FROM daily_orders do
         WHERE do.customer_id = ?
         ORDER BY do.order_date DESC, do.id DESC
@@ -535,7 +553,10 @@ function bakery_customer_record_recent_orders(PDO $db, $customerId, $limit = 12)
     $orders = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $ordered = (int)$row['ordered_units'];
-        $delivered = (int)$row['delivered_units'];
+        $headerDelivered = $row['delivered_pieces'] ?? null;
+        $delivered = ($headerDelivered !== null && $headerDelivered !== '')
+            ? (int)$headerDelivered
+            : (int)$row['line_delivered_units'];
         $orders[] = [
             'id' => (int)$row['id'],
             'order_date' => $row['order_date'],
@@ -610,7 +631,7 @@ function bakery_customer_record_hints(
     if ($zoneText === '' && $zoneId <= 0) {
         $hints[] = [
             'level' => 'warn',
-            'message' => 'No delivery zone assigned — routing and daily order filters may be incomplete.',
+            'message' => 'No delivery zone assigned. Routing and daily order filters may be incomplete.',
         ];
     }
 

@@ -9,6 +9,8 @@ require_once 'includes/zones_catalog.php';
 require_once 'includes/customer_portal.php';
 require_once 'includes/sf_baker.php';
 require_once 'includes/billing_aging.php';
+require_once 'includes/audit_log.php';
+require_once 'includes/payment_terms.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
@@ -23,9 +25,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
                     $zoneId = bakery_zone_id_for_name($db, $zoneName);
-                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price, portal_phone, portal_code, portal_enabled, sf_baker_enabled, pricing_tier, payment_collection) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $pay = bakery_customer_payment_terms_from_post($_POST);
+                    $paySql = 'payment_collection';
+                    $payMarks = '?';
+                    $payParams = [$pay['payment_collection']];
+                    if (column_exists($db, 'customers', 'payment_terms')) {
+                        $paySql .= ', payment_terms';
+                        $payMarks .= ', ?';
+                        $payParams[] = $pay['payment_terms'];
+                    }
+                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price, portal_phone, portal_code, portal_enabled, sf_baker_enabled, pricing_tier, {$paySql}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {$payMarks})");
                     $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
-                    $stmt->execute([
+                    $stmt->execute(array_merge([
                         $_POST['name'],
                         empty($_POST['email']) ? null : $_POST['email'],
                         $_POST['phone'],
@@ -40,10 +51,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         !empty($_POST['portal_enabled']) ? 1 : 0,
                         !empty($_POST['sf_baker_enabled']) ? 1 : 0,
                         in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
-                        in_array($_POST['payment_collection'] ?? '', ['cod', 'signature'], true) ? $_POST['payment_collection'] : 'cod',
-                    ]);
+                    ], $payParams));
                     $newId = (int)$db->lastInsertId();
                     if ($newId > 0) {
+                        bakery_audit_pricing_tier(
+                            $db,
+                            $newId,
+                            null,
+                            in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
+                            'create'
+                        );
                         header('Location: customer_record.php?customer_id=' . $newId . '&created=1');
                     } else {
                         header('Location: customers.php?success=created');
@@ -58,9 +75,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
                     $zoneId = bakery_zone_id_for_name($db, $zoneName);
-                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ?, portal_phone = ?, portal_code = ?, portal_enabled = ?, sf_baker_enabled = ?, pricing_tier = ?, payment_collection = ? WHERE id = ?");
+                    $customerId = (int)($_POST['id'] ?? 0);
+                    $oldTierStmt = $db->prepare('SELECT pricing_tier FROM customers WHERE id = ?');
+                    $oldTierStmt->execute([$customerId]);
+                    $oldTier = $oldTierStmt->fetchColumn();
+                    $newTier = in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail';
+                    $pay = bakery_customer_payment_terms_from_post($_POST);
+                    $paySet = 'payment_collection = ?';
+                    $payParams = [$pay['payment_collection']];
+                    if (column_exists($db, 'customers', 'payment_terms')) {
+                        $paySet .= ', payment_terms = ?';
+                        $payParams[] = $pay['payment_terms'];
+                    }
+                    $payParams[] = $customerId;
+                    $stmt = $db->prepare("UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, zone = ?, zone_id = ?, deliver_by = ?, deliver_after = ?, default_pan_dulce_price = ?, portal_phone = ?, portal_code = ?, portal_enabled = ?, sf_baker_enabled = ?, pricing_tier = ?, {$paySet} WHERE id = ?");
                     $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
-                    $stmt->execute([
+                    $stmt->execute(array_merge([
                         $_POST['name'],
                         $_POST['email'],
                         $_POST['phone'],
@@ -74,10 +104,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $portalCode !== '' ? $portalCode : null,
                         !empty($_POST['portal_enabled']) ? 1 : 0,
                         !empty($_POST['sf_baker_enabled']) ? 1 : 0,
-                        in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
-                        in_array($_POST['payment_collection'] ?? '', ['cod', 'signature'], true) ? $_POST['payment_collection'] : 'cod',
-                        $_POST['id']
-                    ]);
+                        $newTier,
+                    ], $payParams));
+                    bakery_audit_pricing_tier($db, $customerId, $oldTier === false ? null : $oldTier, $newTier);
                     header("Location: customers.php?success=updated");
                     exit;
                 } catch (Exception $e) {
@@ -126,6 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!in_array($field, $allowed_fields)) {
                         throw new Exception("Invalid field");
                     }
+
+                    $oldTier = null;
+                    if ($field === 'pricing_tier') {
+                        $oldTierStmt = $db->prepare('SELECT pricing_tier FROM customers WHERE id = ?');
+                        $oldTierStmt->execute([(int)$id]);
+                        $oldTier = $oldTierStmt->fetchColumn();
+                    }
                     
                     if ($field === 'zone') {
                         $zoneName = empty($value) ? null : $value;
@@ -135,6 +171,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         $stmt = $db->prepare("UPDATE customers SET $field = ? WHERE id = ?");
                         $stmt->execute([empty($value) ? null : $value, $id]);
+                    }
+                    if ($field === 'pricing_tier') {
+                        bakery_audit_pricing_tier($db, (int)$id, $oldTier === false ? null : $oldTier, empty($value) ? null : $value);
                     }
                     
                     echo json_encode(['success' => true]);
@@ -328,12 +367,13 @@ try {
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="payment_collection">Delivery payment</label>
-                            <select id="payment_collection" name="payment_collection">
-                                <option value="cod" selected>Cash on delivery (COD)</option>
-                                <option value="signature">Signature receipt (no cash)</option>
+                            <label for="payment_terms"><?php echo htmlspecialchars(bakery_t('customers.payment_terms')); ?></label>
+                            <select id="payment_terms" name="payment_terms">
+                                <option value="cod" selected><?php echo htmlspecialchars(bakery_t('customers.payment_terms_cod')); ?></option>
+                                <option value="invoice"><?php echo htmlspecialchars(bakery_t('customers.payment_terms_invoice')); ?></option>
+                                <option value="check"><?php echo htmlspecialchars(bakery_t('customers.payment_terms_check')); ?></option>
                             </select>
-                            <small class="help-text">COD stops count toward the driver&apos;s cash turn-in total in Route Manager.</small>
+                            <small class="help-text"><?php echo htmlspecialchars(bakery_t('customers.payment_terms_help')); ?></small>
                         </div>
                         <div class="form-group" style="display:flex;align-items:flex-end;">
                             <label style="display:flex;align-items:center;gap:8px;margin:0;">
@@ -433,7 +473,7 @@ try {
                         ]))));
                         $rowClass = ((int)$customer['id'] === $highlightId) ? ' is-highlighted' : '';
                         $isActive = (int)($customer['is_active'] ?? 1) === 1;
-                        $isCod = (string)($customer['payment_collection'] ?? 'cod') === 'cod';
+                        $isCod = bakery_payment_terms_is_cod($customer['payment_terms'] ?? $customer['payment_collection'] ?? 'cod');
                         $balanceRow = $customerBalances[(int)$customer['id']] ?? null;
                         $outstanding = is_array($balanceRow) ? (float)($balanceRow['outstanding_total'] ?? 0) : 0.0;
                         $hasBalance = $outstanding > 0.005;
@@ -466,7 +506,7 @@ try {
                             <?php 
                             if ($customer['deliver_by']) {
                                 $time = new DateTime($customer['deliver_by']);
-                                echo '<span class="time-display">' . $time->format('g:i A') . '</span>';
+                                echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
                                 echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_by'] . '">';
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
@@ -478,7 +518,7 @@ try {
                             <?php 
                             if ($customer['deliver_after']) {
                                 $time = new DateTime($customer['deliver_after']);
-                                echo '<span class="time-display">' . $time->format('g:i A') . '</span>';
+                                echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
                                 echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_after'] . '">';
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
@@ -743,7 +783,7 @@ try {
             document.getElementById('portal_enabled').checked = customer.portal_enabled == 1;
             document.getElementById('sf_baker_enabled').checked = customer.sf_baker_enabled == 1;
             document.getElementById('pricing_tier').value = customer.pricing_tier || 'retail';
-            document.getElementById('payment_collection').value = customer.payment_collection || 'cod';
+            document.getElementById('payment_terms').value = customer.payment_terms || (customer.payment_collection === 'cod' ? 'cod' : 'invoice');
             document.getElementById('customerForm').style.display = 'block';
             document.getElementById('name').focus();
         }
@@ -765,7 +805,7 @@ try {
             document.getElementById('portal_enabled').checked = false;
             document.getElementById('sf_baker_enabled').checked = false;
             document.getElementById('pricing_tier').value = customer.pricing_tier || 'retail';
-            document.getElementById('payment_collection').value = customer.payment_collection || 'cod';
+            document.getElementById('payment_terms').value = customer.payment_terms || (customer.payment_collection === 'cod' ? 'cod' : 'invoice');
             document.getElementById('customerForm').style.display = 'block';
             document.getElementById('name').focus();
             document.getElementById('name').select();
@@ -1078,7 +1118,7 @@ try {
         function updateTimeDisplay(timeDisplay, value) {
             if (value) {
                 const time = new Date('1970-01-01T' + value);
-                timeDisplay.textContent = time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+                timeDisplay.textContent = window.bakeryLocaleTime ? window.bakeryLocaleTime(time) : time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
                 timeDisplay.className = 'time-display';
             } else {
                 timeDisplay.textContent = 'No constraint';

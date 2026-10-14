@@ -285,7 +285,7 @@ require_once __DIR__ . '/includes/nav.php';
                 <?php echo bakery_csrf_field(); ?>
                 <input type="hidden" name="action" value="done">
                 <input type="hidden" name="order_id" value="<?php echo (int)$row['id']; ?>">
-                <button class="counter-orders__done" type="submit"><?php bakery_te('counter_orders.done'); ?></button>
+                <button class="counter-orders__done" type="submit" title="<?php echo htmlspecialchars(bakery_t('counter_orders.done_means'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('counter_orders.done'); ?></button>
               </form>
             <?php elseif ((string)$row['status'] === 'done'): ?>
               <p class="counter-orders__meta"><?php bakery_te('counter_orders.status_done'); ?><?php if (!empty($row['done_name'])): ?> · <?php echo htmlspecialchars((string)$row['done_name'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?></p>

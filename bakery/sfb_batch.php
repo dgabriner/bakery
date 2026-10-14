@@ -248,7 +248,7 @@ if (!in_array($askPhase, bakery_sfb_builder_phases(), true)) {
 
 $saved = (string)($_GET['saved'] ?? '');
 $savedMessages = [
-    'started' => 'Batch started — happy mixing!',
+    'started' => 'Batch started. Happy mixing!',
     'mix' => 'Mix saved.',
     'development' => 'Bulk fermentation saved.',
     'turn' => 'Turn logged.',
@@ -279,7 +279,7 @@ if (bakery_sfb_intensive_ready($db) && bakery_sfb_intensive_batch_context($db, $
     exit;
 }
 
-$page_title = 'SF Baker — ' . $batch['name'];
+$page_title = 'SF Baker.' . $batch['name'];
 $currentLocale = bakery_locale();
 $portalActivePage = 'sfb';
 $portalCustomerName = $customer['name'];
@@ -324,7 +324,7 @@ $portalCustomerName = $customer['name'];
           <span class="badge <?php echo $batch['status'] === 'completed' ? 'badge-ok' : ($batch['status'] === 'abandoned' ? 'badge-muted' : 'badge-info'); ?>">
             <?php echo htmlspecialchars(bakery_sfb_phase_label($phase)); ?>
           </span>
-          <span><?php echo htmlspecialchars(date('D, M j · g:ia', strtotime($batch['started_at']))); ?></span>
+          <span><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($batch['started_at']), 'D, M j · g:ia')); ?></span>
           <?php if ($batch['status'] === 'completed'): ?>
             <span><?php echo (int)$batch['loaf_count']; ?> <?php echo (int)$batch['loaf_count'] === 1 ? bakery_t('sfb.loaf') : bakery_t('sfb.loaves'); ?></span>
           <?php endif; ?>
@@ -470,7 +470,7 @@ $portalCustomerName = $customer['name'];
 
     <?php if ($formulaLines): ?>
       <section class="card">
-        <div class="card-header"><h2><?php bakery_te('sfb.formula'); ?><?php echo $formulaTarget ? ' — ' . (int)$formulaTarget['target'] . 'g' : ''; ?></h2></div>
+        <div class="card-header"><h2><?php bakery_te('sfb.formula'); ?><?php echo $formulaTarget ? ' - ' . (int)$formulaTarget['target'] . 'g' : ''; ?></h2></div>
         <div class="card-body">
           <?php if ($formulaSnapshot): ?>
             <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.formula_snapshot'); ?></p>
@@ -581,7 +581,7 @@ $portalCustomerName = $customer['name'];
             <div style="display:flex;justify-content:space-between;gap:10px;">
               <span>
                 <strong><?php echo htmlspecialchars(bakery_sfb_turn_type_label($turn['turn_type'])); ?></strong>
-                · <?php echo htmlspecialchars(date('D g:ia', strtotime($turn['occurred_at']))); ?>
+                · <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($turn['occurred_at']), 'D g:ia')); ?>
                 <?php if ($turn['dough_temp_f'] !== null): ?>
                   · <?php echo (float)$turn['dough_temp_f']; ?>°F
                 <?php endif; ?>
@@ -725,7 +725,7 @@ $portalCustomerName = $customer['name'];
           <ul class="line-list">
             <?php foreach ($temps as $tempRow): ?>
               <li>
-                <span><?php echo htmlspecialchars(bakery_sfb_phase_label($tempRow['phase'])); ?> · <?php echo htmlspecialchars(date('D g:ia', strtotime($tempRow['measured_at']))); ?></span>
+                <span><?php echo htmlspecialchars(bakery_sfb_phase_label($tempRow['phase'])); ?> · <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($tempRow['measured_at']), 'D g:ia')); ?></span>
                 <span class="line-qty">
                   <?php echo (float)$tempRow['temp_f']; ?>°F
                   <?php if ($editable): ?>
@@ -848,7 +848,7 @@ $portalCustomerName = $customer['name'];
                   <?php if (!empty($message['phase'])): ?>
                     <span class="badge badge-muted"><?php echo htmlspecialchars(bakery_sfb_phase_label($message['phase']), ENT_QUOTES, 'UTF-8'); ?></span>
                   <?php endif; ?>
-                  <time datetime="<?php echo htmlspecialchars(date('c', strtotime($message['created_at']))); ?>"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($message['created_at']))); ?></time>
+                  <time datetime="<?php echo htmlspecialchars(date('c', strtotime($message['created_at']))); ?>"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($message['created_at']), 'M j, g:ia')); ?></time>
                 </div>
                 <p class="sfb-message__body"><?php echo nl2br(htmlspecialchars($message['body'])); ?></p>
               </article>
@@ -857,7 +857,7 @@ $portalCustomerName = $customer['name'];
                   <div class="sfb-message__meta">
                     <strong><?php echo htmlspecialchars($reply['author_name']); ?></strong>
                     <span class="sfb-message__role"><?php echo $reply['author_type'] === 'admin' ? bakery_t('sfb.from_sour_flour') : bakery_t('sfb.from_baker'); ?></span>
-                    <time datetime="<?php echo htmlspecialchars(date('c', strtotime($reply['created_at']))); ?>"><?php echo htmlspecialchars(date('M j, g:ia', strtotime($reply['created_at']))); ?></time>
+                    <time datetime="<?php echo htmlspecialchars(date('c', strtotime($reply['created_at']))); ?>"><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime($reply['created_at']), 'M j, g:ia')); ?></time>
                   </div>
                   <p class="sfb-message__body"><?php echo nl2br(htmlspecialchars($reply['body'])); ?></p>
                 </article>

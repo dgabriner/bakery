@@ -102,11 +102,11 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
         <span><?php bakery_te('sfb.studio_action'); ?></span>
       </div>
       <div class="sfb-admin__stat">
-        <strong><?php echo $baker['next_action_at'] ? htmlspecialchars(date('M j, g:ia', strtotime((string)$baker['next_action_at'])), ENT_QUOTES, 'UTF-8') : '—'; ?></strong>
+        <strong><?php echo $baker['next_action_at'] ? htmlspecialchars(bakery_format_user_stamp(strtotime((string)$baker['next_action_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
         <span><?php bakery_te('sfb.studio_next'); ?></span>
       </div>
       <div class="sfb-admin__stat">
-        <strong><?php echo $baker['last_action'] ? htmlspecialchars(bakery_sfb_studio_action_label($baker['last_action']), ENT_QUOTES, 'UTF-8') : '—'; ?></strong>
+        <strong><?php echo $baker['last_action'] ? htmlspecialchars(bakery_sfb_studio_action_label($baker['last_action']), ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
         <span><?php bakery_te('sfb.studio_last'); ?></span>
       </div>
       <div class="sfb-admin__stat">
@@ -148,11 +148,11 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
         <div class="sfb-admin__facts">
           <div class="sfb-admin__fact">
             <span><?php bakery_te('sfb.admin_active_batches'); ?></span>
-            <strong><?php echo $active ? htmlspecialchars((string)$active['name'], ENT_QUOTES, 'UTF-8') : '—'; ?></strong>
+            <strong><?php echo $active ? htmlspecialchars((string)$active['name'], ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
           </div>
           <div class="sfb-admin__fact">
             <span><?php bakery_te('sfb.admin_completed_batches'); ?></span>
-            <strong><?php echo $completed ? htmlspecialchars((string)$completed['name'], ENT_QUOTES, 'UTF-8') : '—'; ?></strong>
+            <strong><?php echo $completed ? htmlspecialchars((string)$completed['name'], ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
           </div>
           <div class="sfb-admin__fact">
             <span>Folds / temps</span>
@@ -160,7 +160,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           </div>
           <div class="sfb-admin__fact">
             <span><?php bakery_te('sfb.community_title'); ?></span>
-            <strong><?php echo (int)($state['topic_id'] ?? 0) > 0 ? '#' . (int)$state['topic_id'] : '—'; ?></strong>
+            <strong><?php echo (int)($state['topic_id'] ?? 0) > 0 ? '#' . (int)$state['topic_id'] : '-'; ?></strong>
           </div>
         </div>
 
@@ -177,7 +177,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <p class="sfb-admin__batch-meta">
             <?php echo htmlspecialchars(bakery_sfb_studio_action_label($logRow['action']), ENT_QUOTES, 'UTF-8'); ?>
             · <?php echo htmlspecialchars((string)$logRow['status'], ENT_QUOTES, 'UTF-8'); ?>
-            · <?php echo htmlspecialchars(date('M j, g:ia', strtotime((string)$logRow['created_at'])), ENT_QUOTES, 'UTF-8'); ?>
+            · <?php echo htmlspecialchars(bakery_format_user_stamp(strtotime((string)$logRow['created_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8'); ?>
           </p>
           <p><?php echo htmlspecialchars((string)$logRow['summary'], ENT_QUOTES, 'UTF-8'); ?></p>
           <?php
@@ -217,7 +217,7 @@ require __DIR__ . '/includes/sfb_admin_styles.php';
           <tbody>
             <?php foreach ($detail['logs'] as $log): ?>
               <tr>
-                <td><?php echo htmlspecialchars(date('M j, g:ia', strtotime((string)$log['created_at'])), ENT_QUOTES, 'UTF-8'); ?></td>
+                <td><?php echo htmlspecialchars(bakery_format_user_stamp(strtotime((string)$log['created_at']), 'M j, g:ia'), ENT_QUOTES, 'UTF-8'); ?></td>
                 <td><a href="sfb_admin_studio_baker.php?baker=<?php echo (int)$baker['id']; ?>&log=<?php echo (int)$log['id']; ?>"><?php echo htmlspecialchars(bakery_sfb_studio_action_label($log['action']), ENT_QUOTES, 'UTF-8'); ?></a></td>
                 <td class="sfb-admin__status-<?php echo htmlspecialchars((string)$log['status'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)$log['status'], ENT_QUOTES, 'UTF-8'); ?></td>
                 <td><?php echo htmlspecialchars((string)$log['summary'], ENT_QUOTES, 'UTF-8'); ?></td>

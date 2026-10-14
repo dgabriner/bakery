@@ -25,14 +25,70 @@ function bakery_kitchen_segment_for_page(?string $page = null): string
     }
 }
 
-function bakery_kitchen_segment_date(?string $date = null): string
+function bakery_baker_home_delivery_date(?string $today = null): string
 {
-    $raw = $date ?? ($_GET['date'] ?? date('Y-m-d', strtotime('+1 day')));
+    $today = $today ?? date('Y-m-d');
+    return date('Y-m-d', strtotime($today . ' +1 day'));
+}
+
+function bakery_staff_selected_date(?string $raw, string $fallback): string
+{
     $raw = trim((string)$raw);
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
-        return date('Y-m-d', strtotime('+1 day'));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) !== 1) {
+        return $fallback;
+    }
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+    if (!$dt || $dt->format('Y-m-d') !== $raw) {
+        return $fallback;
     }
     return $raw;
+}
+
+function bakery_baker_nav_workspace_date(?string $requestedDate, ?string $today = null): string
+{
+    return bakery_staff_selected_date($requestedDate, bakery_baker_home_delivery_date($today));
+}
+
+function bakery_baker_delivery_aria(string $deliveryDate): string
+{
+    if (!function_exists('bakery_production_cadence_bake_date_for_delivery')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    $deliveryLabel = date('D, M j', strtotime($deliveryDate));
+    $bakeDate = bakery_production_cadence_bake_date_for_delivery(
+        BAKERY_PRODUCTION_CADENCE_DAILY,
+        $deliveryDate
+    );
+    if ($bakeDate === null) {
+        return bakery_t('nav.baker_delivery', ['date' => $deliveryLabel]);
+    }
+    return bakery_t('nav.baker_delivery_aria', [
+        'delivery' => $deliveryLabel,
+        'bake' => date('D, M j', strtotime($bakeDate)),
+    ]);
+}
+
+function bakery_driver_nav_route_href(string $baseUrl, ?string $requestedDate, int $driverId, ?string $today = null): string
+{
+    $today = $today ?? date('Y-m-d');
+    $query = ['date' => bakery_staff_selected_date($requestedDate, $today)];
+    if ($driverId > 0) {
+        $query['driver_id'] = $driverId;
+    }
+    return $baseUrl . 'driver.php?' . http_build_query($query);
+}
+
+function bakery_driver_nav_pack_href(string $baseUrl, ?string $requestedDate, ?string $today = null): string
+{
+    $today = $today ?? date('Y-m-d');
+    $date = bakery_staff_selected_date($requestedDate, $today);
+    return $baseUrl . 'pack_list.php?date=' . rawurlencode($date);
+}
+
+function bakery_kitchen_segment_date(?string $date = null): string
+{
+    $raw = $date ?? ($_GET['date'] ?? bakery_baker_home_delivery_date());
+    return bakery_staff_selected_date($raw, bakery_baker_home_delivery_date());
 }
 
 /**

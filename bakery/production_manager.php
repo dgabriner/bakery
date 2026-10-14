@@ -18,9 +18,6 @@ $isPrint = (string)($_GET['print'] ?? '') === '1';
 $expandAll = (string)($_GET['expand'] ?? '') === '1' || $isPrint;
 if ($isPrint) {
     $view = 'batches';
-    if ((string)($_GET['source'] ?? '') === '') {
-        $sourceMode = 'last_entered';
-    }
 }
 
 $board = null;
@@ -61,12 +58,7 @@ $pmdHref = static function (string $date, string $viewName = 'batches', bool $ex
     }
     return 'production_manager.php?' . http_build_query($q);
 };
-$printHref = 'production_manager.php?' . http_build_query([
-    'date' => $selectedDate,
-    'view' => 'batches',
-    'source' => 'last_entered',
-    'print' => '1',
-]);
+$printLinks = bakery_pmd_print_links($selectedDate);
 
 $hubStages = [];
 try {
@@ -81,14 +73,14 @@ $fmtSigned = static function (int $n): string {
 
 $fmtTime = static function (?string $t): string {
     if ($t === null || $t === '') {
-        return '—';
+        return '-';
     }
     $ts = strtotime($t);
-    return $ts ? date('g:i A', $ts) : htmlspecialchars($t);
+    return $ts ? bakery_locale_time($ts) : htmlspecialchars($t);
 };
 
-$page_title = $isPrint
-    ? bakery_t('production_manager.print_title')
+$page_title = ($isPrint && $board)
+    ? bakery_t(bakery_pmd_print_title_key($board))
     : bakery_t('page.production_manager');
 require_once 'includes/header.php';
 if (!$isPrint) {
@@ -105,11 +97,17 @@ if (!$isPrint) {
     <header class="pmd-print-head">
         <div>
             <p class="pmd-print-kicker"><?php bakery_te('production_manager.print_kicker'); ?></p>
-            <h1><?php bakery_te('production_manager.print_title'); ?></h1>
-            <p class="pmd-print-sub"><?php echo htmlspecialchars($board['date_display']); ?></p>
+            <h1><?php bakery_te(bakery_pmd_print_title_key($board)); ?></h1>
+            <p class="pmd-print-sub"><?php echo htmlspecialchars((string)($board['quantity_date_display'] ?? $board['date_display'])); ?></p>
+            <?php if (!empty($board['date_mismatch'])): ?>
+                <p class="pmd-note"><?php echo htmlspecialchars(bakery_t('production_manager.print_date_mismatch', [
+                    'quantity_date' => (string)($board['quantity_date_display'] ?? ''),
+                    'selected_date' => (string)($board['date_display'] ?? ''),
+                ])); ?></p>
+            <?php endif; ?>
         </div>
         <div class="pmd-print-meta">
-            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_route_label($selectedDate)); ?></p>
+            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_route_label((string)($board['quantity_date'] ?? $selectedDate))); ?></p>
             <p><strong><?php bakery_te('production_manager.print_source'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_source_label($board)); ?></p>
             <p><strong><?php bakery_te('production_manager.metric_pieces'); ?></strong> <?php echo number_format((int)($board['summary']['pieces'] ?? 0)); ?>
                 · <strong><?php bakery_te('production_manager.metric_doughs'); ?></strong> <?php echo number_format((int)($board['summary']['dough_types'] ?? 0)); ?>
@@ -137,7 +135,7 @@ if (!$isPrint) {
                             <span class="pmd-print-muted"><?php echo htmlspecialchars($dough['product_line_name']); ?></span>
                         <?php endif; ?>
                     </td>
-                    <td><?php echo htmlspecialchars($dough['batch']['label'] !== '' ? $dough['batch']['label'] : '—'); ?></td>
+                    <td><?php echo htmlspecialchars($dough['batch']['label'] !== '' ? $dough['batch']['label'] : '-'); ?></td>
                     <td class="num"><strong><?php echo number_format((int)$dough['pieces']); ?></strong></td>
                     <td class="pmd-print-muted"><?php echo (int)$dough['product_count']; ?></td>
                 </tr>
@@ -145,7 +143,7 @@ if (!$isPrint) {
                     <?php if ((int)$product['bake_quantity'] <= 0) { continue; } ?>
                     <tr class="pmd-print-sku">
                         <td><?php echo htmlspecialchars($product['name']); ?></td>
-                        <td><?php echo htmlspecialchars($product['batch_label'] !== '' ? $product['batch_label'] : '—'); ?></td>
+                        <td><?php echo htmlspecialchars($product['batch_label'] !== '' ? $product['batch_label'] : '-'); ?></td>
                         <td class="num"><?php echo number_format((int)$product['bake_quantity']); ?></td>
                         <td></td>
                     </tr>
@@ -155,9 +153,9 @@ if (!$isPrint) {
         </table>
     <?php endif; ?>
     <footer class="pmd-print-foot">
-        <p><?php bakery_te('production_manager.print_not_demand'); ?></p>
+        <p><?php bakery_te(bakery_pmd_print_footer_key($board)); ?></p>
         <p><?php echo htmlspecialchars(bakery_t('production_manager.print_letter', [
-            'date' => date('n/j/Y g:i A'),
+            'date' => bakery_format_user_stamp(time(), 'n/j/Y g:i A'),
         ])); ?></p>
     </footer>
 </main>
@@ -187,8 +185,11 @@ if (!$isPrint) {
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($links['product_manager_plan']); ?>">
                 <?php bakery_te('production_manager.link_pmp'); ?>
             </a>
-            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printHref); ?>">
-                <?php bakery_te('production_manager.print_letter_link'); ?>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printLinks['bake_sheet']); ?>">
+                <?php bakery_te('production_manager.print_sheet_link'); ?>
+            </a>
+            <a class="btn btn-outline" href="<?php echo htmlspecialchars($printLinks['draft']); ?>">
+                <?php bakery_te('production_manager.print_draft_link'); ?>
             </a>
         </div>
     </header>
@@ -294,7 +295,7 @@ if (!$isPrint) {
         </div>
         <div class="pmd-metric">
             <span><?php bakery_te('production_manager.metric_dough_weight'); ?></span>
-            <strong><?php echo htmlspecialchars($summary['dough_weight']['label'] !== '' ? number_format($summary['dough_weight']['lb'], 1) . ' lb' : '—'); ?></strong>
+            <strong><?php echo htmlspecialchars($summary['dough_weight']['label'] !== '' ? number_format($summary['dough_weight']['lb'], 1) . ' lb' : '-'); ?></strong>
         </div>
         <div class="pmd-metric<?php echo ((int)$summary['delta_vs_prior'] !== 0) ? ' is-info' : ''; ?>">
             <span><?php bakery_te('production_manager.metric_vs_prior'); ?></span>
@@ -333,11 +334,11 @@ if (!$isPrint) {
                             </div>
                             <div class="pmd-stat pmd-stat--wide">
                                 <span><?php bakery_te('production_manager.col_batch'); ?></span>
-                                <strong><?php echo htmlspecialchars($batch['label'] !== '' ? $batch['label'] : '—'); ?></strong>
+                                <strong><?php echo htmlspecialchars($batch['label'] !== '' ? $batch['label'] : '-'); ?></strong>
                             </div>
                             <div class="pmd-stat">
                                 <span><?php bakery_te('production_manager.col_dough_weight'); ?></span>
-                                <strong><?php echo htmlspecialchars($weight['label'] !== '' ? number_format($weight['lb'], 1) . ' lb' : '—'); ?></strong>
+                                <strong><?php echo htmlspecialchars($weight['label'] !== '' ? number_format($weight['lb'], 1) . ' lb' : '-'); ?></strong>
                             </div>
                             <div class="pmd-stat">
                                 <span><?php bakery_te('production_manager.col_vs_prior'); ?></span>
@@ -397,22 +398,22 @@ if (!$isPrint) {
                                                     . $product['batch_unit']
                                                 );
                                             } else {
-                                                echo '—';
+                                                echo '-';
                                             }
                                             ?>
                                         </td>
-                                        <td><?php echo htmlspecialchars($product['batch_label'] !== '' ? $product['batch_label'] : '—'); ?></td>
+                                        <td><?php echo htmlspecialchars($product['batch_label'] !== '' ? $product['batch_label'] : '-'); ?></td>
                                         <td><?php echo number_format((int)$product['demand_quantity']); ?></td>
-                                        <td><?php echo $product['planned_quantity'] > 0 ? number_format((int)$product['planned_quantity']) : '—'; ?></td>
-                                        <td><?php echo $board['inventory_ready'] ? number_format((int)$product['produced_quantity']) : '—'; ?></td>
-                                        <td><?php echo $board['inventory_ready'] ? number_format((int)$product['left']) : '—'; ?></td>
+                                        <td><?php echo $product['planned_quantity'] > 0 ? number_format((int)$product['planned_quantity']) : '-'; ?></td>
+                                        <td><?php echo $board['inventory_ready'] ? number_format((int)$product['produced_quantity']) : '-'; ?></td>
+                                        <td><?php echo $board['inventory_ready'] ? number_format((int)$product['left']) : '-'; ?></td>
                                         <td class="pmd-muted">
-                                            <?php echo $product['weight_grams'] > 0 ? number_format((int)$product['weight_grams']) . ' g' : '—'; ?>
+                                            <?php echo $product['weight_grams'] > 0 ? number_format((int)$product['weight_grams']) . ' g' : '-'; ?>
                                         </td>
                                         <td class="pmd-muted">
                                             <?php echo $product['dough_weight']['label'] !== ''
                                                 ? htmlspecialchars(number_format($product['dough_weight']['lb'], 1) . ' lb')
-                                                : '—'; ?>
+                                                : '-'; ?>
                                         </td>
                                         <td><?php echo htmlspecialchars($fmtSigned((int)$product['delta_vs_prior'])); ?></td>
                                     </tr>
@@ -437,7 +438,14 @@ if (!$isPrint) {
 
     <?php elseif ($view === 'week' && $week): ?>
         <?php $ws = $week['summary']; ?>
+        <?php $weekUnavailable = (($week['load_state'] ?? 'ready') !== 'ready'); ?>
         <p class="pmd-view-lead"><?php bakery_te('production_manager.week_lead'); ?></p>
+        <?php if ($weekUnavailable): ?>
+            <p class="pmd-note" role="alert"><?php bakery_te('production_manager.week_unavailable'); ?></p>
+            <p class="pmd-muted">
+                <a href="<?php echo htmlspecialchars($links['daily_orders']); ?>"><?php bakery_te('production_manager.link_daily_orders'); ?></a>
+            </p>
+        <?php else: ?>
         <?php if (!empty($week['incomplete'])): ?>
             <p class="pmd-note"><?php bakery_te('production_manager.week_incomplete'); ?></p>
         <?php endif; ?>
@@ -467,7 +475,7 @@ if (!$isPrint) {
             </div>
             <div class="pmd-metric<?php echo ($ws['vs_typical'] !== null && (int)$ws['vs_typical'] !== 0) ? ' is-info' : ''; ?>">
                 <span><?php bakery_te('production_manager.week_metric_vs_typical'); ?></span>
-                <strong><?php echo $ws['vs_typical'] === null ? '—' : htmlspecialchars($fmtSigned((int)$ws['vs_typical'])); ?></strong>
+                <strong><?php echo $ws['vs_typical'] === null ? '-' : htmlspecialchars($fmtSigned((int)$ws['vs_typical'])); ?></strong>
             </div>
         </section>
 
@@ -523,6 +531,7 @@ if (!$isPrint) {
         <p class="pmd-muted">
             <a href="<?php echo htmlspecialchars($links['daily_orders']); ?>"><?php bakery_te('production_manager.link_daily_orders'); ?></a>
         </p>
+        <?php endif; ?>
 
     <?php elseif ($view === 'routes' && $routes): ?>
         <?php $rs = $routes['summary']; ?>
@@ -602,7 +611,7 @@ if (!$isPrint) {
                                         <span class="pmd-muted">#<?php echo (int)$row['plan_route_order']; ?></span>
                                     <?php endif; ?>
                                 <?php else: ?>
-                                    <span class="pmd-muted">—</span>
+ <span class="pmd-muted">-</span>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -612,10 +621,10 @@ if (!$isPrint) {
                                         <span class="pmd-muted">#<?php echo (int)$row['actual_route_order']; ?></span>
                                     <?php endif; ?>
                                 <?php else: ?>
-                                    <span class="pmd-muted">—</span>
+ <span class="pmd-muted">-</span>
                                 <?php endif; ?>
                             </td>
-                            <td><?php echo $row['delivery_status'] ? htmlspecialchars($row['delivery_status']) : '—'; ?></td>
+                            <td><?php echo $row['delivery_status'] ? htmlspecialchars($row['delivery_status']) : '-'; ?></td>
                             <td><?php echo $fmtTime($row['scheduled_delivery_time'] ?? null); ?></td>
                             <td><?php echo $fmtTime($row['actual_delivery_time'] ?? null); ?></td>
                             <td><span class="pmd-status pmd-status--<?php echo htmlspecialchars($alignTone); ?>"><?php echo htmlspecialchars($alignLabel); ?></span></td>
@@ -698,12 +707,12 @@ if (!$isPrint) {
                             <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                             <td><?php echo number_format((int)$row['demand']); ?></td>
                             <td><?php echo number_format((int)$row['bake']); ?></td>
-                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['produced']) : '—'; ?></td>
-                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['on_hand']) : '—'; ?></td>
-                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['loaded']) : '—'; ?></td>
+                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['produced']) : '-'; ?></td>
+                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['on_hand']) : '-'; ?></td>
+                            <td><?php echo $supply['inventory_ready'] ? number_format((int)$row['loaded']) : '-'; ?></td>
                             <td>
                                 <?php if ((int)$row['demand'] <= 0): ?>
-                                    <span class="pmd-muted">—</span>
+ <span class="pmd-muted">-</span>
                                 <?php else: ?>
                                     <span class="pmd-status pmd-status--<?php echo htmlspecialchars($row['tone'] === 'short' ? 'danger' : ($row['tone'] === 'extra' ? 'info' : 'ok')); ?>">
                                         <?php echo htmlspecialchars($fmtSigned((int)$row['gap'])); ?>

@@ -253,7 +253,7 @@ require_once 'includes/nav.php';
                     <td><strong><?= htmlspecialchars($dy['dough_type_name']) ?></strong></td>
                     <td><input type="number" step="0.000001" min="0" name="dough_trays_per_gallon[<?= (int)$dy['dough_type_id'] ?>]" value="<?= $tpg !== null ? htmlspecialchars((string)$tpg) : '' ?>"></td>
                     <td><input type="number" step="1" min="1" name="dough_pieces_per_tray[<?= (int)$dy['dough_type_id'] ?>]" value="<?= $ppt !== null ? (int)$ppt : 20 ?>"></td>
-                    <td><?= $derived !== null ? (int)$derived : '—' ?></td>
+                    <td><?= $derived !== null ? (int)$derived : '-' ?></td>
                     <td><input type="text" name="dough_notes[<?= (int)$dy['dough_type_id'] ?>]" value="<?= htmlspecialchars((string)($dy['notes'] ?? '')) ?>" style="min-width:12rem;"></td>
                 </tr>
             <?php endforeach; ?>
@@ -305,7 +305,7 @@ require_once 'includes/nav.php';
                     <td><input type="number" step="0.000001" min="0" name="trays_per_gallon[<?= $pid ?>]" value="<?= $y && $y['trays_per_gallon'] !== null ? htmlspecialchars((string)$y['trays_per_gallon']) : '' ?>"></td>
                     <td><input type="number" step="1" min="0" name="pieces_per_tray[<?= $pid ?>]" value="<?= $y && $y['pieces_per_tray'] !== null ? (int)$y['pieces_per_tray'] : '' ?>"></td>
                     <td><input type="number" step="0.0001" min="0" name="cut_ratio[<?= $pid ?>]" value="<?= $y && $y['cut_ratio'] !== null ? htmlspecialchars((string)$y['cut_ratio']) : '' ?>"></td>
-                    <td><?= $galPieces !== null ? (int)$galPieces : '—' ?></td>
+                    <td><?= $galPieces !== null ? (int)$galPieces : '-' ?></td>
                     <td><input type="text" name="yield_notes[<?= $pid ?>]" value="<?= htmlspecialchars((string)($y['notes'] ?? '')) ?>" style="min-width:10rem;"></td>
                 </tr>
             <?php endforeach; ?>

@@ -6,8 +6,11 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/audit_log.php';
 require_once __DIR__ . '/photo_handler.php';
 require_once __DIR__ . '/route_manager_cash.php';
+require_once __DIR__ . '/cod_square_guard.php';
+require_once __DIR__ . '/payment_terms.php';
 require_once __DIR__ . '/product_inventory.php';
 require_once __DIR__ . '/product_pack_yields.php';
 
@@ -40,19 +43,20 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
     $hasDeliveryOrderTotal = column_exists($db, 'daily_orders', 'delivery_order_total');
     $hasDeliveredPieces = column_exists($db, 'daily_orders', 'delivered_pieces');
     $customerPaymentSql = $hasPaymentCollection ? "COALESCE(c.payment_collection, 'cod')" : "'cod'";
-    // Pan Dulce deliveries are collected as cash by default. This also makes
-    // historical routes reconcile correctly even when the customer was created
-    // before payment_collection existed.
-    $paymentCollectionSql = "CASE WHEN EXISTS (
-        SELECT 1
-        FROM daily_order_items payment_doi
-        INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-        INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-        INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-        WHERE payment_doi.daily_order_id = do.id
-          AND payment_pl.name = 'Pan Dulce'
-    ) THEN 'cod' ELSE {$customerPaymentSql} END";
+    // Pan Dulce stays cash when the account is COD. Invoice and check terms keep their path.
+    if ($hasPaymentCollection) {
+        $paymentCollectionSql = bakery_payment_terms_pan_dulce_collection_sql($db);
+    } else {
+        $paymentCollectionSql = $customerPaymentSql;
+    }
     $amountCollectedSql = $hasAmountCollected ? 'do.amount_collected' : 'NULL';
+    $hasSquareInvoice = column_exists($db, 'daily_orders', 'square_invoice_id');
+    $squareInvoiceSql = $hasSquareInvoice ? 'do.square_invoice_id' : 'NULL';
+    $squareStatusSql = $hasSquareInvoice ? 'do.square_status' : 'NULL';
+    $squarePaidAtSql = $hasSquareInvoice ? 'do.square_paid_at' : 'NULL';
+    $overrideSql = column_exists($db, 'daily_orders', 'cod_square_override_reason')
+        ? 'do.cod_square_override_reason'
+        : 'NULL';
     $deliveryConfirmedSql = $hasDeliveryConfirmedAt
         ? 'do.delivery_confirmed_at'
         : 'NULL';
@@ -86,6 +90,10 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             {$deliveryOrderTotalSql} AS delivery_order_total,
             {$deliveryConfirmedSql} AS delivery_confirmed_at,
             {$amountCollectedSql} AS amount_collected,
+            {$squareInvoiceSql} AS square_invoice_id,
+            {$squareStatusSql} AS square_status,
+            {$squarePaidAtSql} AS square_paid_at,
+            {$overrideSql} AS cod_square_override_reason,
             {$deliveredPiecesSql} AS delivered_pieces,
             {$paymentCollectionSql} AS payment_collection,
             c.id AS customer_id,
@@ -160,6 +168,15 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
             'order_total_estimate' => (float)$row['order_total_estimate'],
             'delivery_confirmed_at' => $row['delivery_confirmed_at'] ?? null,
             'amount_collected' => $row['amount_collected'] !== null ? (float)$row['amount_collected'] : null,
+            'square_invoice_id' => trim((string)($row['square_invoice_id'] ?? '')),
+            'square_status' => trim((string)($row['square_status'] ?? '')),
+            'square_paid_at' => trim((string)($row['square_paid_at'] ?? '')),
+            'cod_override_reason' => trim((string)($row['cod_square_override_reason'] ?? '')),
+            'square_prepaid' => bakery_stop_square_prepaid([
+                'square_invoice_id' => $row['square_invoice_id'] ?? '',
+                'square_status' => $row['square_status'] ?? '',
+                'square_paid_at' => $row['square_paid_at'] ?? '',
+            ]),
             'delivered_pieces' => $row['delivered_pieces'] !== null && $row['delivered_pieces'] !== ''
                 ? (int)$row['delivered_pieces']
                 : null,
@@ -846,11 +863,8 @@ function route_manager_pickup_save_demand(
         throw new InvalidArgumentException('This stop is already on the van and cannot be edited here.');
     }
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
-    $stmt = $db->prepare(
-        'SELECT id, quantity FROM daily_order_items WHERE daily_order_id = ? AND product_id = ? LIMIT 1'
-    );
-    $stmt->execute([$dailyOrderId, $productId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $auditBefore = bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId);
+    $existing = $auditBefore;
     $oldQty = $existing ? (int)$existing['quantity'] : 0;
     $unitPrice = bakery_resolve_customer_price($db, $customer, $product);
     $lineTotal = round($quantity * $unitPrice, 2);
@@ -867,6 +881,7 @@ function route_manager_pickup_save_demand(
         $ins->execute([$dailyOrderId, $productId, $quantity, $unitPrice, $lineTotal]);
     }
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    bakery_audit_daily_line_diff($db, $auditBefore, bakery_audit_daily_line_lookup($db, $dailyOrderId, $productId));
     if ($oldQty !== $quantity && function_exists('bakery_record_operational_event')) {
         bakery_record_operational_event(
             $db,

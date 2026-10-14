@@ -8,6 +8,7 @@ require_once 'includes/database.php';
 require_once 'includes/ingredient_requirements.php';
 
 $batchReferenceReady = bakery_ingredient_batch_reference_ready($db);
+$piecesPerBatchReady = $batchReferenceReady && column_exists($db, 'dough_types', 'pieces_per_batch');
 
 // Set page title
 $page_title = bakery_t('page.dough_types');
@@ -21,7 +22,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $batchGrams = ($batchReferenceReady && isset($_POST['standard_batch_dough_grams']) && $_POST['standard_batch_dough_grams'] !== '')
                         ? (float)$_POST['standard_batch_dough_grams']
                         : null;
-                    if ($batchReferenceReady) {
+                    $piecesPerBatch = ($piecesPerBatchReady && isset($_POST['pieces_per_batch']) && $_POST['pieces_per_batch'] !== '')
+                        ? (float)$_POST['pieces_per_batch']
+                        : null;
+                    if ($piecesPerBatch !== null && $piecesPerBatch <= 0) {
+                        $piecesPerBatch = null;
+                    }
+                    if ($piecesPerBatchReady) {
+                        $stmt = $db->prepare('INSERT INTO dough_types (name, description, product_line_id, standard_batch_dough_grams, pieces_per_batch) VALUES (?, ?, ?, ?, ?)');
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['description'] ?? '',
+                            $_POST['product_line_id'] ?: null,
+                            $batchGrams,
+                            $piecesPerBatch,
+                        ]);
+                    } elseif ($batchReferenceReady) {
                         $stmt = $db->prepare('INSERT INTO dough_types (name, description, product_line_id, standard_batch_dough_grams) VALUES (?, ?, ?, ?)');
                         $stmt->execute([
                             $_POST['name'],
@@ -49,7 +65,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $batchGrams = ($batchReferenceReady && isset($_POST['standard_batch_dough_grams']) && $_POST['standard_batch_dough_grams'] !== '')
                         ? (float)$_POST['standard_batch_dough_grams']
                         : null;
-                    if ($batchReferenceReady) {
+                    $piecesPerBatch = ($piecesPerBatchReady && isset($_POST['pieces_per_batch']) && $_POST['pieces_per_batch'] !== '')
+                        ? (float)$_POST['pieces_per_batch']
+                        : null;
+                    if ($piecesPerBatch !== null && $piecesPerBatch <= 0) {
+                        $piecesPerBatch = null;
+                    }
+                    if ($piecesPerBatchReady) {
+                        $stmt = $db->prepare('UPDATE dough_types SET name = ?, description = ?, product_line_id = ?, standard_batch_dough_grams = ?, pieces_per_batch = ? WHERE id = ?');
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['description'] ?? '',
+                            $_POST['product_line_id'] ?: null,
+                            $batchGrams,
+                            $piecesPerBatch,
+                            $_POST['id'],
+                        ]);
+                    } elseif ($batchReferenceReady) {
                         $stmt = $db->prepare('UPDATE dough_types SET name = ?, description = ?, product_line_id = ?, standard_batch_dough_grams = ? WHERE id = ?');
                         $stmt->execute([
                             $_POST['name'],
@@ -1072,6 +1104,7 @@ foreach ($dough_types_rows as $dough_type) {
                                                 'name' => $dough_type['name'],
                                                 'description' => $dough_type['description'] ?? '',
                                                 'standard_batch_dough_grams' => $dough_type['standard_batch_dough_grams'] ?? '',
+                                                'pieces_per_batch' => $dough_type['pieces_per_batch'] ?? '',
                                             ]); ?>)'>&#9998;</button>
                                         <button type="button" class="btn-icon delete-btn" title="Delete dough type"
                                             onclick="confirmDeleteDoughType(<?php echo $dough_id; ?>, <?php echo bakery_json_for_html($dough_type['name']); ?>)">&#128465;</button>
@@ -1087,8 +1120,16 @@ foreach ($dough_types_rows as $dough_type) {
                                         <p class="card-batch-ref">
                                             <?php if (!empty($dough_type['standard_batch_dough_grams'])): ?>
                                                 Standard batch: <?php echo rtrim(rtrim(number_format((float)$dough_type['standard_batch_dough_grams'], 1), '0'), '.'); ?> g dough
+                                                <?php if ($piecesPerBatchReady): ?>
+                                                    · <?php echo htmlspecialchars(bakery_t('formula_structure.pieces_per_batch'), ENT_QUOTES, 'UTF-8'); ?>:
+                                                    <?php if (!empty($dough_type['pieces_per_batch'])): ?>
+                                                        <?php echo rtrim(rtrim(number_format((float)$dough_type['pieces_per_batch'], 1), '0'), '.'); ?>
+                                                    <?php else: ?>
+                                                        <span class="no-items"><?php echo htmlspecialchars(bakery_t('formula_structure.pieces_per_batch_blank'), ENT_QUOTES, 'UTF-8'); ?></span>
+                                                    <?php endif; ?>
+                                                <?php endif; ?>
                                             <?php else: ?>
-                                                <span class="no-items">No standard batch size — Ingredient Planner uses continuous dough grams</span>
+ <span class="no-items">No standard batch size. Ingredient Planner uses continuous dough grams</span>
                                             <?php endif; ?>
                                         </p>
                                     <?php endif; ?>
@@ -1131,7 +1172,7 @@ foreach ($dough_types_rows as $dough_type) {
                                                                 min="0"
                                                                 step="1"
                                                                 value="<?php echo $product['weight_grams'] !== null ? (int)$product['weight_grams'] : ''; ?>"
-                                                                placeholder="—"
+ placeholder="-"
                                                                 aria-label="Weight in grams for <?php echo htmlspecialchars($product['name']); ?>"
                                                                 onchange="updateProductWeight(<?php echo (int)$product['id']; ?>, this.value)">
                                                             <span class="weight-unit">g</span>
@@ -1182,6 +1223,7 @@ foreach ($dough_types_rows as $dough_type) {
                                             'name' => $dough_type['name'],
                                             'description' => $dough_type['description'] ?? '',
                                             'standard_batch_dough_grams' => $dough_type['standard_batch_dough_grams'] ?? '',
+                                            'pieces_per_batch' => $dough_type['pieces_per_batch'] ?? '',
                                         ]); ?>)'>&#9998;</button>
                                     <button type="button" class="btn-icon delete-btn" title="Delete dough type"
                                         onclick="confirmDeleteDoughType(<?php echo $dough_id; ?>, <?php echo bakery_json_for_html($dough_type['name']); ?>)">&#128465;</button>
@@ -1267,6 +1309,13 @@ foreach ($dough_types_rows as $dough_type) {
                 <input type="number" id="doughTypeBatchGrams" name="standard_batch_dough_grams" min="0" step="1" placeholder="e.g. 18000 for one standard mix">
                 <small>Optional. One reference mix weight for batch planning in Ingredient Planner. Products with weight_grams derive units/batch from this.</small>
             </div>
+            <?php if ($piecesPerBatchReady): ?>
+            <div class="form-group">
+                <label for="doughTypePiecesPerBatch"><?php echo htmlspecialchars(bakery_t('formula_structure.pieces_per_batch'), ENT_QUOTES, 'UTF-8'); ?></label>
+                <input type="number" id="doughTypePiecesPerBatch" name="pieces_per_batch" min="0" step="0.001" placeholder="">
+                <small><?php echo htmlspecialchars(bakery_t('formula_structure.pieces_per_batch_hint'), ENT_QUOTES, 'UTF-8'); ?></small>
+            </div>
+            <?php endif; ?>
             <?php endif; ?>
             <div class="form-actions">
                 <button type="button" class="btn-secondary" onclick="hideDoughTypeModal()">Cancel</button>
@@ -1358,6 +1407,9 @@ function showDoughTypeModal(id = null, productLineId = null, data = null) {
         form.elements.description.value = data.description || '';
         if (form.elements.standard_batch_dough_grams) {
             form.elements.standard_batch_dough_grams.value = data.standard_batch_dough_grams ?? '';
+        }
+        if (form.elements.pieces_per_batch) {
+            form.elements.pieces_per_batch.value = data.pieces_per_batch ?? '';
         }
     }
     if (productLineId) {

@@ -34,7 +34,7 @@ if ($format === 'lines') {
 
 $recordKey = 'portal_csv_' . $customerId . '_' . $format . '_' . $startDate . '_' . $endDate;
 if (empty($_SESSION[$recordKey])) {
-    bakery_portal_billing_log_event($db, $customerId, 'portal_billing_export_downloaded', 'Customer downloaded ' . $eventDetail . ' for ' . $startDate . ' – ' . $endDate, [
+    bakery_portal_billing_log_event($db, $customerId, 'portal_billing_export_downloaded', 'Customer downloaded ' . $eventDetail . ' for ' . $startDate . ' ' . bakery_locale_range_word() . ' ' . $endDate, [
         'period_start' => $startDate,
         'period_end' => $endDate,
         'format' => $format,

@@ -53,6 +53,11 @@ $slugs = bakery_agent_work_map_canonical_slugs();
 map_assert('canonical list includes exception-desktop', in_array('exception-desktop', $slugs, true));
 
 map_assert('map has manager-phone', isset($map['manager-phone']));
+$authPacket = bakery_agent_work_map_packet('auth');
+map_assert(
+    'auth lists login history insights',
+    in_array('includes/login_history_insights.php', $authPacket['files'], true)
+);
 map_assert('map has customer-portal', isset($map['customer-portal']));
 map_assert('resolve manager-phone alias', bakery_agent_work_map_resolve('laura-manager-phone') === 'manager-phone');
 

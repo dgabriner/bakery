@@ -88,6 +88,8 @@ function bakery_driver_assign_orders(
         throw new RuntimeException('No valid orders to assign');
     }
 
+    bakery_dated_route_removals_ready($db);
+
     if ($normalized !== []) {
         $orderIds = array_column($normalized, 'daily_order_id');
         $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
@@ -164,6 +166,7 @@ function bakery_driver_assign_orders(
         }
 
         $updateLegacyDriverStmt = $db->prepare('UPDATE daily_orders SET driver_id = ? WHERE id = ?');
+        $removedOrderIds = [];
 
         if ($mode === 'append') {
             $maxStmt = $db->prepare('
@@ -202,7 +205,6 @@ function bakery_driver_assign_orders(
                 WHERE driver_id = ? AND delivery_date = ?
             ')->execute([$driverId, $deliveryDate]);
 
-            $removedOrderIds = [];
             foreach ($targetExistingByOrder as $orderId => $row) {
                 if (!isset($submittedLookup[$orderId])) {
                     $removedOrderIds[] = $orderId;
@@ -255,6 +257,21 @@ function bakery_driver_assign_orders(
 
         bakery_driver_renumber_route_orders($db, array_keys($sourceDriverIds), $deliveryDate);
 
+        $customerByOrder = bakery_dated_route_customers_for_orders($db, array_merge(
+            array_map(static fn(array $assignment): int => (int)$assignment['daily_order_id'], $normalized),
+            $removedOrderIds
+        ));
+        foreach ($removedOrderIds as $orderId) {
+            bakery_dated_route_removal_record($db, $deliveryDate, $customerByOrder[(int)$orderId] ?? 0, $driverId);
+        }
+        foreach ($normalized as $assignment) {
+            bakery_dated_route_removal_clear(
+                $db,
+                $deliveryDate,
+                $customerByOrder[(int)$assignment['daily_order_id']] ?? 0
+            );
+        }
+
         $db->commit();
     } catch (Throwable $e) {
         if ($db->inTransaction()) {
@@ -302,6 +319,7 @@ function bakery_driver_remove_assignment(
     if ($dailyOrderId <= 0 || $driverId <= 0) {
         throw new RuntimeException('Invalid route stop');
     }
+    bakery_dated_route_removals_ready($db);
 
     $db->beginTransaction();
     try {
@@ -321,6 +339,9 @@ function bakery_driver_remove_assignment(
         }
 
         $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$assignment['id']]);
+        $customerStmt = $db->prepare('SELECT customer_id FROM daily_orders WHERE id = ?');
+        $customerStmt->execute([$dailyOrderId]);
+        bakery_dated_route_removal_record($db, $deliveryDate, (int)$customerStmt->fetchColumn(), $driverId);
         bakery_driver_renumber_route_orders($db, [$driverId], $deliveryDate);
         $db->prepare('
             UPDATE daily_orders do
@@ -377,6 +398,156 @@ function bakery_driver_assignment_restore_label(int $count, array $storeLabels):
         'count' => $count,
         'stores' => $stores,
     ]);
+}
+
+/**
+ * Confirm sentence that names every stop a Restore action will add back.
+ *
+ * @param list<string> $storeLabels
+ */
+function bakery_route_restore_confirm_message(array $storeLabels): string
+{
+    $stores = implode(', ', $storeLabels);
+    if (count($storeLabels) === 1) {
+        return bakery_t('driver_assignment.restore_confirm_one', ['stores' => $stores]);
+    }
+    return bakery_t('driver_assignment.restore_confirm_many', ['stores' => $stores]);
+}
+
+/**
+ * Result sentence after Restore adds the named stops back.
+ *
+ * @param list<string> $storeLabels
+ */
+function bakery_route_restore_done_message(array $storeLabels, string $driverName): string
+{
+    $stores = implode(', ', $storeLabels);
+    if (count($storeLabels) === 1) {
+        return bakery_t('driver_assignment.restore_done_one', [
+            'stores' => $stores,
+            'driver' => $driverName,
+        ]);
+    }
+    return bakery_t('driver_assignment.restore_done_many', [
+        'stores' => $stores,
+        'driver' => $driverName,
+        'count' => count($storeLabels),
+    ]);
+}
+
+/**
+ * Standing stops that are not on that driver's dated route.
+ *
+ * @return list<array{
+ *   driver_id:int,
+ *   driver_name:string,
+ *   stops:list<array{customer_id:int,customer_name:string,route_order:int,label:string}>,
+ *   labels:list<string>,
+ *   label:string,
+ *   confirm:string
+ * }>
+ */
+function bakery_route_missing_standing_by_driver(PDO $db, string $date): array
+{
+    if (!table_exists($db, 'standing_routes') || !table_exists($db, 'customers') || !table_exists($db, 'drivers')) {
+        return [];
+    }
+    $date = bakery_driver_validate_delivery_date($date);
+    $dayOfWeek = (int)date('N', strtotime($date));
+    $stmt = $db->prepare(
+        'SELECT sr.customer_id, sr.driver_id, sr.route_order, c.name AS customer_name, d.name AS driver_name
+         FROM standing_routes sr
+         JOIN customers c ON c.id = sr.customer_id
+         ' . bakery_sfb_ops_origin_clause('c', $db) . '
+         JOIN drivers d ON d.id = sr.driver_id
+         WHERE CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
+         ORDER BY d.name, COALESCE(sr.route_order, 2147483647), c.name'
+    );
+    $stmt->execute([$dayOfWeek]);
+    $standing = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $assignedDriverByCustomer = [];
+    if (table_exists($db, 'daily_orders') && table_exists($db, 'daily_order_assignments')) {
+        $assignedStmt = $db->prepare(
+            'SELECT do.customer_id, doa.driver_id
+             FROM daily_orders do
+             JOIN daily_order_assignments doa
+               ON doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
+             WHERE do.order_date = ?'
+        );
+        $assignedStmt->execute([$date]);
+        foreach ($assignedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $assignedDriverByCustomer[(int)$row['customer_id']] = (int)$row['driver_id'];
+        }
+    }
+
+    $groups = [];
+    foreach ($standing as $route) {
+        $driverId = (int)$route['driver_id'];
+        $customerId = (int)$route['customer_id'];
+        if ($driverId <= 0 || $customerId <= 0) {
+            continue;
+        }
+        if (($assignedDriverByCustomer[$customerId] ?? 0) === $driverId) {
+            continue;
+        }
+        if (!isset($groups[$driverId])) {
+            $groups[$driverId] = [
+                'driver_id' => $driverId,
+                'driver_name' => (string)($route['driver_name'] ?? ''),
+                'stops' => [],
+                'labels' => [],
+            ];
+        }
+        $label = bakery_driver_assignment_missing_store_label($route);
+        $groups[$driverId]['stops'][] = [
+            'customer_id' => $customerId,
+            'customer_name' => (string)($route['customer_name'] ?? ''),
+            'route_order' => (int)($route['route_order'] ?? 0),
+            'label' => $label,
+        ];
+        $groups[$driverId]['labels'][] = $label;
+    }
+
+    $result = [];
+    foreach ($groups as $group) {
+        $labels = $group['labels'];
+        $group['label'] = bakery_driver_assignment_restore_label(count($labels), $labels);
+        $group['confirm'] = bakery_route_restore_confirm_message($labels);
+        $result[] = $group;
+    }
+    return $result;
+}
+
+/**
+ * Submit buttons whose label and confirm both name the stores.
+ *
+ * @param list<array{driver_id:int,label:string,confirm:string}> $groups
+ * @param array<string,scalar> $hidden
+ */
+function bakery_route_restore_render_forms(array $groups, array $hidden, string $buttonClass = 'route-restore-btn'): void
+{
+    foreach ($groups as $group) {
+        $confirm = (string)($group['confirm'] ?? '');
+        $label = (string)($group['label'] ?? '');
+        if ($confirm === '' || $label === '') {
+            continue;
+        }
+        echo '<form method="post" class="route-restore-form" data-confirm="'
+            . htmlspecialchars($confirm, ENT_QUOTES, 'UTF-8')
+            . '" onsubmit="return confirm(this.getAttribute(\'data-confirm\'));">';
+        if (function_exists('bakery_csrf_field')) {
+            echo bakery_csrf_field();
+        }
+        foreach ($hidden as $name => $value) {
+            echo '<input type="hidden" name="' . htmlspecialchars((string)$name, ENT_QUOTES, 'UTF-8')
+                . '" value="' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '">';
+        }
+        echo '<input type="hidden" name="driver_id" value="' . (int)$group['driver_id'] . '">';
+        echo '<button type="submit" class="' . htmlspecialchars($buttonClass, ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</button>';
+        echo '</form>';
+    }
 }
 
 /**
@@ -438,8 +609,10 @@ function bakery_driver_assign_from_standing_routes(PDO $db, string $deliveryDate
         'assign_routes' => false,
     ]);
 
+    bakery_dated_route_removals_ready($db);
     $db->beginTransaction();
     try {
+        bakery_dated_route_removal_clear_date($db, $deliveryDate);
         $customerIds = array_map(static fn(array $route): int => (int)$route['customer_id'], $standingRoutes);
         $orderIdByCustomer = bakery_daily_orders_map_for_customers($db, $deliveryDate, $customerIds);
 
@@ -1384,24 +1557,68 @@ function bakery_driver_plan_text(string $key, array $params = [], string $fallba
 }
 
 /**
+ * Dated orders with no driver for this delivery date.
+ * Survey Center and Driver Assignment both use this list.
+ *
+ * @return list<array{id:int,name:string,zone:string,address:string,daily_order_id:int,pieces:int}>
+ */
+function bakery_unassigned_for_date(PDO $db, string $date): array
+{
+    $date = bakery_driver_validate_delivery_date($date);
+    if (!function_exists('table_exists') || !table_exists($db, 'daily_orders') || !table_exists($db, 'customers')) {
+        return [];
+    }
+    $origin = function_exists('bakery_sfb_ops_origin_clause')
+        ? bakery_sfb_ops_origin_clause('c', $db)
+        : '';
+    $pieces = '0';
+    if (table_exists($db, 'daily_order_items')) {
+        $pieces = '(SELECT COALESCE(SUM(doi.quantity), 0) FROM daily_order_items doi WHERE doi.daily_order_id = do.id)';
+    }
+    $assignmentGuard = '';
+    if (table_exists($db, 'daily_order_assignments')) {
+        $assignmentGuard = ' AND NOT EXISTS (
+            SELECT 1 FROM daily_order_assignments doa
+            WHERE doa.daily_order_id = do.id
+              AND doa.delivery_date = do.order_date
+              AND doa.driver_id <> 0
+        )';
+    }
+    $sql = "SELECT c.id AS id, c.name AS name, COALESCE(c.zone, '') AS zone,
+                   COALESCE(c.address, '') AS address, do.id AS daily_order_id,
+                   {$pieces} AS pieces
+            FROM daily_orders do
+            JOIN customers c ON c.id = do.customer_id
+            {$origin}
+            WHERE do.order_date = ?
+            {$assignmentGuard}
+            ORDER BY c.name";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$date]);
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $id = (int)$row['id'];
+        if ($id <= 0) {
+            continue;
+        }
+        $rows[] = [
+            'id' => $id,
+            'name' => (string)$row['name'],
+            'zone' => (string)($row['zone'] ?? ''),
+            'address' => (string)($row['address'] ?? ''),
+            'daily_order_id' => (int)$row['daily_order_id'],
+            'pieces' => (int)($row['pieces'] ?? 0),
+        ];
+    }
+    return $rows;
+}
+
+/**
  * Count unassigned daily orders for a date.
  */
 function bakery_driver_unassigned_count(PDO $db, string $date): int
 {
-    if (!table_exists($db, 'daily_orders') || !table_exists($db, 'daily_order_assignments')) {
-        return 0;
-    }
-    $stmt = $db->prepare('
-        SELECT COUNT(*)
-        FROM daily_orders do
-        WHERE do.order_date = ?
-          AND NOT EXISTS (
-              SELECT 1 FROM daily_order_assignments doa
-              WHERE doa.daily_order_id = do.id AND doa.delivery_date = ?
-          )
-    ');
-    $stmt->execute([$date, $date]);
-    return (int)$stmt->fetchColumn();
+    return count(bakery_unassigned_for_date($db, $date));
 }
 
 /**

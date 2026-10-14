@@ -12,7 +12,7 @@ header('Content-Type: text/html; charset=utf-8');
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Local Health — <?php echo htmlspecialchars(SITE_NAME); ?></title>
+  <title>Local Health. <?php echo htmlspecialchars(SITE_NAME); ?></title>
   <style>
     body { font-family: Segoe UI, sans-serif; margin: 2rem; background: #f8f9fa; color: #222; }
     .ok { color: #155724; background: #d4edda; padding: 1rem; border-radius: 6px; }
@@ -22,9 +22,9 @@ header('Content-Type: text/html; charset=utf-8');
 </head>
 <body>
 <?php if (IS_LOCAL && defined('USE_PROD_DB') && USE_PROD_DB): ?>
-<div class="banner" style="background:#721c24;color:#f8d7da;">LOCAL APP → LIVE PRODUCTION DB — <?php echo htmlspecialchars(DB_NAME); ?> @ <?php echo htmlspecialchars(DB_HOST); ?></div>
+<div class="banner" style="background:#721c24;color:#f8d7da;">LOCAL APP → LIVE PRODUCTION DB. <?php echo htmlspecialchars(DB_NAME); ?> @ <?php echo htmlspecialchars(DB_HOST); ?></div>
 <?php elseif (IS_LOCAL): ?>
-<div class="banner">LOCAL ENVIRONMENT — <?php echo htmlspecialchars(DB_NAME); ?> @ <?php echo htmlspecialchars(DB_HOST); ?></div>
+<div class="banner">LOCAL ENVIRONMENT. <?php echo htmlspecialchars(DB_NAME); ?> @ <?php echo htmlspecialchars(DB_HOST); ?></div>
 <?php endif; ?>
 <div class="ok">
   <p><strong>Config loaded successfully.</strong></p>

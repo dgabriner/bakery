@@ -121,7 +121,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
             <h1>Ingredient Planner</h1>
             <p class="ipl-lead">
                 Given what customers ordered and what you decided to produce, see required batches,
-                aggregated ingredient needs, reported stock, and likely stocking gaps — traceable back to each product and formula.
+ aggregated ingredient needs, reported stock, and likely stocking gaps. Traceable back to each product and formula.
             </p>
         </div>
         <div class="ipl-actions no-print">
@@ -172,7 +172,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
         <div>
             <span>Demand mode</span>
             <strong><?php echo $plan['demand_mode'] === 'daily_orders' ? 'Committed daily orders' : 'Standing forecast'; ?></strong>
-            <small>Never switched silently — see quantity source above.</small>
+ <small>Never switched silently. See quantity source above.</small>
         </div>
         <?php if ($selectedSource === 'plan' && empty($plan['error'])): ?>
         <div>
@@ -281,8 +281,8 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                 echo ($d > 0 ? '+' : '') . number_format($d);
                                 ?>
                             </td>
-                            <td><?php echo $row['weight_grams'] ? number_format((int)$row['weight_grams']) . ' g' : '—'; ?></td>
-                            <td><?php echo $row['dough_grams'] !== null ? htmlspecialchars(bakery_ingredient_requirements_format_grams((float)$row['dough_grams']), ENT_QUOTES, 'UTF-8') : '—'; ?></td>
+                            <td><?php echo $row['weight_grams'] ? number_format((int)$row['weight_grams']) . ' g' : '-'; ?></td>
+                            <td><?php echo $row['dough_grams'] !== null ? htmlspecialchars(bakery_ingredient_requirements_format_grams((float)$row['dough_grams']), ENT_QUOTES, 'UTF-8') : '-'; ?></td>
                             <td>
                                 <?php if (!empty($batches['batch_reference_configured']) && !empty($batches['reference_yield_units'])): ?>
                                     <?php echo rtrim(rtrim(number_format((float)$batches['reference_yield_units'], 2), '0'), '.'); ?> units/batch
@@ -295,12 +295,12 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                     <?php echo rtrim(rtrim(number_format((float)$batches['theoretical_product_batches'], 3), '0'), '.'); ?>
                                 <?php elseif ($row['dough_grams'] !== null): ?>
                                     <span class="ipl-muted" title="Continuous dough scale"><?php echo htmlspecialchars(bakery_ingredient_requirements_format_grams((float)$row['dough_grams']), ENT_QUOTES, 'UTF-8'); ?></span>
-                                <?php else: ?>—<?php endif; ?>
+                                <?php else: ?>-<?php endif; ?>
                             </td>
                             <td>
                                 <?php if (!empty($batches['suggested_whole_product_batches'])): ?>
                                     <?php echo number_format((int)$batches['suggested_whole_product_batches']); ?>
-                                <?php else: ?>—<?php endif; ?>
+                                <?php else: ?>-<?php endif; ?>
                             </td>
                             <td>
                                 <?php if ($row['explodable']): ?>
@@ -362,7 +362,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                             <small class="ipl-delta"><?php echo ((float)$row['plan_vs_demand_grams'] > 0 ? '+' : '') . number_format((float)$row['plan_vs_demand_grams'], 1); ?> vs demand</small>
                                         <?php endif; ?>
                                     <?php else: ?>
-                                        <span class="ipl-muted">—</span>
+ <span class="ipl-muted">-</span>
                                     <?php endif; ?>
                                 </td>
                                 <?php endif; ?>
@@ -370,7 +370,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                     <?php if ($row['on_hand_display'] !== null): ?>
                                         <?php echo htmlspecialchars($row['on_hand_display'], ENT_QUOTES, 'UTF-8'); ?>
                                     <?php else: ?>
-                                        <span class="ipl-muted">—</span>
+ <span class="ipl-muted">-</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -383,7 +383,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                             <span class="ipl-ok">Covered</span>
                                         <?php endif; ?>
                                     <?php else: ?>
-                                        <span class="ipl-muted">—</span>
+ <span class="ipl-muted">-</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -393,7 +393,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                                             <small><a href="ingredients.php">Update in Ingredients →</a></small>
                                         <?php endif; ?>
                                     <?php else: ?>
-                                        <span class="ipl-muted">—</span>
+ <span class="ipl-muted">-</span>
                                     <?php endif; ?>
                                 </td>
                                 <td class="ipl-purchase-note no-print">
@@ -432,7 +432,7 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
         <section class="ipl-section" id="purchase">
             <header class="ipl-section__header">
                 <h2>Suggested purchase need</h2>
-                <p>Recommendations only — nothing is ordered automatically. Update ingredient counts in Ingredients after purchasing.</p>
+ <p>Recommendations only. Nothing is ordered automatically. Update ingredient counts in Ingredients after purchasing.</p>
             </header>
             <div class="ipl-table-wrap">
                 <table class="ipl-table">
@@ -450,9 +450,9 @@ $pcWeek = date('Y-m-d', strtotime('monday this week', strtotime($selectedDate)))
                         <tr>
                             <td><strong><?php echo htmlspecialchars($row['ingredient_name'], ENT_QUOTES, 'UTF-8'); ?></strong></td>
                             <td><?php echo number_format((float)$row['required_grams'], 1); ?> g</td>
-                            <td><?php echo htmlspecialchars($row['on_hand_display'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td><?php echo htmlspecialchars($row['on_hand_display'] ?? '-', ENT_QUOTES, 'UTF-8'); ?></td>
                             <td class="ipl-short"><?php echo htmlspecialchars($row['shortage_display'] ?? '', ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($row['suggested_purchase'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td><?php echo htmlspecialchars($row['suggested_purchase'] ?? '-', ENT_QUOTES, 'UTF-8'); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

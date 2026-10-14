@@ -129,6 +129,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'record_cod_square_override') {
+    header('Content-Type: application/json');
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    if (function_exists('bakery_require_role')) {
+        bakery_require_role(['administrator', 'manager']);
+    }
+    require_once __DIR__ . '/includes/cod_square_guard.php';
+    $orderId = (int)($_POST['daily_order_id'] ?? 0);
+    $reason = trim((string)($_POST['reason'] ?? ''));
+    try {
+        bakery_cod_record_square_override($db, $orderId, $reason, bakery_current_user());
+        echo json_encode([
+            'success' => true,
+            'daily_order_id' => $orderId,
+            'reason' => $reason,
+        ]);
+    } catch (Throwable $e) {
+        error_log('record_cod_square_override: ' . $e->getMessage());
+        $msg = function_exists('bakery_error_message_for_user')
+            ? bakery_error_message_for_user($e)
+            : 'Could not record the COD override';
+        echo json_encode(['success' => false, 'error' => $msg]);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'record_cod_turnin') {
     header('Content-Type: application/json');
     if (function_exists('bakery_require_csrf')) {
@@ -297,7 +325,7 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
     <div class="route-manager-header">
         <div>
             <h1>Route Manager</h1>
-            <p class="subtitle">Assigned deliveries for the selected day — drag stops to reorder each driver’s route. <strong>Each driver header shows the pickup manifest from Driver Pickup Loads, plus COD cash totals.</strong></p>
+ <p class="subtitle">Assigned deliveries for the selected day. Drag stops to reorder each driver’s route. <strong>Each driver header shows the pickup manifest from Driver Pickup Loads, plus COD cash totals.</strong></p>
         </div>
         <div class="route-manager-actions">
             <a class="btn btn-secondary" href="driver_load.php?date=<?php echo htmlspecialchars($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.driver_load')); ?></a>
@@ -568,7 +596,15 @@ if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
 <script>
 window.__ROUTE_MANAGER__ = {
     apiKey: <?php echo bakery_json_for_html(GOOGLE_MAPS_API_KEY, '""'); ?>,
-    drivers: <?php echo bakery_json_for_html($drivers, '[]'); ?>
+    drivers: <?php echo bakery_json_for_html($drivers, '[]'); ?>,
+    copy: <?php echo bakery_json_for_html([
+        'prepaid' => bakery_t('route.prepaid'),
+        'prepaid_square' => bakery_t('route.prepaid_square'),
+        'cod_override' => bakery_t('route.cod_override'),
+        'cod_override_reason' => bakery_t('route.cod_override_reason'),
+        'cod_override_save' => bakery_t('route.cod_override_save'),
+        'cod_override_saved' => bakery_t('route.cod_override_saved'),
+    ], '{}'); ?>
 };
 </script>
 <script async defer
@@ -579,7 +615,7 @@ window.__ROUTE_MANAGER__ = {
 document.addEventListener('DOMContentLoaded', function() {
     const mapEl = document.getElementById('route-map');
     if (!mapEl) return;
-    mapEl.innerHTML = '<div class="map-fallback">Map unavailable — cash and delivery totals still load from the selected routes. Enable maps (MAPS_ENABLED + API key) to show the map.</div>';
+ mapEl.innerHTML = '<div class="map-fallback">Map unavailable. Cash and delivery totals still load from the selected routes. Enable maps (MAPS_ENABLED + API key) to show the map.</div>';
 });
 </script>
 

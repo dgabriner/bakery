@@ -375,6 +375,34 @@
     color: var(--sf-text);
 }
 
+.dr-restore-standing {
+    margin: 0 0 var(--sf-space-4);
+    padding: var(--sf-space-4);
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: var(--sf-radius-lg);
+}
+
+.dr-restore-standing h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+}
+
+.dr-restore-standing p {
+    margin: 0 0 0.75rem;
+}
+
+.route-restore-form {
+    margin: 0.4rem 0;
+}
+
+.route-restore-btn {
+    white-space: normal;
+    text-align: left;
+    max-width: 100%;
+    height: auto;
+}
+
 .dr-unrouted-standing {
     margin: 0 0 var(--sf-space-4);
     padding: var(--sf-space-4);

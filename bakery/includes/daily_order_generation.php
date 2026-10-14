@@ -5,6 +5,9 @@
  *
  * Inactive customers never generate orders. Dated quantity changes are
  * preserved unless overwrite mode is explicitly requested.
+ * Page views must not call the fillers. The cron and an explicit manager
+ * Build from standing action are the writers. An order with
+ * standing_fill_blocked stays empty unless overwrite is requested.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -46,7 +49,8 @@ function bakery_next_standing_route_order(
 /**
  * True when an active standing-route stop for this date has no dated assignment.
  * Paused and skipped customers are ignored. A cancelled assignment still counts
- * as present. A hard-deleted assignment does not, because removal is not stored.
+ * as present. A recorded manager removal stays off. An untracked hard delete
+ * does not, so the next fill copies that stop again.
  */
 function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date): bool
 {
@@ -80,6 +84,13 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
         $pauseParams[] = $date;
         $pauseParams[] = $date;
     }
+    if (table_exists($db, 'dated_route_removals')) {
+        $pauseSql .= ' AND NOT EXISTS (
+            SELECT 1 FROM dated_route_removals drr
+            WHERE drr.customer_id = sr.customer_id AND drr.delivery_date = ?
+        )';
+        $pauseParams[] = $date;
+    }
 
     $stmt = $db->prepare(
         'SELECT 1
@@ -102,6 +113,123 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
 }
 
 /**
+ * Create the dated-removal table when this database has not migrated yet.
+ * Call this before opening a transaction. DDL commits an open transaction.
+ */
+function bakery_dated_route_removals_ready(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready && table_exists($db, 'dated_route_removals')) {
+        return true;
+    }
+    if (table_exists($db, 'dated_route_removals')) {
+        $ready = true;
+        return true;
+    }
+    if ($db->inTransaction()) {
+        return false;
+    }
+    $db->exec(
+        'CREATE TABLE IF NOT EXISTS dated_route_removals (
+            id INT NOT NULL AUTO_INCREMENT,
+            delivery_date DATE NOT NULL,
+            customer_id INT NOT NULL,
+            driver_id INT NULL DEFAULT NULL,
+            removed_by_user_id INT NULL DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_dated_route_removals_date_customer (delivery_date, customer_id),
+            KEY idx_dated_route_removals_driver_date (driver_id, delivery_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    if (function_exists('bakery_forget_table_exists')) {
+        bakery_forget_table_exists('dated_route_removals');
+    }
+    $ready = table_exists($db, 'dated_route_removals');
+    return $ready;
+}
+
+/**
+ * @return array<int,true>
+ */
+function bakery_dated_route_removed_customer_ids(PDO $db, string $date): array
+{
+    if (!table_exists($db, 'dated_route_removals')) {
+        return [];
+    }
+    $stmt = $db->prepare('SELECT customer_id FROM dated_route_removals WHERE delivery_date = ?');
+    $stmt->execute([$date]);
+    $ids = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $customerId) {
+        $ids[(int)$customerId] = true;
+    }
+    return $ids;
+}
+
+function bakery_dated_route_removal_record(PDO $db, string $date, int $customerId, int $driverId): void
+{
+    if ($customerId <= 0 || !table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $userId = null;
+    if (function_exists('bakery_current_user')) {
+        $user = bakery_current_user();
+        if ($user && (int)($user['id'] ?? 0) > 0) {
+            $userId = (int)$user['id'];
+        }
+    }
+    $stmt = $db->prepare(
+        'INSERT INTO dated_route_removals (delivery_date, customer_id, driver_id, removed_by_user_id)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            driver_id = VALUES(driver_id),
+            removed_by_user_id = VALUES(removed_by_user_id),
+            created_at = CURRENT_TIMESTAMP'
+    );
+    $stmt->execute([$date, $customerId, $driverId > 0 ? $driverId : null, $userId]);
+}
+
+function bakery_dated_route_removal_clear(PDO $db, string $date, int $customerId): void
+{
+    if ($customerId <= 0 || !table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $db->prepare('DELETE FROM dated_route_removals WHERE delivery_date = ? AND customer_id = ?')
+        ->execute([$date, $customerId]);
+}
+
+function bakery_dated_route_removal_clear_date(PDO $db, string $date): void
+{
+    if (!table_exists($db, 'dated_route_removals')) {
+        return;
+    }
+    $db->prepare('DELETE FROM dated_route_removals WHERE delivery_date = ?')->execute([$date]);
+}
+
+/**
+ * @param list<int> $orderIds
+ * @return array<int,int> daily_order_id => customer_id
+ */
+function bakery_dated_route_customers_for_orders(PDO $db, array $orderIds): array
+{
+    $orderIds = array_values(array_unique(array_filter(
+        array_map('intval', $orderIds),
+        static fn(int $id): bool => $id > 0
+    )));
+    if ($orderIds === []) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $db->prepare("SELECT id, customer_id FROM daily_orders WHERE id IN ($placeholders)");
+    $stmt->execute($orderIds);
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['id']] = (int)$row['customer_id'];
+    }
+    return $map;
+}
+
+/**
  * Generate dated daily orders from standing orders for one date.
  *
  * @param array{overwrite_changed?:bool, record_event?:bool, assign_routes?:bool} $options
@@ -109,9 +237,10 @@ function bakery_date_has_unassigned_standing_route_stops(PDO $db, string $date):
  *   record_event      — write an operational-timeline event (default true)
  *   assign_routes     — copy standing-route stops onto the dated route (default true).
  *                       Stops with no standing order are included. An existing
- *                       dated assignment is left where it is. A hard delete is
- *                       not recorded, so the next fill copies that stop again.
- *                       Cancelled assignments stay cancelled.
+ *                       dated assignment is left where it is. A recorded
+ *                       manager removal stays off the route. An untracked hard
+ *                       delete is not recorded, so the next fill copies that
+ *                       stop again. Cancelled assignments stay cancelled.
  *
  * @return array{db_day:int, standing_rows:int, orders_created:int, items_created:int,
  *               items_updated:int, items_preserved:int, overwrite_changed:bool,
@@ -136,6 +265,12 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
     // which implicitly commits in MariaDB. Finish them before opening the
     // generation transaction.
     bakery_customer_order_ensure_schema($db);
+    $removedCustomerIds = [];
+    if ($assignRoutes) {
+        bakery_dated_route_removals_ready($db);
+        $removedCustomerIds = bakery_dated_route_removed_customer_ids($db, $date);
+    }
+    $standingFillColumn = bakery_daily_order_standing_fill_column_ready($db);
     $db->beginTransaction();
 
     try {
@@ -299,6 +434,13 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                 }
 
                 if ($dailyOrderId) {
+                    $fillBlocked = $existedBefore
+                        && !$overwriteChanged
+                        && bakery_daily_order_standing_fill_is_blocked($db, (int)$dailyOrderId, $standingFillColumn);
+                    if ($existedBefore && $overwriteChanged) {
+                        bakery_daily_order_set_standing_fill_blocked($db, (int)$dailyOrderId, false, $standingFillColumn);
+                    }
+                    if (!$fillBlocked) {
                     $existingItemQtyStmt->execute([$dailyOrderId]);
                     $existingQtyByProduct = [];
                     foreach ($existingItemQtyStmt->fetchAll(PDO::FETCH_ASSOC) as $existingItem) {
@@ -314,7 +456,8 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                         $standingQty = (int)$order['quantity'];
                         if (isset($existingQtyByProduct[$productId])) {
                             if ($existingQtyByProduct[$productId] !== $standingQty && !$overwriteChanged) {
-                                // Keep the manager's dated change instead of silently resetting it.
+                                // Keep the manager's dated change, including a
+                                // one-day removal stored as quantity 0.
                                 $itemsPreserved++;
                                 continue;
                             }
@@ -364,6 +507,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
 
                     // Update order total efficiently
                     bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
+                    }
 
                     $standingRoute = $standingRouteByCustomer[(int)$customerId] ?? null;
                     if ($standingRoute) {
@@ -376,6 +520,10 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                             $datedDriverId = (int)$existingAssignments[0]['driver_id'];
                             $updateLegacyDriverStmt->execute([$datedDriverId, $dailyOrderId]);
                             $routesPreserved++;
+                            $standingRoutePlaced[(int)$customerId] = true;
+                            continue;
+                        }
+                        if (isset($removedCustomerIds[(int)$customerId])) {
                             $standingRoutePlaced[(int)$customerId] = true;
                             continue;
                         }
@@ -420,8 +568,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
         // Standing-route stops are the route plan. Customers with no standing
         // order (or whose order lines were filtered out of the product join)
         // still belong on the dated route. Existing assignments, including
-        // cancelled ones, are left alone. A hard delete leaves no record, so
-        // this pass copies the stop again.
+        // cancelled ones, are left alone. A recorded manager removal stays
+        // off. An untracked hard delete leaves no record, so this pass copies
+        // that stop again.
         if ($assignRoutes && $standingRouteByCustomer !== []) {
             $routeWeekStart = bakery_week_start_monday($date);
             $routeOrderExists = $db->prepare(
@@ -430,6 +579,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
             foreach ($standingRouteByCustomer as $routeCustomerId => $standingRoute) {
                 $routeCustomerId = (int)$routeCustomerId;
                 if (isset($standingRoutePlaced[$routeCustomerId])) {
+                    continue;
+                }
+                if (isset($removedCustomerIds[$routeCustomerId])) {
                     continue;
                 }
                 if (bakery_customer_week_is_paused($db, $routeCustomerId, $routeWeekStart)
@@ -578,7 +730,7 @@ function bakery_generate_daily_orders_week(PDO $db, string $date, array $options
 
     $weekEnd = date('Y-m-d', strtotime($weekStart . ' +6 days'));
     $message = "Generated orders for the week of " . date('M j', strtotime($weekStart))
-        . " – " . date('M j', strtotime($weekEnd)) . ": "
+        . ' ' . bakery_locale_range_word() . ' ' . date('M j', strtotime($weekEnd)) . ": "
         . $totals['orders_created'] . " new orders, "
         . $totals['items_created'] . " new item(s), "
         . $totals['items_updated'] . " updated item(s), "
@@ -604,10 +756,10 @@ function bakery_generate_daily_orders_week(PDO $db, string $date, array $options
  * demand exists but dated commercial orders are still missing, including
  * already-generated orders that lack newly added standing product lines.
  *
- * Intended for first Daily Run / Daily Orders page view so tomorrow's
- * demand is never a remembered manual click. Always preserves dated
- * quantity edits (overwrite_changed is forced off). Skips closed days
- * and no-ops when generation is already complete.
+ * Callers are the demand scheduler cron and an explicit manager action.
+ * Page views must not call this. Always preserves dated quantity edits
+ * (overwrite_changed is forced off). Skips closed days, skips orders a
+ * manager emptied on purpose, and no-ops when generation is already complete.
  *
  * @param array{record_event?:bool, assign_routes?:bool, skip_if_closed?:bool} $options
  * @return array{ran:bool, skipped_reason:?string, result:?array}
@@ -860,6 +1012,62 @@ function bakery_fill_demand_horizon(PDO $db, ?string $alsoDate = null, array $op
 }
 
 /**
+ * Manager POST: build one date from standing. CSRF and manager role required.
+ * No-ops unless the request is that action. Redirects back to the current page.
+ */
+function bakery_try_build_from_standing_post(PDO $db): void
+{
+    if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
+        return;
+    }
+    if ((string)($_POST['action'] ?? '') !== 'build_from_standing') {
+        return;
+    }
+    bakery_require_role(['administrator', 'manager']);
+    bakery_require_csrf();
+    $date = trim((string)($_POST['date'] ?? ''));
+    $dateObject = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('Invalid order date');
+    }
+    $result = bakery_generate_daily_orders_from_standing($db, $date, [
+        'overwrite_changed' => false,
+        'record_event' => true,
+    ]);
+    $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? 'index.php'));
+    $message = function_exists('bakery_t')
+        ? bakery_t('orders.built_from_standing', [
+            'date' => $date,
+            'orders' => (int)($result['orders_created'] ?? 0),
+        ])
+        : 'Built dated orders from standing.';
+    $query = $_GET;
+    $query['date'] = $date;
+    $query['flash'] = 'success';
+    $query['msg'] = $message;
+    safe_redirect($script . '?' . http_build_query($query));
+}
+
+/**
+ * Explicit Build from standing control. Empty for anyone who is not a manager.
+ */
+function bakery_build_from_standing_button(string $date, string $buttonClass = 'btn btn-primary'): string
+{
+    if (!function_exists('bakery_user_has_role') || !bakery_user_has_role(['administrator', 'manager'])) {
+        return '';
+    }
+    $label = function_exists('bakery_t') ? bakery_t('ux.daily_orders.generate_standing') : 'Build from standing';
+    $csrf = function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
+    return '<form method="post" action="" class="build-from-standing-form" style="display:inline-flex;margin:0;align-items:center">'
+        . $csrf
+        . '<input type="hidden" name="action" value="build_from_standing">'
+        . '<input type="hidden" name="date" value="' . htmlspecialchars($date, ENT_QUOTES, 'UTF-8') . '">'
+        . '<button type="submit" class="' . htmlspecialchars($buttonClass, ENT_QUOTES, 'UTF-8') . '">'
+        . htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
+        . '</button></form>';
+}
+
+/**
  * CLI cron guard. Unforced runs are DreamHost production (bakerysf) or
  * DreamHost staging. Local one-shots need --force. Laptop-to-prod is refused.
  */
@@ -879,7 +1087,7 @@ function bakery_demand_scheduler_assert_cli(PDO $db, bool $force = false): void
     if ($isLocal) {
         if (!$force) {
             throw new RuntimeException(
-                'Demand scheduler cron is DreamHost-only. Opening Daily Run fills the horizon locally, or pass --force for a one-shot.'
+                'Demand scheduler cron is DreamHost-only. Use Build from standing, or pass --force for a one-shot.'
             );
         }
         return;

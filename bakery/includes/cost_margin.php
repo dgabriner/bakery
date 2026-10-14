@@ -11,10 +11,95 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/formula_structure.php';
 require_once __DIR__ . '/ingredient_prices.php';
+require_once __DIR__ . '/ingredient_units.php';
 
 function bakery_cost_margin_loss_grams(): float
 {
     return bakery_formula_default_dough_loss_grams();
+}
+
+/**
+ * Cost per kilogram from a package price and a package size in a mass unit.
+ * Null when the cost, the size, or the unit cannot make a kilogram price.
+ */
+function bakery_cost_margin_package_cost_per_kg($unitCost, $packageSize, ?string $unit): ?float
+{
+    if ($unitCost === null || $unitCost === '' || $packageSize === null || $packageSize === '') {
+        return null;
+    }
+    if (!is_numeric($unitCost) || !is_numeric($packageSize)) {
+        return null;
+    }
+    $grams = bakery_ingredient_unit_to_grams((float) $packageSize, $unit);
+    if ($grams === null || $grams <= 0) {
+        return null;
+    }
+    return round(((float) $unitCost) * 1000 / $grams, 4);
+}
+
+/**
+ * Invoice cost per kg wins. Otherwise read unit_cost, package_size, and supplier_name.
+ *
+ * @return array{cost_per_kg:?float, source:?string, supplier_name:?string, package_label:?string}
+ */
+function bakery_cost_margin_ingredient_cost_detail(PDO $db, int $ingredientId): array
+{
+    $blank = [
+        'cost_per_kg' => null,
+        'source' => null,
+        'supplier_name' => null,
+        'package_label' => null,
+    ];
+    if ($ingredientId <= 0) {
+        return $blank;
+    }
+    $history = bakery_ingredient_current_cost_per_kg($ingredientId, $db);
+    $hasPackage = function_exists('column_exists')
+        && column_exists($db, 'ingredients', 'unit_cost')
+        && column_exists($db, 'ingredients', 'package_size');
+    $supplierSql = (function_exists('column_exists') && column_exists($db, 'ingredients', 'supplier_name'))
+        ? 'supplier_name'
+        : 'NULL AS supplier_name';
+    $packageSql = $hasPackage ? 'unit_cost, package_size' : 'NULL AS unit_cost, NULL AS package_size';
+    $stmt = $db->prepare("SELECT unit, $supplierSql, $packageSql FROM ingredients WHERE id = ?");
+    $stmt->execute([$ingredientId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        if ($history !== null) {
+            $blank['cost_per_kg'] = $history;
+            $blank['source'] = 'invoice';
+        }
+        return $blank;
+    }
+    $supplier = trim((string) ($row['supplier_name'] ?? ''));
+    $blank['supplier_name'] = $supplier !== '' ? $supplier : null;
+    $blank['package_label'] = function_exists('bakery_ingredient_package_label')
+        ? bakery_ingredient_package_label([
+            'package_size' => $row['package_size'] ?? null,
+            'unit' => $row['unit'] ?? '',
+        ])
+        : null;
+    if ($history !== null) {
+        $blank['cost_per_kg'] = $history;
+        $blank['source'] = 'invoice';
+        return $blank;
+    }
+    $packageCost = bakery_cost_margin_package_cost_per_kg(
+        $row['unit_cost'] ?? null,
+        $row['package_size'] ?? null,
+        (string) ($row['unit'] ?? '')
+    );
+    if ($packageCost === null) {
+        return $blank;
+    }
+    $blank['cost_per_kg'] = $packageCost;
+    $blank['source'] = 'package';
+    return $blank;
+}
+
+function bakery_cost_margin_resolve_cost_per_kg(PDO $db, int $ingredientId): ?float
+{
+    return bakery_cost_margin_ingredient_cost_detail($db, $ingredientId)['cost_per_kg'];
 }
 
 function bakery_cost_margin_method_allowed(string $method): bool
@@ -36,6 +121,9 @@ function bakery_cost_margin_method_allowed(string $method): bool
  *   unit_price:?float,
  *   margin_dollars:?float,
  *   margin_percent:?float,
+ *   cost_floor:?float,
+ *   cost_upper:?float,
+ *   priced_dough_percent:?float,
  *   flags:list<string>
  * }
  */
@@ -51,6 +139,9 @@ function bakery_cost_margin_quote(array $lines, array $structure, array $parts, 
         'unit_price' => $price,
         'margin_dollars' => null,
         'margin_percent' => null,
+        'cost_floor' => null,
+        'cost_upper' => null,
+        'priced_dough_percent' => null,
         'flags' => ['empty_formula'],
     ];
     if ($weight === null || $weight <= 0) {
@@ -68,12 +159,16 @@ function bakery_cost_margin_quote(array $lines, array $structure, array $parts, 
     $lossed = bakery_formula_product_piece_grams($lines, $with, $parts, $weight);
     $plainCost = bakery_cost_margin_sum_ingredients($plain['ingredients'] ?? [], $costsByIngredient);
     $lossedCost = bakery_cost_margin_sum_ingredients($lossed['ingredients'] ?? [], $costsByIngredient);
+    $bounds = bakery_cost_margin_bound_sums($plain['ingredients'] ?? [], $costsByIngredient);
 
     if ($plainCost['status'] === 'empty' || $lossedCost['status'] === 'empty') {
         return $blank;
     }
     if ($plainCost['status'] === 'missing' || $lossedCost['status'] === 'missing') {
         $blank['flags'] = ['missing_price'];
+        $blank['cost_floor'] = $bounds['floor'];
+        $blank['cost_upper'] = $bounds['upper'];
+        $blank['priced_dough_percent'] = $bounds['priced_dough_percent'];
         return $blank;
     }
 
@@ -98,7 +193,84 @@ function bakery_cost_margin_quote(array $lines, array $structure, array $parts, 
         'unit_price' => $price,
         'margin_dollars' => $marginDollars,
         'margin_percent' => $marginPercent,
+        'cost_floor' => $bounds['floor'],
+        'cost_upper' => $bounds['upper'],
+        'priced_dough_percent' => $bounds['priced_dough_percent'],
         'flags' => [],
+    ];
+}
+
+/**
+ * A float is an invoice price. A pair may also carry a fill price (quote or public_list).
+ *
+ * @param mixed $value
+ * @return array{invoice:?float, fill:?float}
+ */
+function bakery_cost_margin_price_pair($value): array
+{
+    if (is_array($value)) {
+        $invoice = array_key_exists('invoice', $value) ? $value['invoice'] : null;
+        $fill = array_key_exists('fill', $value) ? $value['fill'] : null;
+        return [
+            'invoice' => ($invoice === null || $invoice === '') ? null : (float)$invoice,
+            'fill' => ($fill === null || $fill === '') ? null : (float)$fill,
+        ];
+    }
+    if ($value === null || $value === '') {
+        return ['invoice' => null, 'fill' => null];
+    }
+    return ['invoice' => (float)$value, 'fill' => null];
+}
+
+/**
+ * Floor uses invoice prices only. Upper bound uses a fill price where the invoice price is missing.
+ * Priced dough weight ignores toppings and fillings.
+ *
+ * @param list<array<string, mixed>> $ingredients
+ * @param array<int, mixed> $costsByIngredient
+ * @return array{floor:?float, upper:?float, priced_dough_percent:?float}
+ */
+function bakery_cost_margin_bound_sums(array $ingredients, array $costsByIngredient): array
+{
+    $floor = 0.0;
+    $upper = 0.0;
+    $floorAny = false;
+    $upperAny = false;
+    $doughGrams = 0.0;
+    $pricedDough = 0.0;
+    foreach ($ingredients as $row) {
+        if (!is_array($row) || empty($row['counts_in_totals'])) {
+            continue;
+        }
+        $grams = (float)($row['grams'] ?? 0);
+        if ($grams <= 0) {
+            continue;
+        }
+        $id = (int)($row['ingredient_id'] ?? 0);
+        $pair = ($id > 0 && array_key_exists($id, $costsByIngredient))
+            ? bakery_cost_margin_price_pair($costsByIngredient[$id])
+            : ['invoice' => null, 'fill' => null];
+        $used = $pair['invoice'] !== null ? $pair['invoice'] : $pair['fill'];
+        $source = strtolower(trim((string)($row['source'] ?? 'dough')));
+        if ($source !== 'topping' && $source !== 'filling') {
+            $doughGrams += $grams;
+            if ($pair['invoice'] !== null || $pair['fill'] !== null) {
+                $pricedDough += $grams;
+            }
+        }
+        if ($pair['invoice'] !== null) {
+            $floorAny = true;
+            $floor += ($grams / 1000.0) * $pair['invoice'];
+        }
+        if ($used !== null) {
+            $upperAny = true;
+            $upper += ($grams / 1000.0) * $used;
+        }
+    }
+    return [
+        'floor' => $floorAny ? $floor : null,
+        'upper' => $upperAny ? $upper : null,
+        'priced_dough_percent' => $doughGrams > 0 ? ($pricedDough / $doughGrams) * 100.0 : null,
     ];
 }
 
@@ -121,10 +293,13 @@ function bakery_cost_margin_sum_ingredients(array $ingredients, array $costsByIn
         }
         $any = true;
         $id = (int)($row['ingredient_id'] ?? 0);
-        if ($id <= 0 || !array_key_exists($id, $costsByIngredient) || $costsByIngredient[$id] === null || $costsByIngredient[$id] === '') {
+        $pair = ($id > 0 && array_key_exists($id, $costsByIngredient))
+            ? bakery_cost_margin_price_pair($costsByIngredient[$id])
+            : ['invoice' => null, 'fill' => null];
+        if ($id <= 0 || $pair['invoice'] === null) {
             return ['status' => 'missing', 'cost' => null];
         }
-        $sum += ($grams / 1000.0) * (float)$costsByIngredient[$id];
+        $sum += ($grams / 1000.0) * $pair['invoice'];
     }
     if (!$any) {
         return ['status' => 'empty', 'cost' => null];
@@ -145,6 +320,9 @@ function bakery_cost_margin_csv(array $rows): string
         'product',
         'piece_grams',
         'ingredient_cost',
+        'cost_floor',
+        'cost_upper',
+        'priced_dough_percent',
         'dough_loss',
         'unit_price',
         'margin_dollars',
@@ -157,6 +335,9 @@ function bakery_cost_margin_csv(array $rows): string
             (string)($row['product_name'] ?? ''),
             bakery_cost_margin_csv_number($row['piece_grams'] ?? null, 4),
             bakery_cost_margin_csv_number($row['ingredient_cost'] ?? null, 4),
+            bakery_cost_margin_csv_number($row['cost_floor'] ?? null, 4),
+            bakery_cost_margin_csv_number($row['cost_upper'] ?? null, 4),
+            bakery_cost_margin_csv_number($row['priced_dough_percent'] ?? null, 4),
             bakery_cost_margin_csv_number($row['dough_loss'] ?? null, 4),
             bakery_cost_margin_csv_number($row['unit_price'] ?? null, 4),
             bakery_cost_margin_csv_number($row['margin_dollars'] ?? null, 4),
@@ -224,6 +405,30 @@ function bakery_cost_margin_rows(PDO $db, ?string $asOf = null): array
         $structure = $structures[$doughId] ?? bakery_formula_normalize_structure([]);
         $productParts = $parts[$productId] ?? [];
         $costs = bakery_cost_margin_costs_for($db, $lines, $productParts, $costCache);
+        $packagePrices = [];
+        $notedIds = bakery_formula_collect_ingredient_ids($lines);
+        foreach ($productParts as $part) {
+            foreach ($part['lines'] ?? [] as $partLine) {
+                if (is_array($partLine)) {
+                    $notedIds[] = (int) ($partLine['ingredient_id'] ?? 0);
+                }
+            }
+        }
+        foreach (array_unique($notedIds) as $notedId) {
+            $detail = $costCache[$notedId] ?? null;
+            if (!is_array($detail) || ($detail['source'] ?? '') !== 'package' || $detail['cost_per_kg'] === null) {
+                continue;
+            }
+            $bits = array_values(array_filter([
+                $detail['supplier_name'] ?? null,
+                $detail['package_label'] ?? null,
+            ], static function ($bit): bool {
+                return $bit !== null && $bit !== '';
+            }));
+            if ($bits !== []) {
+                $packagePrices[] = implode(' · ', $bits);
+            }
+        }
         $quote = bakery_cost_margin_quote(
             $lines,
             $structure,
@@ -242,8 +447,12 @@ function bakery_cost_margin_rows(PDO $db, ?string $asOf = null): array
             'unit_price' => $quote['unit_price'],
             'margin_dollars' => $quote['margin_dollars'],
             'margin_percent' => $quote['margin_percent'],
+            'cost_floor' => $quote['cost_floor'],
+            'cost_upper' => $quote['cost_upper'],
+            'priced_dough_percent' => $quote['priced_dough_percent'],
             'delivered_90_days' => (int)($delivered[$productId] ?? 0),
             'flags' => $quote['flags'],
+            'package_prices' => $packagePrices,
         ];
     }
     return $rows;
@@ -288,6 +497,10 @@ function bakery_cost_margin_load_formulas(PDO $db, array $doughIds): array
             'percentage' => (float)$row['percentage'],
         ];
     }
+    $catalog = bakery_formula_subformula_catalog($db);
+    foreach ($byDough as $doughId => $lines) {
+        $byDough[$doughId] = bakery_formula_decorate_subformulas($lines, $catalog);
+    }
     return $byDough;
 }
 
@@ -300,11 +513,8 @@ function bakery_cost_margin_load_formulas(PDO $db, array $doughIds): array
 function bakery_cost_margin_costs_for(PDO $db, array $lines, array $parts, array &$cache): array
 {
     $ids = [];
-    foreach ($lines as $line) {
-        $id = (int)($line['ingredient_id'] ?? 0);
-        if ($id > 0) {
-            $ids[$id] = true;
-        }
+    foreach (bakery_formula_collect_ingredient_ids($lines) as $id) {
+        $ids[$id] = true;
     }
     foreach ($parts as $part) {
         foreach ($part['lines'] ?? [] as $line) {
@@ -320,9 +530,16 @@ function bakery_cost_margin_costs_for(PDO $db, array $lines, array $parts, array
     $costs = [];
     foreach (array_keys($ids) as $id) {
         if (!array_key_exists($id, $cache)) {
-            $cache[$id] = bakery_ingredient_current_cost_per_kg($id, $db);
+            $detail = bakery_cost_margin_ingredient_cost_detail($db, (int) $id);
+            $detail['invoice'] = bakery_ingredient_current_cost_per_kg($id, $db);
+            $detail['fill'] = bakery_ingredient_fill_cost_per_kg($db, (int) $id);
+            $cache[$id] = $detail;
         }
-        $costs[$id] = $cache[$id];
+        $detail = $cache[$id];
+        $costs[$id] = [
+            'invoice' => is_array($detail) ? ($detail['invoice'] ?? null) : null,
+            'fill' => is_array($detail) ? ($detail['fill'] ?? null) : null,
+        ];
     }
     return $costs;
 }

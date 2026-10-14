@@ -6,6 +6,8 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/billing.php';
+require_once __DIR__ . '/includes/billing_cod_day.php';
+require_once __DIR__ . '/includes/payment_terms.php';
 require_once __DIR__ . '/includes/billing_aging.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 
@@ -19,8 +21,8 @@ $orderStatuses = ['pending', 'confirmed', 'in_production', 'ready', 'out_for_del
 $rangePresets = ['today', 'week', 'month', 'last_month', 'custom'];
 $statusOptions = array_merge(['all', 'open'], $orderStatuses);
 
-$panel = (string)($_GET['panel'] ?? 'invoices');
-$panels = ['invoices', 'customer', 'export', 'exceptions'];
+$panel = (string)($_GET['panel'] ?? 'cod');
+$panels = ['cod', 'invoices', 'customer', 'export', 'exceptions', 'mismatch'];
 if (!in_array($panel, $panels, true)) {
     $panel = 'invoices';
 }
@@ -175,22 +177,26 @@ require_once __DIR__ . '/includes/nav.php';
         <p class="bc-eyebrow">Orders &amp; Customers</p>
         <h1><?php bakery_te('page.billing_center'); ?></h1>
         <p class="bc-subtitle">
-            <?php echo htmlspecialchars(bakery_t('billing.center_subtitle')); ?>
+            <?php echo htmlspecialchars(bakery_t('billing.center_cash_subtitle')); ?>
         </p>
     </header>
 
     <nav class="bc-tabs" aria-label="Billing Center panels">
+        <?php echo $panelTab('cod', bakery_t('billing.tab_cod')); ?>
         <?php echo $panelTab('invoices', bakery_t('billing.tab_invoices')); ?>
+        <?php echo $panelTab('mismatch', bakery_t('billing.tab_mismatch')); ?>
         <?php echo $panelTab('customer', bakery_t('billing.tab_customer')); ?>
         <?php echo $panelTab('export', bakery_t('billing.tab_export')); ?>
     </nav>
 
-    <?php if ($panel === 'invoices'): ?>
+    <?php if ($panel === 'cod'): ?>
+        <?php require __DIR__ . '/includes/billing_panel_cod_day.php'; ?>
+    <?php elseif ($panel === 'invoices'): ?>
         <?php require __DIR__ . '/includes/billing_panel_invoices.php'; ?>
     <?php elseif ($panel === 'customer'): ?>
         <section class="bc-panel">
             <h2 style="margin:0 0 8px;font-size:1.1rem">Customer billing account</h2>
-            <p style="margin:0 0 16px;color:#64748b;font-size:.86rem">Financial-operational history from delivery snapshots — trace any charge back to its delivery.</p>
+ <p style="margin:0 0 16px;color:#64748b;font-size:.86rem">Financial-operational history from delivery snapshots. Trace any charge back to its delivery.</p>
 
             <form class="bc-form" method="get">
                 <input type="hidden" name="panel" value="customer">
@@ -214,7 +220,7 @@ require_once __DIR__ . '/includes/nav.php';
             <?php elseif ($account): ?>
                 <?php $cust = $account['customer']; ?>
                 <?php if ($account['missing_billing_contact']): ?>
-                    <div class="bc-alert">Billing exception: this customer has no email or address on file — statements may be incomplete.</div>
+ <div class="bc-alert">Billing exception: this customer has no email or address on file. Statements may be incomplete.</div>
                 <?php endif; ?>
 
                 <div class="bc-grid">
@@ -263,7 +269,7 @@ require_once __DIR__ . '/includes/nav.php';
                             <td><?php echo htmlspecialchars($inv['category_meta']['short']); ?></td>
                             <td class="num">
                                 <?php if ($inv['pricing_issue'] && !$inv['amount_is_billable']): ?>
-                                    <span title="Pricing issue — amount not trusted">—</span>
+ <span title="Pricing issue. Amount not trusted">-</span>
                                 <?php else: ?>
                                     $<?php echo number_format($inv['amount_is_billable'] ? $inv['billable_amount'] : $inv['display_amount'], 2); ?>
                                 <?php endif; ?>
@@ -286,7 +292,7 @@ require_once __DIR__ . '/includes/nav.php';
                         <?php foreach ($account['statements'] as $st): ?>
                             <tr>
                                 <td><?php echo date('M j, Y', strtotime($st['statement_date'])); ?></td>
-                                <td><?php echo htmlspecialchars($st['period_start'] . ' – ' . $st['period_end']); ?></td>
+                                <td><?php echo htmlspecialchars($st['period_start'] . ' ' . bakery_locale_range_word() . ' ' . $st['period_end']); ?></td>
                                 <td class="num">$<?php echo number_format((float)$st['total_amount'], 2); ?></td>
                                 <td><?php echo $st['sent_at'] ? htmlspecialchars(date('M j, Y', strtotime($st['sent_at'])) . ($st['sent_to_email'] ? ' → ' . $st['sent_to_email'] : '')) : 'Generated only'; ?></td>
                             </tr>
@@ -319,6 +325,9 @@ require_once __DIR__ . '/includes/nav.php';
                 <p class="bc-note">Select a customer to view invoices, delivery dates, and statement history.</p>
             <?php endif; ?>
         </section>
+
+    <?php elseif ($panel === 'mismatch'): ?>
+        <?php require __DIR__ . '/includes/billing_panel_header_mismatch.php'; ?>
 
     <?php elseif ($panel === 'export'): ?>
         <section class="bc-panel">
@@ -365,12 +374,12 @@ require_once __DIR__ . '/includes/nav.php';
                     <tbody>
                     <?php foreach ($recentExports as $ex): ?>
                         <tr>
-                            <td><?php echo date('M j, Y g:i A', strtotime($ex['created_at'])); ?></td>
+                            <td><?php echo bakery_format_user_stamp(strtotime($ex['created_at']), 'M j, Y g:i A'); ?></td>
                             <td><code><?php echo htmlspecialchars($ex['export_key']); ?></code></td>
-                            <td><?php echo htmlspecialchars($ex['period_start'] . ' – ' . $ex['period_end']); ?></td>
+                            <td><?php echo htmlspecialchars($ex['period_start'] . ' ' . bakery_locale_range_word() . ' ' . $ex['period_end']); ?></td>
                             <td class="num"><?php echo number_format((int)$ex['row_count']); ?></td>
                             <td class="num"><?php echo number_format((int)$ex['invoice_count']); ?></td>
-                            <td><?php echo htmlspecialchars($ex['created_by_name'] ?? '—'); ?></td>
+                            <td><?php echo htmlspecialchars($ex['created_by_name'] ?? '-'); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

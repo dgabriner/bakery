@@ -239,35 +239,35 @@ function bakery_sfb_persona_copy($cohort, $locale, array $defaults, $index = 0, 
         [
             'topic_title' => "{$tag}: rye in the starter, {$h}% dough",
             'topic_body' => "Fed the starter {$ratio} with rye in the blend. Dough was {$flour} at {$h}%, bulk {$hours}h at {$t}F, baked {$oven}F.",
-            'coach_ask' => "Starter with rye, dough {$flour} at {$h}% and {$t}F. Acidity climbing — cut the bulk?",
+            'coach_ask' => "Starter with rye, dough {$flour} at {$h}% and {$t}F. Acidity climbing. Cut the bulk?",
             'reply_body' => "Yes: shave 30 minutes off bulk at {$t}F and keep the rye in the starter, not the dough, this week.",
             'category' => 'starter',
         ],
         [
             'topic_title' => "{$tag}: whole-grain water at {$h}%",
             'topic_body' => "Used {$flour} at {$h}%. Bulk {$hours} hours at {$t}F felt dry at mix ({$mix} min) then sticky by hour two.",
-            'coach_ask' => "{$flour} at {$h}% and {$t}F — do I autolyse longer or just add water?",
+            'coach_ask' => "{$flour} at {$h}% and {$t}F. Do I autolyse longer or just add water?",
             'reply_body' => "Autolyse 40 minutes before salt, keep {$h}% this bake, and judge strength at {$t}F after the second fold.",
             'category' => 'flours_mills',
         ],
         [
             'topic_title' => "{$tag}: coil folds vs stretch at {$t}F",
             'topic_body' => "Switched to coil folds on {$flour} at {$h}%. Dough sat {$hours}h at {$t}F. Mix {$mix} minutes, oven {$oven}F.",
-            'coach_ask' => "Coil folds on {$flour} at {$h}% and {$t}F — still need a lamination?",
+            'coach_ask' => "Coil folds on {$flour} at {$h}% and {$t}F. Still need a lamination?",
             'reply_body' => "Skip lamination. Two coils in the first 90 minutes at {$t}F is enough at {$h}%.",
             'category' => 'fermentation',
         ],
         [
             'topic_title' => "{$tag}: salt at 2.2%, {$h}% water",
             'topic_body' => "Bumped salt to 2.2% on {$flour} at {$h}%. Bulk slowed: {$hours}h at {$t}F still looked young. Baked {$oven}F.",
-            'coach_ask' => "2.2% salt, {$flour}, {$h}%, {$t}F for {$hours}h — extend bulk or drop salt back?",
+            'coach_ask' => "2.2% salt, {$flour}, {$h}%, {$t}F for {$hours}h. Extend bulk or drop salt back?",
             'reply_body' => "Keep 2.2% and give it 30 more minutes at {$t}F. Don't chase it with more starter.",
             'category' => 'formula',
         ],
         [
             'topic_title' => "{$tag}: open crumb hunt at {$h}%",
             'topic_body' => "Pushed {$flour} to {$h}% looking for holes. Gentle coils every 30 minutes for {$hours} hours at {$t}F. Hands were sticky.",
-            'coach_ask' => "{$h}% and {$t}F with {$flour} — wet enough, or am I just under-developed?",
+            'coach_ask' => "{$h}% and {$t}F with {$flour}. Wet enough, or am I just under-developed?",
             'reply_body' => "You're wet enough. One stronger fold at 30 minutes, then gentle. Keep {$hours}h only if dough temp stays {$t}F.",
             'category' => 'fermentation',
         ],
@@ -572,15 +572,15 @@ function bakery_sfb_persona_batch_name(array $persona, array $spec) {
     $n = (int)($spec['n'] ?? 1);
     $name = (string)$persona['name'];
     if ($n === 1) {
-        return 'Studio journal — ' . $name;
+        return 'Studio journal.' . $name;
     }
     if ($n === 2 && in_array($persona['cohort'] ?? '', ['weekend', 'hydration'], true)) {
-        return 'Studio journal week 2 — ' . $name;
+        return 'Studio journal week 2.' . $name;
     }
     if (empty($spec['complete'])) {
-        return 'Open bake — ' . $name;
+        return 'Open bake.' . $name;
     }
-    return 'Studio bake ' . $n . ' — ' . $name;
+    return 'Studio bake ' . $n . ' - ' . $name;
 }
 
 function bakery_sfb_persona_bake_plan(array $persona) {
@@ -993,7 +993,7 @@ function bakery_sfb_persona_activate(PDO $db, array $customer, array $persona) {
     }
 
     if ($firstBatchId <= 0) {
-        $studio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal —');
+        $studio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal.');
         $firstBatchId = $studio ? (int)$studio['id'] : 0;
     }
 
@@ -1088,9 +1088,9 @@ function bakery_sfb_persona_seed_one(PDO $db, array $persona, $refresh = false, 
     bakery_sfb_persona_save_profile($db, $customerId, $persona);
     bakery_sfb_agent_login_as_customer($db, $customerId);
 
-    $hadStudio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal —');
+    $hadStudio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal.');
     $enriched = bakery_sfb_persona_activate($db, $customer, $persona);
-    $studio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal —');
+    $studio = bakery_sfb_persona_find_studio_batch($db, $customerId, 'Studio journal.');
     $topicId = bakery_sfb_persona_find_topic_titled($db, $customerId, $persona['topic_title']);
     if ($topicId <= 0 && $studio) {
         $topicId = bakery_sfb_persona_find_topic_for_batch($db, $customerId, (int)$studio['id']);

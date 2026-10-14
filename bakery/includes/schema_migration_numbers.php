@@ -23,6 +23,30 @@ function bakery_schema_historical_duplicate_prefixes(): array
     ];
 }
 
+/**
+ * schema_migrations.id is this filename without .sql.
+ * The number prefix is not the key, and the table has no checksum column.
+ */
+function bakery_schema_migration_ledger_id(string $pathOrId): string
+{
+    $name = basename(str_replace('\\', '/', $pathOrId));
+    if (strlen($name) > 4 && substr($name, -4) === '.sql') {
+        $name = substr($name, 0, -4);
+    }
+    return $name;
+}
+
+/**
+ * True only when a ledger row equals the full filename id.
+ * 086_time_clock_overrides does not count as 086_ingredient_prices.
+ *
+ * @param list<string> $appliedIds
+ */
+function bakery_schema_migration_id_is_applied(array $appliedIds, string $pathOrId): bool
+{
+    return in_array(bakery_schema_migration_ledger_id($pathOrId), $appliedIds, true);
+}
+
 /** @return list<string> */
 function bakery_schema_migration_ids_from_dir(?string $dir = null): array
 {
@@ -75,6 +99,17 @@ function bakery_schema_unexpected_duplicate_prefixes(?array $ids = null): array
     return $unexpected;
 }
 
+/**
+ * 093 is reserved for PR #62. 094, 095, and 096 are taken or reserved by
+ * other work. This branch uses 097. The next id is 098.
+ *
+ * @return list<int>
+ */
+function bakery_schema_reserved_migration_numbers(): array
+{
+    return [93, 94, 95, 96];
+}
+
 /** @param list<string>|null $ids */
 function bakery_schema_next_migration_number(?array $ids = null): int
 {
@@ -83,7 +118,12 @@ function bakery_schema_next_migration_number(?array $ids = null): int
     foreach ($ids as $id) {
         $max = max($max, (int)substr((string)$id, 0, 3));
     }
-    return $max + 1;
+    $next = $max + 1;
+    $reserved = array_fill_keys(bakery_schema_reserved_migration_numbers(), true);
+    while (isset($reserved[$next])) {
+        $next++;
+    }
+    return $next;
 }
 
 /** @param list<string>|null $ids */

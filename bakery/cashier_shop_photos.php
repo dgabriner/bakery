@@ -51,17 +51,17 @@ require_once __DIR__ . '/includes/nav.php';
 <main class="shop-photos-page">
   <header class="shop-photos-hero">
     <div>
-      <p class="page-eyebrow">Cashier Workspace</p>
-      <h1>Shop Photos</h1>
-      <p class="shop-photos-hero__subtitle">Take daily photos of the window display, trays, and any other shop details worth saving.</p>
+      <p class="page-eyebrow"><?php bakery_te('shop_photos.eyebrow'); ?></p>
+      <h1><?php bakery_te('shop_photos.title'); ?></h1>
+      <p class="shop-photos-hero__subtitle"><?php bakery_te('shop_photos.subtitle'); ?></p>
     </div>
     <div class="shop-photos-hero__stats">
       <div class="shop-photos-stat">
-        <span class="shop-photos-stat__label">Selected day</span>
+        <span class="shop-photos-stat__label"><?php bakery_te('shop_photos.selected_day'); ?></span>
         <strong><?php echo htmlspecialchars($dateLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
       </div>
       <div class="shop-photos-stat">
-        <span class="shop-photos-stat__label">Photos</span>
+        <span class="shop-photos-stat__label"><?php bakery_te('shop_photos.count'); ?></span>
         <strong id="shopPhotoCount"><?php echo count($photos); ?></strong>
       </div>
     </div>
@@ -69,34 +69,34 @@ require_once __DIR__ . '/includes/nav.php';
 
   <?php if (!$photosEnabled): ?>
     <section class="shop-photos-empty-state">
-      <h2>Shop photos are not enabled yet</h2>
-      <p>Run <code>php scripts/run_migrations.php</code> to install the new table and cashier role.</p>
+      <h2><?php bakery_te('shop_photos.unavailable_title'); ?></h2>
+      <p><?php bakery_te('shop_photos.unavailable_body'); ?></p>
     </section>
   <?php else: ?>
     <section class="shop-photos-toolbar">
       <form method="get" action="cashier_shop_photos.php" class="shop-photos-toolbar__form">
         <div class="shop-photos-date-nav">
-          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($prevDate) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>">← Prev</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($prevDate) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('shop_photos.prev'); ?></a>
           <label class="shop-photos-field">
-            <span>Date</span>
+            <span><?php bakery_te('common.date'); ?></span>
             <input type="date" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
           </label>
-          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($nextDate) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>">Next →</a>
-          <a class="sf-btn sf-btn--quiet sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($today) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>">Today</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($nextDate) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('shop_photos.next'); ?></a>
+          <a class="sf-btn sf-btn--quiet sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode($today) . '&category=' . urlencode($selectedCategory), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('common.today'); ?></a>
         </div>
         <label class="shop-photos-field">
-          <span>Category</span>
+          <span><?php bakery_te('shop_photos.category'); ?></span>
           <select name="category">
-            <option value="all"<?php echo $selectedCategory === 'all' ? ' selected' : ''; ?>>All</option>
+            <option value="all"<?php echo $selectedCategory === 'all' ? ' selected' : ''; ?>><?php bakery_te('shop_photos.all'); ?></option>
             <?php foreach ($categories as $value => $label): ?>
               <option value="<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $selectedCategory === $value ? ' selected' : ''; ?>><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></option>
             <?php endforeach; ?>
           </select>
         </label>
-        <button class="sf-btn sf-btn--primary sf-btn--sm" type="submit">View</button>
+        <button class="sf-btn sf-btn--primary sf-btn--sm" type="submit"><?php bakery_te('shop_photos.view'); ?></button>
       </form>
       <?php if ($photoDates): ?>
-        <div class="shop-photos-toolbar__dates" aria-label="Recent photo days">
+        <div class="shop-photos-toolbar__dates" aria-label="<?php bakery_te('shop_photos.recent_days'); ?>">
           <?php foreach ($photoDates as $date): ?>
             <a class="shop-photos-chip<?php echo $date === $selectedDate ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'cashier_shop_photos.php?date=' . urlencode((string)$date), ENT_QUOTES, 'UTF-8'); ?>">
               <?php echo htmlspecialchars((string)$date, ENT_QUOTES, 'UTF-8'); ?>
@@ -108,8 +108,8 @@ require_once __DIR__ . '/includes/nav.php';
 
     <section class="shop-photos-capture">
       <div class="shop-photos-card">
-        <h2>Take a photo</h2>
-        <p class="text-muted">Each photo is saved under the selected day and your cashier account.</p>
+        <h2><?php bakery_te('shop_photos.take_title'); ?></h2>
+        <p class="text-muted"><?php bakery_te('shop_photos.take_help'); ?></p>
 
         <form id="shopPhotoUploadForm" class="shop-photos-upload-form">
           <?php echo bakery_csrf_field(); ?>
@@ -117,7 +117,7 @@ require_once __DIR__ . '/includes/nav.php';
           <input type="hidden" name="photo_date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
 
           <label class="shop-photos-field">
-            <span>Photo type</span>
+            <span><?php bakery_te('shop_photos.type'); ?></span>
             <select name="photo_category" id="shopPhotoCategory">
               <?php foreach ($categories as $value => $label): ?>
                 <option value="<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></option>
@@ -126,21 +126,21 @@ require_once __DIR__ . '/includes/nav.php';
           </label>
 
           <label class="shop-photos-field">
-            <span>Caption</span>
-            <input type="text" name="caption" id="shopPhotoCaption" maxlength="255" placeholder="Optional note about this display or tray">
+            <span><?php bakery_te('shop_photos.caption'); ?></span>
+            <input type="text" name="caption" id="shopPhotoCaption" maxlength="255" placeholder="<?php bakery_te('shop_photos.caption_placeholder'); ?>">
           </label>
 
           <label class="shop-photos-camera-button">
-            <span>Take or choose photo</span>
+            <span><?php bakery_te('shop_photos.choose'); ?></span>
             <input type="file" name="photo" id="shopPhotoInput" accept="image/*" capture="environment" hidden>
           </label>
 
           <div class="shop-photos-preview" id="shopPhotoPreview" hidden>
-            <img id="shopPhotoPreviewImage" alt="Selected shop photo preview">
+            <img id="shopPhotoPreviewImage" alt="<?php bakery_te('shop_photos.preview_alt'); ?>">
           </div>
 
           <div class="shop-photos-actions">
-            <button class="sf-btn sf-btn--primary" type="submit">Save photo</button>
+            <button class="sf-btn sf-btn--primary" type="submit"><?php bakery_te('shop_photos.save'); ?></button>
             <p id="shopPhotoStatus" class="shop-photos-status" role="status" aria-live="polite"></p>
           </div>
         </form>
@@ -150,15 +150,15 @@ require_once __DIR__ . '/includes/nav.php';
     <section class="shop-photos-gallery-section">
       <header class="shop-photos-gallery-section__header">
         <div>
-          <h2>Daily gallery</h2>
-          <p class="text-muted">Organized by photo type, date, and cashier.</p>
+          <h2><?php bakery_te('shop_photos.gallery'); ?></h2>
+          <p class="text-muted"><?php bakery_te('shop_photos.gallery_help'); ?></p>
         </div>
       </header>
 
       <?php if (!$photos): ?>
         <div class="shop-photos-empty-state">
-          <h3>No photos yet for this day</h3>
-          <p>Use the camera button above to add window display, tray, or general shop photos.</p>
+          <h3><?php bakery_te('shop_photos.empty_title'); ?></h3>
+          <p><?php bakery_te('shop_photos.empty_body'); ?></p>
         </div>
       <?php else: ?>
         <?php foreach ($categories as $categoryKey => $categoryLabel): ?>
@@ -166,7 +166,7 @@ require_once __DIR__ . '/includes/nav.php';
           <section class="shop-photo-group">
             <header class="shop-photo-group__header">
               <h3><?php echo htmlspecialchars($categoryLabel, ENT_QUOTES, 'UTF-8'); ?></h3>
-              <span><?php echo count($groupedPhotos[$categoryKey]); ?> photo<?php echo count($groupedPhotos[$categoryKey]) === 1 ? '' : 's'; ?></span>
+              <span><?php echo htmlspecialchars(bakery_t('shop_photos.photo_count', ['count' => count($groupedPhotos[$categoryKey])]), ENT_QUOTES, 'UTF-8'); ?></span>
             </header>
             <div class="shop-photo-grid">
               <?php foreach ($groupedPhotos[$categoryKey] as $photo): ?>
@@ -184,7 +184,7 @@ require_once __DIR__ . '/includes/nav.php';
                     <?php endif; ?>
                     <div class="shop-photo-card__footer">
                       <span><?php echo htmlspecialchars((string)$photo['created_at'], ENT_QUOTES, 'UTF-8'); ?></span>
-                      <button type="button" class="shop-photo-delete" data-delete-photo>Delete</button>
+                      <button type="button" class="shop-photo-delete" data-delete-photo><?php bakery_te('shop_photos.delete'); ?></button>
                     </div>
                   </div>
                 </article>
@@ -199,16 +199,25 @@ require_once __DIR__ . '/includes/nav.php';
 
 <dialog id="shopPhotoViewer" class="shop-photo-viewer">
   <form method="dialog" class="shop-photo-viewer__frame">
-    <button type="submit" class="shop-photo-viewer__close" aria-label="Close photo viewer">×</button>
+    <button type="submit" class="shop-photo-viewer__close" aria-label="<?php bakery_te('shop_photos.close_viewer'); ?>">×</button>
     <img id="shopPhotoViewerImage" alt="">
     <div class="shop-photo-viewer__meta">
-      <h3 id="shopPhotoViewerTitle">Shop photo</h3>
+      <h3 id="shopPhotoViewerTitle"><?php bakery_te('shop_photos.viewer_title'); ?></h3>
       <p id="shopPhotoViewerCaption"></p>
     </div>
   </form>
 </dialog>
 
 <script>
+window.shopPhotoI18n = <?php echo json_encode([
+    'chooseFirst' => bakery_t('shop_photos.choose_first'),
+    'uploading' => bakery_t('shop_photos.uploading'),
+    'saved' => bakery_t('shop_photos.saved'),
+    'uploadFailed' => bakery_t('shop_photos.upload_failed'),
+    'confirmDelete' => bakery_t('shop_photos.confirm_delete'),
+    'deleteFailed' => bakery_t('shop_photos.delete_failed'),
+    'viewerTitle' => bakery_t('shop_photos.viewer_title'),
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 (function () {
   var form = document.getElementById('shopPhotoUploadForm');
   var input = document.getElementById('shopPhotoInput');
@@ -246,13 +255,13 @@ require_once __DIR__ . '/includes/nav.php';
       event.preventDefault();
       var file = input && input.files ? input.files[0] : null;
       if (!file) {
-        setStatus('Choose a photo first.', true);
+        setStatus(window.shopPhotoI18n.chooseFirst, true);
         return;
       }
 
       var data = new FormData(form);
       data.set('photo', file);
-      setStatus('Uploading…', false);
+      setStatus(window.shopPhotoI18n.uploading, false);
 
       fetch('upload_shop_photo.php', {
         method: 'POST',
@@ -262,13 +271,13 @@ require_once __DIR__ . '/includes/nav.php';
         .then(function (response) { return response.json(); })
         .then(function (payload) {
           if (!payload || !payload.success) {
-            throw new Error((payload && payload.error) || 'Upload failed');
+            throw new Error((payload && payload.error) || window.shopPhotoI18n.uploadFailed);
           }
-          setStatus('Photo saved.', false);
+          setStatus(window.shopPhotoI18n.saved, false);
           window.setTimeout(function () { window.location.reload(); }, 350);
         })
         .catch(function (error) {
-          setStatus(error && error.message ? error.message : 'Upload failed', true);
+          setStatus(error && error.message ? error.message : window.shopPhotoI18n.uploadFailed, true);
         });
     });
   }
@@ -279,7 +288,7 @@ require_once __DIR__ . '/includes/nav.php';
       var card = deleteButton.closest('[data-photo-id]');
       var photoId = card ? card.getAttribute('data-photo-id') : '';
       if (!photoId) return;
-      if (!window.confirm('Delete this shop photo?')) return;
+      if (!window.confirm(window.shopPhotoI18n.confirmDelete)) return;
 
       var body = new URLSearchParams();
       body.set('action', 'delete');
@@ -298,12 +307,12 @@ require_once __DIR__ . '/includes/nav.php';
         .then(function (response) { return response.json(); })
         .then(function (payload) {
           if (!payload || !payload.success) {
-            throw new Error((payload && payload.error) || 'Delete failed');
+            throw new Error((payload && payload.error) || window.shopPhotoI18n.deleteFailed);
           }
           window.location.reload();
         })
         .catch(function (error) {
-          setStatus(error && error.message ? error.message : 'Delete failed', true);
+          setStatus(error && error.message ? error.message : window.shopPhotoI18n.deleteFailed, true);
         });
       return;
     }
@@ -317,7 +326,7 @@ require_once __DIR__ . '/includes/nav.php';
       if (!image || !viewer || !viewerImage) return;
       viewerImage.src = image.src;
       viewerImage.alt = image.alt || '';
-      if (viewerTitle) viewerTitle.textContent = titleNode ? titleNode.textContent : 'Shop photo';
+      if (viewerTitle) viewerTitle.textContent = titleNode ? titleNode.textContent : window.shopPhotoI18n.viewerTitle;
       if (viewerCaption) viewerCaption.textContent = captionNode ? captionNode.textContent : '';
       if (typeof viewer.showModal === 'function') {
         viewer.showModal();

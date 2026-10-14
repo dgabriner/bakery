@@ -70,6 +70,9 @@ $near(0.0068333333, $quote['dough_loss'], 'dough loss dollars are the extra doug
 $near(1.2198333333, $quote['margin_dollars'], 'margin dollars are price minus ingredient cost minus loss');
 $near(81.32222222, $quote['margin_percent'], 'margin percent is margin dollars over unit price');
 $assert($quote['flags'] === [], 'priced formula has no flags');
+$near(0.2733333333, $quote['cost_floor'], 'floor matches ingredient cost when every ingredient has an invoice price');
+$near(0.2733333333, $quote['cost_upper'], 'upper bound matches the floor when every ingredient has an invoice price');
+$near(100.0, $quote['priced_dough_percent'], 'fully priced dough is 100 percent');
 
 $scaled = bakery_cost_margin_quote($lines, [
     'batch_size_mode' => 'grams',
@@ -118,6 +121,31 @@ $topping = bakery_cost_margin_quote(
 );
 $near(0.14, $topping['ingredient_cost'], 'topping grams are in the piece cost');
 $near(0.005, $topping['dough_loss'], 'topping grams are not scaled by dough loss');
+$near(100.0, $topping['priced_dough_percent'], 'a priced topping does not change fully priced dough weight');
+
+$topGap = bakery_cost_margin_quote(
+    [['ingredient_id' => 1, 'ingredient_name' => 'Flour', 'percentage' => 100]],
+    [
+        'batch_size_mode' => 'pieces',
+        'standard_batch_pieces' => 10,
+        'dough_loss_grams' => null,
+        'starters' => [],
+    ],
+    [[
+        'kind' => 'topping',
+        'lines' => [[
+            'ingredient_id' => 9,
+            'ingredient_name' => 'Sesame',
+            'grams_per_piece' => 10,
+        ]],
+    ]],
+    100.0,
+    [1 => 1.0],
+    3.0
+);
+$assert($topGap['ingredient_cost'] === null, 'an unpriced topping blanks the full ingredient cost');
+$near(0.1, $topGap['cost_floor'], 'the floor still prices the invoiced dough');
+$near(100.0, $topGap['priced_dough_percent'], 'topping grams are outside dough weight');
 
 echo "\n=== Empty formula and missing price stay blank ===\n";
 $empty = bakery_cost_margin_quote([], $structure, [], 180.0, $costs, 2.0);
@@ -135,6 +163,26 @@ $missing = bakery_cost_margin_quote($lines, $structure, [], 200.0, [1 => 2.0], 1
 $assert($missing['flags'] === ['missing_price'], 'ingredient without a price is flagged');
 $assert($missing['ingredient_cost'] === null && $missing['dough_loss'] === null, 'missing price blanks cost and loss');
 $assert($missing['margin_dollars'] === null && $missing['margin_percent'] === null, 'missing price blanks margin');
+$near(0.2666666667, $missing['cost_floor'], 'floor keeps the invoiced share of the dough');
+$near(0.2666666667, $missing['cost_upper'], 'upper bound matches the floor when the gap has no other price');
+$near(66.66666667, $missing['priced_dough_percent'], 'priced dough weight is the share of dough grams that have a price');
+
+$filled = bakery_cost_margin_quote($lines, $structure, [], 200.0, [
+    1 => ['invoice' => 2.0, 'fill' => null],
+    2 => ['invoice' => null, 'fill' => 0.20],
+], 1.50);
+$assert($filled['ingredient_cost'] === null && $filled['flags'] === ['missing_price'], 'a quote or public list does not complete the invoice cost');
+$near(0.2666666667, $filled['cost_floor'], 'floor ignores the quote where an invoice price is missing');
+$near(0.28, $filled['cost_upper'], 'upper bound uses the quote only where an invoice price is missing');
+$near(100.0, $filled['priced_dough_percent'], 'a quote or public list counts as a price on that dough weight');
+
+$nonePriced = bakery_cost_margin_quote($lines, $structure, [], 200.0, [], 1.50);
+$assert($nonePriced['cost_floor'] === null && $nonePriced['cost_upper'] === null, 'no prices leave the floor and upper bound blank');
+$assert($nonePriced['cost_floor'] !== 0.0 && $nonePriced['cost_upper'] !== 0.0, 'a blank floor is not zero');
+$near(0.0, $nonePriced['priced_dough_percent'], 'priced dough weight is zero when nothing has a price');
+
+$emptyBounds = bakery_cost_margin_quote([], $structure, [], 180.0, $costs, 2.0);
+$assert($emptyBounds['cost_floor'] === null && $emptyBounds['cost_upper'] === null && $emptyBounds['priced_dough_percent'] === null, 'an empty formula has no floor, upper bound, or priced weight');
 
 $zeroPrice = bakery_cost_margin_quote(
     [['ingredient_id' => 1, 'ingredient_name' => 'Flour', 'percentage' => 100]],
@@ -146,6 +194,8 @@ $zeroPrice = bakery_cost_margin_quote(
 );
 $near(0.0, $zeroPrice['ingredient_cost'], 'a known zero cost per kg is a real cost');
 $assert($zeroPrice['flags'] === [], 'zero cost per kg is not a missing price');
+$near(0.0, $zeroPrice['cost_floor'], 'a known zero invoice price is a real floor');
+$near(100.0, $zeroPrice['priced_dough_percent'], 'a zero price still covers that dough weight');
 
 $noBatch = bakery_cost_margin_quote($lines, ['starters' => []], [], 200.0, $costs, 1.50);
 $near(0.2733333333, $noBatch['ingredient_cost'], 'ingredient cost still shows when the batch is blank');
@@ -191,13 +241,14 @@ $csv = bakery_cost_margin_csv([
 ]);
 $parsed = array_map('str_getcsv', preg_split("/\r\n|\n|\r/", trim($csv)));
 $assert($parsed[0] === [
-    'product', 'piece_grams', 'ingredient_cost', 'dough_loss', 'unit_price',
-    'margin_dollars', 'margin_percent', 'delivered_90_days', 'flag',
+    'product', 'piece_grams', 'ingredient_cost', 'cost_floor', 'cost_upper', 'priced_dough_percent',
+    'dough_loss', 'unit_price', 'margin_dollars', 'margin_percent', 'delivered_90_days', 'flag',
 ], 'csv header matches the page columns');
 $assert($parsed[1][0] === 'Plain, "Roll"', 'csv quotes commas and quotes in names');
-$assert($parsed[2][2] === '' && $parsed[2][3] === '' && $parsed[2][5] === '' && $parsed[2][6] === '', 'flagged csv cells are empty');
+$assert($parsed[2][2] === '' && $parsed[2][3] === '' && $parsed[2][4] === '' && $parsed[2][5] === '', 'flagged csv cost cells are empty');
+$assert($parsed[2][6] === '' && $parsed[2][8] === '' && $parsed[2][9] === '', 'flagged csv loss and margin cells are empty');
 $assert($parsed[2][2] !== '0' && $parsed[2][3] !== '0', 'flagged csv cells are not zero');
-$assert($parsed[2][8] === 'empty_formula', 'csv flag code names the empty formula');
+$assert($parsed[2][11] === 'empty_formula', 'csv flag code names the empty formula');
 
 echo "\n=== Page contracts ===\n";
 $page = (string)file_get_contents($root . '/cost_margin.php');
@@ -214,6 +265,10 @@ $assert(strpos($products, 'cost_margin.php') !== false, 'products page links to 
 $assert(strpos($nav, "'href' => 'cost_margin.php'") === false, 'cost and margin is not a new top-level nav item');
 $assert(strpos($nav, "'cost_margin.php'") !== false, 'script registry allowlists cost and margin for the auth gate');
 $assert(strpos($page, 'bakery_ingredient_current_cost_per_kg') !== false || strpos((string)file_get_contents($include), 'bakery_ingredient_current_cost_per_kg') !== false, 'cost uses the current cost per kg helper');
+$assert(strpos($page, 'cost_margin.col_floor') !== false, 'page shows the invoice cost floor');
+$assert(strpos($page, 'cost_margin.col_upper') !== false, 'page shows the upper bound');
+$assert(strpos($page, 'cost_margin.col_priced_weight') !== false, 'page shows priced dough weight');
+$assert(strpos($page, 'container-type') !== false, 'the cost table adapts to a narrow screen');
 $assert(strpos((string)file_get_contents($include), 'bakery_formula_product_piece_grams') !== false, 'piece grams use the formula structure helper');
 
 $en = require $root . '/lang/en.php';
@@ -250,6 +305,10 @@ echo "\n=== Rows on bakerysf_test ===\n";
 if (!table_exists($db, 'ingredient_price_history')) {
     bakery_run_sql_file($db, $root . '/database/schema/086_ingredient_prices.sql');
     bakery_forget_table_exists('ingredient_price_history');
+}
+if (is_file($root . '/database/schema/093_ingredient_price_type.sql') && !column_exists($db, 'ingredient_price_history', 'price_type')) {
+    bakery_run_sql_file($db, $root . '/database/schema/093_ingredient_price_type.sql');
+    bakery_forget_column_exists('ingredient_price_history', 'price_type');
 }
 if (!column_exists($db, 'dough_types', 'dough_loss_grams')) {
     bakery_run_sql_file($db, $root . '/database/schema/087_formula_structure.sql');
@@ -383,7 +442,51 @@ try {
     $bare = $byName[$prefix . 'bare'];
     $assert($bare['flags'] === ['empty_formula'], 'product with no formula lines is flagged');
     $assert($bare['ingredient_cost'] === null && $bare['margin_dollars'] === null, 'empty formula row stays blank');
+    $assert($bare['cost_floor'] === null && $bare['priced_dough_percent'] === null, 'empty formula row has no floor or priced weight');
     $assert((int)$bare['delivered_90_days'] === 0, 'a product with no deliveries shows zero units');
+    $near(0.54, $roll['cost_floor'], 'a fully invoiced row uses the invoice floor');
+    $near(0.54, $roll['cost_upper'], 'a fully invoiced row upper bound matches the floor');
+    $near(100.0, $roll['priced_dough_percent'], 'a fully invoiced dough is 100 percent priced');
+
+    $db->prepare('INSERT INTO ingredients (name, unit) VALUES (?, ?)')->execute([$prefix . 'oil', 'kg']);
+    $oilId = (int)$db->query('SELECT id FROM ingredients WHERE name = ' . $db->quote($prefix . 'oil'))->fetchColumn();
+    $oilQuote = bakery_ingredient_price_add($db, [
+        'ingredient_id' => $oilId,
+        'vendor' => 'Quote Mill',
+        'pack_size_grams' => 1000,
+        'pack_price' => 8,
+        'invoice_date' => '2026-03-01',
+        'price_type' => 'quote',
+    ]);
+    $oilList = bakery_ingredient_price_add($db, [
+        'ingredient_id' => $oilId,
+        'vendor' => 'List Mill',
+        'pack_size_grams' => 1000,
+        'pack_price' => 10,
+        'invoice_date' => '2026-04-01',
+        'price_type' => 'public_list',
+    ]);
+    $assert(($oilQuote['ok'] ?? false) && ($oilList['ok'] ?? false), 'quote and public_list rows store for the upper bound');
+    $assert(bakery_ingredient_current_cost_per_kg($oilId, $db) === null, 'oil has no invoice price so it has no current cost');
+    $db->prepare('INSERT INTO dough_types (name, standard_batch_dough_grams, batch_size_mode) VALUES (?, ?, ?)')
+        ->execute([$prefix . 'mixed', 2000, 'grams']);
+    $mixedDoughId = (int)$db->lastInsertId();
+    $db->prepare('INSERT INTO formula_ingredients (dough_type_id, ingredient_id, percentage) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)')
+        ->execute([$mixedDoughId, $flourId, 100, $mixedDoughId, $waterId, 50, $mixedDoughId, $oilId, 10]);
+    $db->prepare('INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES (?, ?, ?, ?)')
+        ->execute([$prefix . 'mixed', $mixedDoughId, 2.00, 200]);
+    $mixedRows = bakery_cost_margin_rows($db, $asOf);
+    $mixed = null;
+    foreach ($mixedRows as $row) {
+        if ($row['product_name'] === $prefix . 'mixed') {
+            $mixed = $row;
+        }
+    }
+    $assert($mixed !== null, 'mixed price product has a row');
+    $assert($mixed['ingredient_cost'] === null && $mixed['margin_dollars'] === null, 'missing invoice price still blanks the full cost and margin');
+    $near(0.50625, $mixed['cost_floor'], 'row floor uses invoice prices only');
+    $near(0.63125, $mixed['cost_upper'], 'row upper bound fills the gap with the latest public list price');
+    $near(100.0, $mixed['priced_dough_percent'], 'row priced dough weight counts the public list price');
 } finally {
     $cleanup();
 }
