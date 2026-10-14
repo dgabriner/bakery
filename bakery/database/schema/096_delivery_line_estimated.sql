@@ -6,6 +6,7 @@
 -- delivered_quantity or line_total.
 -- owner-approved-core-column: staff need a visible estimated flag and an unallocated piece total so Customer Record and Billing do not treat a proportional split as a counted product.
 -- schema_migrations tracks apply-once; do not re-run after recorded.
+-- File number 096. 091 through 093 are already used. 094 and 095 are reserved.
 
 ALTER TABLE daily_order_items
   ADD COLUMN delivered_quantity_estimated TINYINT(1) NOT NULL DEFAULT 0;
