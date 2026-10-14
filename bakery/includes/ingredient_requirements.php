@@ -11,6 +11,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/ingredient_units.php';
+require_once __DIR__ . '/formula_structure.php';
 
 /**
  * Supported quantity sources for the planner. Never switch silently in the UI.
@@ -122,7 +123,8 @@ function bakery_ingredient_requirements_product_batches(
     int $quantity,
     int $weightGrams,
     float $doughGrams,
-    ?float $standardBatchDoughGrams
+    ?float $standardBatchDoughGrams,
+    ?array $formulaStructure = null
 ): array {
     $info = [
         'standard_batch_dough_grams' => $standardBatchDoughGrams,
@@ -133,6 +135,36 @@ function bakery_ingredient_requirements_product_batches(
         'theoretical_product_batches' => null,
         'suggested_whole_product_batches' => null,
     ];
+
+    $override = bakery_formula_batch_override($formulaStructure, $standardBatchDoughGrams, $weightGrams);
+    if ($override !== null) {
+        $reference = $override['reference'];
+        $info['batch_reference_configured'] = true;
+        $info['batch_multiplier'] = $override['structure']['batch_multiplier'];
+        $info['batch_size_mode'] = $reference['mode'];
+        $info['effective_batch_dough_grams'] = $reference['grams'];
+        if ($reference['mode'] === 'pieces' && $reference['pieces'] !== null && $reference['pieces'] > 0) {
+            $info['reference_yield_units'] = (float) $reference['pieces'];
+            $info['theoretical_product_batches'] = $quantity / (float) $reference['pieces'];
+            $info['suggested_whole_product_batches'] = (int) ceil($info['theoretical_product_batches']);
+            if ($reference['grams'] !== null && $reference['grams'] > 0 && $weightGrams > 0) {
+                $info['theoretical_dough_batches'] = $doughGrams / (float) $reference['grams'];
+            } else {
+                $info['theoretical_dough_batches'] = $info['theoretical_product_batches'];
+            }
+            $info['suggested_whole_dough_batches'] = (int) ceil((float) $info['theoretical_dough_batches']);
+            return $info;
+        }
+        if ($reference['grams'] !== null && $reference['grams'] > 0 && $weightGrams > 0) {
+            $batchRef = (float) $reference['grams'];
+            $info['reference_yield_units'] = $batchRef / $weightGrams;
+            $info['theoretical_dough_batches'] = $doughGrams / $batchRef;
+            $info['suggested_whole_dough_batches'] = (int) ceil($info['theoretical_dough_batches']);
+            $info['theoretical_product_batches'] = $quantity / $info['reference_yield_units'];
+            $info['suggested_whole_product_batches'] = (int) ceil($info['theoretical_product_batches']);
+            return $info;
+        }
+    }
 
     if (!$info['batch_reference_configured'] || $weightGrams <= 0) {
         return $info;
@@ -365,6 +397,8 @@ function bakery_ingredient_requirements_load_products(PDO $db, string $date, str
             'batches' => $batchInfo,
         ];
     }
+
+    $products = bakery_formula_structure_attach_products($db, $products);
 
     if ($source === 'plan') {
         if ($demandWithoutPlan > 0) {
@@ -742,13 +776,28 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
             continue;
         }
 
-        $doughGrams = $qty * $weight;
-        $flourBase = $doughGrams / ($totalPct / 100.0);
+        $structureRaw = (isset($product['formula_structure']) && is_array($product['formula_structure']))
+            ? $product['formula_structure']
+            : null;
+        $partsRaw = (isset($product['formula_parts']) && is_array($product['formula_parts']))
+            ? $product['formula_parts']
+            : [];
+        $scaled = null;
+        if ($structureRaw !== null || $partsRaw !== []) {
+            $scaled = bakery_formula_requirement_scale($formula, $structureRaw ?? [], $partsRaw, (float) $weight, $qty);
+        }
+        if ($scaled !== null) {
+            $doughGrams = (float) $scaled['dough_grams'];
+            $flourBase = (float) $scaled['flour_grams'];
+        } else {
+            $doughGrams = $qty * $weight;
+            $flourBase = $doughGrams / ($totalPct / 100.0);
+        }
         $productsIncluded++;
         $totalUnits += $qty;
         $totalDough += $doughGrams;
 
-        $batchInfo = bakery_ingredient_requirements_product_batches($qty, $weight, $doughGrams, $standardBatch);
+        $batchInfo = bakery_ingredient_requirements_product_batches($qty, $weight, $doughGrams, $standardBatch, $structureRaw);
         if (!$batchInfo['batch_reference_configured'] && !isset($batchWarnings[$doughTypeId])) {
             $batchWarnings[$doughTypeId] = true;
             $exceptions[] = [
@@ -777,11 +826,82 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
                 'products' => [],
             ];
         }
+        if (!empty($batchInfo['effective_batch_dough_grams'])) {
+            $doughTypeTotals[$doughTypeId]['effective_batch_dough_grams'] = (float) $batchInfo['effective_batch_dough_grams'];
+        }
+        if (($batchInfo['batch_size_mode'] ?? null) === 'pieces' && !empty($batchInfo['reference_yield_units'])) {
+            $doughTypeTotals[$doughTypeId]['batch_size_mode'] = 'pieces';
+            $doughTypeTotals[$doughTypeId]['effective_batch_pieces'] = (float) $batchInfo['reference_yield_units'];
+        }
         $doughTypeTotals[$doughTypeId]['dough_grams'] += $doughGrams;
         $doughTypeTotals[$doughTypeId]['flour_base_grams'] += $flourBase;
         $doughTypeTotals[$doughTypeId]['units'] += $qty;
 
         $productIngredients = [];
+        if ($scaled !== null) {
+            foreach ($scaled['lines'] as $line) {
+                $need = (float) $line['grams'];
+                $ingredientId = (int) $line['ingredient_id'];
+                $unit = $line['unit'] ?? null;
+                $formulaPercentage = $line['stored_percentage'];
+                $source = (string) ($line['source'] ?? 'dough');
+                if ($unit === null || trim((string) $unit) === '') {
+                    $exceptions[] = [
+                        'code' => 'missing_ingredient_unit',
+                        'message' => $line['ingredient_name'] . ': ingredient has no catalogue unit (formula still calculated in grams).',
+                        'product_id' => $productId,
+                        'product_name' => $productName,
+                        'dough_type_id' => $doughTypeId,
+                        'dough_type_name' => $doughTypeName,
+                        'severity' => 'warn',
+                    ];
+                }
+                if (!isset($ingredientTotals[$ingredientId])) {
+                    $ingredientTotals[$ingredientId] = [
+                        'ingredient_id' => $ingredientId,
+                        'ingredient_name' => $line['ingredient_name'],
+                        'required_grams' => 0.0,
+                        'unit_note' => 'g',
+                        'catalogue_unit' => $unit,
+                        'contributors' => [],
+                    ];
+                }
+                $ingredientTotals[$ingredientId]['required_grams'] += $need;
+                $contribKey = $ingredientId . ':' . $productId . ':' . $doughTypeId . ':' . $source;
+                $contributions[$contribKey] = [
+                    'ingredient_id' => $ingredientId,
+                    'ingredient_name' => $line['ingredient_name'],
+                    'product_id' => $productId,
+                    'product_name' => $productName,
+                    'dough_type_id' => $doughTypeId,
+                    'dough_type_name' => $doughTypeName ?? ('Dough #' . $doughTypeId),
+                    'finished_units' => $qty,
+                    'weight_grams' => $weight,
+                    'dough_grams' => $doughGrams,
+                    'formula_percentage' => $formulaPercentage,
+                    'total_percentage' => $totalPct,
+                    'flour_base_grams' => $flourBase,
+                    'required_grams' => $need,
+                    'source' => $source,
+                ];
+                $ingredientTotals[$ingredientId]['contributors'][] = [
+                    'product_id' => $productId,
+                    'product_name' => $productName,
+                    'dough_type_name' => $doughTypeName ?? ('Dough #' . $doughTypeId),
+                    'finished_units' => $qty,
+                    'formula_percentage' => $formulaPercentage,
+                    'required_grams' => $need,
+                    'source' => $source,
+                ];
+                $productIngredients[] = [
+                    'ingredient_id' => $ingredientId,
+                    'ingredient_name' => $line['ingredient_name'],
+                    'required_grams' => $need,
+                    'formula_percentage' => $formulaPercentage,
+                    'source' => $source,
+                ];
+            }
+        } else {
         foreach ($formula as $line) {
             $need = $flourBase * ($line['percentage'] / 100.0);
             $ingredientId = $line['ingredient_id'];
@@ -843,6 +963,7 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
                 'formula_percentage' => $line['percentage'],
             ];
         }
+        }
 
         $rowBase['dough_grams'] = $doughGrams;
         $rowBase['flour_base_grams'] = $flourBase;
@@ -864,7 +985,13 @@ function bakery_ingredient_requirements_explode(array $products, array $formulas
     }
 
     foreach ($doughTypeTotals as $dtId => &$dough) {
-        $batchRef = $dough['standard_batch_dough_grams'];
+        if (($dough['batch_size_mode'] ?? null) === 'pieces' && !empty($dough['effective_batch_pieces'])) {
+            $theoretical = (float) $dough['units'] / (float) $dough['effective_batch_pieces'];
+            $dough['theoretical_dough_batches'] = $theoretical;
+            $dough['suggested_whole_dough_batches'] = (int) ceil($theoretical);
+            continue;
+        }
+        $batchRef = $dough['effective_batch_dough_grams'] ?? $dough['standard_batch_dough_grams'];
         if ($batchRef !== null && (float)$batchRef > 0) {
             $theoretical = (float)$dough['dough_grams'] / (float)$batchRef;
             $dough['theoretical_dough_batches'] = $theoretical;

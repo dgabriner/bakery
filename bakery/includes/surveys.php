@@ -642,10 +642,12 @@ function bakery_survey_collect_questions_from_post(array $post): array
 }
 
 /**
- * Open (or create) the store-verify survey for this driver + next delivery day
- * so a logged-in driver can tap survey.php without a prior token.
+ * Open store-verify (or legacy route-review) row for this driver + day.
+ * Read-only: a page view must call this, never the ensure/create pair.
+ *
+ * @return array<string, mixed>
  */
-function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+function bakery_survey_find_store_verify(PDO $db, int $driverId, string $deliveryDate): array
 {
     $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
     if ($driverId <= 0) {
@@ -657,10 +659,28 @@ function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliv
              LIMIT 1"
         );
         $stmt->execute([$deliveryDate]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            return $row;
-        }
+    } else {
+        $stmt = $db->prepare(
+            "SELECT * FROM surveys
+             WHERE driver_id = ? AND delivery_date = ? AND status = 'open'
+               AND kind IN ('store_verify', 'route_review')
+             ORDER BY (kind = 'store_verify') DESC, id DESC
+             LIMIT 1"
+        );
+        $stmt->execute([$driverId, $deliveryDate]);
+    }
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: [];
+}
+
+function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    $existing = bakery_survey_find_store_verify($db, $driverId, $deliveryDate);
+    if ($existing !== []) {
+        return $existing;
+    }
+    if ($driverId <= 0) {
         return bakery_survey_create($db, [
             'mode' => 'link',
             'kind' => 'store_verify',
@@ -670,18 +690,6 @@ function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliv
             'created_by' => $createdBy,
             'title' => 'HQ store verify',
         ]);
-    }
-    $stmt = $db->prepare(
-        "SELECT * FROM surveys
-         WHERE driver_id = ? AND delivery_date = ? AND status = 'open'
-           AND kind IN ('store_verify', 'route_review')
-         ORDER BY (kind = 'store_verify') DESC, id DESC
-         LIMIT 1"
-    );
-    $stmt->execute([$driverId, $deliveryDate]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row) {
-        return $row;
     }
     return bakery_survey_create($db, [
         'mode' => 'link',
@@ -695,9 +703,11 @@ function bakery_survey_ensure_store_verify(PDO $db, int $driverId, string $deliv
 }
 
 /**
- * Open (or create) the route-order survey for this driver (or HQ) + delivery day.
+ * Open route-order row for this driver + day. Does not insert.
+ *
+ * @return array<string, mixed>
  */
-function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+function bakery_survey_find_route_order(PDO $db, int $driverId, string $deliveryDate): array
 {
     $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
     if ($driverId <= 0) {
@@ -709,10 +719,28 @@ function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $delive
              LIMIT 1"
         );
         $stmt->execute([$deliveryDate]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            return $row;
-        }
+    } else {
+        $stmt = $db->prepare(
+            "SELECT * FROM surveys
+             WHERE driver_id = ? AND delivery_date = ? AND status = 'open'
+               AND kind = 'route_order'
+             ORDER BY id DESC
+             LIMIT 1"
+        );
+        $stmt->execute([$driverId, $deliveryDate]);
+    }
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: [];
+}
+
+function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    $existing = bakery_survey_find_route_order($db, $driverId, $deliveryDate);
+    if ($existing !== []) {
+        return $existing;
+    }
+    if ($driverId <= 0) {
         return bakery_survey_create($db, [
             'mode' => 'link',
             'kind' => 'route_order',
@@ -722,18 +750,6 @@ function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $delive
             'created_by' => $createdBy,
             'title' => 'HQ route order',
         ]);
-    }
-    $stmt = $db->prepare(
-        "SELECT * FROM surveys
-         WHERE driver_id = ? AND delivery_date = ? AND status = 'open'
-           AND kind = 'route_order'
-         ORDER BY id DESC
-         LIMIT 1"
-    );
-    $stmt->execute([$driverId, $deliveryDate]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row) {
-        return $row;
     }
     return bakery_survey_create($db, [
         'mode' => 'link',

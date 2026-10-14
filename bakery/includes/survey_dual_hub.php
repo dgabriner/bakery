@@ -17,11 +17,8 @@ if (!defined('ACCESS_ALLOWED')) {
  *   order_url:string
  * }
  */
-function bakery_survey_dual_hub_links(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+function bakery_survey_dual_hub_pack(string $deliveryDate, array $verify, array $order): array
 {
-    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
-    $verify = bakery_survey_ensure_store_verify($db, $driverId, $deliveryDate, $createdBy);
-    $order = bakery_survey_ensure_route_order($db, $driverId, $deliveryDate, $createdBy);
     $vTok = (string)($verify['token'] ?? '');
     $oTok = (string)($order['token'] ?? '');
     return [
@@ -31,4 +28,31 @@ function bakery_survey_dual_hub_links(PDO $db, int $driverId, string $deliveryDa
         'order_token' => $oTok,
         'order_url' => $oTok !== '' ? bakery_survey_link_url($oTok, $deliveryDate) : '',
     ];
+}
+
+/**
+ * Links for surveys that already exist. Does not insert.
+ *
+ * @return array{
+ *   delivery_date:string,
+ *   verify_token:string,
+ *   verify_url:string,
+ *   order_token:string,
+ *   order_url:string
+ * }
+ */
+function bakery_survey_dual_hub_existing(PDO $db, int $driverId, string $deliveryDate): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    $verify = bakery_survey_find_store_verify($db, $driverId, $deliveryDate);
+    $order = bakery_survey_find_route_order($db, $driverId, $deliveryDate);
+    return bakery_survey_dual_hub_pack($deliveryDate, $verify, $order);
+}
+
+function bakery_survey_dual_hub_links(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
+{
+    $deliveryDate = bakery_survey_validate_ymd($deliveryDate);
+    $verify = bakery_survey_ensure_store_verify($db, $driverId, $deliveryDate, $createdBy);
+    $order = bakery_survey_ensure_route_order($db, $driverId, $deliveryDate, $createdBy);
+    return bakery_survey_dual_hub_pack($deliveryDate, $verify, $order);
 }

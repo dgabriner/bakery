@@ -5,6 +5,7 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/ingredient_prices.php';
 
 // Set page title
 $page_title = bakery_t('page.ingredients');
@@ -37,6 +38,8 @@ function ingredients_purchasing_fields_from_post() {
         'unit_cost' => ingredients_parse_cost($_POST['unit_cost'] ?? null),
     ];
 }
+
+$reorder_qty_ready = (isset($db) && $db instanceof PDO) ? bakery_ingredient_reorder_qty_ready($db) : false;
 
 function ingredients_redirect($params = []) {
     $query = http_build_query(array_filter($params, static function ($value) {
@@ -110,6 +113,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $params[] = $purchasing['package_size'];
                         $params[] = $purchasing['unit_cost'];
                     }
+                    if ($reorder_qty_ready) {
+                        $sql .= ', reorder_qty = ?';
+                        $params[] = ingredients_parse_decimal($_POST['reorder_qty'] ?? null);
+                    }
                     $sql .= ' WHERE id = ?';
                     $params[] = $id;
                     $stmt = $db->prepare($sql);
@@ -128,7 +135,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $stock = ingredients_stock_fields_from_post();
                     $purchasing = ingredients_purchasing_fields_from_post();
-                    if (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db)) {
+                    if (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db) && $reorder_qty_ready) {
+                        $stmt = $db->prepare(
+                            'INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name, package_size, unit_cost, reorder_qty)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                        );
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                            $stock['quantity_on_hand'],
+                            $stock['reorder_level'],
+                            $stock['supplier_name'],
+                            $purchasing['package_size'],
+                            $purchasing['unit_cost'],
+                            ingredients_parse_decimal($_POST['reorder_qty'] ?? null),
+                        ]);
+                    } elseif (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db)) {
                         $stmt = $db->prepare(
                             'INSERT INTO ingredients (name, unit, quantity_on_hand, reorder_level, supplier_name, package_size, unit_cost)
                              VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -171,7 +193,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $stock = ingredients_stock_fields_from_post();
                     $purchasing = ingredients_purchasing_fields_from_post();
-                    if (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db)) {
+                    if (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db) && $reorder_qty_ready) {
+                        $stmt = $db->prepare(
+                            'UPDATE ingredients
+                             SET name = ?, unit = ?, quantity_on_hand = ?, reorder_level = ?, supplier_name = ?,
+                                 package_size = ?, unit_cost = ?, reorder_qty = ?
+                             WHERE id = ?'
+                        );
+                        $stmt->execute([
+                            $_POST['name'],
+                            $_POST['unit'],
+                            $stock['quantity_on_hand'],
+                            $stock['reorder_level'],
+                            $stock['supplier_name'],
+                            $purchasing['package_size'],
+                            $purchasing['unit_cost'],
+                            ingredients_parse_decimal($_POST['reorder_qty'] ?? null),
+                            $_POST['id'],
+                        ]);
+                    } elseif (bakery_ingredients_inventory_ready($db) && bakery_ingredients_purchasing_ready($db)) {
                         $stmt = $db->prepare(
                             'UPDATE ingredients
                              SET name = ?, unit = ?, quantity_on_hand = ?, reorder_level = ?, supplier_name = ?,
@@ -216,6 +256,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
+            case 'add_ingredient_price':
+                bakery_require_role(['administrator', 'manager']);
+                $priceIngredientId = (int)($_POST['ingredient_id'] ?? 0);
+                $enteredBy = function_exists('bakery_current_user') ? (int)(bakery_current_user()['id'] ?? 0) : 0;
+                $result = bakery_ingredient_price_add($db, [
+                    'ingredient_id' => $priceIngredientId,
+                    'vendor' => $_POST['vendor'] ?? '',
+                    'vendor_sku' => $_POST['vendor_sku'] ?? '',
+                    'pack_size_grams' => $_POST['pack_size_grams'] ?? '',
+                    'pack_price' => $_POST['pack_price'] ?? '',
+                    'invoice_number' => $_POST['invoice_number'] ?? '',
+                    'invoice_date' => $_POST['invoice_date'] ?? '',
+                    'entered_by' => $enteredBy,
+                ]);
+                if (!($result['ok'] ?? false)) {
+                    $error = bakery_t((string)($result['error'] ?? 'ingredient_prices.invalid_ingredient'));
+                    $_GET['view'] = 'prices';
+                    $_GET['id'] = $priceIngredientId;
+                    break;
+                }
+                ingredients_redirect([
+                    'success' => 'price_added',
+                    'view' => 'prices',
+                    'id' => $priceIngredientId,
+                ]);
+                break;
+
             case 'delete_ingredient':
                 try {
                     $check = $db->prepare('SELECT COUNT(*) FROM formula_ingredients WHERE ingredient_id = ?');
@@ -254,13 +321,20 @@ if (isset($_GET['success'])) {
         case 'counts_saved':
             $success_message = 'Inventory counts saved!';
             break;
+        case 'price_added':
+            $success_message = bakery_t('ingredient_prices.saved');
+            break;
     }
 }
 
 $inventory_ready = bakery_ingredients_inventory_ready($db);
 $purchasing_ready = bakery_ingredients_purchasing_ready($db);
+$prices_ready = bakery_ingredient_prices_ready($db);
+$current_prices = $prices_ready ? bakery_ingredient_current_prices_map($db) : [];
 $low_stock_ingredients = $inventory_ready ? bakery_low_stock_ingredients($db) : [];
-$active_view = ($_GET['view'] ?? 'count') === 'manage' ? 'manage' : 'count';
+$requested_view = (string)($_GET['view'] ?? 'count');
+$active_view = in_array($requested_view, ['count', 'manage', 'prices', 'po'], true) ? $requested_view : 'count';
+$price_ingredient_id = (int)($_GET['id'] ?? 0);
 $search_query = trim((string)($_GET['q'] ?? ''));
 
 $unit_options = [
@@ -787,6 +861,45 @@ function ingredients_format_cost($value) {
     }
 }
 
+.price-table, .po-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    margin: 0.75rem 0 1.25rem;
+}
+
+.price-table th, .price-table td, .po-table th, .po-table td {
+    text-align: left;
+    padding: 0.45rem 0.55rem;
+    border-bottom: 1px solid #e2e8e4;
+    font-size: 0.92rem;
+    vertical-align: top;
+}
+
+.po-vendor {
+    margin: 1.25rem 0 0.35rem;
+    font-size: 1.15rem;
+}
+
+.price-form {
+    background: #fff;
+    border: 1px solid #e2e8e4;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+@media print {
+    .bakery-nav, .view-tabs, .sticky-save, .no-print, .search-bar {
+        display: none !important;
+    }
+
+    .ingredients-page {
+        max-width: none;
+        padding: 0;
+    }
+}
+
 @media (max-width: 480px) {
     .details-grid {
         grid-template-columns: 1fr;
@@ -817,9 +930,160 @@ function ingredients_format_cost($value) {
     <nav class="view-tabs" aria-label="Ingredients views">
         <a class="view-tab<?php echo $active_view === 'count' ? ' active' : ''; ?>" href="ingredients.php?view=count<?php echo $search_query !== '' ? '&q=' . urlencode($search_query) : ''; ?>">Take Inventory</a>
         <a class="view-tab<?php echo $active_view === 'manage' ? ' active' : ''; ?>" href="ingredients.php?view=manage">Manage</a>
+        <a class="view-tab<?php echo $active_view === 'prices' ? ' active' : ''; ?>" href="ingredients.php?view=prices"><?php bakery_te('ingredient_prices.tab_prices'); ?></a>
+        <a class="view-tab<?php echo $active_view === 'po' ? ' active' : ''; ?>" href="ingredients.php?view=po"><?php bakery_te('ingredient_prices.tab_po'); ?></a>
     </nav>
 
-    <?php if ($active_view === 'count'): ?>
+    <?php if ($active_view === 'po'): ?>
+        <h2><?php bakery_te('ingredient_prices.draft_title'); ?></h2>
+        <p class="notice warning"><?php bakery_te('ingredient_prices.draft_only'); ?></p>
+        <p class="no-print"><button type="button" class="btn-primary" onclick="window.print()"><?php bakery_te('ingredient_prices.print'); ?></button></p>
+        <?php if (!$prices_ready && !$inventory_ready): ?>
+            <div class="notice error"><?php bakery_te('ingredient_prices.migration_needed'); ?></div>
+        <?php else:
+            $draft = bakery_ingredient_draft_purchase_order($db);
+            if ($draft['vendors'] === []): ?>
+                <div class="notice success"><?php bakery_te('ingredient_prices.no_flagged'); ?></div>
+            <?php else: ?>
+                <?php foreach ($draft['vendors'] as $group): ?>
+                    <h3 class="po-vendor"><?php echo htmlspecialchars($group['unassigned'] ? bakery_t('ingredient_prices.unassigned_vendor') : $group['vendor']); ?></h3>
+                    <table class="po-table">
+                        <thead>
+                            <tr>
+                                <th><?php bakery_te('common.name'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.sku'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.on_hand'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.reorder_point'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.suggested_qty'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.pack_price_col'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.cost_per_kg'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($group['lines'] as $line): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($line['name']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)($line['vendor_sku'] ?? '')); ?></td>
+                                    <td><?php echo htmlspecialchars(ingredients_format_qty($line['on_hand'])); ?> <?php echo htmlspecialchars($line['unit']); ?></td>
+                                    <td><?php echo htmlspecialchars(ingredients_format_qty($line['reorder_point'])); ?></td>
+                                    <td><?php echo htmlspecialchars(ingredients_format_qty($line['suggested_qty'])); ?> <?php echo htmlspecialchars($line['unit']); ?></td>
+                                    <td><?php echo $line['pack_price'] === null ? '' : '$' . htmlspecialchars(ingredients_format_cost($line['pack_price'])); ?></td>
+                                    <td><?php echo $line['cost_per_kg'] === null ? '' : '$' . htmlspecialchars(bakery_ingredient_format_cost_per_kg($line['cost_per_kg'])); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+
+    <?php elseif ($active_view === 'prices'): ?>
+        <?php if (!$prices_ready): ?>
+            <div class="notice error"><?php bakery_te('ingredient_prices.migration_needed'); ?></div>
+        <?php else:
+            $priceIngredient = null;
+            if ($price_ingredient_id > 0) {
+                $priceStmt = $db->prepare('SELECT * FROM ingredients WHERE id = ?');
+                $priceStmt->execute([$price_ingredient_id]);
+                $priceIngredient = $priceStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            }
+            $priceHistory = $priceIngredient ? bakery_ingredient_price_history($db, (int)$priceIngredient['id']) : [];
+            $priceCurrent = $priceIngredient ? ($current_prices[(int)$priceIngredient['id']] ?? null) : null;
+        ?>
+            <p class="ingredients-subtitle"><?php bakery_te('ingredient_prices.pick'); ?></p>
+            <div class="inventory-list">
+                <?php foreach ($ingredients as $ingredient): ?>
+                    <a class="inventory-item" href="ingredients.php?view=prices&amp;id=<?php echo (int)$ingredient['id']; ?>">
+                        <div class="inventory-item-main">
+                            <h2 class="inventory-item-name"><?php echo htmlspecialchars($ingredient['name'] ?? ''); ?></h2>
+                            <?php $rowPrice = $current_prices[(int)$ingredient['id']] ?? null; ?>
+                            <div class="inventory-meta">
+                                <span><?php bakery_te('ingredient_prices.cost_per_kg'); ?> <?php echo $rowPrice ? '$' . htmlspecialchars(bakery_ingredient_format_cost_per_kg($rowPrice['cost_per_kg'])) : '—'; ?></span>
+                                <span><?php bakery_te('ingredient_prices.vendor'); ?> <?php echo htmlspecialchars((string)($rowPrice['vendor'] ?? ($ingredient['supplier_name'] ?? '—'))); ?></span>
+                            </div>
+                        </div>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            <?php if ($priceIngredient): ?>
+                <h2><?php echo htmlspecialchars($priceIngredient['name']); ?></h2>
+                <?php if ($priceCurrent): ?>
+                    <p><?php bakery_te('ingredient_prices.current'); ?>: $<?php echo htmlspecialchars(bakery_ingredient_format_cost_per_kg($priceCurrent['cost_per_kg'])); ?> / kg · <?php echo htmlspecialchars((string)$priceCurrent['vendor']); ?></p>
+                <?php endif; ?>
+                <form method="POST" class="price-form">
+                    <?php echo bakery_csrf_field(); ?>
+                    <input type="hidden" name="action" value="add_ingredient_price">
+                    <input type="hidden" name="ingredient_id" value="<?php echo (int)$priceIngredient['id']; ?>">
+                    <h3><?php bakery_te('ingredient_prices.add_line'); ?></h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="vendor"><?php bakery_te('ingredient_prices.vendor'); ?></label>
+                            <input type="text" id="vendor" name="vendor" maxlength="255" required value="<?php echo htmlspecialchars((string)($priceCurrent['vendor'] ?? $priceIngredient['supplier_name'] ?? '')); ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="vendor_sku"><?php bakery_te('ingredient_prices.vendor_sku'); ?></label>
+                            <input type="text" id="vendor_sku" name="vendor_sku" maxlength="80" value="">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pack_size_grams"><?php bakery_te('ingredient_prices.pack_grams'); ?></label>
+                            <input type="number" id="pack_size_grams" name="pack_size_grams" min="0.001" step="0.001" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pack_price"><?php bakery_te('ingredient_prices.pack_price'); ?></label>
+                            <input type="number" id="pack_price" name="pack_price" min="0" step="0.01" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="invoice_number"><?php bakery_te('ingredient_prices.invoice_number'); ?></label>
+                            <input type="text" id="invoice_number" name="invoice_number" maxlength="64">
+                        </div>
+                        <div class="form-group">
+                            <label for="invoice_date"><?php bakery_te('ingredient_prices.invoice_date'); ?></label>
+                            <input type="date" id="invoice_date" name="invoice_date" required value="<?php echo htmlspecialchars(date('Y-m-d')); ?>">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary"><?php bakery_te('ingredient_prices.save_price'); ?></button>
+                </form>
+                <h3><?php bakery_te('ingredient_prices.history'); ?></h3>
+                <?php if (!$priceHistory): ?>
+                    <p><?php bakery_te('ingredient_prices.none'); ?></p>
+                <?php else: ?>
+                    <table class="price-table">
+                        <thead>
+                            <tr>
+                                <th><?php bakery_te('ingredient_prices.invoice_date'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.vendor'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.sku'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.pack_grams'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.pack_price'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.cost_per_kg'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.invoice_number'); ?></th>
+                                <th><?php bakery_te('ingredient_prices.entered_by'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($priceHistory as $line): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars((string)$line['invoice_date']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$line['vendor']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)($line['vendor_sku'] ?? '')); ?></td>
+                                    <td><?php echo htmlspecialchars(ingredients_format_qty($line['pack_size_grams'])); ?></td>
+                                    <td>$<?php echo htmlspecialchars(ingredients_format_cost($line['pack_price'])); ?></td>
+                                    <td>$<?php echo htmlspecialchars(bakery_ingredient_format_cost_per_kg($line['cost_per_kg'])); ?></td>
+                                    <td><?php echo htmlspecialchars((string)($line['invoice_number'] ?? '')); ?></td>
+                                    <td><?php echo htmlspecialchars((string)($line['entered_by_name'] ?? '')); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+
+    <?php elseif ($active_view === 'count'): ?>
         <?php if ($inventory_ready && count($low_stock_ingredients) > 0): ?>
             <div class="notice warning" role="status">
                 <h2>Low stock: <?php echo count($low_stock_ingredients); ?> ingredient<?php echo count($low_stock_ingredients) === 1 ? '' : 's'; ?></h2>
@@ -856,29 +1120,41 @@ function ingredients_format_cost($value) {
                     $packageLabel = bakery_ingredient_package_label($ingredient);
                     $qtyValue = ingredients_format_qty($ingredient['quantity_on_hand'] ?? '');
                 ?>
-                <article class="inventory-item<?php echo $isLowStock ? ' low-stock' : ''; ?>" data-search="<?php echo htmlspecialchars(strtolower($ingredient['name'] . ' ' . ($ingredient['supplier_name'] ?? ''))); ?>">
+                <?php
+                    $priceRow = $current_prices[(int)$ingredient['id']] ?? null;
+                    $displayVendor = trim((string)($priceRow['vendor'] ?? ''));
+                    if ($displayVendor === '') {
+                        $displayVendor = trim((string)($ingredient['supplier_name'] ?? ''));
+                    }
+                ?>
+                <article class="inventory-item<?php echo $isLowStock ? ' low-stock' : ''; ?>" data-search="<?php echo htmlspecialchars(strtolower($ingredient['name'] . ' ' . $displayVendor)); ?>">
                     <div class="inventory-item-main">
                         <div class="inventory-item-header">
                             <h2 class="inventory-item-name">
                                 <?php echo htmlspecialchars($ingredient['name'] ?? ''); ?>
                                 <?php if ($isLowStock): ?>
-                                    <span class="low-stock-badge">Low</span>
+                                    <span class="low-stock-badge reorder-flag"><?php bakery_te('ingredient_prices.reorder_flag'); ?></span>
                                 <?php endif; ?>
                             </h2>
+                            <?php if ($prices_ready): ?>
+                                <a class="no-print" href="ingredients.php?view=prices&amp;id=<?php echo (int)$ingredient['id']; ?>"><?php bakery_te('ingredient_prices.open_history'); ?></a>
+                            <?php endif; ?>
                         </div>
-                        <?php if ($inventory_ready && ($purchasing_ready || !empty($ingredient['supplier_name']) || ($ingredient['reorder_level'] !== null && $ingredient['reorder_level'] !== '') || ($ingredient['package_size'] ?? null) !== null)): ?>
+                        <?php if ($inventory_ready && ($purchasing_ready || $displayVendor !== '' || $priceRow || ($ingredient['reorder_level'] !== null && $ingredient['reorder_level'] !== '') || ($ingredient['package_size'] ?? null) !== null)): ?>
                         <div class="inventory-meta">
                             <?php if ($packageLabel): ?>
                                 <span><?php echo htmlspecialchars($packageLabel); ?> pkg</span>
                             <?php endif; ?>
-                            <?php if ($purchasing_ready && $ingredient['unit_cost'] !== null && $ingredient['unit_cost'] !== ''): ?>
+                            <?php if ($priceRow): ?>
+                                <span><?php bakery_te('ingredient_prices.cost_per_kg'); ?> $<?php echo htmlspecialchars(bakery_ingredient_format_cost_per_kg($priceRow['cost_per_kg'])); ?></span>
+                            <?php elseif ($purchasing_ready && $ingredient['unit_cost'] !== null && $ingredient['unit_cost'] !== ''): ?>
                                 <span>$<?php echo htmlspecialchars(ingredients_format_cost($ingredient['unit_cost'])); ?>/pkg</span>
                             <?php endif; ?>
-                            <?php if (!empty($ingredient['supplier_name'])): ?>
-                                <span><?php echo htmlspecialchars($ingredient['supplier_name']); ?></span>
+                            <?php if ($displayVendor !== ''): ?>
+                                <span><?php bakery_te('ingredient_prices.vendor'); ?> <?php echo htmlspecialchars($displayVendor); ?></span>
                             <?php endif; ?>
                             <?php if ($ingredient['reorder_level'] !== null && $ingredient['reorder_level'] !== ''): ?>
-                                <span>Reorder <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'])); ?> <?php echo htmlspecialchars($ingredient['unit'] ?? ''); ?></span>
+                                <span><?php bakery_te('ingredient_prices.reorder_point'); ?> <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'])); ?> <?php echo htmlspecialchars($ingredient['unit'] ?? ''); ?></span>
                             <?php endif; ?>
                         </div>
                         <?php endif; ?>
@@ -931,9 +1207,15 @@ function ingredients_format_cost($value) {
                                 </div>
                                 <?php endif; ?>
                                 <div class="detail-field">
-                                    <label>Reorder level</label>
+                                    <label><?php bakery_te('ingredient_prices.reorder_point'); ?></label>
                                     <input type="number" name="reorder_level" step="0.001" min="0" value="<?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'] ?? '')); ?>">
                                 </div>
+                                <?php if ($reorder_qty_ready): ?>
+                                <div class="detail-field">
+                                    <label><?php bakery_te('ingredient_prices.reorder_qty'); ?></label>
+                                    <input type="number" name="reorder_qty" step="0.001" min="0" value="<?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_qty'] ?? '')); ?>">
+                                </div>
+                                <?php endif; ?>
                                 <div class="detail-field full">
                                     <label>Supplier</label>
                                     <input type="text" name="supplier_name" maxlength="255" value="<?php echo htmlspecialchars($ingredient['supplier_name'] ?? ''); ?>" placeholder="Sysco, Restaurant Depot…">
@@ -972,24 +1254,33 @@ function ingredients_format_cost($value) {
                 $packageLabel = bakery_ingredient_package_label($ingredient);
             ?>
             <div class="manage-card<?php echo $isLowStock ? ' low-stock' : ''; ?>">
+                <?php
+                    $priceRow = $current_prices[(int)$ingredient['id']] ?? null;
+                    $displayVendor = trim((string)($priceRow['vendor'] ?? ''));
+                    if ($displayVendor === '') {
+                        $displayVendor = trim((string)($ingredient['supplier_name'] ?? ''));
+                    }
+                ?>
                 <h3>
                     <?php echo htmlspecialchars($ingredient['name'] ?? ''); ?>
-                    <?php if ($isLowStock): ?><span class="low-stock-badge">Low</span><?php endif; ?>
+                    <?php if ($isLowStock): ?><span class="low-stock-badge reorder-flag"><?php bakery_te('ingredient_prices.reorder_flag'); ?></span><?php endif; ?>
                 </h3>
                 <div class="meta">
                     Unit: <?php echo htmlspecialchars($ingredient['unit'] ?? '—'); ?><br>
                     <?php if ($inventory_ready): ?>
                         On hand: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['quantity_on_hand'] ?? '') ?: '—'); ?><br>
-                        Reorder: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'] ?? '') ?: '—'); ?><br>
+                        <?php bakery_te('ingredient_prices.reorder_point'); ?>: <?php echo htmlspecialchars(ingredients_format_qty($ingredient['reorder_level'] ?? '') ?: '—'); ?><br>
                     <?php endif; ?>
                     <?php if ($purchasing_ready && $packageLabel): ?>
                         Package: <?php echo htmlspecialchars($packageLabel); ?><br>
                     <?php endif; ?>
-                    <?php if ($purchasing_ready && $ingredient['unit_cost'] !== null && $ingredient['unit_cost'] !== ''): ?>
+                    <?php if ($priceRow): ?>
+                        <?php bakery_te('ingredient_prices.cost_per_kg'); ?>: $<?php echo htmlspecialchars(bakery_ingredient_format_cost_per_kg($priceRow['cost_per_kg'])); ?><br>
+                    <?php elseif ($purchasing_ready && $ingredient['unit_cost'] !== null && $ingredient['unit_cost'] !== ''): ?>
                         Cost: $<?php echo htmlspecialchars(ingredients_format_cost($ingredient['unit_cost'])); ?>/pkg<br>
                     <?php endif; ?>
-                    <?php if (!empty($ingredient['supplier_name'])): ?>
-                        Supplier: <?php echo htmlspecialchars($ingredient['supplier_name']); ?>
+                    <?php if ($displayVendor !== ''): ?>
+                        <?php bakery_te('ingredient_prices.vendor'); ?>: <?php echo htmlspecialchars($displayVendor); ?>
                     <?php endif; ?>
                 </div>
                 <div class="manage-actions">
@@ -1002,6 +1293,7 @@ function ingredients_format_cost($value) {
                         'supplier_name' => $ingredient['supplier_name'] ?? '',
                         'package_size' => ingredients_format_qty($ingredient['package_size'] ?? ''),
                         'unit_cost' => ingredients_format_cost($ingredient['unit_cost'] ?? ''),
+                        'reorder_qty' => ingredients_format_qty($ingredient['reorder_qty'] ?? ''),
                     ]); ?>)'>Edit</button>
                     <button type="button" class="btn-sm btn-delete" onclick='confirmDelete(<?php echo bakery_json_for_html([
                         'id' => $ingredient['id'],
@@ -1043,10 +1335,16 @@ function ingredients_format_cost($value) {
                     <input type="number" id="quantity_on_hand" name="quantity_on_hand" step="0.001" min="0">
                 </div>
                 <div class="form-group">
-                    <label for="reorder_level">Reorder level</label>
+                    <label for="reorder_level"><?php bakery_te('ingredient_prices.reorder_point'); ?></label>
                     <input type="number" id="reorder_level" name="reorder_level" step="0.001" min="0">
                 </div>
             </div>
+            <?php if ($reorder_qty_ready): ?>
+            <div class="form-group">
+                <label for="reorder_qty"><?php bakery_te('ingredient_prices.reorder_qty'); ?></label>
+                <input type="number" id="reorder_qty" name="reorder_qty" step="0.001" min="0">
+            </div>
+            <?php endif; ?>
             <?php if ($purchasing_ready): ?>
             <div class="form-row">
                 <div class="form-group">
@@ -1103,10 +1401,16 @@ function ingredients_format_cost($value) {
                     <input type="number" id="edit_quantity_on_hand" name="quantity_on_hand" step="0.001" min="0">
                 </div>
                 <div class="form-group">
-                    <label for="edit_reorder_level">Reorder level</label>
+                    <label for="edit_reorder_level"><?php bakery_te('ingredient_prices.reorder_point'); ?></label>
                     <input type="number" id="edit_reorder_level" name="reorder_level" step="0.001" min="0">
                 </div>
             </div>
+            <?php if ($reorder_qty_ready): ?>
+            <div class="form-group">
+                <label for="edit_reorder_qty"><?php bakery_te('ingredient_prices.reorder_qty'); ?></label>
+                <input type="number" id="edit_reorder_qty" name="reorder_qty" step="0.001" min="0">
+            </div>
+            <?php endif; ?>
             <?php if ($purchasing_ready): ?>
             <div class="form-row">
                 <div class="form-group">
@@ -1199,6 +1503,7 @@ function showEditModal(ingredient) {
         ['edit_supplier_name', 'supplier_name'],
         ['edit_package_size', 'package_size'],
         ['edit_unit_cost', 'unit_cost'],
+        ['edit_reorder_qty', 'reorder_qty'],
     ];
     fields.forEach(function ([elementId, key]) {
         const el = document.getElementById(elementId);

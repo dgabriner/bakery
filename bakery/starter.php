@@ -134,6 +134,13 @@ $form = is_array($draft) ? $draft : [
 if (!is_array($draft) && $_SERVER['REQUEST_METHOD'] !== 'POST' && (string)($_GET['kit'] ?? '') === '1') {
     $form['fulfillment'] = 'kit';
 }
+$pageCheckoutKey = bakery_sfb_normalize_checkout_key((string)($_POST['checkout_key'] ?? ''));
+if ($pageCheckoutKey === '' && is_array($draft)) {
+    $pageCheckoutKey = bakery_sfb_normalize_checkout_key($draft['checkout_key'] ?? '');
+}
+if ($pageCheckoutKey === '') {
+    $pageCheckoutKey = bin2hex(random_bytes(16));
+}
 $choice = (string)($form['fulfillment'] ?? 'pickup');
 if (($form['pack_kind'] ?? '') === 'first_loaf_kit') {
     $choice = 'kit';
@@ -178,6 +185,7 @@ $signedIn = $customerId > 0;
     .ship-fields[hidden], .pickup-fields[hidden] { display: none !important; }
     .grid2 { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
     button, a.btn { background: var(--terracotta); border: 0; border-radius: 8px; color: #fff; cursor: pointer; display: block; font: inherit; padding: 12px 16px; text-align: center; text-decoration: none; width: 100%; }
+    button:disabled { cursor: progress; opacity: 0.65; }
     a.quiet { background: transparent; border: 1px solid var(--line); color: var(--ink); margin-top: 10px; }
     .notice { border-radius: 8px; margin: 0 0 14px; padding: 10px 12px; }
     .notice--info { background: #eef6f1; }
@@ -258,10 +266,11 @@ $signedIn = $customerId > 0;
       <div class="card">
         <div class="card-body">
           <p class="muted" style="margin-top:0;"><?php bakery_te('sfb.starter_jar_resume_copy'); ?></p>
-          <form method="post">
+          <form method="post" data-checkout-once>
             <?php echo bakery_csrf_field(); ?>
             <input type="hidden" name="action" value="resume">
-            <button type="submit"><?php bakery_te('sfb.starter_jar_cta_pay'); ?></button>
+            <?php echo bakery_sfb_checkout_key_input($pageCheckoutKey); ?>
+            <button type="submit" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('sfb.starter_jar_cta_pay'); ?></button>
           </form>
         </div>
       </div>
@@ -271,9 +280,10 @@ $signedIn = $customerId > 0;
           <?php if (!$ready): ?>
             <p class="muted"><?php bakery_te('sfb.starter_jar_unavailable'); ?></p>
           <?php else: ?>
-            <form method="post" id="starterJarForm">
+            <form method="post" id="starterJarForm" data-checkout-once>
               <?php echo bakery_csrf_field(); ?>
               <input type="hidden" name="action" value="request">
+              <?php echo bakery_sfb_checkout_key_input($pageCheckoutKey); ?>
 
               <div class="prices" role="radiogroup" aria-label="<?php bakery_te('sfb.starter_jar_how'); ?>">
                 <label class="price-opt">
@@ -332,7 +342,7 @@ $signedIn = $customerId > 0;
                 <textarea name="notes" rows="2" maxlength="255"><?php echo htmlspecialchars((string)($form['notes'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
               </label>
 
-              <button type="submit"><?php
+              <button type="submit" data-working-label="<?php echo htmlspecialchars(bakery_t('sfb.checkout_opening'), ENT_QUOTES, 'UTF-8'); ?>"><?php
                 echo $signedIn
                     ? bakery_t('sfb.starter_jar_cta_pay')
                     : bakery_t('sfb.starter_jar_cta_account');
@@ -380,5 +390,6 @@ $signedIn = $customerId > 0;
       sync();
     })();
   </script>
+  <?php echo bakery_sfb_checkout_once_script(); ?>
 </body>
 </html>

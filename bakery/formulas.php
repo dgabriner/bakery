@@ -5,6 +5,8 @@ define('ACCESS_ALLOWED', true);
 // Load includes
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/formula_structure.php';
+require_once 'includes/formula_structure_ui.php';
 
 // Set page title
 $page_title = bakery_t('page.formulas');
@@ -162,6 +164,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = $e->getMessage();
                 }
                 break;
+
+            case 'save_formula_batch':
+                try {
+                    bakery_formula_structure_save_batch($db, $dough_type_id, $_POST);
+                    formulas_redirect($dough_type_id, 'formula_batch_saved');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
+
+            case 'save_formula_starter':
+                try {
+                    bakery_formula_structure_save_starter($db, $dough_type_id, $_POST);
+                    formulas_redirect($dough_type_id, 'formula_starter_saved');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
+
+            case 'delete_formula_starter':
+                try {
+                    bakery_formula_structure_delete($db, $dough_type_id, (int) ($_POST['subformula_id'] ?? 0));
+                    formulas_redirect($dough_type_id, 'formula_starter_removed');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
+
+            case 'save_formula_part':
+                try {
+                    bakery_formula_structure_save_part($db, $dough_type_id, $_POST);
+                    formulas_redirect($dough_type_id, 'formula_part_saved');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
+
+            case 'delete_formula_part':
+                try {
+                    bakery_formula_structure_delete($db, $dough_type_id, (int) ($_POST['subformula_id'] ?? 0));
+                    formulas_redirect($dough_type_id, 'formula_part_removed');
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+                break;
         }
     }
 }
@@ -189,6 +236,21 @@ if (isset($_GET['success'])) {
         case 'formula_copied':
             $success_message = 'Formula copied successfully!';
             break;
+        case 'formula_batch_saved':
+            $success_message = bakery_t('formula_structure.saved_batch');
+            break;
+        case 'formula_starter_saved':
+            $success_message = bakery_t('formula_structure.saved_starter');
+            break;
+        case 'formula_starter_removed':
+            $success_message = bakery_t('formula_structure.removed_starter');
+            break;
+        case 'formula_part_saved':
+            $success_message = bakery_t('formula_structure.saved_part');
+            break;
+        case 'formula_part_removed':
+            $success_message = bakery_t('formula_structure.removed_part');
+            break;
     }
 }
 
@@ -198,6 +260,10 @@ $selected_dough_type_id = isset($_GET['dough_type']) ? max(0, (int)$_GET['dough_
 $all_ingredients = [];
 $dough_types = [];
 $formulas_by_dough = [];
+$products_by_dough = [];
+$formula_structure_ready = false;
+$formula_structures = [];
+$formula_parts_by_product = [];
 
 try {
     $all_ingredients = formulas_load_active_ingredients($db);
@@ -216,6 +282,20 @@ try {
     ")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($formula_rows as $formula_row) {
         $formulas_by_dough[(int)$formula_row['dough_type_id']][] = $formula_row;
+    }
+    $product_rows = $db->query('SELECT id, name, weight_grams, dough_type_id FROM products ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($product_rows as $product_row) {
+        if ($product_row['dough_type_id'] === null) {
+            continue;
+        }
+        $products_by_dough[(int) $product_row['dough_type_id']][] = $product_row;
+    }
+    $formula_structure_ready = bakery_formula_structure_ready($db);
+    if ($formula_structure_ready) {
+        $dough_ids = array_map(static fn($row) => (int) $row['id'], $dough_types);
+        $formula_structures = bakery_formula_structure_load_map($db, $dough_ids);
+        $product_ids = array_map(static fn($row) => (int) $row['id'], $product_rows);
+        $formula_parts_by_product = bakery_formula_parts_load_map($db, $product_ids);
     }
 } catch (Exception $e) {
     $error = "Failed to load formulas: " . $e->getMessage();
@@ -726,6 +806,65 @@ try {
 .formula-copy-button:hover { border-color: var(--formula-brand); background: #eef6f3; }
 .formula-copy-button:disabled { opacity: .65; cursor: wait; }
 
+.formula-structure {
+    margin: 16px 0 8px;
+    padding: 14px;
+    border: 1px solid #d5e4de;
+    border-radius: 10px;
+    background: #f7fbf9;
+}
+.formula-structure h3, .formula-structure h4 { margin: 0 0 8px; color: var(--formula-ink); }
+.formula-structure h4 { margin-top: 14px; font-size: .95rem; }
+.formula-structure-lead, .formula-structure-hint { margin: 0 0 8px; color: var(--formula-muted); font-size: .8rem; line-height: 1.4; }
+.formula-structure-grid, .formula-structure-line {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.formula-structure-field, .formula-structure-line label { display: flex; flex-direction: column; gap: 4px; font-size: .75rem; font-weight: 700; color: #52645f; }
+.formula-structure input, .formula-structure select {
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid #c9d6d1;
+    border-radius: 7px;
+    font: inherit;
+    font-weight: 500;
+    color: var(--formula-ink);
+    background: #fff;
+}
+.formula-structure button[type="submit"] {
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 0;
+    border-radius: 7px;
+    background: var(--formula-brand, #176b5d);
+    color: #fff;
+    font: inherit;
+    font-weight: 750;
+    cursor: pointer;
+}
+.formula-structure-saved {
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #e1ebe6;
+}
+.formula-structure-saved p, .formula-structure-saved ul { margin: 6px 0; padding-left: 18px; color: #3d514c; font-size: .82rem; }
+.formula-structure-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.formula-structure-lines li, .formula-structure-lines li.is-prep {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #e1ebe6;
+    font-size: .82rem;
+}
+.formula-structure-lines li.is-prep { background: #f3f7f5; }
+
 .ingredient-picker { position: relative; }
 .ingredient-picker-input {
     width: 100%;
@@ -922,6 +1061,18 @@ try {
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
+
+                    <?php
+                    bakery_formula_structure_render_card(
+                        $dough_type_id,
+                        $ingredients,
+                        $products_by_dough[$dough_type_id] ?? [],
+                        $all_ingredients,
+                        $formula_structures[$dough_type_id] ?? [],
+                        $formula_parts_by_product,
+                        $formula_structure_ready
+                    );
+                    ?>
 
                     <?php if (!empty($copy_sources)): ?>
                         <div class="formula-copy-row">

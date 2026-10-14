@@ -78,8 +78,8 @@ $db->exec(
 tc_apply_sql_file($db, $root . '/database/schema/002_auth.sql');
 tc_apply_sql_file($db, $root . '/database/schema/007_baker_role.sql');
 tc_apply_sql_file($db, $root . '/database/schema/074_cashier_shop_photos.sql');
-tc_apply_sql_file($db, $root . '/database/schema/086_time_clock_punches.sql');
-tc_apply_sql_file($db, $root . '/database/schema/087_time_clock_overrides.sql');
+tc_apply_sql_file($db, $root . '/database/schema/091_time_clock_punches.sql');
+tc_apply_sql_file($db, $root . '/database/schema/092_time_clock_overrides.sql');
 
 function tc_user(PDO $db, string $email, string $name, string $roleSlug, string $code): int {
     $roleId = (int)$db->query("SELECT id FROM roles WHERE slug = " . $db->quote($roleSlug) . " LIMIT 1")->fetchColumn();
@@ -206,7 +206,7 @@ $_SESSION = [];
 tc_assert(bakery_time_clock_week_monday('2026-10-07') === '2026-10-05', 'a Wednesday snaps to that Monday');
 tc_assert(bakery_time_clock_overrides_ready($db), 'override columns are ready');
 require_once $root . '/includes/hosted_migration_runtime.php';
-[$overrideSqlSafe] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/087_time_clock_overrides.sql'));
+[$overrideSqlSafe] = bakery_hosted_migration_sql_safe((string)file_get_contents($root . '/database/schema/092_time_clock_overrides.sql'));
 tc_assert($overrideSqlSafe, 'override migration is hosted-gate safe');
 
 $monday = bakery_time_clock_week_monday('2026-10-07');

@@ -630,6 +630,11 @@ function bakery_wants_json() {
         'staff_alerts_api.php',
     ];
     $script = basename($uri);
+    $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    // A browser opening this URL should get a page or a redirect. POST stays JSON.
+    if ($script === 'complete_delivery.php' && ($method === 'GET' || $method === 'HEAD')) {
+        return false;
+    }
     // Every *_api.php endpoint answers JSON on auth/CSRF failure, listed or not.
     if (substr($script, -8) === '_api.php') {
         return true;

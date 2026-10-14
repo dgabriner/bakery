@@ -196,6 +196,59 @@ function bakery_inventory_movement(
     $stmt->execute([$date, $productId, $type, $delta, $driverId, $notes, $user['id'] ?? null]);
 }
 
+/**
+ * Finished goods that cover committed demand for each product.
+ *
+ * Coverage is warehouse available + van loaded + units route closeout has
+ * already delivered out of inventory. Delivery movements are netted, so a
+ * reopen that puts those units back on the van is not counted twice. Waste
+ * and other exits that were not handed to customers do not cover demand.
+ *
+ * @param list<int|string> $productIds
+ * @param array<int|string, array<string, mixed>> $inventoryByProduct
+ * @return array<int, int> product_id => covered units
+ */
+function bakery_inventory_finished_goods_coverage(PDO $db, string $date, array $productIds, array $inventoryByProduct): array
+{
+    $ids = [];
+    foreach ($productIds as $productId) {
+        $productId = (int)$productId;
+        if ($productId > 0) {
+            $ids[$productId] = true;
+        }
+    }
+    if ($ids === []) {
+        return [];
+    }
+
+    $deliveredOut = [];
+    if (table_exists($db, 'inventory_movements')) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $db->prepare(
+            "SELECT product_id, COALESCE(SUM(-quantity_delta), 0) AS delivered_out
+             FROM inventory_movements
+             WHERE delivery_date = ?
+               AND movement_type = 'delivery'
+               AND product_id IN ({$placeholders})
+             GROUP BY product_id"
+        );
+        $stmt->execute(array_merge([$date], array_keys($ids)));
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $deliveredOut[(int)$row['product_id']] = (int)$row['delivered_out'];
+        }
+    }
+
+    $covered = [];
+    foreach (array_keys($ids) as $productId) {
+        $inv = $inventoryByProduct[$productId] ?? $inventoryByProduct[(string)$productId] ?? null;
+        $available = is_array($inv) ? (int)($inv['available_quantity'] ?? 0) : 0;
+        $loaded = is_array($inv) ? (int)($inv['loaded_quantity'] ?? 0) : 0;
+        $delivered = max(0, (int)($deliveredOut[$productId] ?? 0));
+        $covered[$productId] = $available + $loaded + $delivered;
+    }
+    return $covered;
+}
+
 function bakery_inventory_credit_return_note(int $dailyOrderId): string {
     return 'Order #' . $dailyOrderId . ' credit taken back';
 }

@@ -1,0 +1,287 @@
+/**
+ * Customers list only. Search, filter chips, sort, sticky header, and cards.
+ * Linked from customers.php. Do not load this on other pages.
+ */
+
+.customers-filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.customers-filters-label {
+  color: var(--sf-text-muted, #6b7d78);
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-right: 0.15rem;
+}
+
+.customers-chip {
+  appearance: none;
+  background: var(--sf-surface, #fffefb);
+  border: 1px solid var(--sf-border-strong, #c9bda9);
+  border-radius: 999px;
+  color: var(--sf-text, #1c2a26);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 0.35rem 0.9rem;
+}
+
+.customers-chip:hover {
+  border-color: var(--sf-primary, #24746a);
+}
+
+.customers-chip[aria-pressed="true"] {
+  background: var(--sf-primary, #24746a);
+  border-color: var(--sf-primary, #24746a);
+  color: var(--sf-text-inverse, #fff);
+}
+
+.customers-chip:focus-visible,
+.customers-sort:focus-visible {
+  outline: 2px solid var(--sf-accent, #c7783a);
+  outline-offset: 2px;
+}
+
+.customers-empty[hidden] {
+  display: none !important;
+}
+
+.customers-empty {
+  background: var(--sf-surface-muted, #f3eee6);
+  border-radius: 8px;
+  color: var(--sf-text-secondary, #4a5c57);
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.customers-table-wrap.table-responsive {
+  overflow: visible;
+}
+
+#customersTable {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#customersTable thead th {
+  background: #007bff;
+  position: sticky;
+  top: var(--customers-sticky-top, 4.5rem);
+  z-index: 4;
+}
+
+#customersTable thead th.customers-colhead {
+  container-name: customers-colhead;
+  container-type: scroll-state;
+  padding: 0;
+}
+
+.customers-sort {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 15px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.customers-sort::after {
+  content: "";
+  display: inline-block;
+  margin-left: 0.35rem;
+  opacity: 0.55;
+  width: 0.7rem;
+}
+
+#customersTable thead th[aria-sort="ascending"] .customers-sort::after {
+  content: "\2191";
+  opacity: 1;
+}
+
+#customersTable thead th[aria-sort="descending"] .customers-sort::after {
+  content: "\2193";
+  opacity: 1;
+}
+
+@container customers-colhead scroll-state(stuck: top) {
+  .customers-sort {
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  }
+}
+
+#customersTable tbody tr[hidden] {
+  display: none !important;
+}
+
+.customers-table-wrap {
+  container-name: customers-table;
+  container-type: inline-size;
+}
+
+@container customers-table (width < 40rem) {
+  .customers-table-wrap .mobile-table-header {
+    display: none !important;
+  }
+
+  #customersTable {
+    min-width: 0 !important;
+  }
+
+  #customersTable thead {
+    display: none;
+  }
+
+  #customersTable,
+  #customersTable tbody,
+  #customersTable tr,
+  #customersTable td {
+    display: block;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  #customersTable tbody tr {
+    background: var(--sf-surface, #fff);
+    border: 1px solid var(--sf-border, #ddd4c6);
+    border-radius: 12px;
+    box-shadow: var(--sf-shadow-sm, 0 1px 2px rgba(42, 32, 18, 0.05));
+    margin: 0 0 0.85rem;
+    padding: 0.7rem 0.8rem 0.45rem;
+  }
+
+  #customersTable tbody tr:hover {
+    background: var(--sf-surface, #fff);
+  }
+
+  #customersTable tbody tr.is-highlighted {
+    outline-offset: 2px;
+  }
+
+  #customersTable tbody td {
+    align-items: flex-start;
+    border: 0;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.35rem 0;
+    text-align: right;
+  }
+
+  #customersTable tbody td::before {
+    color: var(--sf-text-muted, #6b7d78);
+    content: attr(data-label);
+    flex: 1 1 42%;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  #customersTable tbody td[data-field="name"] {
+    border-bottom: 1px solid var(--sf-border, #ddd4c6);
+    display: block;
+    font-size: 1.05rem;
+    margin-bottom: 0.2rem;
+    padding-bottom: 0.45rem;
+    text-align: left;
+  }
+
+  #customersTable tbody td[data-field="name"]::before {
+    content: none;
+  }
+
+  #customersTable tbody td.actions {
+    justify-content: flex-start;
+    padding-top: 0.45rem;
+  }
+
+  #customersTable tbody td.actions::before {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .customers-table-wrap .mobile-table-header {
+    display: none !important;
+  }
+
+  #customersTable {
+    min-width: 0 !important;
+  }
+
+  #customersTable thead {
+    display: none;
+  }
+
+  #customersTable,
+  #customersTable tbody,
+  #customersTable tr,
+  #customersTable td {
+    display: block;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  #customersTable tbody tr {
+    background: var(--sf-surface, #fff);
+    border: 1px solid var(--sf-border, #ddd4c6);
+    border-radius: 12px;
+    box-shadow: var(--sf-shadow-sm, 0 1px 2px rgba(42, 32, 18, 0.05));
+    margin: 0 0 0.85rem;
+    padding: 0.7rem 0.8rem 0.45rem;
+  }
+
+  #customersTable tbody tr:hover {
+    background: var(--sf-surface, #fff);
+  }
+
+  #customersTable tbody td {
+    align-items: flex-start;
+    border: 0;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.35rem 0;
+    text-align: right;
+  }
+
+  #customersTable tbody td::before {
+    color: var(--sf-text-muted, #6b7d78);
+    content: attr(data-label);
+    flex: 1 1 42%;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  #customersTable tbody td[data-field="name"] {
+    border-bottom: 1px solid var(--sf-border, #ddd4c6);
+    display: block;
+    font-size: 1.05rem;
+    margin-bottom: 0.2rem;
+    padding-bottom: 0.45rem;
+    text-align: left;
+  }
+
+  #customersTable tbody td[data-field="name"]::before {
+    content: none;
+  }
+
+  #customersTable tbody td.actions {
+    justify-content: flex-start;
+    padding-top: 0.45rem;
+  }
+
+  #customersTable tbody td.actions::before {
+    flex: 0 0 auto;
+  }
+}

@@ -77,6 +77,12 @@ $assert(strpos($runtime, 'completed_statements') !== false, 'worker records stat
 $assert(strpos($runtime, 'bakery_hosted_migration_exec_statement') !== false
     && strpos($runtime, 'information_schema.COLUMNS') !== false,
     'worker resumes only verified already-present additive objects');
+$assert(strpos($runner, 'bakery_schema_migration_ledger_id($migrationPath)') !== false
+    && strpos($runner, 'bakery_migration_applied($db, $file)') !== false
+    && strpos($runner, 'bakery_mark_migration($db, $file)') !== false
+    && strpos($runner, 'SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1') !== false
+    && strpos($runner, 'INSERT IGNORE INTO schema_migrations (id) VALUES (?)') !== false,
+    'runner marks a migration applied by full filename id, not by number or checksum');
 $squareMigration = (string)file_get_contents($root . '/database/schema/055_square_invoices.sql');
 $assert(substr_count($squareMigration, 'ALTER TABLE daily_orders') === 9, '055 isolates each resumable column addition');
 $squareIndexRepair = (string)file_get_contents($root . '/database/schema/056_square_webhook_invoice_index.sql');

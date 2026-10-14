@@ -100,7 +100,15 @@
 
 .driver-controls {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
+    align-items: center;
+}
+
+.restore-missing-stops {
+    white-space: normal;
+    text-align: left;
+    max-width: 36rem;
 }
 
 .driver-orders {

@@ -1173,7 +1173,7 @@ try {
         );
     }
     foreach (glob($newMigrationsDir . '/[0-9][0-9][0-9]_*.sql') ?: [] as $migrationPath) {
-        $file = basename($migrationPath, '.sql');
+        $file = bakery_schema_migration_ledger_id($migrationPath);
         $number = (int)substr($file, 0, 3);
         if ($number < 50 || bakery_migration_applied($db, $file)) {
             continue;

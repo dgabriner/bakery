@@ -27,14 +27,47 @@ function bakery_survey_validate_ymd(string $date): string
 }
 
 /**
- * Soonest sell/delivery date after $fromDate whose weekday is a delivery day.
- * Defaults to every weekday including Sunday (Sat night → Sunday sell day).
+ * Soonest sell day after $fromDate.
+ * A day counts when its weekday is a standing sell day, or that calendar
+ * date is in $datedSellDates (a dated order with no standing route).
  *
- * @param list<int> $deliveryWeekdays ISO-8601 weekdays (1=Mon … 7=Sun)
+ * @param list<int> $deliveryWeekdays ISO-8601 weekdays (1=Mon through 7=Sun)
+ * @param list<string> $datedSellDates Y-m-d dates that have dated orders
  */
-function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6, 7]): string
+function bakery_survey_next_sell_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6, 7], array $datedSellDates = []): string
 {
     $fromDate = bakery_survey_validate_ymd($fromDate);
+    $days = bakery_survey_weekday_set($deliveryWeekdays);
+    $extra = [];
+    foreach ($datedSellDates as $date) {
+        $date = trim((string)$date);
+        if ($date === '') {
+            continue;
+        }
+        try {
+            $extra[bakery_survey_validate_ymd($date)] = true;
+        } catch (RuntimeException $e) {
+            continue;
+        }
+    }
+    $cursor = new DateTime($fromDate);
+    for ($i = 0; $i < 14; $i++) {
+        $cursor->modify('+1 day');
+        $ymd = $cursor->format('Y-m-d');
+        $weekday = (int)$cursor->format('N');
+        if (isset($days[$weekday]) || isset($extra[$ymd])) {
+            return $ymd;
+        }
+    }
+    return $cursor->format('Y-m-d');
+}
+
+/**
+ * @param list<int> $deliveryWeekdays
+ * @return array<int, true>
+ */
+function bakery_survey_weekday_set(array $deliveryWeekdays): array
+{
     $days = [];
     foreach ($deliveryWeekdays as $day) {
         $day = (int)$day;
@@ -48,15 +81,51 @@ function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekd
     if ($days === []) {
         $days = [1 => true, 2 => true, 3 => true, 4 => true, 5 => true, 6 => true, 7 => true];
     }
-    $cursor = new DateTime($fromDate);
-    for ($i = 0; $i < 14; $i++) {
-        $cursor->modify('+1 day');
-        $weekday = (int)$cursor->format('N');
-        if (isset($days[$weekday])) {
-            return $cursor->format('Y-m-d');
-        }
+    return $days;
+}
+
+/**
+ * @return array{literal_tomorrow:bool, iso_weekday:int}
+ */
+function bakery_survey_sell_day_label(string $today, string $sellDate): array
+{
+    $today = bakery_survey_validate_ymd($today);
+    $sellDate = bakery_survey_validate_ymd($sellDate);
+    $tomorrow = (new DateTime($today))->modify('+1 day')->format('Y-m-d');
+    return [
+        'literal_tomorrow' => $sellDate === $tomorrow,
+        'iso_weekday' => (int)(new DateTime($sellDate))->format('N'),
+    ];
+}
+
+/**
+ * "Tomorrow" only when $sellDate is the next calendar day. Otherwise the
+ * weekday name from $weekdayNames fills :day in $weekdayTemplate.
+ *
+ * @param array<int, string> $weekdayNames ISO weekday => localized name
+ */
+function bakery_survey_hub_title_text(string $today, string $sellDate, string $tomorrowTitle, array $weekdayNames, string $weekdayTemplate): string
+{
+    $label = bakery_survey_sell_day_label($today, $sellDate);
+    if ($label['literal_tomorrow']) {
+        return $tomorrowTitle;
     }
-    return $cursor->format('Y-m-d');
+    $name = trim((string)($weekdayNames[$label['iso_weekday']] ?? ''));
+    if ($name === '') {
+        return $tomorrowTitle;
+    }
+    return str_replace(':day', $name, $weekdayTemplate);
+}
+
+/**
+ * Soonest sell/delivery date after $fromDate whose weekday is a delivery day.
+ * Defaults to every weekday including Sunday (Sat night to Sunday sell day).
+ *
+ * @param list<int> $deliveryWeekdays ISO-8601 weekdays (1=Mon through 7=Sun)
+ */
+function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6, 7]): string
+{
+    return bakery_survey_next_sell_date($fromDate, $deliveryWeekdays, []);
 }
 
 /**
@@ -482,40 +551,17 @@ function bakery_survey_store_verify_log_payload(array $fields): array
 }
 
 /**
- * Weekdays that actually have standing route stops (sell/delivery days).
+ * Weekdays that are sell days: standing routes and standing orders.
+ * A Saturday market order with no route still counts. Dated orders that
+ * are not on one of these weekdays are handled by bakery_survey_dated_sell_dates.
  *
  * @return list<int>
  */
 function bakery_survey_delivery_weekdays(PDO $db): array
 {
-    $days = [];
-    if (function_exists('table_exists') && table_exists($db, 'standing_routes')) {
-        $sql = 'SELECT DISTINCT CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END AS dow
-                FROM standing_routes sr
-                JOIN customers c ON c.id = sr.customer_id AND c.is_active = 1';
-        if (function_exists('bakery_sfb_ops_origin_clause')) {
-            $sql .= bakery_sfb_ops_origin_clause('c', $db);
-        }
-        foreach ($db->query($sql) as $row) {
-            $dow = (int)$row['dow'];
-            if ($dow >= 1 && $dow <= 7) {
-                $days[$dow] = true;
-            }
-        }
-    }
-    if ($days === [] && function_exists('table_exists') && table_exists($db, 'standing_orders')) {
-        $sql = 'SELECT DISTINCT CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END AS dow
-                FROM standing_orders so
-                JOIN customers c ON c.id = so.customer_id AND c.is_active = 1';
-        if (function_exists('bakery_sfb_ops_origin_clause')) {
-            $sql .= bakery_sfb_ops_origin_clause('c', $db);
-        }
-        foreach ($db->query($sql) as $row) {
-            $dow = (int)$row['dow'];
-            if ($dow >= 1 && $dow <= 7) {
-                $days[$dow] = true;
-            }
-        }
+    $days = bakery_survey_collect_standing_weekdays($db, 'standing_routes');
+    foreach (bakery_survey_collect_standing_weekdays($db, 'standing_orders') as $dow => $on) {
+        $days[$dow] = $on;
     }
     $list = array_map('intval', array_keys($days));
     sort($list);
@@ -525,6 +571,88 @@ function bakery_survey_delivery_weekdays(PDO $db): array
         sort($list);
     }
     return $list;
+}
+
+/**
+ * @param 'standing_routes'|'standing_orders' $table
+ * @return array<int, true>
+ */
+function bakery_survey_collect_standing_weekdays(PDO $db, string $table): array
+{
+    if ($table === 'standing_routes') {
+        $alias = 'sr';
+    } elseif ($table === 'standing_orders') {
+        $alias = 'so';
+    } else {
+        return [];
+    }
+    if (!function_exists('table_exists') || !table_exists($db, $table)) {
+        return [];
+    }
+    $sql = "SELECT DISTINCT CASE WHEN {$alias}.day_of_week = 0 THEN 7 ELSE {$alias}.day_of_week END AS dow
+            FROM {$table} {$alias}
+            JOIN customers c ON c.id = {$alias}.customer_id AND c.is_active = 1";
+    if (function_exists('bakery_sfb_ops_origin_clause')) {
+        $sql .= bakery_sfb_ops_origin_clause('c', $db);
+    }
+    $days = [];
+    foreach ($db->query($sql) as $row) {
+        $dow = (int)$row['dow'];
+        if ($dow >= 1 && $dow <= 7) {
+            $days[$dow] = true;
+        }
+    }
+    return $days;
+}
+
+/**
+ * Calendar dates after $fromDate (through 14 days) that have a dated order.
+ * These stay sell days even when that weekday has no standing route.
+ *
+ * @return list<string>
+ */
+function bakery_survey_dated_sell_dates(PDO $db, string $fromDate, int $horizonDays = 14): array
+{
+    $fromDate = bakery_survey_validate_ymd($fromDate);
+    if ($horizonDays < 1) {
+        $horizonDays = 1;
+    }
+    if ($horizonDays > 14) {
+        $horizonDays = 14;
+    }
+    if (!function_exists('table_exists') || !table_exists($db, 'daily_orders') || !table_exists($db, 'customers')) {
+        return [];
+    }
+    $until = (new DateTime($fromDate))->modify('+' . $horizonDays . ' days')->format('Y-m-d');
+    $origin = function_exists('bakery_sfb_ops_origin_clause')
+        ? bakery_sfb_ops_origin_clause('c', $db)
+        : '';
+    $sql = "SELECT DISTINCT do.order_date
+            FROM daily_orders do
+            JOIN customers c ON c.id = do.customer_id AND c.is_active = 1
+            WHERE do.order_date > ? AND do.order_date <= ?
+            {$origin}
+            ORDER BY do.order_date";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$fromDate, $until]);
+    $dates = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $date) {
+        $date = substr((string)$date, 0, 10);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
+            $dates[] = $date;
+        }
+    }
+    return $dates;
+}
+
+function bakery_survey_next_sell_date_from_db(PDO $db, string $fromDate): string
+{
+    $fromDate = bakery_survey_validate_ymd($fromDate);
+    return bakery_survey_next_sell_date(
+        $fromDate,
+        bakery_survey_delivery_weekdays($db),
+        bakery_survey_dated_sell_dates($db, $fromDate)
+    );
 }
 
 /** Open store_verify / route_review tokens are the auth — no staff PIN. */

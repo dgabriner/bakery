@@ -293,7 +293,7 @@ function bakery_render_driver_stop_item(
                     <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
                     <?php if ($receivingHours !== ''): ?><span><?php echo htmlspecialchars($receivingHours); ?></span><?php endif; ?>
                     <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(date('g:i A', strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
-                    <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> pcs</span><?php endif; ?>
+                    <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
                 </div>
             </div>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
@@ -637,7 +637,7 @@ document.body.classList.add('driver-route-prep');
         </div>
         <?php if ($totalStops > 0): ?>
         <div class="route-progress" aria-live="polite">
-            <div class="route-progress-text" id="routeProgressText"><?php echo $driverCompletedStops; ?> of <?php echo $totalStops; ?> done</div>
+            <div class="route-progress-text" id="routeProgressText"><?php echo htmlspecialchars(bakery_t('driver.done_count', ['done' => $driverCompletedStops, 'total' => $totalStops]), ENT_QUOTES, 'UTF-8'); ?></div>
             <div class="route-progress-track"><div class="route-progress-fill" id="routeProgressFill" style="width: <?php echo $progressPct; ?>%;"></div></div>
         </div>
         <?php endif; ?>
@@ -1445,10 +1445,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'map_drive' => bakery_t('driver.map_drive'),
     'map_day_drive' => bakery_t('driver.map_day_drive'),
     'map_duration_distance' => bakery_t('driver.map_duration_distance', ['duration' => '__DURATION__', 'distance' => '__DISTANCE__']),
-    'map_window_opens' => bakery_t('driver.map_window_opens', ['time' => '__TIME__']),
-    'map_window_due' => bakery_t('driver.map_window_due', ['time' => '__TIME__']),
-    'map_window_late' => bakery_t('driver.map_window_late', ['time' => '__TIME__']),
-    'map_window_by' => bakery_t('driver.map_window_by', ['time' => '__TIME__']),
+    'map_window_opens' => bakery_t('driver.map_window_opens'),
+    'map_window_due' => bakery_t('driver.map_window_due'),
+    'map_window_late' => bakery_t('driver.map_window_late'),
+    'map_window_by' => bakery_t('driver.map_window_by'),
+    'done_count' => bakery_t('driver.done_count'),
     'map_window_range' => bakery_t('driver.map_window_range', ['from' => '__FROM__', 'to' => '__TO__']),
     'map_minutes_short' => bakery_t('driver.map_minutes_short', ['count' => '__COUNT__']),
     'map_hour_minutes_short' => bakery_t('driver.map_hour_minutes_short', ['hours' => '__HOURS__', 'minutes' => '__MINUTES__']),
@@ -2134,6 +2135,11 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
 
     var routeAdjust = { open: false, picked: [], snapshot: [], saving: false };
 
+    function formatDoneCount(done, total) {
+        var template = di.done_count || ':done / :total done';
+        return String(template).split(':done').join(String(done)).split(':total').join(String(total));
+    }
+
     function refreshRouteUi() {
         var list = document.getElementById('stopList');
         if (!list) return;
@@ -2169,11 +2175,12 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         if (root) root.setAttribute('data-completed', String(completed));
         var text = document.getElementById('routeProgressText');
         var fill = document.getElementById('routeProgressFill');
-        if (text) text.textContent = completed + ' of ' + total + ' done';
+        var doneLabel = formatDoneCount(completed, total);
+        if (text) text.textContent = doneLabel;
         if (fill && total > 0) fill.style.width = Math.round((completed / total) * 100) + '%';
         var mobileText = document.getElementById('routeMobileProgressText');
         var mobileFill = document.getElementById('routeMobileProgressFill');
-        if (mobileText) mobileText.textContent = completed + ' / ' + total + ' done';
+        if (mobileText) mobileText.textContent = doneLabel;
         if (mobileFill && total > 0) mobileFill.style.width = Math.round((completed / total) * 100) + '%';
         var progressPercent = document.getElementById('routeProgressPercent');
         var progressRing = document.querySelector('.route-progress-ring');

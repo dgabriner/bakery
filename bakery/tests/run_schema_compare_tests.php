@@ -341,8 +341,41 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 88, 'next unused schema number is 088');
-$assert(bakery_schema_next_migration_id('demo_feature') === '088_demo_feature', 'next id is 088_ plus slug');
+$assert(bakery_schema_next_migration_number() === 93, 'next unused schema number is 093');
+$assert(bakery_schema_next_migration_id('demo_feature') === '093_demo_feature', 'next id is 093_ plus slug');
+
+$liveTimeClockLedger = ['083_time_clock_punches', '086_time_clock_overrides'];
+$assert(bakery_schema_migration_ledger_id('database/schema/086_ingredient_prices.sql') === '086_ingredient_prices', 'ledger id is the filename without .sql');
+$assert(bakery_schema_migration_ledger_id('086_ingredient_prices') === '086_ingredient_prices', 'a bare id stays the full filename');
+$assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '086_time_clock_overrides.sql') === true, 'Live time-clock 086 is applied by its own filename');
+$assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '086_ingredient_prices.sql') === false, 'main 086_ingredient_prices stays pending beside Live 086_time_clock_overrides');
+$assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '083_full_week_intensive.sql') === false, 'main 083_full_week_intensive stays pending beside Live 083_time_clock_punches');
+$assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '091_time_clock_punches.sql') === false, '091 is a new filename even when Live already recorded 083_time_clock_punches');
+$assert(bakery_schema_migration_id_is_applied(['091_time_clock_punches'], '091') === false, 'a numeric prefix is not an applied migration');
+
+$db->exec(
+    'CREATE TABLE IF NOT EXISTS schema_migrations (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+);
+$ledgerLookup = $db->prepare('SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1');
+$ingredientId = bakery_schema_migration_ledger_id('086_ingredient_prices.sql');
+$liveOverrideId = bakery_schema_migration_ledger_id('086_time_clock_overrides.sql');
+$ledgerLookup->execute([$ingredientId]);
+$ingredientWasApplied = (bool)$ledgerLookup->fetchColumn();
+if ($ingredientWasApplied) {
+    $db->prepare('DELETE FROM schema_migrations WHERE id = ?')->execute([$ingredientId]);
+}
+$db->prepare('INSERT IGNORE INTO schema_migrations (id) VALUES (?)')->execute([$liveOverrideId]);
+$ledgerLookup->execute([$ingredientId]);
+$assert(!$ledgerLookup->fetchColumn(), 'bakerysf_test ledger row 086_time_clock_overrides does not mark 086_ingredient_prices applied');
+$ledgerLookup->execute([$liveOverrideId]);
+$assert((bool)$ledgerLookup->fetchColumn(), 'bakerysf_test ledger matches the full filename id');
+$db->prepare('DELETE FROM schema_migrations WHERE id = ?')->execute([$liveOverrideId]);
+if ($ingredientWasApplied) {
+    $db->prepare('INSERT IGNORE INTO schema_migrations (id) VALUES (?)')->execute([$ingredientId]);
+}
 $third062 = bakery_schema_migration_ids_from_dir();
 $third062[] = '062_another_collision';
 $assert(isset(bakery_schema_unexpected_duplicate_prefixes($third062)['062']), 'a third 062 file is rejected');
