@@ -650,6 +650,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_demand_scheduler_tests.php',
                 'tests/run_operating_demand_tests.php',
                 'tests/run_demand_visit_compare_tests.php',
+                'tests/run_get_order_materialize_tests.php',
             ],
             'invariants' => [
                 'Dated beats standing per customer, never all-or-nothing per date',

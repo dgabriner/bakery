@@ -626,8 +626,13 @@
 }
 
 .ops-inline-action-btn {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 44px;
     padding: 0.35rem 0.65rem;
+    font-family: inherit;
     font-size: 0.82rem;
     font-weight: 600;
     color: var(--sf-text, #1a1a1a);

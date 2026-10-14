@@ -5,6 +5,9 @@
  *
  * Inactive customers never generate orders. Dated quantity changes are
  * preserved unless overwrite mode is explicitly requested.
+ * Page views must not call the fillers. The cron and an explicit manager
+ * Build from standing action are the writers. An order with
+ * standing_fill_blocked stays empty unless overwrite is requested.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -136,6 +139,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
     // which implicitly commits in MariaDB. Finish them before opening the
     // generation transaction.
     bakery_customer_order_ensure_schema($db);
+    $standingFillColumn = bakery_daily_order_standing_fill_column_ready($db);
     $db->beginTransaction();
 
     try {
@@ -299,6 +303,13 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                 }
 
                 if ($dailyOrderId) {
+                    $fillBlocked = $existedBefore
+                        && !$overwriteChanged
+                        && bakery_daily_order_standing_fill_is_blocked($db, (int)$dailyOrderId, $standingFillColumn);
+                    if ($existedBefore && $overwriteChanged) {
+                        bakery_daily_order_set_standing_fill_blocked($db, (int)$dailyOrderId, false, $standingFillColumn);
+                    }
+                    if (!$fillBlocked) {
                     $existingItemQtyStmt->execute([$dailyOrderId]);
                     $existingQtyByProduct = [];
                     foreach ($existingItemQtyStmt->fetchAll(PDO::FETCH_ASSOC) as $existingItem) {
@@ -364,6 +375,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
 
                     // Update order total efficiently
                     bakery_daily_order_recompute_total($db, (int)$dailyOrderId);
+                    }
 
                     $standingRoute = $standingRouteByCustomer[(int)$customerId] ?? null;
                     if ($standingRoute) {
@@ -604,10 +616,10 @@ function bakery_generate_daily_orders_week(PDO $db, string $date, array $options
  * demand exists but dated commercial orders are still missing, including
  * already-generated orders that lack newly added standing product lines.
  *
- * Intended for first Daily Run / Daily Orders page view so tomorrow's
- * demand is never a remembered manual click. Always preserves dated
- * quantity edits (overwrite_changed is forced off). Skips closed days
- * and no-ops when generation is already complete.
+ * Callers are the demand scheduler cron and an explicit manager action.
+ * Page views must not call this. Always preserves dated quantity edits
+ * (overwrite_changed is forced off). Skips closed days, skips orders a
+ * manager emptied on purpose, and no-ops when generation is already complete.
  *
  * @param array{record_event?:bool, assign_routes?:bool, skip_if_closed?:bool} $options
  * @return array{ran:bool, skipped_reason:?string, result:?array}
@@ -860,6 +872,62 @@ function bakery_fill_demand_horizon(PDO $db, ?string $alsoDate = null, array $op
 }
 
 /**
+ * Manager POST: build one date from standing. CSRF and manager role required.
+ * No-ops unless the request is that action. Redirects back to the current page.
+ */
+function bakery_try_build_from_standing_post(PDO $db): void
+{
+    if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
+        return;
+    }
+    if ((string)($_POST['action'] ?? '') !== 'build_from_standing') {
+        return;
+    }
+    bakery_require_role(['administrator', 'manager']);
+    bakery_require_csrf();
+    $date = trim((string)($_POST['date'] ?? ''));
+    $dateObject = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('Invalid order date');
+    }
+    $result = bakery_generate_daily_orders_from_standing($db, $date, [
+        'overwrite_changed' => false,
+        'record_event' => true,
+    ]);
+    $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? 'index.php'));
+    $message = function_exists('bakery_t')
+        ? bakery_t('orders.built_from_standing', [
+            'date' => $date,
+            'orders' => (int)($result['orders_created'] ?? 0),
+        ])
+        : 'Built dated orders from standing.';
+    $query = $_GET;
+    $query['date'] = $date;
+    $query['flash'] = 'success';
+    $query['msg'] = $message;
+    safe_redirect($script . '?' . http_build_query($query));
+}
+
+/**
+ * Explicit Build from standing control. Empty for anyone who is not a manager.
+ */
+function bakery_build_from_standing_button(string $date, string $buttonClass = 'btn btn-primary'): string
+{
+    if (!function_exists('bakery_user_has_role') || !bakery_user_has_role(['administrator', 'manager'])) {
+        return '';
+    }
+    $label = function_exists('bakery_t') ? bakery_t('ux.daily_orders.generate_standing') : 'Build from standing';
+    $csrf = function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
+    return '<form method="post" action="" class="build-from-standing-form" style="display:inline-flex;margin:0;align-items:center">'
+        . $csrf
+        . '<input type="hidden" name="action" value="build_from_standing">'
+        . '<input type="hidden" name="date" value="' . htmlspecialchars($date, ENT_QUOTES, 'UTF-8') . '">'
+        . '<button type="submit" class="' . htmlspecialchars($buttonClass, ENT_QUOTES, 'UTF-8') . '">'
+        . htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
+        . '</button></form>';
+}
+
+/**
  * CLI cron guard. Unforced runs are DreamHost production (bakerysf) or
  * DreamHost staging. Local one-shots need --force. Laptop-to-prod is refused.
  */
@@ -879,7 +947,7 @@ function bakery_demand_scheduler_assert_cli(PDO $db, bool $force = false): void
     if ($isLocal) {
         if (!$force) {
             throw new RuntimeException(
-                'Demand scheduler cron is DreamHost-only. Opening Daily Run fills the horizon locally, or pass --force for a one-shot.'
+                'Demand scheduler cron is DreamHost-only. Use Build from standing, or pass --force for a one-shot.'
             );
         }
         return;

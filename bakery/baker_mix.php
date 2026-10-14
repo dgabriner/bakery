@@ -10,6 +10,7 @@ require_once 'includes/database.php';
 require_once 'includes/daily_order_generation.php';
 require_once 'includes/baker_mix.php';
 require_once 'includes/kitchen_segments.php';
+require_once 'includes/operational_exceptions.php';
 
 bakery_require_role(['baker', 'manager', 'administrator']);
 
@@ -26,11 +27,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || strtotime($selectedDa
 }
 $selectedDay = bakery_standing_day_from_date($selectedDate);
 
-try {
-    bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => false]);
-} catch (Throwable $e) {
-    error_log('baker_mix demand horizon: ' . $e->getMessage());
-}
+bakery_try_build_from_standing_post($db);
 
 $bakerProductIds = function_exists('bakery_baker_product_ids') ? bakery_baker_product_ids($db) : null;
 $sheet = [
@@ -66,12 +63,14 @@ $page_title = bakery_t('page.baker_mix');
 ?>
 
 <div class="bm-screen">
+    <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
     <?php if ($isBaker) { bakery_kitchen_segments_render('mix', $selectedDate); } ?>
     <header class="bm-header">
         <div class="bm-header__top">
             <h1 class="bm-title"><?php bakery_te('baker_mix.title'); ?></h1>
             <?php if (!$isBaker): ?>
             <div class="bm-header__links">
+                <?php echo bakery_build_from_standing_button($selectedDate, 'bm-link'); ?>
                 <a class="bm-link" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('baker_mix.open_production'); ?></a>
                 <a class="bm-link" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.pack_list'); ?></a>
             </div>
@@ -261,6 +260,7 @@ $page_title = bakery_t('page.baker_mix');
 .bm-lead { margin: 0 0 14px; opacity: .92; font-size: .95rem; line-height: 1.4; }
 .bm-header__links { display: flex; flex-wrap: wrap; gap: 8px; }
 .bm-link { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; color: #fff; font-weight: 700; min-height: 44px; padding: 10px 14px; text-decoration: none; display: inline-flex; align-items: center; }
+button.bm-link { font: inherit; cursor: pointer; }
 .bm-date-form { display: grid; gap: 8px; }
 .bm-date-label { font-size: .9rem; opacity: .9; }
 .bm-date-input { width: 100%; max-width: 280px; min-height: 48px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: #fff; color: #173f3c; font-size: 16px; }

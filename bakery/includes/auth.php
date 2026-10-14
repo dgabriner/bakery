@@ -635,6 +635,9 @@ function bakery_wants_json() {
     if ($script === 'complete_delivery.php' && ($method === 'GET' || $method === 'HEAD')) {
         return false;
     }
+    if ($script === 'daily_orders.php' && $method === 'POST') {
+        return true;
+    }
     // Every *_api.php endpoint answers JSON on auth/CSRF failure, listed or not.
     if (substr($script, -8) === '_api.php') {
         return true;

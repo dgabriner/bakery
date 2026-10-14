@@ -14,6 +14,8 @@ require_once 'includes/customer_record.php';
 $page_title = bakery_t('page.driver_assignment');
 bakery_ensure_standing_routes_order_column($db);
 
+bakery_try_build_from_standing_post($db);
+
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -250,6 +252,7 @@ try {
 
 <?php if ($pageLoadError): ?>
 <div class="container" style="padding:1.5rem;">
+    <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
   <div class="alert alert-danger" style="background:#f8d7da;color:#721c24;padding:1rem;border-radius:6px;">
     <strong>Driver assignment failed to load:</strong>
     <?php echo htmlspecialchars($pageLoadError); ?>
@@ -290,6 +293,7 @@ try {
             </div>
         </div>
         <div class="date-controls">
+            <?php echo bakery_build_from_standing_button($selectedDate, 'btn btn-primary'); ?>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' -1 day'))]))); ?>" class="btn btn-outline">← Previous Day</a>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d')]))); ?>" class="btn btn-primary">Today</a>
             <a href="?<?php echo htmlspecialchars(http_build_query(bakery_ops_workflow_query(['date' => date('Y-m-d', strtotime($selectedDate . ' +1 day'))]))); ?>" class="btn btn-outline">Next Day →</a>

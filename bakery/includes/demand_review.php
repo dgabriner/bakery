@@ -52,6 +52,9 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
 
     $zoneJoin = bakery_customer_zone_join_sql();
     $zoneSelect = 'COALESCE(z.name, NULLIF(c.zone, \'\'), \'No Zone\') AS zone_label';
+    $fillBlockSelect = (function_exists('column_exists') && column_exists($db, 'daily_orders', 'standing_fill_blocked'))
+        ? 'do.standing_fill_blocked'
+        : '0 AS standing_fill_blocked';
 
     // Standing forecast lines for this weekday.
     $standingSql = "
@@ -87,6 +90,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
     // Dated daily orders + items for this date.
     $dailySql = "
         SELECT do.id AS daily_order_id, do.customer_id, do.status, do.total_amount,
+               {$fillBlockSelect},
                do.driver_id AS legacy_driver_id,
                c.is_active,
                c.name AS customer_name, c.address, c.zone, c.zone_id,
@@ -234,6 +238,9 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
             $customers[$cid]['assignment_driver_id'] = (int)$row['assignment_driver_id'];
         }
         $customers[$cid]['has_daily'] = true;
+        if (!empty($row['standing_fill_blocked'])) {
+            $customers[$cid]['standing_fill_blocked'] = 1;
+        }
 
         if ($row['product_id'] === null) {
             continue;
@@ -389,6 +396,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
         if (empty($customer['paused'])
             && !empty($customer['has_standing'])
             && !empty($customer['has_daily'])
+            && empty($customer['standing_fill_blocked'])
         ) {
             foreach ($customer['line_map'] as $line) {
                 if ((int)($line['standing_qty'] ?? 0) > 0 && $line['daily_qty'] === null) {
@@ -529,6 +537,7 @@ function bakery_demand_review_empty_customer(array $row, $standingRoute = null) 
         'assignment_driver_id' => isset($standingRoute['driver_id']) ? (int)$standingRoute['driver_id'] : (isset($row['assignment_driver_id']) ? (int)$row['assignment_driver_id'] : null),
         'has_standing' => false,
         'has_daily' => false,
+        'standing_fill_blocked' => 0,
         'paused' => false,
         'standing_items' => [],
         'line_map' => [],
@@ -589,7 +598,11 @@ function bakery_demand_review_classify_customer(array $customer) {
     }
 
     if (!empty($customer['has_daily']) && !$hasDailyItems && !empty($customer['has_standing'])) {
-        // Dated order shell exists but no line items — standing expected units are unfulfilled on this date.
+        // A manager emptied this order on purpose. It is a dated decision, not a missing shell.
+        if (!empty($customer['standing_fill_blocked'])) {
+            return 'changed';
+        }
+        // Dated order shell exists but no line items. Standing units are still unfulfilled.
         return 'empty_daily';
     }
     if ($hasDiff) {
@@ -1826,6 +1839,9 @@ function bakery_demand_set_dated_quantity(PDO $db, int $customerId, string $date
     }
 
     bakery_customer_update_daily_total($db, $dailyOrderId);
+    if ($quantity <= 0 && function_exists('bakery_daily_order_block_standing_fill_if_empty')) {
+        bakery_daily_order_block_standing_fill_if_empty($db, $dailyOrderId);
+    }
     $changed = $created || $oldQty === null || $oldQty !== $quantity;
     if ($changed) {
         if (!isset($product) || !is_array($product)) {
@@ -1991,6 +2007,9 @@ function bakery_demand_apply_standing_to_dated(PDO $db, int $customerId, string 
     $existing = bakery_customer_daily_order_row($db, $customerId, $date);
     $created = !$existing;
     $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $date);
+    if (function_exists('bakery_daily_order_set_standing_fill_blocked')) {
+        bakery_daily_order_set_standing_fill_blocked($db, (int)$dailyOrderId, false);
+    }
     $added = 0;
 
     if (!$created) {

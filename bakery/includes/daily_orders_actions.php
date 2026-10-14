@@ -191,6 +191,9 @@ function bakery_daily_orders_action_update_quantity(PDO $db, array $input, ?arra
 
     if ($dailyOrderId) {
         bakery_daily_orders_update_order_total($db, $dailyOrderId);
+        if ($quantity <= 0) {
+            bakery_daily_order_block_standing_fill_if_empty($db, (int)$dailyOrderId);
+        }
     }
 
     if ($itemRow && $oldQty !== null && $oldQty !== $quantity) {

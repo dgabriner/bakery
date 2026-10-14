@@ -124,11 +124,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || strtotime($selectedDa
 }
 $selectedDay = bakery_standing_day_from_date($selectedDate);
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
-try {
-    bakery_fill_demand_horizon($db, $selectedDate, ['record_event' => false]);
-} catch (Throwable $e) {
-    error_log('production demand horizon: ' . $e->getMessage());
-}
+bakery_try_build_from_standing_post($db);
 $pageReturnKey = $returnTarget['key'] ?? null;
 $attentionShortfall = (string)($_GET['attention'] ?? '') === 'shortfall';
 $attentionLabel = $attentionShortfall
@@ -672,6 +668,7 @@ if (!empty($groupedData) && is_array($groupedData)) {
 
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
 <div class="bp-screen">
+    <?php echo bakery_ops_render_flash(bakery_ops_read_flash()); ?>
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <?php if ($isBaker) { bakery_kitchen_segments_render('bake', $selectedDate); } ?>
     <header class="bp-header">
@@ -682,6 +679,7 @@ if (!empty($groupedData) && is_array($groupedData)) {
                     <a class="bp-pack-link" href="<?php echo htmlspecialchars($productionCenterHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production.open_production_center'); ?></a>
                 <?php endif; ?>
                 <?php if (!$isBaker): ?>
+                <?php echo bakery_build_from_standing_button($selectedDate, 'bp-pack-link'); ?>
                 <a class="bp-pack-link<?php echo $allProductionComplete ? ' bp-pack-link--ready' : ''; ?>" href="<?php echo htmlspecialchars($packListHref, ENT_QUOTES, 'UTF-8'); ?>">
                     <?php bakery_te('nav.pack_list'); ?>
                 </a>
@@ -1204,6 +1202,7 @@ if (!empty($groupedData) && is_array($groupedData)) {
 .bp-header__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .bp-title { margin: 0; font-size: 1.45rem; line-height: 1.2; }
 .bp-pack-link { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; color: #fff; font-weight: 700; min-height: 44px; padding: 10px 16px; text-decoration: none; white-space: nowrap; }
+button.bp-pack-link { font: inherit; cursor: pointer; }
 .bp-header__links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bp-pack-link--ready { background: var(--sf-accent, #d88346); border-color: #e69a5e; }
 .bp-date-form { display: grid; gap: 8px; }
