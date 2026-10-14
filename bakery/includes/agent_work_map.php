@@ -793,7 +793,7 @@ function bakery_agent_work_map_core(): array
                 'includes/route_manager.php',
                 'includes/route_manager_cash.php',
                 'includes/cod_square_guard.php',
-                'database/schema/093_cod_square_override.sql',
+                'database/schema/095_cod_square_override.sql',
                 'database/schema/094_payment_terms.sql',
                 'includes/payment_terms.php',
                 'css/route_manager.css',
