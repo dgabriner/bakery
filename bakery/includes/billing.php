@@ -132,7 +132,8 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
         $delivered = $deliveredRaw !== null && $deliveredRaw !== '' ? (int)$deliveredRaw : null;
         $unitPrice = round((float)($item['unit_price'] ?? 0), 2);
         $lineTotal = round((float)($item['line_total'] ?? 0), 2);
-        if ($delivered !== null) {
+        $isStoreCredit = (int)($item['is_store_credit'] ?? 0) === 1;
+        if ($delivered !== null && !$isStoreCredit) {
             $lineTotal = round($unitPrice * $delivered, 2);
         }
         $orderedPieces += $ordered;
@@ -168,6 +169,7 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
             'unit_price' => $unitPrice,
             'line_total' => $lineTotal,
             'has_price' => $unitPrice > 0 || $isNoCharge,
+            'is_store_credit' => $isStoreCredit ? 1 : 0,
             'is_no_charge' => $isNoCharge ? 1 : 0,
             'no_charge_reason' => $isNoCharge ? $noChargeReason : null,
             'no_charge_label' => $isNoCharge ? bakery_billing_line_no_charge_label([
@@ -480,20 +482,29 @@ function bakery_billing_load_items(PDO $db, array $orderIds) {
     $noChargeSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_no_charge')
         ? 'doi.is_no_charge, doi.no_charge_reason,'
         : '0 AS is_no_charge, NULL AS no_charge_reason,';
+    $creditSelect = function_exists('column_exists') && column_exists($db, 'daily_order_items', 'is_store_credit')
+        ? 'doi.is_store_credit,'
+        : '0 AS is_store_credit,';
+    $removedName = function_exists('bakery_t') ? bakery_t('billing.removed_product') : 'Removed product';
     $itemStmt = $db->prepare(
         "SELECT doi.daily_order_id, doi.id AS item_id, doi.product_id, doi.quantity,
                 doi.delivered_quantity, doi.unit_price, doi.line_total,
                 {$noChargeSelect}
+                {$creditSelect}
                 p.name AS product_name, pl.name AS product_line_name
          FROM daily_order_items doi
-         JOIN products p ON p.id = doi.product_id
+         LEFT JOIN products p ON p.id = doi.product_id
          LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
          LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
          WHERE doi.daily_order_id IN ($placeholders)
-         ORDER BY doi.daily_order_id, pl.name, p.name"
+         ORDER BY doi.daily_order_id, pl.name, p.name, doi.id"
     );
     $itemStmt->execute(array_values($orderIds));
     foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $item['product_missing'] = ($item['product_name'] === null || $item['product_name'] === '') ? 1 : 0;
+        if ((int)$item['product_missing'] === 1) {
+            $item['product_name'] = $removedName;
+        }
         $itemsByOrder[(int)$item['daily_order_id']][] = $item;
     }
     return $itemsByOrder;
@@ -548,7 +559,10 @@ function bakery_billing_enrich_orders(array $orders, array $itemsByOrder, ?array
         $order['payment_status'] = bakery_billing_payment_status($order, [
             'payment_collection' => $order['payment_collection'] ?? 'signature',
         ]);
-        $order['is_cod'] = (($order['payment_collection'] ?? 'cod') === 'cod');
+        $order['payment_terms'] = bakery_payment_terms_normalize(
+            $order['payment_terms'] ?? ((($order['payment_collection'] ?? 'cod') === 'cod') ? 'cod' : 'invoice')
+        );
+        $order['is_cod'] = bakery_payment_terms_is_cod($order['payment_terms']);
         $order['invoice_sent_at'] = $order['invoice_sent_at'] ?? null;
         $order['invoice_sent_to_email'] = $order['invoice_sent_to_email'] ?? null;
         $order['invoice_sent_by_user_id'] = $order['invoice_sent_by_user_id'] ?? null;
@@ -685,10 +699,13 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
     if ($invoicedOnly) {
         $where[] = "do.status = 'invoiced'";
     }
+    $termsReady = function_exists('column_exists') && column_exists($db, 'customers', 'payment_terms');
     if ($collectionFilter === 'cod') {
-        $where[] = "c.payment_collection = 'cod'";
+        $where[] = $termsReady ? "c.payment_terms = 'cod'" : "c.payment_collection = 'cod'";
     } elseif ($collectionFilter === 'invoice') {
-        $where[] = "c.payment_collection <> 'cod'";
+        $where[] = $termsReady
+            ? "c.payment_terms IN ('invoice', 'check')"
+            : "c.payment_collection <> 'cod'";
     }
 
     $orderSql = 'do.order_date DESC, c.name, do.id DESC';
@@ -718,6 +735,12 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
         $sendCols .= ', do.square_invoice_id, do.square_order_id, do.square_public_url, do.square_status,
                        do.square_recipient_email, do.square_published_at, do.square_paid_at, do.square_last_synced_at';
     }
+    if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'cod_square_override_reason')) {
+        $sendCols .= ', do.cod_square_override_reason';
+    }
+    $termsCol = function_exists('column_exists') && column_exists($db, 'customers', 'payment_terms')
+        ? ', c.payment_terms'
+        : '';
 
     $stmt = $db->prepare(
         'SELECT do.id, do.order_date, do.status, do.total_amount,
@@ -726,7 +749,8 @@ function bakery_billing_query_orders(PDO $db, array $filters) {
                 do.amount_collected' . $sendCols . ',
                 c.id AS customer_id, c.name AS customer_name, c.address AS customer_address,
                 c.email AS customer_email, c.phone AS customer_phone,
-                c.zone AS customer_zone, c.payment_collection,
+                c.zone AS customer_zone, c.payment_collection' . $termsCol . ',
+                do.driver_id,
                 asn.delivery_status AS assignment_delivery_status,
                 asn.driver_id AS assigned_driver_id,
                 COALESCE(asn_drv.name, legacy_drv.name) AS assigned_driver_name
@@ -788,6 +812,7 @@ function bakery_billing_header_mismatch_rows(PDO $db): array
             'customer_name' => (string)($order['customer_name'] ?? ''),
             'stored_header_amount' => $compared['stored_header_amount'],
             'line_header_amount' => $compared['line_header_amount'],
+            'reasons' => bakery_billing_header_mismatch_reasons($order, $itemsByOrder[$orderId] ?? []),
         ];
     }
     return $rows;
@@ -1038,7 +1063,8 @@ function bakery_billing_export_rows_query(PDO $db, array $filters) {
                 continue;
             }
             $unitPrice = (float)($line['unit_price'] ?? 0);
-            $lineTotal = $line['delivered_quantity'] !== null
+            $isStoreCredit = (int)($line['is_store_credit'] ?? 0) === 1;
+            $lineTotal = ($line['delivered_quantity'] !== null && !$isStoreCredit)
                 ? round($unitPrice * (int)$line['delivered_quantity'], 2)
                 : (float)$line['line_total'];
             $noChargeLabel = bakery_billing_line_no_charge_label($line);

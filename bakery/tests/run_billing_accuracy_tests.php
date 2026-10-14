@@ -17,6 +17,8 @@ bakery_assert_local_test_target($db);
 
 require_once $root . '/includes/billing.php';
 require_once $root . '/includes/billing_header.php';
+require_once $root . '/includes/billing_cod_day.php';
+require_once $root . '/includes/payment_terms.php';
 require_once $root . '/includes/cod_square_guard.php';
 require_once $root . '/includes/route_manager_cash.php';
 require_once $root . '/complete_delivery.php';
@@ -226,6 +228,332 @@ $driverJs = (string)file_get_contents($root . '/includes/driver_delivery.js');
 assert_true(strpos($driverJs, 'square_prepaid') !== false, 'driver COD entry knows about Square prepaid');
 $routeJs = (string)file_get_contents($root . '/includes/route_manager.js');
 assert_true(strpos($routeJs, 'square_prepaid') !== false, 'Route Manager shows Square prepaid stops');
+
+echo "Payment terms decide the path\n";
+assert_eq('cod', bakery_payment_terms_normalize(''), 'blank terms default to COD');
+assert_eq('cod', bakery_payment_terms_normalize('COD'), 'COD terms stay COD');
+assert_eq('invoice', bakery_payment_terms_normalize('signature'), 'legacy signature accounts are invoice terms');
+assert_eq('invoice', bakery_payment_terms_normalize('invoice'), 'invoice terms stay invoice');
+assert_eq('check', bakery_payment_terms_normalize('check'), 'check terms stay check');
+assert_true(bakery_payment_terms_is_cod('cod'), 'COD is the cash path');
+assert_true(!bakery_payment_terms_is_cod('check'), 'check is not the cash path');
+assert_true(bakery_payment_terms_is_invoice_path('invoice'), 'invoice accounts stay on the invoice path');
+assert_true(bakery_payment_terms_is_invoice_path('check'), 'check accounts stay on the invoice path');
+assert_true(!bakery_payment_terms_is_invoice_path('cod'), 'COD does not take the invoice path');
+$checkPair = bakery_customer_payment_terms_from_post(['payment_terms' => 'check']);
+assert_eq('check', $checkPair['payment_terms'], 'customer form stores check terms');
+assert_eq('signature', $checkPair['payment_collection'], 'check keeps the legacy non-cash collection flag');
+$codPair = bakery_customer_payment_terms_from_post(['payment_collection' => 'cod']);
+assert_eq('cod', $codPair['payment_terms'], 'a COD post stays COD');
+$panSql = bakery_payment_terms_pan_dulce_collection_sql($db);
+assert_true(strpos($panSql, "payment_terms IN ('invoice', 'check')") !== false, 'invoice and check terms are not forced onto COD');
+
+echo "Confirmed lines use delivered quantity and credits\n";
+$confirmedOrder = [
+    'status' => 'delivered',
+    'delivery_confirmed_at' => '2026-08-20 15:00:00',
+    'credits_taken_back' => 0,
+];
+accuracy_float(10.00, bakery_billing_line_chargeable_amount([
+    'quantity' => 4,
+    'delivered_quantity' => 2,
+    'unit_price' => 5.00,
+    'line_total' => 20.00,
+    'is_no_charge' => 0,
+], $confirmedOrder), 'a confirmed stop prices the line from delivered quantity');
+accuracy_float(-6.00, bakery_billing_line_chargeable_amount([
+    'quantity' => 2,
+    'delivered_quantity' => 2,
+    'unit_price' => 3.00,
+    'line_total' => -6.00,
+    'is_store_credit' => 1,
+], $confirmedOrder), 'a store credit line stays negative');
+$builtReasons = bakery_billing_header_mismatch_reasons($confirmedOrder, [[
+    'quantity' => 4,
+    'delivered_quantity' => 2,
+    'unit_price' => 5.00,
+    'line_total' => 20.00,
+    'product_name' => 'Country loaf',
+    'is_no_charge' => 0,
+    'is_store_credit' => 0,
+]]);
+assert_true(in_array('built_before_delivery', $builtReasons, true), 'ordered quantity on a confirmed stop is flagged');
+$creditReasons = bakery_billing_header_mismatch_reasons([
+    'status' => 'delivered',
+    'delivery_confirmed_at' => '2026-08-20 15:00:00',
+    'credits_taken_back' => 2,
+], [[
+    'quantity' => 4,
+    'delivered_quantity' => 4,
+    'unit_price' => 5.00,
+    'line_total' => 20.00,
+    'product_name' => 'Country loaf',
+    'is_store_credit' => 0,
+]]);
+assert_true(in_array('credit_without_line', $creditReasons, true), 'a header credit with no line is named');
+assert_true(!in_array('unexplained', $creditReasons, true), 'a missing credit line is not called unexplained');
+$openReasons = bakery_billing_header_mismatch_reasons([
+    'status' => 'delivered',
+    'delivery_confirmed_at' => '2026-08-24 15:00:00',
+    'credits_taken_back' => 0,
+], [[
+    'quantity' => 2,
+    'delivered_quantity' => 2,
+    'unit_price' => 10.00,
+    'line_total' => 20.00,
+    'product_name' => 'Country loaf',
+    'is_store_credit' => 0,
+]]);
+assert_eq(['unexplained'], $openReasons, 'a residual gap with no known cause is unexplained');
+$missingReasons = bakery_billing_header_mismatch_reasons($confirmedOrder, [[
+    'quantity' => 1,
+    'delivered_quantity' => 1,
+    'unit_price' => 4.00,
+    'line_total' => 4.00,
+    'product_name' => '',
+    'product_missing' => 1,
+]]);
+assert_true(in_array('product_missing', $missingReasons, true), 'a line whose product is gone is flagged');
+
+accuracy_float(10.00, bakery_billing_cod_expected_amount([
+    'payment_terms' => 'cod',
+    'total_amount' => 10.00,
+    'delivery_order_total' => 10.00,
+    'credits_taken_back' => 2,
+], [[
+    'line_total' => 20.00,
+    'is_store_credit' => 0,
+]]), 'historical COD expected cash stays the stored header when the credit has no line');
+accuracy_float(14.00, bakery_billing_cod_expected_amount([
+    'payment_terms' => 'cod',
+    'status' => 'delivered',
+    'delivery_confirmed_at' => '2026-08-20 15:00:00',
+    'delivery_order_total' => 20.00,
+], [
+    [
+        'quantity' => 4,
+        'delivered_quantity' => 4,
+        'unit_price' => 5.00,
+        'line_total' => 20.00,
+        'is_store_credit' => 0,
+    ],
+    [
+        'line_total' => -6.00,
+        'unit_price' => 3.00,
+        'is_store_credit' => 1,
+    ],
+]), 'a credit line reduces the COD cash the driver should collect');
+accuracy_float(0.00, bakery_billing_cod_expected_amount([
+    'payment_terms' => 'invoice',
+    'delivery_order_total' => 20.00,
+], [['line_total' => 20.00]]), 'invoice terms do not create driver cash');
+accuracy_float(0.00, bakery_billing_cod_expected_amount([
+    'payment_terms' => 'check',
+    'delivery_order_total' => 20.00,
+], [['line_total' => 20.00]]), 'check terms do not create driver cash');
+accuracy_float(0.00, bakery_billing_cod_expected_amount([
+    'payment_terms' => 'cod',
+    'delivery_order_total' => 20.00,
+    'square_prepaid' => true,
+], [['line_total' => 20.00]]), 'Square prepaid stays out of COD expected cash');
+
+echo "COD day, invoice path, and lines that must stay visible\n";
+$suffix = substr(uniqid('', true), -8);
+$codDate = '2019-03-03';
+$db->prepare('INSERT INTO drivers (name) VALUES (?)')->execute(['Accuracy Driver ' . $suffix]);
+$driverId = (int)$db->lastInsertId();
+$driverName = 'Accuracy Driver ' . $suffix;
+assert_true($driverId > 0, 'a driver exists for the COD day');
+$termsReady = function_exists('column_exists') && column_exists($db, 'customers', 'payment_terms');
+assert_true($termsReady, 'customers.payment_terms exists');
+
+$insertCustomer = function (string $name, string $terms) use ($db, $suffix): int {
+    $email = strtolower(str_replace(' ', '-', $name)) . '-' . $suffix . '@sourflour.test';
+    $collection = $terms === 'cod' ? 'cod' : 'signature';
+    $db->prepare(
+        'INSERT INTO customers (name, zone, email, address, phone, payment_collection, payment_terms, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+    )->execute([$name . ' ' . $suffix, 'North Zone', $email, '1 Accuracy Street', '555-0199', $collection, $terms]);
+    return (int)$db->lastInsertId();
+};
+
+$codCustomer = $insertCustomer('Harbor COD', 'cod');
+$prepaidCustomer = $insertCustomer('Prepaid COD', 'cod');
+$invoiceCustomer = $insertCustomer('Mission Invoice', 'invoice');
+$builtCustomer = $insertCustomer('Built Before', 'invoice');
+$checkCustomer = $insertCustomer('Check Counter', 'check');
+$goldenCustomer = $insertCustomer('Golden Gate', 'invoice');
+$convenCustomer = $insertCustomer('Conveniencie', 'invoice');
+
+$insertOrder = function (int $customerId, float $header, string $status = 'delivered') use ($db, $codDate, $driverId): int {
+    $db->prepare(
+        'INSERT INTO daily_orders (customer_id, order_date, status, total_amount, delivery_order_total, delivery_confirmed_at, driver_id, credits_taken_back)
+         VALUES (?, ?, ?, ?, ?, NOW(), ?, 0)'
+    )->execute([$customerId, $codDate, $status, $header, $header, $driverId]);
+    return (int)$db->lastInsertId();
+};
+
+$creditOrder = $insertOrder($codCustomer, 10.00);
+$db->prepare(
+    'UPDATE daily_orders SET credits_taken_back = 2, amount_collected = 10.00 WHERE id = ?'
+)->execute([$creditOrder]);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total, is_no_charge)
+     VALUES (?, ?, 4, 4, 5.00, 20.00, 0)'
+)->execute([$creditOrder, $pricedId]);
+$creditBefore = $db->prepare('SELECT total_amount, delivery_order_total FROM daily_orders WHERE id = ?');
+$creditBefore->execute([$creditOrder]);
+$creditBeforeRow = $creditBefore->fetch(PDO::FETCH_ASSOC);
+
+$prepaidOrder = $insertOrder($prepaidCustomer, 8.00);
+$db->prepare('UPDATE daily_orders SET square_invoice_id = ?, square_status = ? WHERE id = ?')
+    ->execute(['sq_cod_day_prepaid', 'PAID', $prepaidOrder]);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 1, 1, 8.00, 8.00)'
+)->execute([$prepaidOrder, $pricedId]);
+
+$invoiceOrder = $insertOrder($invoiceCustomer, 30.00);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 3, 3, 10.00, 30.00)'
+)->execute([$invoiceOrder, $pricedId]);
+$checkOrder = $insertOrder($checkCustomer, 12.00);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 2, 2, 6.00, 12.00)'
+)->execute([$checkOrder, $pricedId]);
+
+$goldenOrder = $insertOrder($goldenCustomer, 2.06);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 2, 2, 10.00, 20.00)'
+)->execute([$goldenOrder, $pricedId]);
+$convenOrder = $insertOrder($convenCustomer, 2.06);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 2, 2, 10.00, 20.00)'
+)->execute([$convenOrder, $pricedId]);
+
+$builtOrder = $insertOrder($builtCustomer, 20.00);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 4, 2, 5.00, 20.00)'
+)->execute([$builtOrder, $pricedId]);
+
+$day = bakery_billing_cod_driver_day($db, $codDate);
+$dayRow = null;
+foreach ($day as $row) {
+    if ((int)$row['driver_id'] === $driverId) {
+        $dayRow = $row;
+        break;
+    }
+}
+assert_true(is_array($dayRow), 'COD day lists the driver who has cash stops');
+assert_eq($driverName, (string)$dayRow['driver_name'], 'COD day names the driver');
+accuracy_float(10.00, (float)$dayRow['expected'], 'COD day expected cash uses the stored header when the credit has no line');
+accuracy_float(10.00, (float)$dayRow['collected'], 'COD day collected cash is what the driver recorded');
+assert_true((int)$dayRow['stop_count'] >= 1, 'COD day counts the cash stops');
+
+$invoiceIds = array_map(static function ($row) {
+    return (int)$row['id'];
+}, bakery_billing_query_orders($db, [
+    'start_date' => $codDate,
+    'end_date' => $codDate,
+    'collection' => 'invoice',
+    'status' => 'all',
+]));
+assert_true(in_array($invoiceOrder, $invoiceIds, true), 'invoice terms stay on the invoice list');
+assert_true(in_array($checkOrder, $invoiceIds, true), 'check terms stay on the invoice list');
+assert_true(!in_array($creditOrder, $invoiceIds, true), 'COD stops are not invoices');
+
+$reportAfter = bakery_billing_header_mismatch_rows($db);
+$byId = [];
+foreach ($reportAfter as $row) {
+    $byId[(int)$row['id']] = $row;
+}
+assert_true(isset($byId[$goldenOrder]), 'Golden Gate stays on the mismatch report');
+assert_true(isset($byId[$convenOrder]), 'Conveniencie stays on the mismatch report');
+accuracy_float(17.94, abs((float)$byId[$goldenOrder]['line_header_amount'] - (float)$byId[$goldenOrder]['stored_header_amount']), 'Golden Gate difference is 17.94');
+accuracy_float(17.94, abs((float)$byId[$convenOrder]['line_header_amount'] - (float)$byId[$convenOrder]['stored_header_amount']), 'Conveniencie difference is 17.94');
+assert_true(in_array('unexplained', $byId[$goldenOrder]['reasons'], true), 'Golden Gate gap is unexplained');
+assert_true(in_array('unexplained', $byId[$convenOrder]['reasons'], true), 'Conveniencie gap is unexplained');
+assert_true(in_array('credit_without_line', $byId[$creditOrder]['reasons'], true), 'the historical credit order is named and not rewritten');
+assert_true(in_array('built_before_delivery', $byId[$builtOrder]['reasons'], true), 'the ordered-quantity invoice is flagged');
+$creditBefore->execute([$creditOrder]);
+$creditAfterRow = $creditBefore->fetch(PDO::FETCH_ASSOC);
+accuracy_float((float)$creditBeforeRow['total_amount'], (float)$creditAfterRow['total_amount'], 'the report does not rewrite a historical credit header');
+accuracy_float((float)$creditBeforeRow['delivery_order_total'], (float)$creditAfterRow['delivery_order_total'], 'the report does not rewrite a historical credit snapshot');
+$goldenHeader = $db->prepare('SELECT total_amount, delivery_order_total FROM daily_orders WHERE id = ?');
+$goldenHeader->execute([$goldenOrder]);
+$goldenHeaderRow = $goldenHeader->fetch(PDO::FETCH_ASSOC);
+accuracy_float(2.06, (float)$goldenHeaderRow['total_amount'], 'Golden Gate stored header stays booked');
+accuracy_float(2.06, (float)$goldenHeaderRow['delivery_order_total'], 'Golden Gate snapshot stays booked');
+
+$freshCustomer = $insertCustomer('Fresh Confirm', 'cod');
+$db->prepare(
+    "INSERT INTO daily_orders (customer_id, order_date, status, total_amount, driver_id) VALUES (?, ?, 'pending', 0, ?)"
+)->execute([$freshCustomer, $codDate, $driverId]);
+$freshOrder = (int)$db->lastInsertId();
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+     VALUES (?, ?, 4, 5.00, 20.00)'
+)->execute([$freshOrder, $pricedId]);
+$confirmed = bakery_confirm_delivery($db, $freshOrder, 4, 1, ['amount_collected' => 15.00]);
+assert_true(!empty($confirmed['success']), 'a new COD stop confirms');
+$creditLine = $db->prepare(
+    'SELECT line_total, is_store_credit FROM daily_order_items WHERE daily_order_id = ? AND is_store_credit = 1'
+);
+$creditLine->execute([$freshOrder]);
+$creditLineRow = $creditLine->fetch(PDO::FETCH_ASSOC);
+assert_true(is_array($creditLineRow), 'confirm writes a store credit line');
+accuracy_float(-5.00, (float)$creditLineRow['line_total'], 'the new credit line is negative');
+$freshHeader = $db->prepare('SELECT total_amount, delivery_order_total FROM daily_orders WHERE id = ?');
+$freshHeader->execute([$freshOrder]);
+$freshHeaderRow = $freshHeader->fetch(PDO::FETCH_ASSOC);
+accuracy_float(15.00, (float)$freshHeaderRow['total_amount'], 'the new header matches the lines including the credit');
+accuracy_float(15.00, (float)$freshHeaderRow['delivery_order_total'], 'the new snapshot matches the lines including the credit');
+$historicalCreditLines = $db->prepare(
+    'SELECT COUNT(*) FROM daily_order_items WHERE daily_order_id = ? AND is_store_credit = 1'
+);
+$historicalCreditLines->execute([$creditOrder]);
+assert_eq(0, (int)$historicalCreditLines->fetchColumn(), 'confirming a new stop does not add a credit line to an older order');
+
+$db->prepare('INSERT INTO products (name, price, description) VALUES (?, 4.00, ?)')
+    ->execute(['__accuracy_removed_' . $suffix, 'deleted for the billing export']);
+$goneProduct = (int)$db->lastInsertId();
+$exportCustomer = $insertCustomer('Export Shelf', 'invoice');
+$exportOrder = $insertOrder($exportCustomer, 4.00);
+$db->prepare(
+    'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, delivered_quantity, unit_price, line_total)
+     VALUES (?, ?, 1, 1, 4.00, 4.00)'
+)->execute([$exportOrder, $goneProduct]);
+$db->exec('SET FOREIGN_KEY_CHECKS=0');
+$db->prepare('DELETE FROM products WHERE id = ?')->execute([$goneProduct]);
+$db->exec('SET FOREIGN_KEY_CHECKS=1');
+$exportRows = bakery_billing_export_rows($db, [
+    'start_date' => $codDate,
+    'end_date' => $codDate,
+    'collection' => 'invoice',
+    'confirmed_only' => true,
+]);
+$exportHit = false;
+foreach ($exportRows as $exportRow) {
+    if ((int)$exportRow['daily_order_id'] === $exportOrder && (int)$exportRow['product_id'] === $goneProduct) {
+        $exportHit = true;
+        accuracy_float(4.00, (float)$exportRow['line_total'], 'export keeps the amount for a deleted product');
+        assert_true(trim((string)$exportRow['product_name']) !== '', 'export still names a deleted product line');
+    }
+}
+assert_true($exportHit, 'billing export includes a line whose product was deleted');
+
+$center = (string)file_get_contents($root . '/billing_center.php');
+assert_true(strpos($center, "?? 'cod'") !== false, 'Billing Center opens on the COD day');
+assert_true(strpos($center, 'billing_panel_cod_day.php') !== false, 'Billing Center renders the COD day panel');
+$customersPage = (string)file_get_contents($root . '/customers.php');
+assert_true(strpos($customersPage, 'payment_terms') !== false, 'customer form stores payment terms');
+$loadItems = (string)file_get_contents($root . '/includes/billing.php');
+assert_true(strpos($loadItems, 'LEFT JOIN products') !== false, 'billing lines keep rows when the product is gone');
 
 echo "\n{$GLOBALS['TEST_PASS']} passed, {$GLOBALS['TEST_FAIL']} failed\n";
 exit($GLOBALS['TEST_FAIL'] > 0 ? 1 : 0);

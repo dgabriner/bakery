@@ -380,6 +380,7 @@ $formAction = 'billing_center.php?panel=invoices';
 </style>
 
 <section class="invoice-center">
+    <p class="bc-note"><?php echo htmlspecialchars(bakery_t('billing.invoice_path_note')); ?></p>
     <form class="invoice-center-filters" method="get" action="<?php echo htmlspecialchars($formAction); ?>" id="invoiceCenterFilters">
         <input type="hidden" name="panel" value="invoices">
         <input type="hidden" name="queue" value="<?php echo htmlspecialchars($workQueue); ?>">

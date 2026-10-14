@@ -6,6 +6,8 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/billing.php';
+require_once __DIR__ . '/includes/billing_cod_day.php';
+require_once __DIR__ . '/includes/payment_terms.php';
 require_once __DIR__ . '/includes/billing_aging.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 
@@ -19,8 +21,8 @@ $orderStatuses = ['pending', 'confirmed', 'in_production', 'ready', 'out_for_del
 $rangePresets = ['today', 'week', 'month', 'last_month', 'custom'];
 $statusOptions = array_merge(['all', 'open'], $orderStatuses);
 
-$panel = (string)($_GET['panel'] ?? 'invoices');
-$panels = ['invoices', 'customer', 'export', 'exceptions', 'mismatch'];
+$panel = (string)($_GET['panel'] ?? 'cod');
+$panels = ['cod', 'invoices', 'customer', 'export', 'exceptions', 'mismatch'];
 if (!in_array($panel, $panels, true)) {
     $panel = 'invoices';
 }
@@ -175,18 +177,21 @@ require_once __DIR__ . '/includes/nav.php';
         <p class="bc-eyebrow">Orders &amp; Customers</p>
         <h1><?php bakery_te('page.billing_center'); ?></h1>
         <p class="bc-subtitle">
-            <?php echo htmlspecialchars(bakery_t('billing.center_subtitle')); ?>
+            <?php echo htmlspecialchars(bakery_t('billing.center_cash_subtitle')); ?>
         </p>
     </header>
 
     <nav class="bc-tabs" aria-label="Billing Center panels">
+        <?php echo $panelTab('cod', bakery_t('billing.tab_cod')); ?>
         <?php echo $panelTab('invoices', bakery_t('billing.tab_invoices')); ?>
         <?php echo $panelTab('mismatch', bakery_t('billing.tab_mismatch')); ?>
         <?php echo $panelTab('customer', bakery_t('billing.tab_customer')); ?>
         <?php echo $panelTab('export', bakery_t('billing.tab_export')); ?>
     </nav>
 
-    <?php if ($panel === 'invoices'): ?>
+    <?php if ($panel === 'cod'): ?>
+        <?php require __DIR__ . '/includes/billing_panel_cod_day.php'; ?>
+    <?php elseif ($panel === 'invoices'): ?>
         <?php require __DIR__ . '/includes/billing_panel_invoices.php'; ?>
     <?php elseif ($panel === 'customer'): ?>
         <section class="bc-panel">

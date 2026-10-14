@@ -45,6 +45,7 @@ $mismatchRows = bakery_billing_header_mismatch_rows($db);
                     <th class="num"><?php echo htmlspecialchars(bakery_t('billing.mismatch_stored')); ?></th>
                     <th class="num"><?php echo htmlspecialchars(bakery_t('billing.mismatch_lines')); ?></th>
                     <th class="num"><?php echo htmlspecialchars(bakery_t('billing.mismatch_diff')); ?></th>
+                    <th><?php echo htmlspecialchars(bakery_t('billing.mismatch_reason')); ?></th>
                 </tr>
             </thead>
             <tbody>
@@ -53,6 +54,13 @@ $mismatchRows = bakery_billing_header_mismatch_rows($db);
                 $stored = (float)$row['stored_header_amount'];
                 $lines = (float)$row['line_header_amount'];
                 $diff = round($lines - $stored, 2);
+                $reasonLabels = [];
+                foreach ((array)($row['reasons'] ?? []) as $reasonCode) {
+                    $reasonKey = 'billing.reason_' . (string)$reasonCode;
+                    $reasonLabel = bakery_t($reasonKey);
+                    $reasonLabels[] = $reasonLabel === $reasonKey ? (string)$reasonCode : $reasonLabel;
+                }
+                $reasonText = implode(', ', $reasonLabels);
                 ?>
                 <tr>
                     <td data-label="<?php echo htmlspecialchars(bakery_t('billing.mismatch_invoice')); ?>">
@@ -65,6 +73,7 @@ $mismatchRows = bakery_billing_header_mismatch_rows($db);
                     <td class="num" data-label="<?php echo htmlspecialchars(bakery_t('billing.mismatch_stored')); ?>">$<?php echo number_format($stored, 2); ?></td>
                     <td class="num" data-label="<?php echo htmlspecialchars(bakery_t('billing.mismatch_lines')); ?>">$<?php echo number_format($lines, 2); ?></td>
                     <td class="num" data-label="<?php echo htmlspecialchars(bakery_t('billing.mismatch_diff')); ?>">$<?php echo number_format($diff, 2); ?></td>
+                    <td data-label="<?php echo htmlspecialchars(bakery_t('billing.mismatch_reason')); ?>"><?php echo htmlspecialchars($reasonText); ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>

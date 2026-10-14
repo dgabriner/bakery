@@ -9,6 +9,7 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/photo_handler.php';
 require_once __DIR__ . '/route_manager_cash.php';
 require_once __DIR__ . '/cod_square_guard.php';
+require_once __DIR__ . '/payment_terms.php';
 require_once __DIR__ . '/product_inventory.php';
 require_once __DIR__ . '/product_pack_yields.php';
 
@@ -41,18 +42,12 @@ function route_manager_fetch_deliveries(PDO $db, string $date, array $driverIds 
     $hasDeliveryOrderTotal = column_exists($db, 'daily_orders', 'delivery_order_total');
     $hasDeliveredPieces = column_exists($db, 'daily_orders', 'delivered_pieces');
     $customerPaymentSql = $hasPaymentCollection ? "COALESCE(c.payment_collection, 'cod')" : "'cod'";
-    // Pan Dulce deliveries are collected as cash by default. This also makes
-    // historical routes reconcile correctly even when the customer was created
-    // before payment_collection existed.
-    $paymentCollectionSql = "CASE WHEN EXISTS (
-        SELECT 1
-        FROM daily_order_items payment_doi
-        INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-        INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-        INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-        WHERE payment_doi.daily_order_id = do.id
-          AND payment_pl.name = 'Pan Dulce'
-    ) THEN 'cod' ELSE {$customerPaymentSql} END";
+    // Pan Dulce stays cash when the account is COD. Invoice and check terms keep their path.
+    if ($hasPaymentCollection) {
+        $paymentCollectionSql = bakery_payment_terms_pan_dulce_collection_sql($db);
+    } else {
+        $paymentCollectionSql = $customerPaymentSql;
+    }
     $amountCollectedSql = $hasAmountCollected ? 'do.amount_collected' : 'NULL';
     $hasSquareInvoice = column_exists($db, 'daily_orders', 'square_invoice_id');
     $squareInvoiceSql = $hasSquareInvoice ? 'do.square_invoice_id' : 'NULL';
