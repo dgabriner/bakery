@@ -10,6 +10,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/audit_log.php';
+require_once __DIR__ . '/billing_header.php';
 
 /**
  * Single write path for standing_orders rows. Quantity ≤ 0 deletes the row.
@@ -180,16 +181,21 @@ function bakery_daily_order_find_or_create(PDO $db, int $customerId, string $dat
 function bakery_daily_order_recompute_total(PDO $db, int $orderId): float
 {
     $orderId = (int)$orderId;
+    $get = $db->prepare('SELECT COALESCE(total_amount, 0) FROM daily_orders WHERE id = ? LIMIT 1');
+    if (bakery_billing_header_is_historical($db, $orderId)) {
+        $get->execute([$orderId]);
+        return (float)$get->fetchColumn();
+    }
+
+    $sumExpr = bakery_billing_chargeable_line_sum_sql($db);
     $stmt = $db->prepare(
-        'UPDATE daily_orders
+        "UPDATE daily_orders
          SET total_amount = (
-             SELECT COALESCE(SUM(line_total), 0) FROM daily_order_items WHERE daily_order_id = ?
+             SELECT COALESCE(SUM({$sumExpr}), 0) FROM daily_order_items WHERE daily_order_id = ?
          )
-         WHERE id = ?'
+         WHERE id = ?"
     );
     $stmt->execute([$orderId, $orderId]);
-
-    $get = $db->prepare('SELECT COALESCE(total_amount, 0) FROM daily_orders WHERE id = ? LIMIT 1');
     $get->execute([$orderId]);
 
     return (float)$get->fetchColumn();

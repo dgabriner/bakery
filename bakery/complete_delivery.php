@@ -24,6 +24,8 @@ require_once __DIR__ . '/includes/delivery_skip.php';
 require_once __DIR__ . '/includes/customer_portal.php';
 require_once __DIR__ . '/includes/client_request_id.php';
 require_once __DIR__ . '/includes/daily_orders_actions.php';
+require_once __DIR__ . '/includes/cod_square_guard.php';
+require_once __DIR__ . '/includes/billing_header.php';
 
 /**
  * Browser navigation (GET/HEAD) should not dump the JSON API.
@@ -375,15 +377,7 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
                 do.credits_taken_back, c.name AS customer_name,
                 c.address AS customer_address, c.phone AS customer_phone,
                 c.default_pan_dulce_price, c.pricing_tier,
-                CASE WHEN EXISTS (
-                    SELECT 1
-                    FROM daily_order_items payment_doi
-                    INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-                    INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-                    INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-                    WHERE payment_doi.daily_order_id = do.id
-                      AND payment_pl.name = \'Pan Dulce\'
-                    ) THEN \'cod\' ELSE COALESCE(c.payment_collection, \'cod\') END AS payment_collection,
+                ' . bakery_payment_terms_pan_dulce_collection_sql($db) . ' AS payment_collection,
                 COALESCE(asn_drv.name, legacy_drv.name) AS driver_name,
                 COALESCE(asn.driver_id, do.driver_id) AS driver_id
          FROM daily_orders do
@@ -774,18 +768,10 @@ function bakery_confirm_delivery(
             $billable = max(0, $delivered - $credits);
             $pricePerPiece = $billable > 0 ? round($total / $billable, 4) : 0.0;
             $custStmt = $db->prepare(
-                "SELECT CASE WHEN EXISTS (
-                            SELECT 1
-                            FROM daily_order_items payment_doi
-                            INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-                            INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-                            INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-                            WHERE payment_doi.daily_order_id = do.id
-                              AND payment_pl.name = 'Pan Dulce'
-                        ) THEN 'cod' ELSE COALESCE(c.payment_collection, 'cod') END
+                'SELECT ' . bakery_payment_terms_pan_dulce_collection_sql($db) . '
                  FROM daily_orders do
                  JOIN customers c ON c.id = do.customer_id
-                 WHERE do.id = ?"
+                 WHERE do.id = ?'
             );
             $custStmt->execute([$dailyOrderId]);
             $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
@@ -839,18 +825,10 @@ function bakery_confirm_delivery(
     }
 
     $custStmt = $db->prepare(
-        "SELECT CASE WHEN EXISTS (
-                    SELECT 1
-                    FROM daily_order_items payment_doi
-                    INNER JOIN products payment_p ON payment_p.id = payment_doi.product_id
-                    INNER JOIN dough_types payment_dt ON payment_dt.id = payment_p.dough_type_id
-                    INNER JOIN product_lines payment_pl ON payment_pl.id = payment_dt.product_line_id
-                    WHERE payment_doi.daily_order_id = do.id
-                      AND payment_pl.name = 'Pan Dulce'
-                ) THEN 'cod' ELSE COALESCE(c.payment_collection, 'cod') END
+        'SELECT ' . bakery_payment_terms_pan_dulce_collection_sql($db) . '
          FROM daily_orders do
          JOIN customers c ON c.id = do.customer_id
-         WHERE do.id = ?"
+         WHERE do.id = ?'
     );
     $custStmt->execute([$dailyOrderId]);
     $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
@@ -859,7 +837,23 @@ function bakery_confirm_delivery(
     }
 
     $amountCollected = null;
-    if ($paymentCollection === 'cod') {
+    $squareGuard = bakery_cod_square_guard_row($db, $dailyOrderId);
+    $codBlocked = $paymentCollection === 'cod' && bakery_cod_cash_blocked($squareGuard);
+    if ($codBlocked) {
+        $overrideReason = trim((string)($options['cod_override_reason'] ?? ''));
+        if ($overrideReason === '') {
+            if (array_key_exists('amount_collected', $options)) {
+                throw new Exception('This stop is prepaid in Square. COD cash is blocked unless a manager records a reason.');
+            }
+        } else {
+            $actor = isset($options['actor']) && is_array($options['actor'])
+                ? $options['actor']
+                : (function_exists('bakery_current_user') ? bakery_current_user() : null);
+            bakery_cod_record_square_override($db, $dailyOrderId, $overrideReason, $actor);
+            $codBlocked = false;
+        }
+    }
+    if ($paymentCollection === 'cod' && !$codBlocked) {
         if (!array_key_exists('amount_collected', $options)) {
             throw new Exception('Cash collected amount is required for COD customers');
         }
@@ -927,6 +921,16 @@ function bakery_confirm_delivery(
             throw new Exception('Could not save the delivery invoice');
         }
         bakery_mark_delivery_delivered($db, $dailyOrderId);
+        if (function_exists('bakery_billing_apply_confirm_credit_and_header')
+            && function_exists('column_exists')
+            && column_exists($db, 'daily_order_items', 'is_store_credit')) {
+            $total = bakery_billing_apply_confirm_credit_and_header(
+                $db,
+                $dailyOrderId,
+                $creditsTakenBack,
+                (float)$pricePerPiece
+            );
+        }
         bakery_inventory_record_delivery_credit_returns(
             $db,
             $dailyOrderId,
@@ -986,6 +990,7 @@ try {
             if (!in_array($paymentCollection, ['cod', 'signature'], true)) {
                 $paymentCollection = 'signature';
             }
+            $summaryGuard = bakery_cod_square_guard_row($db, $dailyOrderId);
             echo json_encode([
                 'success' => true,
                 'ordered_pieces' => $summary['ordered_pieces'],
@@ -1005,6 +1010,11 @@ try {
                 'payment_collection' => $paymentCollection,
                 'is_saved' => $order['delivery_confirmed_at'] !== null,
                 'items' => $invoice['items'],
+                'square_prepaid' => bakery_stop_square_prepaid($summaryGuard),
+                'cod_cash_blocked' => ($paymentCollection === 'cod') && bakery_cod_cash_blocked($summaryGuard),
+                'cod_override_reason' => $summaryGuard['cod_square_override_reason'],
+                'can_cod_override' => function_exists('bakery_user_has_role')
+                    && bakery_user_has_role(['administrator', 'manager']),
             ]);
             break;
 
@@ -1057,6 +1067,15 @@ try {
             }
             if (isset($_POST['amount_collected'])) {
                 $confirmOptions['amount_collected'] = $_POST['amount_collected'];
+            }
+            if (isset($_POST['cod_override_reason'])) {
+                $confirmOptions['cod_override_reason'] = $_POST['cod_override_reason'];
+            }
+            if (function_exists('bakery_current_user')) {
+                $actor = bakery_current_user();
+                if (is_array($actor)) {
+                    $confirmOptions['actor'] = $actor;
+                }
             }
             $clientRequestId = bakery_normalize_client_request_id($_POST['client_request_id'] ?? '');
             if ($clientRequestId !== '') {

@@ -1442,27 +1442,41 @@
     }
   }
 
+  function codCashBlocked() {
+    return state.squarePrepaid === true && !state.codOverrideReason;
+  }
+
   function updatePaymentCollectionUi() {
     var isCod = state.paymentCollection === 'cod';
+    var blocked = isCod && codCashBlocked();
+    var managerOverride = blocked && state.canCodOverride === true;
     var codRow = $('deliveryCodRow');
     var cashInput = $('deliveryCashCollectedInput');
     var hint = $('deliveryConfirmationHint');
     var cashRow = $('deliveryInvoiceCashRow');
-    if (codRow) codRow.hidden = !isCod;
-    if (cashRow) cashRow.hidden = !isCod;
-    if (hint) {
-      hint.textContent = isCod
-        ? i18n('enter_cod_details')
-        : i18n('enter_delivery_details');
+    var prepaid = $('deliveryPrepaidNote');
+    var overrideLabel = $('deliveryCodOverrideLabel');
+    if (codRow) codRow.hidden = !isCod || (blocked && !managerOverride);
+    if (cashRow) cashRow.hidden = !isCod || (blocked && !managerOverride);
+    if (prepaid) {
+      prepaid.hidden = !blocked;
+      prepaid.textContent = i18n('prepaid_square', 'This stop is already prepaid in Square. Do not collect COD cash.');
     }
-    if (isCod && cashInput && !cashInput.dataset.userEdited) {
+    if (overrideLabel) overrideLabel.hidden = !managerOverride;
+    if (cashInput) cashInput.disabled = blocked && !managerOverride;
+    if (hint) {
+      hint.textContent = blocked
+        ? i18n('prepaid_square', 'This stop is already prepaid in Square. Do not collect COD cash.')
+        : (isCod ? i18n('enter_cod_details') : i18n('enter_delivery_details'));
+    }
+    if (isCod && !blocked && cashInput && !cashInput.dataset.userEdited) {
       syncCashCollectedToTotal();
     }
   }
 
   function syncCashCollectedToTotal() {
     var cashInput = $('deliveryCashCollectedInput');
-    if (!cashInput || state.paymentCollection !== 'cod') return;
+    if (!cashInput || state.paymentCollection !== 'cod' || codCashBlocked()) return;
     var pieces = Math.max(0, parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10) || 0);
     var credits = Math.max(0, parseInt($('deliveryCreditsInput') && $('deliveryCreditsInput').value, 10) || 0);
     var billable = Math.max(0, pieces - credits);
@@ -1723,6 +1737,10 @@
       state.isSaved = data.is_saved === true;
       state.paymentCollection = data.payment_collection === 'cod' ? 'cod' : 'signature';
       state.amountCollected = data.amount_collected != null ? Number(data.amount_collected) : null;
+      state.squarePrepaid = data.square_prepaid === true;
+      state.codCashBlocked = data.cod_cash_blocked === true;
+      state.codOverrideReason = data.cod_override_reason || '';
+      state.canCodOverride = data.can_cod_override === true;
       state.summaryReady = true;
       piecesInput.value = Number(data.delivered_pieces) || 0;
       creditsInput.value = Number(data.credits_taken_back) || 0;
@@ -1803,13 +1821,25 @@
     }
     hideVarianceConfirm();
 
+    var overrideReason = '';
     if (state.paymentCollection === 'cod') {
-      var cashInput = $('deliveryCashCollectedInput');
-      var cashAmount = cashInput ? parseFloat(cashInput.value) : NaN;
-      if (!Number.isFinite(cashAmount) || cashAmount < 0) {
-        openDeliveryAdjust();
-        setStatus(i18n('cash_required'), 'error');
-        return;
+      if (codCashBlocked() && state.canCodOverride === true) {
+        var reasonInput = $('deliveryCodOverrideReason');
+        overrideReason = reasonInput ? reasonInput.value.trim() : '';
+        if (!overrideReason) {
+          openDeliveryAdjust();
+          setStatus(i18n('cod_override_needed', 'A manager must enter a reason before COD cash can be recorded.'), 'error');
+          return;
+        }
+      }
+      if (!(codCashBlocked() && state.canCodOverride !== true)) {
+        var cashInput = $('deliveryCashCollectedInput');
+        var cashAmount = cashInput ? parseFloat(cashInput.value) : NaN;
+        if (!Number.isFinite(cashAmount) || cashAmount < 0) {
+          openDeliveryAdjust();
+          setStatus(i18n('cash_required'), 'error');
+          return;
+        }
       }
     }
 
@@ -1837,8 +1867,11 @@
       if (state.pricingMissing && canEditPricing() && state.pricePerPieceOverride != null) {
         body += '&price_per_piece=' + encodeURIComponent(String(state.pricePerPieceOverride));
       }
-      if (state.paymentCollection === 'cod') {
+      if (state.paymentCollection === 'cod' && !(codCashBlocked() && state.canCodOverride !== true)) {
         body += '&amount_collected=' + encodeURIComponent(String(parseFloat($('deliveryCashCollectedInput').value)));
+        if (overrideReason) {
+          body += '&cod_override_reason=' + encodeURIComponent(overrideReason);
+        }
       }
       body = appendGpsParams(body, coords);
       if (requestId) {

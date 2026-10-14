@@ -374,11 +374,13 @@ $formAction = 'billing_center.php?panel=invoices';
 .invoice-detail-table{width:100%;border-collapse:collapse;font-size:.82rem}
 .invoice-detail-table th,.invoice-detail-table td{padding:8px 4px;border-bottom:1px solid #edf2f4}
 .invoice-detail-summary{margin-top:12px;padding-top:10px;border-top:2px solid #e2e8f0;font-size:.84rem}
+.ic-header-mismatch{margin-top:4px;color:#9a3412;font-size:.72rem;font-weight:700}
 .invoice-detail-footer{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 @media(max-width:980px){.invoice-center-layout{grid-template-columns:1fr}}
 </style>
 
 <section class="invoice-center">
+    <p class="bc-note"><?php echo htmlspecialchars(bakery_t('billing.invoice_path_note')); ?></p>
     <form class="invoice-center-filters" method="get" action="<?php echo htmlspecialchars($formAction); ?>" id="invoiceCenterFilters">
         <input type="hidden" name="panel" value="invoices">
         <input type="hidden" name="queue" value="<?php echo htmlspecialchars($workQueue); ?>">
@@ -507,6 +509,10 @@ $formAction = 'billing_center.php?panel=invoices';
                                             'open' => number_format((float)$settle['open_balance'], 2),
                                         ], 'Snap $:snapshot · COD :cod · Square :square · Send :send · Open $:open')); ?>
                                     </div>
+                                    <?php $headerMismatchFlag = bakery_billing_header_mismatch_flag($order); ?>
+                                    <?php if ($headerMismatchFlag !== ''): ?>
+                                        <div class="ic-header-mismatch"><?php echo htmlspecialchars($headerMismatchFlag); ?></div>
+                                    <?php endif; ?>
                                 </div>
                                 <div><span class="ic-att <?php echo $attentionClassFor($order['category']); ?>"><?php echo htmlspecialchars($order['category_meta']['short']); ?></span></div>
                                 <div style="text-align:right"><strong style="color:#0f766e">$<?php echo number_format($order['display_amount'], 2); ?></strong></div>
@@ -607,6 +613,14 @@ $formAction = 'billing_center.php?panel=invoices';
                             <div><span><?php echo htmlspecialchars(bakery_t('billing.square_pay_link')); ?></span><strong><a href="<?php echo htmlspecialchars((string)$selectedInvoice['square_public_url']); ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars(bakery_t('billing.square_open_pay')); ?></a></strong></div>
                         <?php endif; ?>
                         <div><span>Billable total</span><strong>$<?php echo number_format($selectedInvoice['amount_is_billable'] ? $selectedInvoice['billable_amount'] : $selectedInvoice['display_amount'], 2); ?></strong></div>
+                        <?php if (!empty($selectedInvoice['header_mismatch'])): ?>
+                            <div class="ic-header-mismatch">
+                                <span><?php echo htmlspecialchars(bakery_t('billing.mismatch_stored')); ?></span>
+                                <strong>$<?php echo number_format((float)$selectedInvoice['stored_header_amount'], 2); ?></strong>
+                                <span><?php echo htmlspecialchars(bakery_t('billing.mismatch_lines')); ?></span>
+                                <strong>$<?php echo number_format((float)$selectedInvoice['line_header_amount'], 2); ?></strong>
+                            </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="invoice-detail-footer">

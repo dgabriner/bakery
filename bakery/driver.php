@@ -1230,7 +1230,11 @@ document.body.classList.add('driver-route-prep');
                                     <input type="number" id="deliveryPricePerPieceInput" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">
                                 </label>
                             </div>
+                            <p class="delivery-prepaid-note" id="deliveryPrepaidNote" hidden></p>
                             <div class="delivery-cod-row" id="deliveryCodRow" hidden>
+                                <label id="deliveryCodOverrideLabel" hidden><?php bakery_te('driver.cod_override_reason'); ?>
+                                    <textarea id="deliveryCodOverrideReason" maxlength="255" rows="2"></textarea>
+                                </label>
                                 <label><?php bakery_te('driver.cash_collected'); ?>
                                     <input type="number" id="deliveryCashCollectedInput" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
                                 </label>
@@ -1567,6 +1571,8 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'previous_photo_removed' => bakery_t('driver.previous_photo_removed'),
     'whole_numbers_required' => bakery_t('driver.whole_numbers_required'),
     'cash_required' => bakery_t('driver.cash_required'),
+    'prepaid_square' => bakery_t('driver.prepaid_square'),
+    'cod_override_needed' => bakery_t('driver.cod_override_needed'),
     'price_required' => bakery_t('driver.price_required'),
     'cancel' => bakery_t('common.cancel'),
     'cancel_photo' => bakery_t('driver.cancel_photo'),
