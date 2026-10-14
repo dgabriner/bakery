@@ -114,6 +114,9 @@ require_once 'includes/nav.php';
                     <span class="ops-date-pill ops-date-pill-muted"><?php bakery_te('common.selected_day'); ?></span>
                 <?php endif; ?>
             </p>
+            <?php if (!$isBaker && is_array($commandCenter) && is_array($commandCenter['demand_scheduler'] ?? null)): ?>
+                <?php bakery_render_demand_scheduler_status($commandCenter['demand_scheduler']); ?>
+            <?php endif; ?>
         </div>
         <?php if (!$isBaker): ?>
         <nav class="ops-date-nav" aria-label="<?php bakery_te('dashboard.date_nav_aria'); ?>">

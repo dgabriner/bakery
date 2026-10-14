@@ -1957,7 +1957,12 @@ return [
 
     // Dashboard
     'dashboard.ops_title' => 'Panel de operaciones',
-    'dashboard.cron_overnight_stale' => 'Generación nocturna atrasada (:hours h)',
+    'dashboard.cron_overnight_last_run' => 'La generación nocturna corrió por última vez :when.',
+    'dashboard.cron_overnight_never' => 'La generación nocturna no tiene una corrida registrada.',
+    'dashboard.cron_overnight_covered' => 'La generación nocturna no tiene una corrida registrada. Mañana ya tiene pedidos con fecha.',
+    'dashboard.cron_overnight_stale' => 'Faltó la generación nocturna',
+    'dashboard.cron_overnight_stale_detail' => 'No hay una corrida exitosa de las 2:30 AM PT, y :date no tiene pedidos con fecha.',
+    'dashboard.cron_overnight_action' => 'Revisar el cron nocturno',
     'dashboard.baker_title' => 'Panel del panadero',
     'dashboard.ops_eyebrow' => 'Centro de mando diario del gerente',
     'dashboard.baker_eyebrow' => 'Espacio del panadero',

@@ -150,6 +150,139 @@ $assert(($stamp['outcome'] ?? '') === 'ok', 'cron stamp writes outcome');
 $assert(bakery_cron_age_hours('demand_scheduler_test') !== null, 'cron age_hours readable after stamp');
 @unlink($root . '/storage/cron/demand_scheduler_test.json');
 
+echo "\n=== Overnight heartbeat is not a false stale warning ===\n";
+require_once $root . '/includes/operational_timeline.php';
+require_once $root . '/includes/dashboard_command_center.php';
+
+$pt = new DateTimeZone('America/Los_Angeles');
+$morning = new DateTimeImmutable('2026-10-14 08:00:00', $pt);
+$duringGrace = new DateTimeImmutable('2026-10-14 02:45:00', $pt);
+$ranToday = new DateTimeImmutable('2026-10-14 02:31:00', $pt);
+$ranYesterday = new DateTimeImmutable('2026-10-13 02:31:00', $pt);
+$tomorrowProbe = '2026-10-15';
+$probeCustomerId = (int)$db->query('SELECT id FROM customers ORDER BY id LIMIT 1')->fetchColumn();
+if ($probeCustomerId <= 0) {
+    $db->prepare('INSERT INTO customers (name, address, is_active) VALUES (?, ?, 1)')
+        ->execute(['Overnight Probe', '1 Probe Way']);
+    $probeCustomerId = (int)$db->lastInsertId();
+}
+$probeOrderId = 0;
+$clearProbeOrder = static function () use ($db, &$probeOrderId, $tomorrowProbe, $probeCustomerId): void {
+    if ($probeOrderId > 0) {
+        $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$probeOrderId]);
+        $probeOrderId = 0;
+    }
+    $db->prepare('DELETE FROM daily_orders WHERE customer_id = ? AND order_date = ?')
+        ->execute([$probeCustomerId, $tomorrowProbe]);
+};
+$clearProbeHeartbeat = static function () use ($db, $root): void {
+    @unlink($root . '/storage/cron/demand_scheduler.json');
+    if (function_exists('bakery_operational_events_ready') && bakery_operational_events_ready($db)) {
+        $db->exec("DELETE FROM operational_events WHERE event_type = 'cron_run' AND summary LIKE 'Cron demand_scheduler %'");
+    }
+};
+$schedulerWarn = static function (array $center): bool {
+    foreach ($center['exceptions'] ?? [] as $ex) {
+        if (($ex['type'] ?? '') === 'cron_overnight_stale') {
+            return true;
+        }
+    }
+    return false;
+};
+
+try {
+    $clearProbeHeartbeat();
+    $clearProbeOrder();
+    $assert(bakery_cron_format_pt('2026-10-14T09:31:00+00:00') === 'Oct 14, 2026 2:31 AM PDT', 'UTC heartbeat displays as Pacific');
+
+    bakery_cron_record_run($db, 'demand_scheduler', 'ok', ['source' => 'scheduler-test'], $ranToday);
+    @unlink($root . '/storage/cron/demand_scheduler.json');
+    $fromDb = bakery_cron_last_run('demand_scheduler', $db);
+    $assert(is_array($fromDb) && ($fromDb['outcome'] ?? '') === 'ok', 'last run survives when the json file is missing');
+    $assert(strpos((string)($fromDb['last_run_at'] ?? ''), '2026-10-14T02:31:00') === 0, 'database heartbeat keeps the Pacific timestamp');
+
+    $fresh = bakery_demand_scheduler_board_status($db, $morning);
+    $assert(empty($fresh['warn']), 'a 2:31 AM PT run is not stale at 8:00 AM');
+    $assert(($fresh['last_run_pt'] ?? '') === 'Oct 14, 2026 2:31 AM PDT', 'board shows the last run in Pacific time');
+
+    $clearProbeHeartbeat();
+    $insertProbe = $db->prepare('INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, ?, 0)');
+    $insertProbe->execute([$probeCustomerId, $tomorrowProbe, 'pending']);
+    $probeOrderId = (int)$db->lastInsertId();
+    $covered = bakery_demand_scheduler_board_status($db, $morning);
+    $assert(!empty($covered['missed']), 'missing heartbeat is a missed overnight run');
+    $assert(empty($covered['warn']), 'tomorrow dated orders suppress the false stale warning');
+    $assert(($covered['tomorrow_order_count'] ?? 0) >= 1, 'fallback counts tomorrow dated orders');
+
+    $clearProbeOrder();
+    $missed = bakery_demand_scheduler_board_status($db, $morning);
+    $assert(!empty($missed['warn']), 'missing heartbeat warns when tomorrow has no dated orders');
+
+    bakery_cron_record_run($db, 'demand_scheduler', 'ok', ['source' => 'scheduler-test'], $ranYesterday);
+    $old = bakery_demand_scheduler_board_status($db, $morning);
+    $assert(!empty($old['warn']), 'a run before the 2:30 AM slot is missed when tomorrow has no orders');
+    $assert(($old['last_run_pt'] ?? '') === 'Oct 13, 2026 2:31 AM PDT', 'an older run still shows its Pacific time');
+
+    $insertProbe->execute([$probeCustomerId, $tomorrowProbe, 'pending']);
+    $probeOrderId = (int)$db->lastInsertId();
+    $oldCovered = bakery_demand_scheduler_board_status($db, $morning);
+    $assert(empty($oldCovered['warn']), 'dated orders for tomorrow cover an old heartbeat');
+    $clearProbeOrder();
+
+    $grace = bakery_demand_scheduler_board_status($db, $duringGrace);
+    $assert(empty($grace['warn']), '2:45 AM PT is still inside the overnight window');
+
+    $center = bakery_dashboard_command_center($db, '2026-10-12');
+    $assert(isset($center['demand_scheduler']['last_run_pt']), 'command center carries the overnight status');
+    $realTomorrow = (new DateTimeImmutable('now', $pt))->modify('+1 day')->format('Y-m-d');
+    $realCountStmt = $db->prepare('SELECT COUNT(*) FROM daily_orders WHERE order_date = ?');
+    $realCountStmt->execute([$realTomorrow]);
+    $realTomorrowCount = (int)$realCountStmt->fetchColumn();
+    $clearProbeHeartbeat();
+    $live = bakery_dashboard_command_center($db, '2026-10-12');
+    if ($realTomorrowCount > 0) {
+        $assert(!$schedulerWarn($live), '10/12 board does not warn when tomorrow already has dated orders');
+    } else {
+        $assert($schedulerWarn($live), 'board warns only when the run was missed and tomorrow has no dated orders');
+    }
+    bakery_cron_record_run($db, 'demand_scheduler', 'ok', ['source' => 'scheduler-test']);
+    $stamped = bakery_dashboard_command_center($db, '2026-10-13');
+    $assert(!$schedulerWarn($stamped), 'a fresh heartbeat clears the warning on every morning board');
+    $assert(($stamped['demand_scheduler']['last_run_pt'] ?? '') !== '', 'fresh heartbeat shows a Pacific last-run time');
+} catch (Throwable $e) {
+    $assert(false, 'overnight heartbeat scenario threw: ' . $e->getMessage());
+} finally {
+    $clearProbeOrder();
+    $clearProbeHeartbeat();
+}
+
+$indexSrc = (string)file_get_contents($root . '/index.php');
+$runPage = (string)file_get_contents($root . '/daily_run.php');
+$assert(strpos($indexSrc, 'bakery_render_demand_scheduler_status') !== false, 'dashboard shows the overnight last-run line');
+$assert(strpos($runPage, 'bakery_render_demand_scheduler_status') !== false, 'Daily Run shows the overnight last-run line');
+$enCron = require $root . '/lang/en.php';
+$esCron = require $root . '/lang/es.php';
+foreach ([
+    'dashboard.cron_overnight_last_run',
+    'dashboard.cron_overnight_never',
+    'dashboard.cron_overnight_covered',
+    'dashboard.cron_overnight_stale',
+    'dashboard.cron_overnight_stale_detail',
+    'dashboard.cron_overnight_action',
+] as $cronKey) {
+    $enText = (string)($enCron[$cronKey] ?? '');
+    $esText = (string)($esCron[$cronKey] ?? '');
+    $assert($enText !== '' && $esText !== '', "lang key $cronKey exists in English and Spanish");
+    $assert($enText !== $esText, "lang key $cronKey is translated");
+    $assert(
+        strpos($enText, "\u{2014}") === false
+        && strpos($enText, "\u{2013}") === false
+        && strpos($esText, "\u{2014}") === false
+        && strpos($esText, "\u{2013}") === false,
+        "lang key $cronKey has no en or em dash"
+    );
+}
+
 echo "\n=== Standing-route fill copies every stop ===\n";
 require_once $root . '/includes/driver_assignments.php';
 require_once $root . '/includes/daily_run.php';

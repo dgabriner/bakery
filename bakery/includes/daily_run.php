@@ -1290,5 +1290,6 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'demand_review' => $demandReview,
         'inventory_ready' => $inventoryReady,
         'unrouted_standing_orders' => $unroutedStandingOrders,
+        'demand_scheduler' => $commandCenter['demand_scheduler'] ?? null,
     ];
 }

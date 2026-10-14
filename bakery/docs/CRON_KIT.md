@@ -15,20 +15,20 @@ staleness check only — Staging and Live cron installs are not performed from G
 
 ## Install (DreamHost panel → Cron Jobs)
 
-Exact lines (replace `YOUR_USER`):
+The Live tree is `/home/dh_dp755h/bakery.sourflour.org/bake`. Add this line if it is not already there. The panel clock must be America/Los_Angeles so 2:30 is 2:30 AM PT. Do not edit a line that already matches.
 
 ```cron
-# Demand horizon fill — 02:30 America/Los_Angeles server time
-30 2 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/demand_scheduler.php >> /home/YOUR_USER/cron_demand.log 2>&1
+# Demand horizon fill, 02:30 America/Los_Angeles
+30 2 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/demand_scheduler.php >> /home/dh_dp755h/cron_demand.log 2>&1
 
-# Staff alert digest — 06:00
-0 6 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/YOUR_USER/cron_digest.log 2>&1
+# Staff alert digest, 06:00
+0 6 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/dh_dp755h/cron_digest.log 2>&1
 ```
 
 Log paths on the shell host:
-- `/home/YOUR_USER/cron_demand.log`
-- `/home/YOUR_USER/cron_digest.log`
-- App stamps: `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`
+- `/home/dh_dp755h/cron_demand.log`
+- `/home/dh_dp755h/cron_digest.log`
+- App stamps: `operational_events` row `cron_run` (the board reads this) and `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`
 
 Both scripts refuse to run against local/test targets unless `--force` — on DreamHost they run as-is.
 
@@ -46,8 +46,10 @@ Both scripts refuse to run against local/test targets unless `--force` — on Dr
    - `cron.demand_scheduler.age_hours=<number under 26>`
    - `cron.staff_alert_digest.age_hours=<number under 26>`
    - `null` means that job has never stamped a run on this host.
-3. **Dashboard / staff bell:** if demand age > 26h, Command Center shows
-   “Overnight generation stale (Nh)” as a warning fact (same queue as other staff alerts).
+3. **Dashboard / Daily Run:** the board shows the last run in Pacific time.
+   It warns only when the 2:30 AM PT run is already due (after 3:30 AM PT)
+   and tomorrow has no dated orders. A missing `storage/cron/*.json` file
+   is not a warning when the database heartbeat or tomorrow's orders exist.
 4. Digest delivery still also writes `operational_events.staff_alert_digest_sent` when email goes out;
    clean nights only write `cron_run` (that is still success).
 
