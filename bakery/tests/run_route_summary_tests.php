@@ -162,6 +162,115 @@ route_summary_assert(
         && ($missing['drivers'][0]['stops'][0]['customer_name'] ?? '') === 'Market'
 );
 
+$coverageDrivers = [
+    4 => [
+        'id' => 4,
+        'name' => 'Marcos',
+        'deliveries' => [
+            [
+                'daily_order_id' => 41,
+                'customer_id' => 401,
+                'customer_name' => 'Arrival Only',
+                'delivery_status' => 'delivered',
+                'payment_collection' => 'cod',
+                'amount_collected' => 10,
+                'item_count' => 2,
+                'route_order' => 1,
+            ],
+            [
+                'daily_order_id' => 42,
+                'customer_id' => 402,
+                'customer_name' => 'Proof After',
+                'delivery_status' => 'delivered',
+                'payment_collection' => 'cod',
+                'amount_collected' => 10,
+                'item_count' => 2,
+                'route_order' => 2,
+            ],
+            [
+                'daily_order_id' => 43,
+                'customer_id' => 403,
+                'customer_name' => 'Proof Receipt',
+                'delivery_status' => 'delivered',
+                'payment_collection' => 'signature',
+                'delivery_order_total' => 8,
+                'item_count' => 1,
+                'route_order' => 3,
+            ],
+            [
+                'daily_order_id' => 44,
+                'customer_id' => 404,
+                'customer_name' => 'No Photo',
+                'delivery_status' => 'delivered',
+                'payment_collection' => 'cod',
+                'amount_collected' => 4,
+                'item_count' => 1,
+                'route_order' => 4,
+            ],
+            [
+                'daily_order_id' => 45,
+                'customer_id' => 405,
+                'customer_name' => 'Pending Arrival',
+                'delivery_status' => 'pending',
+                'payment_collection' => 'cod',
+                'total_amount' => 6,
+                'item_count' => 1,
+                'route_order' => 5,
+            ],
+        ],
+    ],
+];
+$coveragePhotos = [
+    '4:401' => [['photo_type' => 'Before', 'url' => 'arrive.jpg']],
+    '4:402' => [['photo_type' => 'After', 'url' => 'leave.jpg'], ['photo_type' => 'Before', 'url' => 'arrive-too.jpg']],
+    '4:403' => [['photo_type' => 'Receipt', 'url' => 'receipt.jpg']],
+    '4:405' => [['photo_type' => 'Before', 'url' => 'pending-arrive.jpg']],
+];
+$coverage = bakery_route_summary_build_day($coverageDrivers, $coveragePhotos, 'all');
+$coverageStops = [];
+foreach ($coverage['drivers'][0]['stops'] ?? [] as $stop) {
+    $coverageStops[(string)$stop['customer_name']] = $stop;
+}
+route_summary_assert(
+    'a delivered stop counts as with photo only when it has a proof photo',
+    (int)$coverage['stats']['with_photos'] === 2
+);
+route_summary_assert(
+    'arrival and proof photos are counted separately',
+    (int)$coverage['stats']['arrival_photo_count'] === 3
+        && (int)$coverage['stats']['pod_photo_count'] === 2
+);
+route_summary_assert(
+    'delivered stops with only an arrival photo are flagged and counted as missing proof',
+    (int)$coverage['stats']['arrival_only'] === 1
+        && (int)$coverage['stats']['missing_photos'] === 3
+        && !empty($coverageStops['Arrival Only']['arrival_only'])
+        && empty($coverageStops['Arrival Only']['has_pod_photo'])
+        && !empty($coverageStops['Arrival Only']['has_arrival_photo'])
+        && empty($coverageStops['Proof After']['arrival_only'])
+        && !empty($coverageStops['Proof After']['has_pod_photo'])
+        && !empty($coverageStops['Proof Receipt']['has_pod_photo'])
+        && empty($coverageStops['Pending Arrival']['arrival_only'])
+);
+$coverageMissing = bakery_route_summary_build_day($coverageDrivers, $coveragePhotos, 'missing');
+$coverageMissingNames = array_map(static function ($stop) {
+    return (string)$stop['customer_name'];
+}, $coverageMissing['drivers'][0]['stops'] ?? []);
+sort($coverageMissingNames);
+route_summary_assert(
+    'missing-photo filter includes delivered stops that only have an arrival photo',
+    $coverageMissingNames === ['Arrival Only', 'No Photo', 'Pending Arrival']
+);
+$coverageWith = bakery_route_summary_build_day($coverageDrivers, $coveragePhotos, 'photos');
+$coverageWithNames = array_map(static function ($stop) {
+    return (string)$stop['customer_name'];
+}, $coverageWith['drivers'][0]['stops'] ?? []);
+sort($coverageWithNames);
+route_summary_assert(
+    'with-photo filter keeps proof photos and drops arrival-only stops',
+    $coverageWithNames === ['Proof After', 'Proof Receipt']
+);
+
 $page = (string)file_get_contents($root . '/route_summary.php');
 $css = (string)file_get_contents($root . '/css/route_summary.css');
 $js = (string)file_get_contents($root . '/includes/route_summary.js');
@@ -190,6 +299,15 @@ $requiredKeys = [
     'route_summary.stat_sold',
     'route_summary.filter_missing',
     'route_summary.no_photo',
+    'route_summary.arrival_only',
+    'route_summary.arrival_only_help',
+    'route_summary.stops_with_proof',
+    'closeout.stops_heading',
+    'closeout.photo_pod',
+    'closeout.photo_arrival_only',
+    'closeout.photo_arrival',
+    'closeout.photo_none',
+    'closeout.no_stops',
     'route_manager.pickup_manifest',
     'route_manager.pickup_summary',
     'route_manager.no_pickup',
@@ -239,6 +357,27 @@ route_summary_assert(
         && strpos($shopPhotoSrc, 'bakery_upload_display_url(') !== false
 );
 route_summary_assert('Route summary thumbnails come from photo URL fields', strpos((string)file_get_contents($root . '/route_summary.php'), "\$hero['url']") !== false);
+route_summary_assert(
+    'Route Summary flags a delivered stop that only has an arrival photo',
+    strpos($page, 'is-arrival-only') !== false && strpos($page, 'route_summary.arrival_only') !== false
+);
+$closeoutPage = (string)file_get_contents($root . '/route_closeout.php');
+route_summary_assert(
+    'closeout page lists each stop with its photo status',
+    strpos($closeoutPage, 'bakery_route_closeout_stops') !== false
+        && strpos($closeoutPage, 'closeout-stops') !== false
+        && strpos($closeoutPage, 'closeout.photo_arrival_only') !== false
+);
+foreach (['route_summary.arrival_only', 'route_summary.arrival_only_help', 'closeout.photo_pod', 'closeout.photo_arrival_only', 'closeout.stops_heading'] as $plainKey) {
+    $enValue = (string)($english[$plainKey] ?? '');
+    $esValue = (string)($spanish[$plainKey] ?? '');
+    route_summary_assert(
+        "{$plainKey} has no dash punctuation",
+        $enValue !== '' && $esValue !== '' && $enValue !== $esValue
+            && strpos($enValue, "\u{2014}") === false && strpos($enValue, "\u{2013}") === false
+            && strpos($esValue, "\u{2014}") === false && strpos($esValue, "\u{2013}") === false
+    );
+}
 
 if ($failed > 0) {
     fwrite(STDERR, "{$failed} Route Summary checks failed\n");

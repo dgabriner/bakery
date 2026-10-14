@@ -788,6 +788,7 @@ function bakery_agent_work_map_core(): array
             'includes/route_manager.php',
             'includes/product_pack_yields.php',
             'route_summary.php',
+            'css/route_summary.css',
             'includes/zones_catalog.php',
             'driver_overview.php',
             'driver_list.php',
