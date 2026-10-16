@@ -214,6 +214,9 @@
   async function flush(opts) {
     opts = opts || {};
     var jobs = await listJobs();
+    jobs.sort(function (a, b) {
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
     var now = Date.now();
     for (var i = 0; i < jobs.length; i++) {
       var job = jobs[i];

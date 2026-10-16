@@ -440,6 +440,42 @@
     font-weight: 700;
 }
 
+.dr-driver-sms {
+    margin: 0 0 var(--sf-space-4);
+    padding: var(--sf-space-4);
+    background: #fff;
+    border: 1px solid #e7e5e4;
+    border-radius: var(--sf-radius-lg);
+}
+
+.dr-driver-sms h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+}
+
+.dr-driver-sms-help {
+    margin: 0 0 0.75rem;
+}
+
+.dr-driver-sms-card + .dr-driver-sms-card {
+    margin-top: 1rem;
+}
+
+.dr-driver-sms-card h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+}
+
+.dr-driver-sms-body {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 8rem;
+    margin: 0 0 0.5rem;
+    font: inherit;
+    white-space: pre-wrap;
+}
+
 @media (max-width: 720px) {
     .dr-hero {
         grid-template-columns: 1fr;

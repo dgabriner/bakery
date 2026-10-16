@@ -23,6 +23,7 @@ define('BAKERY_OP_PRODUCTION_CUT', 'production_cut');
 define('BAKERY_OP_DRIVER_LOAD_SAVED', 'driver_load_saved');
 define('BAKERY_OP_DRIVER_ROUTE_CLOSED', 'driver_route_closed');
 define('BAKERY_OP_DELIVERY_COMPLETED', 'delivery_completed');
+define('BAKERY_OP_DELIVERY_PROOF_SKIPPED', 'delivery_proof_photo_skipped');
 define('BAKERY_OP_DELIVERY_MARKED', 'delivery_marked');
 define('BAKERY_OP_DELIVERY_MODIFIED', 'delivery_modified');
 define('BAKERY_OP_DELIVERY_SKIPPED', 'delivery_skipped');
@@ -331,6 +332,7 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_PRODUCTION_CUT => 'production',
         BAKERY_OP_DRIVER_LOAD_SAVED => 'inventory',
         BAKERY_OP_DELIVERY_COMPLETED => 'delivery',
+        BAKERY_OP_DELIVERY_PROOF_SKIPPED => 'delivery',
         BAKERY_OP_DELIVERY_MARKED => 'delivery',
         BAKERY_OP_DELIVERY_MODIFIED => 'delivery',
         BAKERY_OP_DELIVERY_SKIPPED => 'delivery',

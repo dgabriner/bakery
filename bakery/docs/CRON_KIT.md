@@ -1,7 +1,8 @@
 # Cron Kit — overnight jobs on DreamHost
 
-Two scripts are designed to run unattended on DreamHost. Page loads already fill the
+Three scripts are designed to run unattended on DreamHost. Page loads already fill the
 demand horizon lazily, so cron makes the system proactive instead of reactive.
+The dual survey does not open on a page view.
 
 **Owner installs the crontab on DreamHost.** Agents ship the runbook + in-app
 staleness check only — Staging and Live cron installs are not performed from GitHub.
@@ -12,6 +13,7 @@ staleness check only — Staging and Live cron installs are not performed from G
 |---|---|---|
 | `scripts/demand_scheduler.php` | Materializes dated orders from standing orders over the rolling horizon; records `cron_run` + `storage/cron/demand_scheduler.json` | Nightly, early morning (PT) |
 | `scripts/staff_alert_digest.php` | Emails one digest of critical/warning alerts to active administrators/managers. **Silent when clean** but still stamps `cron_run`. | Morning, before the manager's first coffee (PT) |
+| `scripts/survey_dual_open.php` | Opens the next sell day's dual survey (lock stores and set order) for HQ and each active driver so end-of-day texts can carry the Ajustes link. Records `cron_run`. Does not send texts. | 5:00 PM America/Los_Angeles |
 
 ## Install (DreamHost panel → Cron Jobs)
 
@@ -23,7 +25,12 @@ The Live tree is `/home/dh_dp755h/bakery.sourflour.org/bake`. Add this line if i
 
 # Staff alert digest, 06:00
 0 6 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/dh_dp755h/cron_digest.log 2>&1
+
+# Next-day dual survey, 17:00 America/Los_Angeles
+0 17 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/survey_dual_open.php
 ```
+
+On this Live host, `YOUR_USER` is `dh_dp755h`. The 5:00 PM line is also in the script header. Do not open the dual survey from a GET.
 
 Log paths on the shell host:
 - `/home/dh_dp755h/cron_demand.log`
