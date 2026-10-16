@@ -240,17 +240,21 @@ $surveyCoverage = [
 if ($view === 'surveys') {
     require_once __DIR__ . '/includes/surveys.php';
     $surveysReady = bakery_surveys_ready($db);
-    if (function_exists('bakery_survey_next_delivery_date')) {
+    if (function_exists('bakery_survey_center_date')) {
         $weekdays = function_exists('bakery_survey_delivery_weekdays')
             ? bakery_survey_delivery_weekdays($db)
             : [1, 2, 3, 4, 5, 6];
-        $surveyComposerDate = bakery_survey_next_delivery_date($today, $weekdays);
+        $requestedSurveyDate = array_key_exists('date', $_GET) ? trim((string)$_GET['date']) : '';
+        $surveyComposerDate = bakery_survey_center_date($requestedSurveyDate, $today, $weekdays);
     }
     if ($surveysReady) {
         $surveyRows = $db->query(
             'SELECT s.*,
+                d.name AS driver_name,
                 (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id AND sr.action <> \'sent\') AS response_count
-             FROM surveys s ORDER BY s.id DESC LIMIT 50'
+             FROM surveys s
+             LEFT JOIN drivers d ON d.id = s.driver_id
+             ORDER BY s.id DESC LIMIT 50'
         )->fetchAll(PDO::FETCH_ASSOC);
         $driverChoices = bakery_survey_driver_choices($db);
 
@@ -1031,7 +1035,7 @@ require_once __DIR__ . '/includes/nav.php';
                 </span>
                 <small>
                     <a href="text_comms.php?view=surveys"><?php bakery_te('texts.survey_back_to_list'); ?></a>
-                    · <a href="<?php echo htmlspecialchars(BASE_URL . 'survey.php?t=' . rawurlencode((string)$dRow['token']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
+                    · <a href="<?php echo htmlspecialchars(bakery_survey_link_url((string)$dRow['token'], (string)($dRow['delivery_date'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
                 </small>
             </div>
             <div style="padding:12px 16px; display:flex; flex-wrap:wrap; gap:14px; font-size:13px;">
@@ -1279,6 +1283,14 @@ require_once __DIR__ . '/includes/nav.php';
                                 <a href="<?php echo htmlspecialchars($detailQs, ENT_QUOTES, 'UTF-8'); ?>" style="font-weight:600; color:inherit; text-decoration:underline;">
                                     <?php echo htmlspecialchars($listTitle !== '' ? $listTitle : bakery_t('texts.survey_kind_question'), ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
+                                <?php
+                                    $surveyDriverId = (int)($s['driver_id'] ?? 0);
+                                    $surveyDriverName = trim((string)($s['driver_name'] ?? ''));
+                                    if ($surveyDriverName === '' || $surveyDriverId <= 0) {
+                                        $surveyDriverName = (string)bakery_t('texts.survey_driver_hq');
+                                    }
+                                ?>
+                                <span class="tc-survey-driver"><?php echo htmlspecialchars($surveyDriverName, ENT_QUOTES, 'UTF-8'); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($s['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : ($s['kind'] === 'route_order' ? 'texts.survey_kind_order' : 'texts.survey_kind_question'))); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['audience'] === 'driver' ? 'texts.survey_audience_driver' : 'texts.survey_audience_staff'); ?></span>
                                 <span class="tc-status"><?php bakery_te($s['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>
@@ -1290,7 +1302,7 @@ require_once __DIR__ . '/includes/nav.php';
                             <span class="tc-hint">
                                 <?php echo (int)$s['response_count']; ?> <?php bakery_te('texts.survey_responses_suffix'); ?>
                                 · <a href="<?php echo htmlspecialchars($detailQs, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_view_results'); ?></a>
-                                · <a href="<?php echo htmlspecialchars(BASE_URL . 'survey.php?t=' . rawurlencode((string)$s['token']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
+                                · <a href="<?php echo htmlspecialchars(bakery_survey_link_url((string)$s['token'], (string)($s['delivery_date'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('texts.survey_open_link'); ?></a>
                             </span>
                         </div>
                     </li>

@@ -41,6 +41,9 @@
     pendingVarianceConfirm: null,
     photoReturnStep: null,
     confirmationSaved: false,
+    proofAccepted: false,
+    explicitProofSkip: false,
+    awaitingProof: false,
     completionMessage: '',
     stopFinished: false,
     sessionRefreshPromise: null,
@@ -513,6 +516,10 @@
     return state.photos.some(function (photo) {
       return String(photo.photo_type || '').toLowerCase() === String(type).toLowerCase();
     });
+  }
+
+  function stopHasProofPhoto() {
+    return hasPhotoType('After') || hasPhotoType('Receipt');
   }
 
   function updatePhotoWorkflowUi(applySuggestedType) {
@@ -1361,7 +1368,20 @@
         );
         goToStep('invoice');
       } else if (state.photoReturnStep === 'complete') {
+        var proofType = String(photoType || '').toLowerCase();
+        if (proofType !== 'after' && proofType !== 'receipt') {
+          setStatus(i18n('proof_photo_required', 'Take the after photo before this stop can be marked delivered.'), 'error');
+          return;
+        }
+        state.proofAccepted = true;
+        state.explicitProofSkip = false;
+        state.awaitingProof = false;
         state.photoReturnStep = null;
+        if (!state.confirmationSaved) {
+          setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
+          confirmDelivery(true);
+          return;
+        }
         setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
         finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
       } else if (photoType === 'Before') {
@@ -2013,6 +2033,14 @@
       syncPricePerPieceInputs(pricePerPiece);
     }
 
+    if (!state.proofAccepted && !stopHasProofPhoto()) {
+      state.awaitingProof = true;
+      state.photoReturnStep = 'complete';
+      setSubmitting(false);
+      promptDeparturePhoto();
+      return;
+    }
+
     setSubmitting(true);
     setStatus(i18n('saving_delivery'), 'loading');
 
@@ -2037,6 +2065,9 @@
       body = appendGpsParams(body, coords);
       if (requestId) {
         body += '&client_request_id=' + encodeURIComponent(requestId);
+      }
+      if (state.explicitProofSkip) {
+        body += '&proof_skip=1';
       }
 
       var data = null;
@@ -2084,9 +2115,10 @@
       state.completionMessage = successMessage;
       state.savedTotal = Number(data.total || 0);
       state.isSaved = true;
-      state.photoReturnStep = 'complete';
+      state.awaitingProof = false;
+      state.photoReturnStep = null;
       setSubmitting(false);
-      promptDeparturePhoto();
+      finishDeliveryUi(successMessage);
     } catch (err) {
       if (err && err.isSessionError) {
         setStatus(err.message, 'error');
@@ -2161,6 +2193,9 @@
     var varianceAck = $('deliveryVarianceAck');
     if (varianceAck) varianceAck.checked = false;
     state.confirmationSaved = false;
+    state.proofAccepted = false;
+    state.explicitProofSkip = false;
+    state.awaitingProof = false;
     state.completionMessage = '';
     state.stopFinished = false;
 
@@ -2249,11 +2284,6 @@
   function closeModal(options) {
     options = options || {};
     if (state.uploading || state.preparing || state.submitting) return;
-    if (!options.deliveryFinished && state.confirmationSaved && state.photoReturnStep === 'complete') {
-      state.photoReturnStep = null;
-      finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
-      return;
-    }
     closeViewer();
     stopCamera();
     resetOrderDetailsPanel();
@@ -2433,9 +2463,12 @@
     });
     function skipPhotoStep() {
       if (state.submitting) return;
-      if (state.photoReturnStep === 'complete') {
+      if (state.photoReturnStep === 'complete' || state.awaitingProof) {
+        state.explicitProofSkip = true;
+        state.proofAccepted = true;
+        state.awaitingProof = false;
         state.photoReturnStep = null;
-        finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
+        confirmDelivery(true);
         return;
       }
       goToStep('delivery');

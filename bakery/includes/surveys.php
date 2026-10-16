@@ -761,3 +761,22 @@ function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $delive
         'title' => 'Route order',
     ]);
 }
+
+/**
+ * Survey Center date. An explicit Y-m-d in the link wins. Otherwise the next
+ * delivery day. Junk query values fall back to that next day.
+ *
+ * @param list<int> $deliveryWeekdays
+ */
+function bakery_survey_center_date(string $requested, string $today, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6]): string
+{
+    $requested = trim($requested);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $requested)) {
+        try {
+            return bakery_survey_validate_ymd($requested);
+        } catch (RuntimeException $e) {
+            // Fall through to the next delivery day.
+        }
+    }
+    return bakery_survey_next_delivery_date($today, $deliveryWeekdays);
+}
