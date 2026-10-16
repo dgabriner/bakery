@@ -3,11 +3,19 @@
  * Wholesale account health.
  *
  * Standing quantity is never an input. An account is lapsed only when the
- * lapse window has no dated order and no completed or photo-confirmed
- * delivery. Photo confirmation is a driver_photos row for that customer and
- * delivery date, so a stop whose order is still Pending after a photo still
- * counts. Dated orders on or after the lapse start count too, including a
+ * lapse window has no dated order, no completed delivery, and no driver
+ * photo. A photo keeps the account out of lapsed. It is not a completed
+ * delivery. Dated orders on or after the lapse start count too, including a
  * future dated order that has not been delivered yet.
+ *
+ * Delivered units, the delivered share, and the last completed delivery
+ * count only orders whose status is delivered or invoiced, or whose
+ * delivery_confirmed_at is set. A driver photo, including a before-delivery
+ * photo on an order that is still Pending, does not add units and does not
+ * set the last completed date. The last photo is its own column.
+ *
+ * Past orders that are still Pending are listed in a read-only cleanup
+ * queue. This page does not change them.
  *
  * Thresholds (one block):
  *   BAKERY_ACCOUNT_HEALTH_RECENT_DAYS — delivered units, inclusive, ending on as-of
@@ -18,12 +26,14 @@
  *   BAKERY_ACCOUNT_HEALTH_SHRINK_MIN_PRIOR_UNITS — prior volume required before shrinking
  *
  * Example for as-of 2026-10-07: recent is 2026-08-13 through 2026-10-07,
- * prior is 2026-06-18 through 2026-08-12, and a photo-confirmed delivery on
- * 2026-10-07 keeps the account out of lapsed even when standing quantity is 0.
+ * prior is 2026-06-18 through 2026-08-12. A photo on 2026-10-07 keeps the
+ * account out of lapsed even when standing quantity is 0, and those units
+ * are not counted as delivered.
  *
  * Shrinking and fill rate use the delivered order total
- * (daily_orders.delivered_pieces). When that total is missing, the ordered
- * piece total is the fallback. Per-product delivered quantities are not summed.
+ * (daily_orders.delivered_pieces) on completed deliveries. When that total
+ * is missing, the ordered piece total is the fallback. Per-product
+ * delivered quantities are not summed.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -144,7 +154,7 @@ function bakery_account_health_normalize_status(string $status): string
 function bakery_account_health_normalize_sort(string $sort): string
 {
     $sort = strtolower(trim($sort));
-    if (in_array($sort, ['name', 'recent', 'prior', 'change', 'last', 'stale', 'share', 'balance', 'status'], true)) {
+    if (in_array($sort, ['name', 'recent', 'prior', 'change', 'last', 'photo', 'stale', 'share', 'balance', 'status'], true)) {
         return $sort;
     }
     return 'status';
@@ -216,6 +226,8 @@ function bakery_account_health_compare(array $a, array $b, string $sort, array $
             return bakery_account_health_nullable_cmp($a['change_percent'] ?? null, $b['change_percent'] ?? null);
         case 'last':
             return bakery_account_health_nullable_cmp($a['last_delivered_date'] ?? null, $b['last_delivered_date'] ?? null);
+        case 'photo':
+            return bakery_account_health_nullable_cmp($a['last_photo_date'] ?? null, $b['last_photo_date'] ?? null);
         case 'stale':
             return ((int)($a['stale_pending_count'] ?? 0)) <=> ((int)($b['stale_pending_count'] ?? 0));
         case 'share':
@@ -257,6 +269,7 @@ function bakery_account_health_csv_headers(): array
         bakery_t('account_health.col_prior'),
         bakery_t('account_health.col_change'),
         bakery_t('account_health.col_last'),
+        bakery_t('account_health.col_photo'),
         bakery_t('account_health.col_stale'),
         bakery_t('account_health.csv_share_delivered'),
         bakery_t('account_health.csv_share_ordered'),
@@ -281,6 +294,7 @@ function bakery_account_health_csv_row(array $row): array
         (string)(int)($row['prior_delivered_units'] ?? 0),
         $change === null ? '' : number_format((float)$change, 1, '.', ''),
         (string)($row['last_delivered_date'] ?? ''),
+        (string)($row['last_photo_date'] ?? ''),
         (string)(int)($row['stale_pending_count'] ?? 0),
         (string)(int)($row['share_delivered_units'] ?? 0),
         (string)(int)($row['share_ordered_units'] ?? 0),
@@ -434,8 +448,7 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
     foreach ($orders->fetchAll(PDO::FETCH_ASSOC) as $order) {
         $customerId = (int)$order['customer_id'];
         $date = substr((string)$order['order_date'], 0, 10);
-        $hasPhoto = !empty($photos[$customerId][$date]);
-        $delivered = bakery_account_health_order_is_delivered($order, $hasPhoto);
+        $delivered = bakery_account_health_order_is_delivered($order);
         if (!isset($totals[$customerId])) {
             $totals[$customerId] = [
                 'recent' => 0,
@@ -509,11 +522,8 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
         $prior = (int)$bucket['prior'];
         $shareOrdered = (int)$bucket['share_ordered'];
         $shareDelivered = (int)$bucket['share_delivered'];
-        $lastDates = array_filter([
-            $completedByCustomer[$customerId] ?? null,
-            $lastPhoto[$customerId] ?? null,
-        ]);
-        $last = $lastDates === [] ? null : max($lastDates);
+        $lastCompleted = $completedByCustomer[$customerId] ?? null;
+        $lastPhotoDate = $lastPhoto[$customerId] ?? null;
         $balance = $balances[$customerId] ?? null;
         $row = [
             'customer_id' => $customerId,
@@ -522,7 +532,8 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
             'recent_delivered_units' => $recent,
             'prior_delivered_units' => $prior,
             'change_percent' => bakery_account_health_change_percent($recent, $prior),
-            'last_delivered_date' => $last,
+            'last_delivered_date' => $lastCompleted,
+            'last_photo_date' => $lastPhotoDate,
             'stale_pending_count' => (int)($staleByCustomer[$customerId] ?? 0),
             'share_delivered_units' => $shareDelivered,
             'share_ordered_units' => $shareOrdered,
@@ -541,11 +552,8 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
 /**
  * @param array<string, mixed> $order
  */
-function bakery_account_health_order_is_delivered(array $order, bool $hasPhoto): bool
+function bakery_account_health_order_is_delivered(array $order): bool
 {
-    if ($hasPhoto) {
-        return true;
-    }
     $status = (string)($order['status'] ?? '');
     if ($status === 'delivered' || $status === 'invoiced') {
         return true;
@@ -619,16 +627,138 @@ function bakery_account_health_format_change(array $row): string
     return $sign . number_format($number, 1) . '%';
 }
 
+function bakery_account_health_timeline_url(int $customerId, string $from, string $until): string
+{
+    return 'operational_timeline.php?' . http_build_query([
+        'context' => 'customer',
+        'customer_id' => $customerId,
+        'date_from' => $from,
+        'date_until' => $until,
+    ]);
+}
+
+function bakery_account_health_order_timeline_url(int $dailyOrderId, string $orderDate): string
+{
+    return 'operational_timeline.php?' . http_build_query([
+        'context' => 'order',
+        'daily_order_id' => $dailyOrderId,
+        'date' => $orderDate,
+    ]);
+}
+
+/**
+ * Past-dated orders still Pending. Read-only. Same active human customers as the health table.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function bakery_account_health_cleanup_queue(PDO $db, string $asOf): array
+{
+    if (!table_exists($db, 'customers') || !table_exists($db, 'daily_orders')) {
+        return [];
+    }
+    $windows = bakery_account_health_windows($asOf);
+    $where = 'c.is_active = 1' . bakery_sfb_ops_origin_clause('c', $db);
+    $stmt = $db->prepare(
+        "SELECT do.id AS daily_order_id, do.customer_id, c.name AS customer_name,
+                do.order_date, COALESCE(SUM(doi.quantity), 0) AS ordered_units
+         FROM daily_orders do
+         INNER JOIN customers c ON c.id = do.customer_id
+         LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
+         WHERE {$where}
+           AND do.status = 'pending'
+           AND do.order_date < ?
+         GROUP BY do.id, do.customer_id, c.name, do.order_date
+         ORDER BY c.name ASC, do.order_date ASC, do.id ASC"
+    );
+    $stmt->execute([$windows['as_of']]);
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rows[] = [
+            'daily_order_id' => (int)$row['daily_order_id'],
+            'customer_id' => (int)$row['customer_id'],
+            'customer_name' => (string)$row['customer_name'],
+            'order_date' => substr((string)$row['order_date'], 0, 10),
+            'ordered_units' => (int)$row['ordered_units'],
+        ];
+    }
+    return $rows;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $queue
+ */
+function bakery_account_health_render_cleanup(array $queue): string
+{
+    $h = static function (string $value): string {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    };
+    $columns = [
+        'customer' => 'account_health.col_customer',
+        'date' => 'account_health.cleanup_col_date',
+        'order' => 'account_health.cleanup_col_order',
+        'units' => 'account_health.cleanup_col_units',
+        'status' => 'account_health.col_status',
+    ];
+    $head = '';
+    foreach ($columns as $key => $labelKey) {
+        $numeric = $key === 'customer' || $key === 'status' ? '' : ' class="num"';
+        $head .= '<th' . $numeric . '>' . $h(bakery_t($labelKey)) . '</th>';
+    }
+    $body = '';
+    if ($queue === []) {
+        $body = '<tr><td colspan="' . count($columns) . '">' . $h(bakery_t('account_health.cleanup_empty')) . '</td></tr>';
+    }
+    $anchored = [];
+    foreach ($queue as $item) {
+        $customerId = (int)$item['customer_id'];
+        $orderId = (int)$item['daily_order_id'];
+        $orderDate = (string)$item['order_date'];
+        $hub = 'customer_record.php?customer_id=' . $customerId;
+        $events = bakery_account_health_order_timeline_url($orderId, $orderDate);
+        $rowId = '';
+        if (!isset($anchored[$customerId])) {
+            $rowId = ' id="ah-cleanup-' . $customerId . '"';
+            $anchored[$customerId] = true;
+        }
+        $cells = [
+            'customer' => '<a href="' . $h($hub) . '">' . $h((string)$item['customer_name']) . '</a>',
+            'date' => '<time datetime="' . $h($orderDate) . '">' . $h($orderDate) . '</time>',
+            'order' => '<a href="' . $h($events) . '">' . $h((string)$orderId) . '</a>',
+            'units' => (string)(int)$item['ordered_units'],
+            'status' => $h(bakery_t('account_health.pending')),
+        ];
+        $body .= '<tr' . $rowId . '>';
+        foreach ($columns as $key => $labelKey) {
+            $numeric = $key === 'customer' || $key === 'status' ? '' : ' class="num"';
+            $body .= '<td' . $numeric . ' data-label="' . $h(bakery_t($labelKey)) . '">' . $cells[$key] . '</td>';
+        }
+        $body .= '</tr>';
+    }
+
+    return '<div class="sf-section" id="ah-cleanup">'
+        . '<h2>' . $h(bakery_t('account_health.cleanup_title')) . '</h2>'
+        . '<p style="color:var(--sf-text-muted);max-width:70ch;">' . $h(bakery_t('account_health.cleanup_note')) . '</p>'
+        . '<div class="sf-table-wrap"><table class="sf-table sf-table--stack-sm">'
+        . '<caption class="sf-sr-only">' . $h(bakery_t('account_health.cleanup_title')) . '</caption>'
+        . '<thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
+        . '</div>';
+}
+
 /**
  * @param array<int, array<string, mixed>> $rows filtered rows for the table
  * @param array<int, array<string, mixed>> $allRows unfiltered rows for the summary
  * @param array<string, string> $query
+ * @param array<int, array<string, mixed>> $queue
  */
-function bakery_account_health_render(array $rows, array $allRows, array $query): string
+function bakery_account_health_render(array $rows, array $allRows, array $query, array $queue = [], string $asOf = ''): string
 {
     $query['status'] = bakery_account_health_normalize_status((string)($query['status'] ?? 'all'));
     $query['sort'] = bakery_account_health_normalize_sort((string)($query['sort'] ?? 'status'));
     $query['dir'] = bakery_account_health_normalize_dir((string)($query['dir'] ?? 'asc'));
+    if ($asOf === '') {
+        $asOf = date('Y-m-d');
+    }
+    $windows = bakery_account_health_windows($asOf);
     $thresholds = bakery_account_health_thresholds();
     $summary = bakery_account_health_summary($allRows);
     $h = static function (string $value): string {
@@ -661,6 +791,7 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
         'prior' => 'account_health.col_prior',
         'change' => 'account_health.col_change',
         'last' => 'account_health.col_last',
+        'photo' => 'account_health.col_photo',
         'stale' => 'account_health.col_stale',
         'share' => 'account_health.col_share',
         'balance' => 'account_health.col_balance',
@@ -672,6 +803,7 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
         'prior' => 'desc',
         'change' => 'asc',
         'last' => 'asc',
+        'photo' => 'asc',
         'stale' => 'desc',
         'share' => 'asc',
         'balance' => 'desc',
@@ -695,7 +827,7 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
 
     $body = '';
     if ($rows === []) {
-        $body = '<tr><td colspan="9">' . $h(bakery_t('account_health.empty')) . '</td></tr>';
+        $body = '<tr><td colspan="' . count($columns) . '">' . $h(bakery_t('account_health.empty')) . '</td></tr>';
     }
     foreach ($rows as $row) {
         $status = (string)$row['status'];
@@ -712,6 +844,18 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
             ]);
         $last = (string)($row['last_delivered_date'] ?? '');
         $lastText = $last === '' ? bakery_t('account_health.never') : $last;
+        $photoDate = (string)($row['last_photo_date'] ?? '');
+        $photoText = $photoDate === '' ? bakery_t('account_health.never') : $photoDate;
+        $timelineUrl = bakery_account_health_timeline_url(
+            (int)$row['customer_id'],
+            $windows['prior_start'],
+            $windows['as_of']
+        );
+        $staleCount = (int)$row['stale_pending_count'];
+        $staleHtml = (string)$staleCount;
+        if ($staleCount > 0) {
+            $staleHtml = '<a href="#ah-cleanup-' . (int)$row['customer_id'] . '">' . $staleCount . '</a>';
+        }
         $balanceText = '$' . number_format((float)$row['balance'], 2);
         if ((int)$row['balance_oldest_days'] > 0 && (float)$row['balance'] > 0) {
             $balanceText .= ' · ' . bakery_t('account_health.balance_age', [
@@ -720,12 +864,14 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
         }
         $cells = [
             'name' => '<a href="' . $h($hub) . '">' . $h((string)$row['customer_name']) . '</a>'
-                . ($zone !== '' ? '<div style="color:var(--sf-text-muted);font-size:0.85rem;">' . $h($zone) . '</div>' : ''),
+                . ($zone !== '' ? '<div style="color:var(--sf-text-muted);font-size:0.85rem;">' . $h($zone) . '</div>' : '')
+                . '<div><a href="' . $h($timelineUrl) . '">' . $h(bakery_t('account_health.timeline')) . '</a></div>',
             'recent' => (string)(int)$row['recent_delivered_units'],
             'prior' => (string)(int)$row['prior_delivered_units'],
             'change' => $h(bakery_account_health_format_change($row)),
             'last' => $last === '' ? $h($lastText) : '<time datetime="' . $h($last) . '">' . $h($lastText) . '</time>',
-            'stale' => (string)(int)$row['stale_pending_count'],
+            'photo' => $photoDate === '' ? $h($photoText) : '<time datetime="' . $h($photoDate) . '">' . $h($photoText) . '</time>',
+            'stale' => $staleHtml,
             'share' => $h($shareText),
             'balance' => $h($balanceText),
             'status' => '<span class="' . $badge . '">' . $h(bakery_account_health_status_label($status)) . '</span>',
@@ -741,6 +887,7 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
     return '<div class="sf-section">'
         . '<p>' . $h(bakery_t('account_health.subtitle')) . '</p>'
         . '<p style="color:var(--sf-text-muted);max-width:70ch;">' . $h($note) . '</p>'
+        . '<p style="color:var(--sf-text-muted);max-width:70ch;">' . $h(bakery_t('account_health.delivered_note')) . '</p>'
         . '<p><strong>' . $h($summaryText) . '</strong></p>'
         . '<div class="action-bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 16px;">'
         . '<span class="sf-sr-only">' . $h(bakery_t('account_health.filter_label')) . '</span>'
@@ -750,5 +897,6 @@ function bakery_account_health_render(array $rows, array $allRows, array $query)
         . '<div class="sf-table-wrap"><table class="sf-table sf-table--stack-sm">'
         . '<caption class="sf-sr-only">' . $h(bakery_t('account_health.title')) . '</caption>'
         . '<thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
-        . '</div>';
+        . '</div>'
+        . bakery_account_health_render_cleanup($queue);
 }

@@ -43,12 +43,14 @@ if (($_GET['export'] ?? '') === 'csv') {
     exit;
 }
 
+$queue = bakery_account_health_cleanup_queue($db, $asOf);
+
 $page_title = bakery_t('account_health.title');
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/nav.php';
 ?>
 <div class="container container--wide">
     <h1><?php echo htmlspecialchars(bakery_t('account_health.title'), ENT_QUOTES, 'UTF-8'); ?></h1>
-    <?php echo bakery_account_health_render($rows, $allRows, $query); ?>
+    <?php echo bakery_account_health_render($rows, $allRows, $query, $queue, $asOf); ?>
 <?php
 require_once __DIR__ . '/includes/footer.php';
