@@ -1324,6 +1324,14 @@ function bakery_customer_apply_active_status(PDO $db, int $customerId, bool $isA
  */
 function bakery_customer_retire_inactive_future_demand(PDO $db, int $customerId, string $customerName = ''): array
 {
+    // daily_order_generation.php requires this file before the removal log
+    // exists, so load it only when a caller has not already done so.
+    if (!function_exists('bakery_dated_route_log_removal')) {
+        require_once __DIR__ . '/daily_order_generation.php';
+    }
+    if (function_exists('bakery_dated_route_removal_log_ready')) {
+        bakery_dated_route_removal_log_ready($db);
+    }
     $today = date('Y-m-d');
     $result = [
         'orders_retired' => 0,
@@ -1378,6 +1386,28 @@ function bakery_customer_retire_inactive_future_demand(PDO $db, int $customerId,
 
         $deleteItems->execute([$dailyOrderId]);
         $itemsRemoved = $deleteItems->rowCount();
+        if (function_exists('bakery_dated_route_log_removal')) {
+            $pendingStops = $db->prepare(
+                "SELECT driver_id, daily_order_id
+                 FROM daily_order_assignments
+                 WHERE daily_order_id = ?
+                   AND delivery_date = ?
+                   AND COALESCE(delivery_status, 'pending') IN ('pending', 'cancelled')"
+            );
+            $pendingStops->execute([$dailyOrderId, $orderDate]);
+            foreach ($pendingStops->fetchAll(PDO::FETCH_ASSOC) as $pendingStop) {
+                bakery_dated_route_log_removal(
+                    $db,
+                    $orderDate,
+                    $customerId,
+                    (int)$pendingStop['driver_id'],
+                    $dailyOrderId,
+                    'customer_inactive',
+                    'customer_retire_inactive_future_demand',
+                    false
+                );
+            }
+        }
         $deletePendingAssignments->execute([$dailyOrderId, $orderDate]);
         $assignmentsRemoved = $deletePendingAssignments->rowCount();
         $result['assignments_removed'] += $assignmentsRemoved;

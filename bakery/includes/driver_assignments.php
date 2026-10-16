@@ -38,7 +38,7 @@ function bakery_driver_assign_orders(
     bakery_require_role(['administrator', 'manager']);
     $deliveryDate = bakery_driver_validate_delivery_date($deliveryDate);
 
-    if (!in_array($mode, ['replace', 'append'], true)) {
+    if (!in_array($mode, ['replace', 'append', 'reorder'], true)) {
         $mode = 'replace';
     }
     if ($mode === 'append' && $assignments === []) {
@@ -87,8 +87,12 @@ function bakery_driver_assign_orders(
     if ($mode === 'append' && $normalized === []) {
         throw new RuntimeException('No valid orders to assign');
     }
+    if ($mode === 'reorder' && $normalized === []) {
+        throw new RuntimeException('No assignments provided');
+    }
 
     bakery_dated_route_removals_ready($db);
+    bakery_dated_route_removal_log_ready($db);
 
     if ($normalized !== []) {
         $orderIds = array_column($normalized, 'daily_order_id');
@@ -117,7 +121,7 @@ function bakery_driver_assign_orders(
         ');
 
         $targetExistingStmt = $db->prepare('
-            SELECT id, daily_order_id, delivery_status
+            SELECT id, daily_order_id, delivery_status, route_order, scheduled_delivery_time
             FROM daily_order_assignments
             WHERE driver_id = ? AND delivery_date = ?
             FOR UPDATE
@@ -165,6 +169,8 @@ function bakery_driver_assign_orders(
             }
         }
 
+        $movedFromOther = $otherAssignments ?? [];
+
         $updateLegacyDriverStmt = $db->prepare('UPDATE daily_orders SET driver_id = ? WHERE id = ?');
         $removedOrderIds = [];
 
@@ -195,6 +201,60 @@ function bakery_driver_assign_orders(
                 $added++;
             }
             $stopCount = $added;
+        } elseif ($mode === 'reorder') {
+            $omitted = [];
+            foreach ($targetExistingByOrder as $orderId => $row) {
+                if (!isset($submittedLookup[$orderId])) {
+                    $omitted[] = $row;
+                }
+            }
+            usort($omitted, static function (array $a, array $b): int {
+                $routeCompare = ((int)($a['route_order'] ?? 0)) <=> ((int)($b['route_order'] ?? 0));
+                return $routeCompare !== 0 ? $routeCompare : ((int)$a['id'] <=> (int)$b['id']);
+            });
+
+            $db->prepare('
+                UPDATE daily_order_assignments
+                SET route_order = -id
+                WHERE driver_id = ? AND delivery_date = ?
+            ')->execute([$driverId, $deliveryDate]);
+
+            $updateExistingStmt = $db->prepare('
+                UPDATE daily_order_assignments
+                SET route_order = ?, scheduled_delivery_time = ?
+                WHERE id = ?
+            ');
+            $updateOrderOnlyStmt = $db->prepare('
+                UPDATE daily_order_assignments
+                SET route_order = ?
+                WHERE id = ?
+            ');
+            $position = 1;
+            foreach ($normalized as $assignment) {
+                $dailyOrderId = (int)$assignment['daily_order_id'];
+                if (isset($targetExistingByOrder[$dailyOrderId])) {
+                    $updateExistingStmt->execute([
+                        $position,
+                        $assignment['scheduled_delivery_time'],
+                        (int)$targetExistingByOrder[$dailyOrderId]['id'],
+                    ]);
+                } else {
+                    $insertStmt->execute([
+                        $dailyOrderId,
+                        $driverId,
+                        $deliveryDate,
+                        $position,
+                        $assignment['scheduled_delivery_time'],
+                    ]);
+                }
+                $updateLegacyDriverStmt->execute([$driverId, $dailyOrderId]);
+                $position++;
+            }
+            foreach ($omitted as $row) {
+                $updateOrderOnlyStmt->execute([$position, (int)$row['id']]);
+                $position++;
+            }
+            $stopCount = $position - 1;
         } else {
             // Free the positive route positions before applying a reorder.
             // Migration 047 enforces one position per driver/date, so swaps
@@ -257,12 +317,38 @@ function bakery_driver_assign_orders(
 
         bakery_driver_renumber_route_orders($db, array_keys($sourceDriverIds), $deliveryDate);
 
+        $movedOrderIds = array_map(
+            static fn(array $row): int => (int)$row['daily_order_id'],
+            $movedFromOther
+        );
         $customerByOrder = bakery_dated_route_customers_for_orders($db, array_merge(
             array_map(static fn(array $assignment): int => (int)$assignment['daily_order_id'], $normalized),
-            $removedOrderIds
+            $removedOrderIds,
+            $movedOrderIds
         ));
+        foreach ($movedFromOther as $row) {
+            bakery_dated_route_log_removal(
+                $db,
+                $deliveryDate,
+                $customerByOrder[(int)$row['daily_order_id']] ?? 0,
+                (int)$row['driver_id'],
+                (int)$row['daily_order_id'],
+                'moved_to_other_driver',
+                'driver_assign_orders.move',
+                false
+            );
+        }
         foreach ($removedOrderIds as $orderId) {
-            bakery_dated_route_removal_record($db, $deliveryDate, $customerByOrder[(int)$orderId] ?? 0, $driverId);
+            bakery_dated_route_log_removal(
+                $db,
+                $deliveryDate,
+                $customerByOrder[(int)$orderId] ?? 0,
+                $driverId,
+                (int)$orderId,
+                'saved_route_omitted',
+                'driver_assign_orders.replace',
+                true
+            );
         }
         foreach ($normalized as $assignment) {
             bakery_dated_route_removal_clear(
@@ -285,7 +371,7 @@ function bakery_driver_assign_orders(
         bakery_record_operational_event(
             $db,
             BAKERY_OP_DRIVER_ROUTE_ASSIGNED,
-            ($mode === 'append' ? 'Added stops to ' : 'Assigned route for ') . $driverName
+            ($mode === 'append' ? 'Added stops to ' : ($mode === 'reorder' ? 'Reordered route for ' : 'Assigned route for ')) . $driverName
                 . ' on ' . date('M j, Y', strtotime($deliveryDate)),
             [
                 'operational_date' => $deliveryDate,
@@ -320,6 +406,7 @@ function bakery_driver_remove_assignment(
         throw new RuntimeException('Invalid route stop');
     }
     bakery_dated_route_removals_ready($db);
+    bakery_dated_route_removal_log_ready($db);
 
     $db->beginTransaction();
     try {
@@ -341,7 +428,16 @@ function bakery_driver_remove_assignment(
         $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$assignment['id']]);
         $customerStmt = $db->prepare('SELECT customer_id FROM daily_orders WHERE id = ?');
         $customerStmt->execute([$dailyOrderId]);
-        bakery_dated_route_removal_record($db, $deliveryDate, (int)$customerStmt->fetchColumn(), $driverId);
+        bakery_dated_route_log_removal(
+            $db,
+            $deliveryDate,
+            (int)$customerStmt->fetchColumn(),
+            $driverId,
+            $dailyOrderId,
+            'driver_removed',
+            'driver_remove_assignment',
+            true
+        );
         bakery_driver_renumber_route_orders($db, [$driverId], $deliveryDate);
         $db->prepare('
             UPDATE daily_orders do
@@ -610,6 +706,7 @@ function bakery_driver_assign_from_standing_routes(PDO $db, string $deliveryDate
     ]);
 
     bakery_dated_route_removals_ready($db);
+    bakery_dated_route_removal_log_ready($db);
     $db->beginTransaction();
     try {
         bakery_dated_route_removal_clear_date($db, $deliveryDate);
@@ -634,6 +731,53 @@ function bakery_driver_assign_from_standing_routes(PDO $db, string $deliveryDate
                 'route_order' => $routeOrderByDriver[$assignedDriverId],
                 'scheduled_delivery_time' => null,
             ];
+        }
+
+        $priorStmt = $db->prepare(
+            'SELECT doa.daily_order_id, doa.driver_id, do.customer_id
+             FROM daily_order_assignments doa
+             JOIN daily_orders do ON do.id = doa.daily_order_id
+             WHERE doa.delivery_date = ?'
+        );
+        $priorStmt->execute([$deliveryDate]);
+        $priorStops = $priorStmt->fetchAll(PDO::FETCH_ASSOC);
+        $newDriverByCustomer = [];
+        $customerByOrder = [];
+        foreach ($orderIdByCustomer as $customerId => $dailyOrderId) {
+            $customerByOrder[(int)$dailyOrderId] = (int)$customerId;
+        }
+        foreach ($assignments as $assignment) {
+            $customerId = $customerByOrder[(int)$assignment['daily_order_id']] ?? 0;
+            if ($customerId > 0) {
+                $newDriverByCustomer[$customerId] = (int)$assignment['driver_id'];
+            }
+        }
+        foreach ($priorStops as $priorStop) {
+            $customerId = (int)$priorStop['customer_id'];
+            $priorDriverId = (int)$priorStop['driver_id'];
+            if (!isset($newDriverByCustomer[$customerId])) {
+                bakery_dated_route_log_removal(
+                    $db,
+                    $deliveryDate,
+                    $customerId,
+                    $priorDriverId,
+                    (int)$priorStop['daily_order_id'],
+                    'standing_rebuild_omitted',
+                    'driver_assign_from_standing',
+                    false
+                );
+            } elseif ($newDriverByCustomer[$customerId] !== $priorDriverId) {
+                bakery_dated_route_log_removal(
+                    $db,
+                    $deliveryDate,
+                    $customerId,
+                    $priorDriverId,
+                    (int)$priorStop['daily_order_id'],
+                    'moved_to_other_driver',
+                    'driver_assign_from_standing',
+                    false
+                );
+            }
         }
 
         $db->prepare('DELETE FROM daily_order_assignments WHERE delivery_date = ?')->execute([$deliveryDate]);
@@ -767,6 +911,7 @@ function bakery_driver_transfer_assignments(
         throw new RuntimeException('No eligible stops to transfer');
     }
 
+    bakery_dated_route_removal_log_ready($db);
     $db->beginTransaction();
     try {
         $deleteStmt = $db->prepare('
@@ -790,9 +935,23 @@ function bakery_driver_transfer_assignments(
         $nextRouteOrder = (int)$maxStmt->fetchColumn() + 1;
 
         $sourceDriverIds = [];
+        $transferCustomers = bakery_dated_route_customers_for_orders(
+            $db,
+            array_map(static fn(array $assignment): int => (int)$assignment['daily_order_id'], $toTransfer)
+        );
         foreach ($toTransfer as $assignment) {
             $orderId = (int)$assignment['daily_order_id'];
             $sourceDriverIds[(int)$assignment['driver_id']] = true;
+            bakery_dated_route_log_removal(
+                $db,
+                $deliveryDate,
+                $transferCustomers[$orderId] ?? 0,
+                (int)$assignment['driver_id'],
+                $orderId,
+                'moved_to_other_driver',
+                'driver_transfer_assignments',
+                false
+            );
 
             $deleteStmt->execute([$orderId, $deliveryDate]);
             $insertStmt->execute([
@@ -1070,6 +1229,7 @@ function bakery_driver_add_customer_to_route(
     $dayOfWeek = (int)date('N', strtotime($deliveryDate));
     $standingOrdersUpdated = 0;
 
+    bakery_dated_route_removal_log_ready($db);
     $db->beginTransaction();
     try {
         if ($saveStandingRoute) {
@@ -1155,6 +1315,25 @@ function bakery_driver_add_customer_to_route(
         ');
         $maxStmt->execute([$driverId, $deliveryDate]);
         $nextRouteOrder = (int)$maxStmt->fetchColumn() + 1;
+
+        $priorAssignStmt = $db->prepare(
+            'SELECT driver_id FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ?'
+        );
+        $priorAssignStmt->execute([$dailyOrderId, $deliveryDate]);
+        foreach ($priorAssignStmt->fetchAll(PDO::FETCH_COLUMN) as $priorDriverId) {
+            if ((int)$priorDriverId !== $driverId) {
+                bakery_dated_route_log_removal(
+                    $db,
+                    $deliveryDate,
+                    $customerId,
+                    (int)$priorDriverId,
+                    $dailyOrderId,
+                    'moved_to_other_driver',
+                    'driver_add_customer_to_route',
+                    false
+                );
+            }
+        }
 
         $db->prepare('DELETE FROM daily_order_assignments WHERE daily_order_id = ? AND delivery_date = ?')
             ->execute([$dailyOrderId, $deliveryDate]);
@@ -1324,6 +1503,7 @@ function bakery_driver_plan_add_stop(
     $filled = ['filled' => false, 'source' => 'none', 'item_count' => 0];
     $dailyOrderId = 0;
 
+    bakery_dated_route_removal_log_ready($db);
     $db->beginTransaction();
     try {
         $existingStmt = $db->prepare(
@@ -1391,6 +1571,16 @@ function bakery_driver_plan_add_stop(
             $scheduled = $existing['scheduled_delivery_time'] ?? null;
             $dailyOrderId = bakery_customer_ensure_daily_order($db, $customer, $deliveryDate);
             $filled = bakery_customer_fill_empty_dated_order_from_standard($db, $dailyOrderId, $deliveryDate, $customer);
+            bakery_dated_route_log_removal(
+                $db,
+                $deliveryDate,
+                $customerId,
+                $sourceDriverId,
+                $dailyOrderId,
+                'moved_to_other_driver',
+                'driver_plan_add_stop',
+                false
+            );
             $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$existing['id']]);
             bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, $scheduled);
             bakery_driver_renumber_route_orders($db, [$sourceDriverId, $driverId], $deliveryDate);
