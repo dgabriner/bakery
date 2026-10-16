@@ -186,6 +186,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_exception_connection_tests.php',
+                'tests/run_route_integrity_tests.php',
                 'tests/run_manager_mode_tests.php',
                 'tests/run_daily_run_core_tests.php',
             ],
@@ -636,6 +637,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_driver_workflow_tests.php',
+                'tests/run_route_integrity_tests.php',
                 'tests/run_billing_accuracy_tests.php',
                 'tests/run_driver_route_ux_tests.php',
                 'tests/run_driver_photo_ui_tests.php',
@@ -658,6 +660,8 @@ function bakery_agent_work_map_core(): array
                 'includes/demand_confirmation.php',
                 'includes/daily_order_generation.php',
                 'database/schema/097_standing_fill_blocked.sql',
+                'database/schema/105_dated_route_removal_log.sql',
+                'database/schema/106_dated_route_morning_checks.sql',
                 'includes/production_cadence.php',
                 'product_distribution.php',
                 'scripts/demand_scheduler.php',
@@ -666,6 +670,7 @@ function bakery_agent_work_map_core(): array
             'tests' => [
                 'tests/run_tomorrow_confirmed_tests.php',
                 'tests/run_demand_scheduler_tests.php',
+                'tests/run_route_integrity_tests.php',
                 'tests/run_operating_demand_tests.php',
                 'tests/run_demand_visit_compare_tests.php',
                 'tests/run_get_order_materialize_tests.php',

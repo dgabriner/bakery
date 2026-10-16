@@ -171,6 +171,36 @@ require_once 'includes/nav.php';
             </section>
         <?php endif; ?>
 
+        <?php if (!empty($dailyRun['route_losses'])): ?>
+            <?php
+            $routeLossGroups = [];
+            foreach ($dailyRun['route_losses'] as $routeLoss) {
+                $routeLossDriverId = (int)($routeLoss['driver_id'] ?? 0);
+                if (!isset($routeLossGroups[$routeLossDriverId])) {
+                    $routeLossDriverName = trim((string)($routeLoss['driver_name'] ?? ''));
+                    $routeLossGroups[$routeLossDriverId] = [
+                        'name' => $routeLossDriverName !== '' ? $routeLossDriverName : ('#' . $routeLossDriverId),
+                        'stores' => [],
+                    ];
+                }
+                $routeLossGroups[$routeLossDriverId]['stores'][] = (string)($routeLoss['customer_name'] ?? '');
+            }
+            ?>
+            <section class="dr-route-losses" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.route_lost_title', ['count' => count($dailyRun['route_losses'])])); ?>">
+                <h2><?php echo htmlspecialchars(bakery_t('daily_run.route_lost_title', ['count' => count($dailyRun['route_losses'])])); ?></h2>
+                <p><?php bakery_te('daily_run.route_lost_help'); ?></p>
+                <ul>
+                    <?php foreach ($routeLossGroups as $routeLossGroup): ?>
+                        <li><?php echo htmlspecialchars(bakery_t('daily_run.route_lost_driver', [
+                            'driver' => $routeLossGroup['name'],
+                            'count' => count($routeLossGroup['stores']),
+                            'stores' => implode(', ', $routeLossGroup['stores']),
+                        ])); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+            </section>
+        <?php endif; ?>
+
         <?php if (!empty($dailyRun['unrouted_standing_orders'])): ?>
             <section class="dr-unrouted-standing" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.unrouted_standing_title', ['count' => count($dailyRun['unrouted_standing_orders'])])); ?>">
                 <h2><?php echo htmlspecialchars(bakery_t('daily_run.unrouted_standing_title', ['count' => count($dailyRun['unrouted_standing_orders'])])); ?></h2>

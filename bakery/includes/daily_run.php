@@ -10,6 +10,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/dashboard_command_center.php';
+require_once __DIR__ . '/daily_order_generation.php';
 require_once __DIR__ . '/demand_review.php';
 require_once __DIR__ . '/demand_confirmation.php';
 require_once __DIR__ . '/production_plan.php';
@@ -308,6 +309,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
 
     $blockers = [];
     $sectionErrors = [];
+    $routeLosses = [];
 
     $inventoryReady = false;
     if (function_exists('bakery_inventory_ready')) {
@@ -398,6 +400,16 @@ function bakery_daily_run_build(PDO $db, string $date): array
                 ]);
             }
             if ((int)$ds['empty_daily'] > 0) {
+                $emptyNames = [];
+                foreach ($demandReview['customers'] ?? [] as $emptyCustomer) {
+                    if (($emptyCustomer['state'] ?? '') !== 'empty_daily') {
+                        continue;
+                    }
+                    $emptyName = trim((string)($emptyCustomer['customer_name'] ?? ''));
+                    if ($emptyName !== '') {
+                        $emptyNames[] = $emptyName;
+                    }
+                }
                 $parts[] = (int)$ds['empty_daily'] . ' empty dated order'
                     . ((int)$ds['empty_daily'] === 1 ? '' : 's');
                 $blockers[] = bakery_ops_exception([
@@ -405,10 +417,11 @@ function bakery_daily_run_build(PDO $db, string $date): array
                     'severity' => 'warning',
                     'stage' => 'confirm_demand',
                     'category' => 'demand',
-                    'title' => 'Dated orders with no line items',
-                    'detail' => (int)$ds['empty_daily'] . ' daily order'
-                        . ((int)$ds['empty_daily'] === 1 ? '' : 's')
-                        . ' exist but have no committed products.',
+                    'title' => bakery_t('demand.empty_daily_label'),
+                    'detail' => bakery_t('daily_run.empty_orders_detail', [
+                        'count' => (int)$ds['empty_daily'],
+                        'stores' => implode(', ', $emptyNames),
+                    ]),
                     'count' => (int)$ds['empty_daily'],
                     'href' => bakery_ops_link_daily_orders($date, ['review' => 'empty'], 'daily_run'),
                     'action' => 'Review Demand',
@@ -1013,6 +1026,48 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $dispatchStage['summary'] = 'Assignments not started';
     }
 
+    $routeLosses = [];
+    try {
+        $routeLosses = bakery_dated_route_morning_losses($db, $date);
+    } catch (Throwable $e) {
+        error_log('daily_run route losses: ' . $e->getMessage());
+        $routeLosses = [];
+    }
+    if ($routeLosses !== [] && $dispatchStage['ui_state'] !== 'unavailable') {
+        $dispatchStage['ui_state'] = 'needs_attention';
+        $lossesByDriver = [];
+        foreach ($routeLosses as $loss) {
+            $lossDriverId = (int)$loss['driver_id'];
+            if (!isset($lossesByDriver[$lossDriverId])) {
+                $driverName = trim((string)$loss['driver_name']);
+                $lossesByDriver[$lossDriverId] = [
+                    'name' => $driverName !== '' ? $driverName : ('#' . $lossDriverId),
+                    'stores' => [],
+                ];
+            }
+            $lossesByDriver[$lossDriverId]['stores'][] = (string)$loss['customer_name'];
+        }
+        $lossParts = [];
+        foreach ($lossesByDriver as $lossGroup) {
+            $lossParts[] = bakery_t('daily_run.route_lost_driver', [
+                'driver' => $lossGroup['name'],
+                'count' => count($lossGroup['stores']),
+                'stores' => implode(', ', $lossGroup['stores']),
+            ]);
+        }
+        $blockers[] = bakery_ops_exception([
+            'type' => 'route_lost_after_morning',
+            'severity' => 'critical',
+            'stage' => 'dispatch',
+            'category' => 'delivery',
+            'title' => bakery_t('daily_run.route_lost_title', ['count' => count($routeLosses)]),
+            'detail' => implode(' ', $lossParts),
+            'count' => count($routeLosses),
+            'href' => $links['driver_assignment'],
+            'action' => bakery_t('daily_run.route_lost_action'),
+        ]);
+    }
+
     // --- Stage 6: Deliver & Reconcile ---
     $deliverStage = [
         'key' => 'deliver',
@@ -1290,6 +1345,7 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'demand_review' => $demandReview,
         'inventory_ready' => $inventoryReady,
         'unrouted_standing_orders' => $unroutedStandingOrders,
+        'route_losses' => $routeLosses,
         'demand_scheduler' => $commandCenter['demand_scheduler'] ?? null,
     ];
 }
