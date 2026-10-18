@@ -122,6 +122,7 @@ def main() -> int:
     parser.add_argument("--to-name", help="Remote filename under SFTP_REMOTE_ROOT (with --from-file)")
     parser.add_argument("--migration-file", help="Upload one approved schema SQL file to Staging's private migration vault")
     parser.add_argument("--run-hosted-stage-migrations", action="store_true", help="Checkpoint and migrate bakerysoftware through the Staging SSH account")
+    parser.add_argument("--list-hosted-stage-migrations", action="store_true", help="Print bakerysoftware schema_migrations ids. Does not apply SQL.")
     parser.add_argument("--stage-tool", action="append", default=[], metavar="LOCAL_PHP",
                         help="Additional PHP script to upload into stage-tools and run between checkpoint and migrations")
     parser.add_argument("--bootstrap-live-migration-worker", action="store_true", help="Atomically install the owner-approved Live migration wrapper and runtime")
@@ -190,6 +191,53 @@ def main() -> int:
                         sftp.rename(backup, remote)
                     raise
                 print(f"BOOTSTRAP  {remote}  backup={'none' if not had_prior else backup}")
+            return 0
+        finally:
+            sftp.close()
+            client.close()
+
+    if args.list_hosted_stage_migrations:
+        if target.strip().lower() != "[REDACTED]" or user != "[REDACTED]" or normalize_remote_root(remote_root) != "[REDACTED]":
+            raise SystemExit("Listing Staging migrations requires [REDACTED] at exactly [REDACTED]")
+        if args.dry_run:
+            print("DRY-RUN  would list Staging schema_migrations")
+            return 0
+        tool = local_root / "scripts" / "run_migrations.php"
+        if not tool.is_file():
+            raise SystemExit("Missing scripts/run_migrations.php")
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=host,
+            username=user,
+            password=password,
+            timeout=45,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+        sftp = client.open_sftp()
+        private_dir = f"{remote_root}/../.sourflour-stage-tools"
+        try:
+            ensure_remote_dir(sftp, private_dir)
+            remote_tool = f"{private_dir}/run_migrations.php"
+            sftp.put(str(tool), remote_tool)
+            sftp.chmod(remote_tool, 0o600)
+            command = (
+                "umask 077 && "
+                "export BAKERY_HOSTED_STAGE_ROOT=/home/[REDACTED]/[REDACTED] && "
+                "php /home/[REDACTED]/.sourflour-stage-tools/run_migrations.php --mode=hosted-stage --list-applied"
+            )
+            _stdin, stdout, stderr = client.exec_command(command, timeout=120)
+            stdout_text = stdout.read().decode("utf-8", errors="replace")
+            stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+            exit_code = stdout.channel.recv_exit_status()
+            if stdout_text:
+                print(stdout_text, end="" if stdout_text.endswith("\n") else "\n")
+            if stderr_text:
+                print(stderr_text, file=sys.stderr)
+            if exit_code != 0:
+                print(f"Could not read Staging schema_migrations (exit {exit_code}); production bakerysf was not targeted.", file=sys.stderr)
+                return exit_code
             return 0
         finally:
             sftp.close()

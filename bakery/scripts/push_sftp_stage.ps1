@@ -151,6 +151,107 @@ function Invoke-BakeryStagingMigrations {
     return $paths
 }
 
+function Write-BakeryStagingSchemaGap {
+    param([switch]$DryRun)
+    if ($DryRun) {
+        Write-Host "Schema gap check skipped (dry run does not read Staging)."
+        return
+    }
+    $repoRoot = $null
+    try {
+        $repoRoot = Get-BakeryRepoRoot -BakeryRoot $bakeryRoot
+    } catch {
+        Write-Host "Schema gap check skipped: could not find the git root, so main's schema files are unknown."
+        return
+    }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $tree = & git -C $repoRoot ls-tree -r --name-only origin/main -- (Get-BakeryGitPath 'database/schema') 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Schema gap check skipped: origin/main schema list is unavailable."
+            return
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    $mainIds = @()
+    foreach ($line in @($tree)) {
+        $name = Split-Path -Leaf ([string]$line)
+        if ($name -match '^\d{3}_[A-Za-z0-9_]+\.sql$') {
+            $mainIds += $name.Substring(0, $name.Length - 4)
+        }
+    }
+    if ($mainIds.Count -eq 0) {
+        Write-Host "Schema gap check skipped: origin/main has no schema files."
+        return
+    }
+
+    $python = $null
+    try { $python = Get-PythonLauncher } catch {
+        Write-Host "Schema gap check skipped: Python is unavailable, so Staging schema_migrations was not read."
+        return
+    }
+    $stdout = Join-Path $env:TEMP ("bakery_stage_migrations_{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    $stderr = Join-Path $env:TEMP ("bakery_stage_migrations_{0}.err" -f [guid]::NewGuid().ToString('N'))
+    $pyArgs = @()
+    if ((Split-Path $python -Leaf) -in @('py.exe', 'py')) { $pyArgs += '-3' }
+    $pyArgs += @($uploader, '--local-root', $bakeryRoot, '--list-hosted-stage-migrations')
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $python @pyArgs 1>$stdout 2>$stderr
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    if ($code -ne 0) {
+        Write-Host "WARN  Could not read Staging schema_migrations, so this sync did not check for unapplied main migrations."
+        Remove-Item -Force -ErrorAction SilentlyContinue $stdout, $stderr
+        return
+    }
+    $applied = @()
+    if (Test-Path -LiteralPath $stdout) {
+        foreach ($line in @(Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue)) {
+            $id = ([string]$line).Trim()
+            if ($id -match '^\d{3}_[A-Za-z0-9_]+$') { $applied += $id }
+        }
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue $stdout, $stderr
+
+    $mainFile = Join-Path $env:TEMP ("bakery_main_schema_{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    $appliedFile = Join-Path $env:TEMP ("bakery_applied_schema_{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllLines($mainFile, [string[]]$mainIds, $utf8)
+    if ($applied.Count -eq 0) {
+        [System.IO.File]::WriteAllText($appliedFile, '', $utf8)
+    } else {
+        [System.IO.File]::WriteAllLines($appliedFile, [string[]]$applied, $utf8)
+    }
+    $php = Get-BakeryPhpExecutable -BakeryRoot $bakeryRoot
+    $gapFile = Join-Path $env:TEMP ("bakery_schema_gap_{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $php (Join-Path $PSScriptRoot 'schema_sync_gap.php') "--main=$mainFile" "--applied=$appliedFile" 1>$gapFile
+        $gapCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue $mainFile, $appliedFile
+    if ($gapCode -ne 0) {
+        Write-Host "WARN  Could not compare main schema files to Staging schema_migrations."
+        Remove-Item -Force -ErrorAction SilentlyContinue $gapFile
+        return
+    }
+    $missing = @()
+    if (Test-Path -LiteralPath $gapFile) {
+        $missing = @(Get-Content -LiteralPath $gapFile -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -ne '' })
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue $gapFile
+    if ($missing.Count -eq 0) { return }
+    Write-Host "WARN  Staging has not applied schema migrations that are on main:"
+    foreach ($id in $missing) { Write-Host "WARN    $id" }
+}
+
 function Assert-BakeryStagingSmoke {
     $url = "https://staging.sourflour.org/login.php"
     $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 45
@@ -239,6 +340,12 @@ if (-not (Test-Path -LiteralPath $lockPath)) {
 }
 
 try {
+
+try {
+    Write-BakeryStagingSchemaGap -DryRun:$DryRun
+} catch {
+    Write-Host "WARN  Schema gap check failed: $($_.Exception.Message)"
+}
 
 $uploadEnv = $EnvOnly -or $All
 $toUpload = @()

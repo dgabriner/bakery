@@ -151,6 +151,24 @@ try {
             bakery_assert_local_test_target($db);
         }
     }
+    if (in_array('--list-applied', $argv, true)) {
+        if ($migrationMode !== 'hosted-stage' && $migrationMode !== '[REDACTED]') {
+            fwrite(STDERR, "--list-applied is only for Staging modes.\n");
+            exit(2);
+        }
+        if (!table_exists($db, 'schema_migrations')) {
+            fwrite(STDERR, "schema_migrations is missing\n");
+            exit(2);
+        }
+        $appliedIds = $db->query('SELECT id FROM schema_migrations ORDER BY id')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($appliedIds ?: [] as $appliedId) {
+            $appliedId = (string)$appliedId;
+            if ($appliedId !== '') {
+                echo $appliedId, "\n";
+            }
+        }
+        exit(0);
+    }
     bakery_ensure_migrations_table($db);
 
     $migrationsDir = $root . '/database/schema';

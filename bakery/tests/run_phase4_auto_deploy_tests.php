@@ -79,7 +79,7 @@ $assert(strpos($pushStage, '$hostedOutput = @(Invoke-BakerySftpPython') !== fals
 $assert(strpos($sftp, 'snapshot_dreamhost_staging.php --confirm-snapshot-staging') !== false, 'hosted Staging command takes a bakerysoftware checkpoint');
 $assert(strpos($sftp, 'run_migrations.php --mode=hosted-stage') !== false, 'hosted Staging command runs the canonical migration runner');
 $hostedSnapshotAt = strpos($sftp, 'snapshot_dreamhost_staging.php --confirm-snapshot-staging');
-$hostedMigrationAt = strpos($sftp, 'run_migrations.php --mode=hosted-stage');
+$hostedMigrationAt = strpos($sftp, 'run_migrations.php --mode=hosted-stage"');
 $assert($hostedSnapshotAt !== false && $hostedMigrationAt !== false && $hostedSnapshotAt < $hostedMigrationAt, 'hosted checkpoint must succeed before Staging migrations');
 $assert(strpos($sftp, 'production bakerysf was not targeted') !== false, 'hosted Staging failure names the protected production target');
 $assert(strpos($manifest = file_get_contents($root . '/scripts/deploy_manifest.ps1'), '-ge 50') !== false, 'schema change detector is 050+ only');
@@ -91,6 +91,13 @@ $assert(strpos($pushStage, 'AlsoInclude root pages must stick') !== false, 'stag
 $assert(strpos($snapshot, 'Cannot connect to bakerysoftware') !== false, 'staging snapshot reports bakerysoftware connect failure');
 $assert(strpos($pushStage, '--run-hosted-stage-migrations') !== false, 'staging push runs migrations beside bakerysoftware');
 $assert(strpos($pushStage, 'login page did not name bakerysoftware') !== false, 'staging smoke requires bakerysoftware');
+$assert(strpos($pushStage, 'WARN  Staging has not applied schema migrations that are on main:') !== false, 'staging sync warns when main has a schema migration Staging has not applied');
+$assert(strpos($pushStage, '--list-hosted-stage-migrations') !== false, 'staging sync reads Staging schema_migrations before warning');
+$assert(strpos($pushStage, 'schema_sync_gap.php') !== false, 'staging sync uses the shared unapplied-migration diff');
+$assert(strpos($sftp, '--list-hosted-stage-migrations') !== false, 'uploader can list Staging schema_migrations without applying them');
+$listAppliedAt = strpos($migrations, '--list-applied');
+$firstApplyAt = strpos($migrations, 'Applying migration 003');
+$assert($listAppliedAt !== false && $firstApplyAt !== false && $listAppliedAt < $firstApplyAt, 'list-applied returns before any migration is applied');
 
 $python = $root . '/scripts/sftp_upload.py';
 $pythonBin = null;
