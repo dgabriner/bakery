@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/photo_handler.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/client_request_id.php';
+require_once __DIR__ . '/includes/photo_capture.php';
 
 header('Content-Type: application/json');
 error_reporting(0);
@@ -130,6 +131,38 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     if (!in_array($photoType, $allowedTypes, true)) {
         $photoType = 'After';
     }
+    $captureMethod = strtolower(trim((string)($_POST['capture_method'] ?? '')));
+    if ($photoType === 'After' && $captureMethod === 'gallery') {
+        $message = function_exists('bakery_t')
+            ? bakery_t('driver.after_camera_only')
+            : 'The after photo has to come from the camera.';
+        throw new Exception($message);
+    }
+
+    $postedCapturedAt = bakery_photo_normalize_captured_at($_POST['captured_at'] ?? '');
+    $postedSource = strtolower(trim((string)($_POST['capture_source'] ?? '')));
+    if (!in_array($postedSource, ['browser', 'exif'], true)) {
+        $postedSource = '';
+    }
+    $exif = ['captured_at' => null, 'latitude' => null, 'longitude' => null];
+    $tmpPhoto = isset($_FILES['photo']['tmp_name']) ? (string)$_FILES['photo']['tmp_name'] : '';
+    if ($tmpPhoto !== '' && is_file($tmpPhoto)) {
+        $exif = bakery_photo_exif_capture($tmpPhoto);
+    }
+    $capturedAt = $postedCapturedAt ?? $exif['captured_at'];
+    $captureSource = $postedSource;
+    if ($postedCapturedAt === null && $exif['captured_at'] !== null) {
+        $captureSource = 'exif';
+    } elseif ($capturedAt !== null && $captureSource === '') {
+        $captureSource = 'browser';
+    }
+    if ($latitude === null && $exif['latitude'] !== null && $exif['longitude'] !== null) {
+        $latitude = $exif['latitude'];
+        $longitude = $exif['longitude'];
+        if ($captureSource === '') {
+            $captureSource = 'exif';
+        }
+    }
 
     $assignment = $photoHandler->verifyDeliveryAssignment($db, $driverId, $customerId, $dailyOrderId, $date);
     if (!$assignment) {
@@ -185,6 +218,10 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
     $photoData = $uploadResult['data'];
     $photoData['delivery_date'] = $date;
     $photoData['daily_order_id'] = $dailyOrderId;
+    $photoData['latitude'] = $latitude;
+    $photoData['longitude'] = $longitude;
+    $photoData['captured_at'] = $capturedAt;
+    $photoData['capture_source'] = $captureSource;
     if ($clientRequestId !== '') {
         $photoData['client_request_id'] = $clientRequestId;
     }

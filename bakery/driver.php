@@ -1379,6 +1379,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'take_receipt_photo' => bakery_t('driver.take_receipt_photo'),
     'photo_guidance' => bakery_t('driver.photo_guidance'),
     'departure_guidance' => bakery_t('driver.departure_guidance'),
+    'after_camera_only' => bakery_t('driver.after_camera_only'),
     'receipt_guidance' => bakery_t('driver.receipt_guidance'),
     'stop_workflow' => bakery_t('driver.stop_workflow'),
     'leave' => bakery_t('driver.leave'),

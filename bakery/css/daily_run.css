@@ -298,6 +298,27 @@
     color: inherit;
 }
 
+.dr-closeout-split {
+  margin: 0 0 16px;
+}
+
+.dr-closeout-split-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--sf-border, #ddd);
+  border-radius: 8px;
+}
+
+.dr-closeout-split-card ul {
+  margin: 8px 0;
+  padding-left: 1.2rem;
+}
+
+.dr-closeout-sms-body {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
 .dr-closeout-panel {
     margin-top: var(--sf-space-3);
     padding-top: var(--sf-space-3);

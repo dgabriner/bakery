@@ -117,6 +117,32 @@ function bakery_driver_day_sms_body(array $input): string
 }
 
 /**
+ * Spanish end-of-day note for one driver.
+ * Callers copy this to the clipboard. This function does not send it.
+ *
+ * @param array{driver_name?:string,date?:string,counts?:array{after?:int,arrival_only?:int,no_photo?:int,open?:int}} $input
+ */
+function bakery_driver_closeout_sms_body(array $input): string
+{
+    $driver = trim((string)($input['driver_name'] ?? ''));
+    if ($driver === '') {
+        $driver = 'conductor';
+    }
+    $counts = isset($input['counts']) && is_array($input['counts']) ? $input['counts'] : [];
+    $lines = [
+        bakery_driver_sms_phrase('closeout_sms.heading', [
+            'date' => bakery_driver_sms_date_label((string)($input['date'] ?? '')),
+        ]),
+        bakery_driver_sms_phrase('closeout_sms.driver', ['driver' => $driver]),
+        bakery_driver_sms_phrase('closeout_sms.after', ['count' => (int)($counts['after'] ?? 0)]),
+        bakery_driver_sms_phrase('closeout_sms.arrival', ['count' => (int)($counts['arrival_only'] ?? 0)]),
+        bakery_driver_sms_phrase('closeout_sms.none', ['count' => (int)($counts['no_photo'] ?? 0)]),
+        bakery_driver_sms_phrase('closeout_sms.open', ['count' => (int)($counts['open'] ?? 0)]),
+    ];
+    return implode("\n", $lines);
+}
+
+/**
  * One clipboard block per driver who has a dated stop. Looks up survey links.
  *
  * @return list<array{driver_id:int,driver_name:string,body:string}>

@@ -543,6 +543,64 @@ function bakery_route_restore_done_message(array $storeLabels, string $driverNam
  *   confirm:string
  * }>
  */
+/**
+ * True when another driver already delivered this store on the dated route.
+ */
+function bakery_route_customer_delivered_by_other(
+    int $standingDriverId,
+    int $assignedDriverId,
+    string $deliveryStatus,
+    string $orderStatus,
+    $confirmedAt
+): bool {
+    if ($standingDriverId <= 0 || $assignedDriverId <= 0 || $assignedDriverId === $standingDriverId) {
+        return false;
+    }
+    if ($deliveryStatus === 'delivered' || in_array($orderStatus, ['delivered', 'invoiced'], true)) {
+        return true;
+    }
+    $confirmed = trim((string)$confirmedAt);
+    return $confirmed !== '' && $confirmed !== '0000-00-00 00:00:00';
+}
+
+/**
+ * Customer ids another driver already delivered on this date.
+ *
+ * @return array<int, true>
+ */
+function bakery_route_customers_delivered_elsewhere(PDO $db, string $date, int $standingDriverId): array
+{
+    $delivered = [];
+    if ($standingDriverId <= 0 || !table_exists($db, 'daily_orders') || !table_exists($db, 'daily_order_assignments')) {
+        return $delivered;
+    }
+    $confirmedSql = function_exists('column_exists') && column_exists($db, 'daily_orders', 'delivery_confirmed_at')
+        ? 'do.delivery_confirmed_at'
+        : 'NULL';
+    $stmt = $db->prepare(
+        'SELECT do.customer_id, doa.driver_id, doa.delivery_status, do.status AS order_status, '
+        . $confirmedSql . ' AS delivery_confirmed_at
+         FROM daily_orders do
+         JOIN daily_order_assignments doa
+           ON doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
+         WHERE do.order_date = ?'
+    );
+    $stmt->execute([$date]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $customerId = (int)($row['customer_id'] ?? 0);
+        if (bakery_route_customer_delivered_by_other(
+            $standingDriverId,
+            (int)($row['driver_id'] ?? 0),
+            (string)($row['delivery_status'] ?? ''),
+            (string)($row['order_status'] ?? ''),
+            $row['delivery_confirmed_at'] ?? null
+        )) {
+            $delivered[$customerId] = true;
+        }
+    }
+    return $delivered;
+}
+
 function bakery_route_missing_standing_by_driver(PDO $db, string $date): array
 {
     if (!table_exists($db, 'standing_routes') || !table_exists($db, 'customers') || !table_exists($db, 'drivers')) {
@@ -578,6 +636,7 @@ function bakery_route_missing_standing_by_driver(PDO $db, string $date): array
     }
 
     $groups = [];
+    $deliveredElsewhere = [];
     foreach ($standing as $route) {
         $driverId = (int)$route['driver_id'];
         $customerId = (int)$route['customer_id'];
@@ -585,6 +644,12 @@ function bakery_route_missing_standing_by_driver(PDO $db, string $date): array
             continue;
         }
         if (($assignedDriverByCustomer[$customerId] ?? 0) === $driverId) {
+            continue;
+        }
+        if (!isset($deliveredElsewhere[$driverId])) {
+            $deliveredElsewhere[$driverId] = bakery_route_customers_delivered_elsewhere($db, $date, $driverId);
+        }
+        if (!empty($deliveredElsewhere[$driverId][$customerId])) {
             continue;
         }
         if (!isset($groups[$driverId])) {
