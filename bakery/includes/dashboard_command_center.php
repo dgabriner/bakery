@@ -778,6 +778,46 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     ],
                 ]);
             }
+            $standingWithoutDriver = [];
+            if (!function_exists('bakery_daily_run_unrouted_standing_orders')) {
+                $dailyRunFile = __DIR__ . '/daily_run.php';
+                if (is_readable($dailyRunFile)) {
+                    require_once $dailyRunFile;
+                }
+            }
+            if (function_exists('bakery_daily_run_unrouted_standing_orders')) {
+                try {
+                    $standingWithoutDriver = bakery_daily_run_unrouted_standing_orders($db, $date);
+                } catch (Throwable $e) {
+                    error_log('command center standing driver gap: ' . $e->getMessage());
+                    $standingWithoutDriver = [];
+                }
+            }
+            if ($standingWithoutDriver !== []) {
+                $standingNames = [];
+                foreach ($standingWithoutDriver as $standingRow) {
+                    $standingName = trim((string)($standingRow['customer_name'] ?? ''));
+                    if ($standingName !== '') {
+                        $standingNames[] = $standingName;
+                    }
+                }
+                $standingCount = count($standingWithoutDriver);
+                $base = defined('BASE_URL') ? BASE_URL : '';
+                $exceptions[] = bakery_ops_exception([
+                    'type' => 'standing_order_no_driver',
+                    'severity' => 'critical',
+                    'category' => 'delivery',
+                    'stage' => 'dispatch',
+                    'title' => bakery_t('daily_run.no_standing_driver_title', ['count' => $standingCount]),
+                    'detail' => bakery_t('daily_run.no_standing_driver_detail', [
+                        'count' => $standingCount,
+                        'stores' => implode(', ', $standingNames),
+                    ]),
+                    'count' => $standingCount,
+                    'href' => $base . 'standing_routes.php',
+                    'action' => bakery_t('daily_run.no_standing_driver_action'),
+                ]);
+            }
             if ($failed !== null && $failed > 0) {
                 $exceptions[] = bakery_ops_exception([
                     'type' => 'delivery_failed',

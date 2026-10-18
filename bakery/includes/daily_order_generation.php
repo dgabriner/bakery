@@ -207,6 +207,212 @@ function bakery_dated_route_removal_clear_date(PDO $db, string $date): void
 }
 
 /**
+ * Create the append-only removal log when this database has not migrated yet.
+ * Call this before opening a transaction. DDL commits an open transaction.
+ */
+function bakery_dated_route_removal_log_ready(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready && table_exists($db, 'dated_route_removal_log')) {
+        return true;
+    }
+    if (table_exists($db, 'dated_route_removal_log')) {
+        $ready = true;
+        return true;
+    }
+    if ($db->inTransaction()) {
+        return false;
+    }
+    $db->exec(
+        'CREATE TABLE IF NOT EXISTS dated_route_removal_log (
+            id BIGINT NOT NULL AUTO_INCREMENT,
+            delivery_date DATE NOT NULL,
+            customer_id INT NOT NULL,
+            daily_order_id INT NULL DEFAULT NULL,
+            driver_id INT NULL DEFAULT NULL,
+            removed_by_user_id INT NULL DEFAULT NULL,
+            removed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reason VARCHAR(64) NOT NULL,
+            code_path VARCHAR(128) NOT NULL,
+            PRIMARY KEY (id),
+            KEY idx_dated_route_removal_log_date_driver (delivery_date, driver_id),
+            KEY idx_dated_route_removal_log_customer_date (customer_id, delivery_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    if (function_exists('bakery_forget_table_exists')) {
+        bakery_forget_table_exists('dated_route_removal_log');
+    }
+    $ready = table_exists($db, 'dated_route_removal_log');
+    return $ready;
+}
+
+/**
+ * Create the morning route baseline when this database has not migrated yet.
+ * Call this before opening a transaction. DDL commits an open transaction.
+ */
+function bakery_dated_route_morning_checks_ready(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready && table_exists($db, 'dated_route_morning_checks')) {
+        return true;
+    }
+    if (table_exists($db, 'dated_route_morning_checks')) {
+        $ready = true;
+        return true;
+    }
+    if ($db->inTransaction()) {
+        return false;
+    }
+    $db->exec(
+        'CREATE TABLE IF NOT EXISTS dated_route_morning_checks (
+            id BIGINT NOT NULL AUTO_INCREMENT,
+            delivery_date DATE NOT NULL,
+            driver_id INT NOT NULL,
+            customer_id INT NOT NULL,
+            checked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_dated_route_morning_date_driver_customer (delivery_date, driver_id, customer_id),
+            KEY idx_dated_route_morning_date (delivery_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    if (function_exists('bakery_forget_table_exists')) {
+        bakery_forget_table_exists('dated_route_morning_checks');
+    }
+    $ready = table_exists($db, 'dated_route_morning_checks');
+    return $ready;
+}
+
+function bakery_dated_route_actor_user_id(): ?int
+{
+    if (!function_exists('bakery_current_user')) {
+        return null;
+    }
+    $user = bakery_current_user();
+    $userId = (int)($user['id'] ?? 0);
+    return $userId > 0 ? $userId : null;
+}
+
+/**
+ * Record who removed a stop, when, why, and which code path.
+ * A tombstone also blocks the next standing fill from copying the stop back.
+ */
+function bakery_dated_route_log_removal(
+    PDO $db,
+    string $date,
+    int $customerId,
+    int $driverId,
+    int $dailyOrderId,
+    string $reason,
+    string $codePath,
+    bool $tombstone = false
+): void {
+    if ($customerId <= 0) {
+        return;
+    }
+    if (table_exists($db, 'dated_route_removal_log')) {
+        $stmt = $db->prepare(
+            'INSERT INTO dated_route_removal_log (
+                delivery_date, customer_id, daily_order_id, driver_id,
+                removed_by_user_id, reason, code_path
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $date,
+            $customerId,
+            $dailyOrderId > 0 ? $dailyOrderId : null,
+            $driverId > 0 ? $driverId : null,
+            bakery_dated_route_actor_user_id(),
+            substr($reason, 0, 64),
+            substr($codePath, 0, 128),
+        ]);
+    }
+    if ($tombstone) {
+        bakery_dated_route_removal_record($db, $date, $customerId, $driverId);
+    }
+}
+
+/**
+ * Freeze the first non-empty dated route for this date. Later writers do not
+ * shrink the baseline, so an evening loss is still visible.
+ */
+function bakery_dated_route_morning_capture(PDO $db, string $date): void
+{
+    if (!bakery_dated_route_morning_checks_ready($db)) {
+        return;
+    }
+    $exists = $db->prepare('SELECT 1 FROM dated_route_morning_checks WHERE delivery_date = ? LIMIT 1');
+    $exists->execute([$date]);
+    if ($exists->fetchColumn()) {
+        return;
+    }
+    $rows = $db->prepare(
+        'SELECT doa.driver_id, do.customer_id
+         FROM daily_order_assignments doa
+         JOIN daily_orders do ON do.id = doa.daily_order_id AND do.order_date = doa.delivery_date
+         WHERE doa.delivery_date = ?
+           AND doa.driver_id IS NOT NULL
+           AND do.customer_id IS NOT NULL'
+    );
+    $rows->execute([$date]);
+    $found = $rows->fetchAll(PDO::FETCH_ASSOC);
+    if ($found === []) {
+        return;
+    }
+    $insert = $db->prepare(
+        'INSERT IGNORE INTO dated_route_morning_checks (delivery_date, driver_id, customer_id)
+         VALUES (?, ?, ?)'
+    );
+    foreach ($found as $row) {
+        $driverId = (int)$row['driver_id'];
+        $customerId = (int)$row['customer_id'];
+        if ($driverId > 0 && $customerId > 0) {
+            $insert->execute([$date, $driverId, $customerId]);
+        }
+    }
+}
+
+/**
+ * Stores on a driver at the morning check that are no longer on that driver.
+ * Read-only. A missing table returns an empty list and does not create one.
+ *
+ * @return list<array{driver_id:int,driver_name:string,customer_id:int,customer_name:string}>
+ */
+function bakery_dated_route_morning_losses(PDO $db, string $date): array
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'dated_route_morning_checks')) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT m.driver_id, d.name AS driver_name, m.customer_id, c.name AS customer_name
+         FROM dated_route_morning_checks m
+         JOIN customers c ON c.id = m.customer_id
+         LEFT JOIN drivers d ON d.id = m.driver_id
+         WHERE m.delivery_date = ?
+           AND NOT EXISTS (
+               SELECT 1
+               FROM daily_order_assignments doa
+               JOIN daily_orders do ON do.id = doa.daily_order_id
+               WHERE doa.delivery_date = m.delivery_date
+                 AND doa.driver_id = m.driver_id
+                 AND do.customer_id = m.customer_id
+                 AND do.order_date = doa.delivery_date
+           )
+         ORDER BY d.name, c.name, m.customer_id'
+    );
+    $stmt->execute([$date]);
+    $losses = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $losses[] = [
+            'driver_id' => (int)$row['driver_id'],
+            'driver_name' => (string)($row['driver_name'] ?? ''),
+            'customer_id' => (int)$row['customer_id'],
+            'customer_name' => (string)$row['customer_name'],
+        ];
+    }
+    return $losses;
+}
+
+/**
  * @param list<int> $orderIds
  * @return array<int,int> daily_order_id => customer_id
  */
@@ -268,6 +474,8 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
     $removedCustomerIds = [];
     if ($assignRoutes) {
         bakery_dated_route_removals_ready($db);
+        bakery_dated_route_removal_log_ready($db);
+        bakery_dated_route_morning_checks_ready($db);
         $removedCustomerIds = bakery_dated_route_removed_customer_ids($db, $date);
     }
     $standingFillColumn = bakery_daily_order_standing_fill_column_ready($db);
@@ -634,6 +842,10 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
         }
 
         $db->commit();
+
+        if ($assignRoutes) {
+            bakery_dated_route_morning_capture($db, $date);
+        }
 
         if ($recordEvent) {
             bakery_record_operational_event($db, BAKERY_OP_DAILY_ORDER_GENERATED, 'Generated daily orders from standing for ' . date('l, F j, Y', strtotime($date)), [

@@ -747,7 +747,7 @@ function saveOptimizedRoute() {
         return;
     }
     
-    saveAssignments(currentAssignments);
+    saveAssignments(currentAssignments, 'reorder');
     closeRouteModal();
 }
 
@@ -994,7 +994,8 @@ function removeAssignment(orderId) {
 }
 
 // Save assignments
-// mode: 'replace' rewrites the driver's route; 'append' adds without clearing existing stops
+// mode: 'replace' rewrites the driver's route; 'reorder' keeps omitted stops;
+// 'append' adds without clearing existing stops
 function saveAssignments(assignments = null, mode = 'replace') {
     if (!assignments) {
         // Collect assignments from edit modal
@@ -1019,7 +1020,12 @@ function saveAssignments(assignments = null, mode = 'replace') {
     }
     
     // Use the driver_id from the first assignment if currentDriverId is not set
-    const saveMode = mode === 'append' ? 'append' : 'replace';
+    let saveMode = 'replace';
+    if (mode === 'append') {
+        saveMode = 'append';
+    } else if (mode === 'reorder') {
+        saveMode = 'reorder';
+    }
     const driverId = currentDriverId || (assignments[0] && assignments[0].driver_id);
     if (!driverId) {
         alert('Choose a driver before saving');
@@ -1027,6 +1033,10 @@ function saveAssignments(assignments = null, mode = 'replace') {
     }
     if (assignments.length === 0 && saveMode === 'append') {
         alert('Check one or more stops to add');
+        return;
+    }
+    if (assignments.length === 0 && saveMode === 'reorder') {
+        alert('No route to save');
         return;
     }
     if (assignments.length === 0 && !confirm('Clear every movable stop from this driver\'s route for this date?')) {

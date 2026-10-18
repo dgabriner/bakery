@@ -258,12 +258,14 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
                 'item_id' => null,
                 'delivered_quantity' => null,
                 'unit_price' => null,
+                'line_total' => null,
             ];
         }
         $customers[$cid]['line_map'][$pid]['daily_qty'] = (int)$row['quantity'];
         $customers[$cid]['line_map'][$pid]['item_id'] = (int)$row['item_id'];
         $customers[$cid]['line_map'][$pid]['delivered_quantity'] = $row['delivered_quantity'];
         $customers[$cid]['line_map'][$pid]['unit_price'] = $row['unit_price'];
+        $customers[$cid]['line_map'][$pid]['line_total'] = $row['line_total'];
         $customers[$cid]['line_map'][$pid]['product_name'] = $row['product_name'];
     }
 
@@ -283,6 +285,7 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
                     'item_id' => null,
                     'delivered_quantity' => null,
                     'unit_price' => null,
+                    'line_total' => null,
                 ];
             } else {
                 $customer['line_map'][$pid]['standing_qty'] = $standingLine['standing_qty'];
@@ -563,30 +566,38 @@ function bakery_demand_review_classify_customer(array $customer) {
         return 'missing_daily';
     }
     if (!empty($customer['has_daily']) && empty($customer['has_standing'])) {
-        $hasItems = false;
+        $hasBillable = false;
+        $hasQty = false;
         foreach ($customer['line_map'] as $line) {
-            if ($line['daily_qty'] !== null && (int)$line['daily_qty'] > 0) {
-                $hasItems = true;
+            if (($line['daily_qty'] ?? null) !== null && (int)$line['daily_qty'] > 0) {
+                $hasQty = true;
+            }
+            if (bakery_demand_review_line_is_billable($line)) {
+                $hasBillable = true;
                 break;
             }
         }
         // A standing-route visit with nothing to bake is not missing demand.
-        if (!$hasItems && !empty($customer['on_standing_route'])) {
+        if (!$hasQty && !empty($customer['on_standing_route'])) {
             return 'matches';
         }
-        return $hasItems ? 'one_off' : 'empty_daily';
+        return $hasBillable ? 'one_off' : 'empty_daily';
     }
     if (!empty($customer['has_daily']) && empty($customer['line_map'])) {
         return 'empty_daily';
     }
 
     $hasDailyItems = false;
+    $hasBillable = false;
     $hasDiff = false;
     foreach ($customer['line_map'] as $line) {
         $s = $line['standing_qty'];
         $d = $line['daily_qty'];
         if ($d !== null && (int)$d > 0) {
             $hasDailyItems = true;
+        }
+        if (bakery_demand_review_line_is_billable($line)) {
+            $hasBillable = true;
         }
         if ($s === null && $d !== null) {
             $hasDiff = true;
@@ -597,12 +608,11 @@ function bakery_demand_review_classify_customer(array $customer) {
         }
     }
 
-    if (!empty($customer['has_daily']) && !$hasDailyItems && !empty($customer['has_standing'])) {
+    if (!empty($customer['has_daily']) && !$hasBillable) {
         // A manager emptied this order on purpose. It is a dated decision, not a missing shell.
-        if (!empty($customer['standing_fill_blocked'])) {
+        if (!empty($customer['standing_fill_blocked']) && !empty($customer['has_standing']) && !$hasDailyItems) {
             return 'changed';
         }
-        // Dated order shell exists but no line items. Standing units are still unfulfilled.
         return 'empty_daily';
     }
     if ($hasDiff) {
@@ -675,13 +685,37 @@ function bakery_demand_review_matches_filter(array $customer, $filter) {
     }
 }
 
+function bakery_demand_review_line_is_billable(array $line): bool
+{
+    if (($line['daily_qty'] ?? null) === null || (int)$line['daily_qty'] <= 0) {
+        return false;
+    }
+    $sawPrice = false;
+    if (array_key_exists('line_total', $line) && $line['line_total'] !== null && $line['line_total'] !== '') {
+        $sawPrice = true;
+        if ((float)$line['line_total'] > 0) {
+            return true;
+        }
+    }
+    if (array_key_exists('unit_price', $line) && $line['unit_price'] !== null && $line['unit_price'] !== '') {
+        $sawPrice = true;
+        if ((float)$line['unit_price'] > 0) {
+            return true;
+        }
+    }
+    return !$sawPrice;
+}
+
 function bakery_demand_review_state_label($state) {
+    if ($state === 'empty_daily' && function_exists('bakery_t')) {
+        return bakery_t('demand.empty_daily_label');
+    }
     $labels = [
         'matches' => 'Matches standing',
         'changed' => 'Changed for this date',
         'one_off' => 'Added for this date',
         'missing_daily' => 'No dated order yet',
-        'empty_daily' => 'Dated order has no items',
+        'empty_daily' => 'Dated order is empty or $0.00',
         'paused' => 'Standing paused this week',
         'customer_skipped' => 'Customer skipped this delivery',
     ];
@@ -694,7 +728,9 @@ function bakery_demand_review_state_help($state) {
         'changed' => 'At least one product quantity differs from standing for this date.',
         'one_off' => 'This dated order has no standing forecast for this weekday.',
         'missing_daily' => 'Standing forecast exists, but no daily_orders row for this date.',
-        'empty_daily' => 'A daily order exists, but it currently has no line items.',
+        'empty_daily' => function_exists('bakery_t')
+            ? bakery_t('demand.empty_daily_help')
+            : 'A daily order exists, but it has no line priced above $0.00.',
         'paused' => 'Customer standing is paused for this week; generation skips them.',
     ];
     return $help[$state] ?? '';
@@ -736,9 +772,21 @@ function bakery_operating_demand_lines(PDO $db, string $date, array $filters = [
         }
 
         $state = (string)($customer['state'] ?? '');
-        $useDaily = !empty($customer['has_daily'])
-            && $state !== 'empty_daily'
-            && $state !== 'missing_daily';
+        $useDaily = !empty($customer['has_daily']) && $state !== 'missing_daily';
+        if ($useDaily && $state === 'empty_daily') {
+            $hasDailyQty = false;
+            foreach ($customer['line_map'] as $line) {
+                if (($line['daily_qty'] ?? null) !== null && (int)$line['daily_qty'] > 0) {
+                    $hasDailyQty = true;
+                    break;
+                }
+            }
+            // A $0.00 line is still pieces to bake. Only a shell with no quantity
+            // falls back to standing.
+            if (!$hasDailyQty) {
+                $useDaily = false;
+            }
+        }
 
         if (!$useDaily && empty($customer['has_standing'])) {
             continue;

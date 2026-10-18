@@ -12,10 +12,11 @@ function bakery_driver_assignment_action_assign_orders(PDO $db, array $input, ?a
     $driverId = (int)($input['driver_id'] ?? 0);
     $deliveryDate = (string)($input['delivery_date'] ?? '');
     $assignments = json_decode($input['assignments'] ?? '[]', true);
-    // replace = full route rewrite (edit/optimize/reorder)
+    // replace = full route rewrite (edit modal)
+    // reorder = change visit order without dropping omitted stops (optimize)
     // append = add selected orders without clearing existing ones
     $mode = strtolower(trim((string)($input['mode'] ?? 'replace')));
-    if (!in_array($mode, ['replace', 'append'], true)) {
+    if (!in_array($mode, ['replace', 'append', 'reorder'], true)) {
         $mode = 'replace';
     }
 
@@ -31,9 +32,11 @@ function bakery_driver_assignment_action_assign_orders(PDO $db, array $input, ?a
             ? ($result['stop_count'] > 0
                 ? $result['stop_count'] . ' stop' . ($result['stop_count'] === 1 ? '' : 's') . ' added to ' . $result['driver_name']
                 : 'Those stops are already on ' . $result['driver_name'] . '\'s route')
-            : ($result['stop_count'] > 0
-                ? 'Route saved for ' . $result['driver_name']
-                : 'Route cleared for ' . $result['driver_name']),
+            : ($result['mode'] === 'reorder'
+                ? 'Route order saved for ' . $result['driver_name']
+                : ($result['stop_count'] > 0
+                    ? 'Route saved for ' . $result['driver_name']
+                    : 'Route cleared for ' . $result['driver_name'])),
         'mode' => $result['mode'],
         'stop_count' => $result['stop_count'],
     ];

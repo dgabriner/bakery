@@ -376,7 +376,7 @@ $summary = $demandSummaryAll['summary'];
                 <option value="missing" <?= $reviewFilter === 'missing' ? 'selected' : '' ?>>No dated order yet</option>
                 <option value="changed" <?= $reviewFilter === 'changed' ? 'selected' : '' ?>>Changed quantities</option>
                 <option value="one_off" <?= $reviewFilter === 'one_off' ? 'selected' : '' ?>>Added for this date</option>
-                <option value="empty" <?= $reviewFilter === 'empty' ? 'selected' : '' ?>>Dated order has no items</option>
+                <option value="empty" <?= $reviewFilter === 'empty' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('demand.empty_daily_label')) ?></option>
                 <option value="paused" <?= $reviewFilter === 'paused' ? 'selected' : '' ?>>Paused this week</option>
                 <option value="matches" <?= $reviewFilter === 'matches' ? 'selected' : '' ?>>Matches standing</option>
                 <option value="all" <?= $reviewFilter === 'all' ? 'selected' : '' ?>>All customers</option>

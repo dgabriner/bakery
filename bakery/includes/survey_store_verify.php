@@ -1207,6 +1207,9 @@ function bakery_survey_store_verify_assign_customer(
     if (!function_exists('bakery_customer_ensure_daily_order') || !function_exists('bakery_driver_plan_insert_assignment')) {
         return ['ok' => false, 'code' => 'helpers_missing', 'moved' => false];
     }
+    if (function_exists('bakery_dated_route_removal_log_ready')) {
+        bakery_dated_route_removal_log_ready($db);
+    }
 
     $custStmt = $db->prepare('SELECT * FROM customers WHERE id = ? AND is_active = 1 LIMIT 1');
     $custStmt->execute([$customerId]);
@@ -1246,6 +1249,18 @@ function bakery_survey_store_verify_assign_customer(
                 : (int)$existing['daily_order_id'];
             if (function_exists('bakery_customer_fill_empty_dated_order_from_standard')) {
                 bakery_customer_fill_empty_dated_order_from_standard($db, $dailyOrderId, $deliveryDate, $customer);
+            }
+            if (function_exists('bakery_dated_route_log_removal')) {
+                bakery_dated_route_log_removal(
+                    $db,
+                    $deliveryDate,
+                    $customerId,
+                    $assignedDriverId,
+                    $dailyOrderId,
+                    'moved_to_other_driver',
+                    'survey_store_verify_assign',
+                    false
+                );
             }
             $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$existing['id']]);
             bakery_driver_plan_insert_assignment($db, $driverId, $deliveryDate, $dailyOrderId, $scheduled);
@@ -1320,6 +1335,12 @@ function bakery_survey_store_verify_unassign_customer(
             require_once $assign;
         }
     }
+    if (function_exists('bakery_dated_route_removals_ready')) {
+        bakery_dated_route_removals_ready($db);
+    }
+    if (function_exists('bakery_dated_route_removal_log_ready')) {
+        bakery_dated_route_removal_log_ready($db);
+    }
 
     $db->beginTransaction();
     try {
@@ -1353,6 +1374,18 @@ function bakery_survey_store_verify_unassign_customer(
             return ['ok' => false, 'code' => 'locked_' . $status];
         }
         $orderId = (int)$row['daily_order_id'];
+        if (function_exists('bakery_dated_route_log_removal')) {
+            bakery_dated_route_log_removal(
+                $db,
+                $deliveryDate,
+                $customerId,
+                $driverId,
+                $orderId,
+                'survey_turned_off',
+                'survey_store_verify_unassign',
+                true
+            );
+        }
         $db->prepare('DELETE FROM daily_order_assignments WHERE id = ?')->execute([(int)$row['id']]);
         if (function_exists('bakery_driver_renumber_route_orders')) {
             bakery_driver_renumber_route_orders($db, [$driverId], $deliveryDate);
@@ -1454,7 +1487,20 @@ function bakery_survey_store_verify_apply_routes(PDO $db, string $deliveryDate, 
         $current = bakery_survey_store_verify_driver_dated_stops($db, $driverId, $deliveryDate);
         $plan = bakery_survey_store_verify_route_reconcile($desiredIds, $current);
         $result['blocked'] += count($plan['blocked']);
+        $explicitDropped = array_key_exists('dropped', $group);
+        $droppedIds = [];
+        if ($explicitDropped) {
+            foreach ($group['dropped'] ?? [] as $store) {
+                $droppedId = is_array($store) ? (int)($store['id'] ?? 0) : (int)$store;
+                if ($droppedId > 0) {
+                    $droppedIds[$droppedId] = true;
+                }
+            }
+        }
         foreach ($plan['unassign'] as $row) {
+            if ($explicitDropped && !isset($droppedIds[(int)$row['customer_id']])) {
+                continue;
+            }
             $op = bakery_survey_store_verify_unassign_customer(
                 $db,
                 $driverId,
@@ -1554,19 +1600,27 @@ function bakery_survey_store_verify_groups_from_payload(array $payload): array
             if ($driverId <= 0) {
                 continue;
             }
-            $groups[] = [
+            $entry = [
                 'driver_id' => $driverId,
                 'driver_name' => (string)($group['driver_name'] ?? ''),
                 'on' => $group['on'] ?? [],
             ];
+            if (array_key_exists('dropped', $group)) {
+                $entry['dropped'] = is_array($group['dropped']) ? $group['dropped'] : [];
+            }
+            $groups[] = $entry;
         }
     }
     if ($groups === [] && (int)($payload['driver_id'] ?? 0) > 0) {
-        $groups[] = [
+        $entry = [
             'driver_id' => (int)$payload['driver_id'],
             'driver_name' => (string)($payload['driver_name'] ?? ''),
             'on' => $payload['on'] ?? [],
         ];
+        if (array_key_exists('dropped', $payload)) {
+            $entry['dropped'] = is_array($payload['dropped']) ? $payload['dropped'] : [];
+        }
+        $groups[] = $entry;
     }
     return $groups;
 }
