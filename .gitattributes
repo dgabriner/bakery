@@ -1,0 +1,27 @@
+* text=auto eol=lf
+
+*.avif binary
+*.db binary
+*.dll binary
+*.eot binary
+*.exe binary
+*.gif binary
+*.gz binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.mp3 binary
+*.mp4 binary
+*.otf binary
+*.pdf binary
+*.png binary
+*.sqlite binary
+*.sqlite3 binary
+*.ttf binary
+*.webm binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.xls binary
+*.xlsx binary
+*.zip binary
