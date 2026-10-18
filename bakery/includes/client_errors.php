@@ -176,7 +176,44 @@ function bakery_client_errors_recent(PDO $db, int $limit = 20): array
 }
 
 /**
- * Read-only admin list. Filters: user_id, page_path (substring), from, until (Y-m-d).
+ * Seconds to add to a UTC clock to get the MySQL session clock.
+ * TIMESTAMP literals are interpreted in the session time zone.
+ */
+function bakery_client_error_session_offset_seconds(PDO $db): int
+{
+    return (int)$db->query('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())')->fetchColumn();
+}
+
+/**
+ * Express a Pacific instant as a datetime literal for the MySQL session clock.
+ */
+function bakery_client_error_session_literal(DateTimeImmutable $instant, int $sessionOffsetSeconds): string
+{
+    $utc = $instant->setTimezone(new DateTimeZone('UTC'));
+    $session = $utc->modify(sprintf('%+d seconds', $sessionOffsetSeconds));
+    return $session->format('Y-m-d H:i:s');
+}
+
+/**
+ * Start of a bakery calendar day. from/until filters are America/Los_Angeles
+ * dates, matching date_default_timezone_set in config.php. A UTC session
+ * would otherwise drop a Pacific evening row onto the next UTC date.
+ */
+function bakery_client_error_pacific_day_start(string $ymd): ?DateTimeImmutable
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $ymd)) {
+        return null;
+    }
+    try {
+        return new DateTimeImmutable($ymd . ' 00:00:00', new DateTimeZone('America/Los_Angeles'));
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Read-only admin list. Filters: user_id, page_path (substring), from, until
+ * (Y-m-d in America/Los_Angeles).
  *
  * @param array{user_id?:int,page_path?:string,from?:string,until?:string} $filters
  * @return list<array<string,mixed>>
@@ -190,13 +227,18 @@ function bakery_client_errors_search(PDO $db, array $filters, int $limit = 100):
     $params = [];
     $from = (string)($filters['from'] ?? '');
     $until = (string)($filters['until'] ?? '');
-    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
-        $where[] = 'ce.created_at >= ?';
-        $params[] = $from . ' 00:00:00';
-    }
-    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
-        $where[] = 'ce.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
-        $params[] = $until . ' 00:00:00';
+    $fromDay = bakery_client_error_pacific_day_start($from);
+    $untilDay = bakery_client_error_pacific_day_start($until);
+    if ($fromDay || $untilDay) {
+        $offset = bakery_client_error_session_offset_seconds($db);
+        if ($fromDay) {
+            $where[] = 'ce.created_at >= ?';
+            $params[] = bakery_client_error_session_literal($fromDay, $offset);
+        }
+        if ($untilDay) {
+            $where[] = 'ce.created_at < ?';
+            $params[] = bakery_client_error_session_literal($untilDay->modify('+1 day'), $offset);
+        }
     }
     $userId = (int)($filters['user_id'] ?? 0);
     if ($userId > 0) {

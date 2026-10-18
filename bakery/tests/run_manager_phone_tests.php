@@ -286,6 +286,14 @@ manager_phone_assert(
     'Spanish mission times use 24-hour or h:mm a. m. style, got ' . $esMorning . ' / ' . $esAfternoon
 );
 manager_phone_assert(strpos($esMorning, 'AM') === false && strpos($esAfternoon, 'PM') === false, 'Spanish mission times are not English AM/PM');
+manager_phone_assert(
+    bakery_manager_phone_spanish_clock_label("10:40\u{202F}a.m.") === '10:40 a. m.',
+    'ICU es_MX a.m. becomes the spaced Spanish day period'
+);
+manager_phone_assert(
+    bakery_manager_phone_spanish_clock_label("2:05\u{202F}p.m.") === '2:05 p. m.',
+    'ICU es_MX p.m. becomes the spaced Spanish day period'
+);
 $_SESSION['locale'] = 'en';
 bakery_reset_locale_cache();
 foreach (['manager_phone.do_not_interrupt', 'manager_phone.plan_not_committed'] as $dashKey) {

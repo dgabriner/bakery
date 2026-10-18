@@ -121,6 +121,48 @@ $assert($otherDay === [], 'another date does not match this beacon');
 $assert(bakery_client_error_normalize_reference('no') === '', 'short references are dropped');
 $db->prepare('DELETE FROM client_errors WHERE id = ?')->execute([$refId]);
 
+$boundaryId = bakery_client_error_record($db, [
+    'user_id' => $userId,
+    'kind' => 'error',
+    'message' => 'pacific evening beacon',
+    'page_path' => '/driver.php',
+    'reference' => 'pm1840',
+]);
+$pacificEvening = new DateTimeImmutable('2026-10-17 21:30:00', new DateTimeZone('America/Los_Angeles'));
+$db->prepare('UPDATE client_errors SET created_at = FROM_UNIXTIME(?) WHERE id = ?')->execute([
+    $pacificEvening->getTimestamp(),
+    $boundaryId,
+]);
+$onPacificDay = bakery_client_errors_search($db, [
+    'user_id' => $userId,
+    'page_path' => 'driver.php',
+    'from' => '2026-10-17',
+    'until' => '2026-10-17',
+], 20);
+$foundBoundary = null;
+foreach ($onPacificDay as $row) {
+    if ((int)$row['id'] === $boundaryId) {
+        $foundBoundary = $row;
+        break;
+    }
+}
+$assert(is_array($foundBoundary), 'search uses the Pacific bakery day, not the MySQL session date');
+$onUtcDay = bakery_client_errors_search($db, [
+    'user_id' => $userId,
+    'page_path' => 'driver.php',
+    'from' => '2026-10-18',
+    'until' => '2026-10-18',
+], 20);
+$utcHit = false;
+foreach ($onUtcDay as $row) {
+    if ((int)$row['id'] === $boundaryId) {
+        $utcHit = true;
+        break;
+    }
+}
+$assert($utcHit === false, 'a Pacific evening beacon is not listed on the next UTC date');
+$db->prepare('DELETE FROM client_errors WHERE id = ?')->execute([$boundaryId]);
+
 $manifest = (string)file_get_contents($root . '/scripts/deploy_manifest.ps1');
 $assert(strpos($manifest, 'client_error_api.php') !== false, 'client_error_api.php is in the deploy root whitelist');
 

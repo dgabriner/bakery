@@ -244,9 +244,23 @@ function bakery_manager_phone_driver_stops(PDO $db, string $date): array
 }
 
 /**
+ * Turn an Intl es_MX clock into the day period the rest of the app uses.
+ * ICU 74 prints "10:40 a.m." (narrow space, no space inside the abbreviation).
+ * Login History and bakery_locale_meridiem use "10:40 a. m.".
+ */
+function bakery_manager_phone_spanish_clock_label(string $label): string
+{
+    $label = str_replace(["\u{202F}", "\u{00A0}"], ' ', $label);
+    $label = preg_replace('/\b([ap])\.\s*m\./iu', '$1. m.', $label) ?? $label;
+    $label = preg_replace('/\s+/u', ' ', trim($label)) ?? trim($label);
+    return $label;
+}
+
+/**
  * Clock time for the phone mission board.
- * English keeps g:i A. Spanish follows Intl es_MX when the extension is
- * present (24-hour or h:mm a. m.) and otherwise the same a. m. / p. m. style.
+ * English keeps g:i A. Spanish follows Intl es_MX for 12-hour vs 24-hour,
+ * then uses "a. m." / "p. m." so the spelling does not depend on the ICU
+ * version. Without Intl, that same spaced form is written directly.
  */
 function bakery_manager_phone_format_clock_timestamp(int $ts): string
 {
@@ -254,8 +268,13 @@ function bakery_manager_phone_format_clock_timestamp(int $ts): string
         if (class_exists('IntlDateFormatter')) {
             $fmt = new IntlDateFormatter('es_MX', IntlDateFormatter::NONE, IntlDateFormatter::SHORT);
             $label = $fmt ? $fmt->format($ts) : false;
-            if (is_string($label) && $label !== '' && !preg_match('/\b(AM|PM)\b/', $label)) {
-                return str_replace(["\u{202F}", "\u{00A0}"], ' ', $label);
+            if (is_string($label) && $label !== '') {
+                $label = bakery_manager_phone_spanish_clock_label($label);
+                $clock24 = preg_match('/^\d{1,2}:\d{2}$/', $label) === 1;
+                $clock12 = preg_match('/^\d{1,2}:\d{2} [ap]\. m\.$/', $label) === 1;
+                if (($clock24 || $clock12) && !preg_match('/\b(AM|PM)\b/', $label)) {
+                    return $label;
+                }
             }
         }
         $hour = (int)date('G', $ts);

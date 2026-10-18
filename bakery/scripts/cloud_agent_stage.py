@@ -21,12 +21,38 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UPLOADER = ROOT / "scripts" / "sftp_upload.py"
+
+
+def stamp_deploy_sha() -> str:
+    """Write includes/deploy_sha.php from git. The host only reads that file."""
+    repo = ROOT
+    while repo != repo.parent and not (repo / ".git").exists():
+        repo = repo.parent
+    if not (repo / ".git").exists():
+        return ""
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", "--short=7", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip().lower()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    if not re.fullmatch(r"[0-9a-f]{7,40}", sha):
+        return ""
+    path = ROOT / "includes" / "deploy_sha.php"
+    body = f"<?php\nreturn '{sha}';\n"
+    if path.is_file() and path.read_text(encoding="utf-8") == body:
+        return sha
+    path.write_bytes(body.encode("utf-8"))
+    return sha
 
 
 def run_uploader(extra: list[str]) -> int:
@@ -94,11 +120,19 @@ def main() -> int:
     if args.check_target:
         return run_uploader(["--check-target"])
     if args.files or args.list:
-        extra = ["--list", args.list] if args.list else []
-        if args.files:
-            list_path = Path("/tmp/bakery_cloud_agent_files.txt")
-            list_path.write_text("\n".join(args.files) + "\n", encoding="utf-8")
-            extra = ["--list", str(list_path)]
+        sha = stamp_deploy_sha()
+        names = list(args.files)
+        if args.list:
+            names.extend(
+                line.strip()
+                for line in Path(args.list).read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            )
+        if sha and "includes/deploy_sha.php" not in names:
+            names.append("includes/deploy_sha.php")
+        list_path = Path("/tmp/bakery_cloud_agent_files.txt")
+        list_path.write_text("\n".join(names) + "\n", encoding="utf-8")
+        extra = ["--list", str(list_path)]
         code = run_uploader(extra)
         if code != 0:
             return code

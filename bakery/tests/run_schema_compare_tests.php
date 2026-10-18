@@ -353,6 +353,27 @@ $assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '086_ingredi
 $assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '083_full_week_intensive.sql') === false, 'main 083_full_week_intensive stays pending beside Live 083_time_clock_punches');
 $assert(bakery_schema_migration_id_is_applied($liveTimeClockLedger, '091_time_clock_punches.sql') === false, '091 is a new filename even when Live already recorded 083_time_clock_punches');
 $assert(bakery_schema_migration_id_is_applied(['091_time_clock_punches'], '091') === false, 'a numeric prefix is not an applied migration');
+$assert(bakery_schema_migrations_unapplied(
+    ['049_invoice_send', '091_time_clock_punches', '091_other_feature', '106_new_table', 'not-a-migration'],
+    ['091_time_clock_punches']
+) === ['091_other_feature', '106_new_table'], '050+ files on main that the target ledger lacks are the gap');
+$assert(bakery_schema_migrations_unapplied(['001_baseline', '050_customer_portal'], ['050_customer_portal']) === [], 'baseline files and applied 050+ ids are not a gap');
+$gapMain = tempnam(sys_get_temp_dir(), 'bakery-main-');
+$gapApplied = tempnam(sys_get_temp_dir(), 'bakery-applied-');
+file_put_contents($gapMain, "049_invoice_send\n106_new_table\n");
+file_put_contents($gapApplied, "049_invoice_send\n");
+$gapOut = [];
+$gapCode = 0;
+exec(PHP_BINARY . ' ' . escapeshellarg($root . '/scripts/schema_sync_gap.php') . ' --main=' . escapeshellarg($gapMain) . ' --applied=' . escapeshellarg($gapApplied) . ' 2>&1', $gapOut, $gapCode);
+@unlink($gapMain);
+@unlink($gapApplied);
+$assert($gapCode === 0 && $gapOut === ['106_new_table'], 'schema_sync_gap.php prints only unapplied 050+ ids');
+$listOut = [];
+$listCode = 0;
+exec(PHP_BINARY . ' ' . escapeshellarg($root . '/scripts/run_migrations.php') . ' --list-applied 2>&1', $listOut, $listCode);
+$listText = implode("\n", $listOut);
+$assert($listCode === 2 && strpos($listText, '--list-applied is only for Staging modes.') !== false, 'list-applied refuses a non-staging mode');
+$assert(strpos($listText, 'Applying migration') === false, 'a refused list-applied does not apply migrations');
 
 $db->exec(
     'CREATE TABLE IF NOT EXISTS schema_migrations (

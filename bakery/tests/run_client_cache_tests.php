@@ -68,6 +68,34 @@ cache_assert('Apache HTML/PHP responses are not stored', strpos($htaccess, 'no-s
 
 $buildEndpoint = file_get_contents($root . '/build_id.php');
 cache_assert('build_id endpoint returns bakery_client_build_id', strpos($buildEndpoint, 'bakery_client_build_id()') !== false);
+cache_assert('build_id endpoint returns the deployed git sha', strpos($buildEndpoint, "'sha'") !== false && strpos($buildEndpoint, 'bakery_deploy_git_sha()') !== false);
+cache_assert('refresh meta publishes app-sha beside app-build', strpos($refreshPhp, 'name="app-build"') !== false && strpos($refreshPhp, 'name="app-sha"') !== false && strpos($refreshPhp, 'bakery_deploy_git_sha()') !== false);
+
+$shaPath = $root . '/includes/deploy_sha.php';
+$shaBackup = is_file($shaPath) ? (string)file_get_contents($shaPath) : null;
+file_put_contents($shaPath, "<?php\nreturn 'abc1234';\n");
+cache_assert('stamped deploy sha is the short git id', bakery_deploy_git_sha() === 'abc1234');
+file_put_contents($shaPath, "<?php\nreturn 'not a sha';\n");
+cache_assert('a non-hex stamp is ignored', bakery_deploy_git_sha() === '');
+if ($shaBackup === null) {
+    @unlink($shaPath);
+} else {
+    file_put_contents($shaPath, $shaBackup);
+}
+
+$stagePush = (string)file_get_contents($root . '/scripts/push_sftp_stage.ps1');
+$livePush = (string)file_get_contents($root . '/scripts/push_sftp.ps1');
+$cloudStage = (string)file_get_contents($root . '/scripts/cloud_agent_stage.py');
+$manifest = (string)file_get_contents($root . '/scripts/deploy_manifest.ps1');
+cache_assert('deploy manifest stamps the git sha without asking the host to run git', strpos($manifest, 'function Write-BakeryDeployGitSha') !== false && strpos($manifest, 'rev-parse --short=7') !== false);
+$stageStampAt = strpos($stagePush, 'Write-BakeryDeployGitSha');
+$stageListAt = strpos($stagePush, 'Get-BakeryDeployFileList');
+cache_assert('staging sync stamps deploy_sha.php before the file list', $stageStampAt !== false && $stageListAt !== false && $stageStampAt < $stageListAt);
+$liveStampAt = strpos($livePush, 'Write-BakeryDeployGitSha');
+$liveListAt = strpos($livePush, 'Get-BakeryDeployFileList');
+cache_assert('live file sync stamps deploy_sha.php before the file list', $liveStampAt !== false && $liveListAt !== false && $liveStampAt < $liveListAt);
+cache_assert('cloud staging sync stamps deploy_sha.php', strpos($cloudStage, 'def stamp_deploy_sha') !== false && strpos($cloudStage, 'includes/deploy_sha.php') !== false);
+cache_assert('deploy sha stamp is gitignored', strpos((string)file_get_contents($root . '/.gitignore'), 'includes/deploy_sha.php') !== false);
 
 $config = file_get_contents($root . '/includes/config.php');
 cache_assert('config sends document cache headers', strpos($config, 'bakery_send_document_cache_headers') !== false);

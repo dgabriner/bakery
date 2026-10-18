@@ -14,4 +14,5 @@ require_once __DIR__ . '/includes/config.php';
 
 echo json_encode([
     'build' => bakery_client_build_id(),
+    'sha' => bakery_deploy_git_sha(),
 ], JSON_UNESCAPED_SLASHES);

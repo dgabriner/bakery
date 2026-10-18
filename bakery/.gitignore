@@ -16,6 +16,7 @@
 *.local.php
 local_config.php
 includes/local_*.php
+includes/deploy_sha.php
 
 # --- Secrets and tokens (runtime) ---
 oauth_tokens.json

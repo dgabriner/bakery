@@ -47,6 +47,35 @@ function bakery_schema_migration_id_is_applied(array $appliedIds, string $pathOr
     return in_array(bakery_schema_migration_ledger_id($pathOrId), $appliedIds, true);
 }
 
+/**
+ * 050+ schema files on main whose full filename id is absent from a target ledger.
+ * Earlier files are baseline or imperative migrations, not the desktop sync's
+ * additive set. A numeric prefix does not count as applied.
+ *
+ * @param list<string> $mainIds
+ * @param list<string> $appliedIds
+ * @return list<string>
+ */
+function bakery_schema_migrations_unapplied(array $mainIds, array $appliedIds): array
+{
+    $missing = [];
+    foreach ($mainIds as $id) {
+        $id = bakery_schema_migration_ledger_id((string)$id);
+        if (!preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+            continue;
+        }
+        if ((int)substr($id, 0, 3) < 50) {
+            continue;
+        }
+        if (!bakery_schema_migration_id_is_applied($appliedIds, $id)) {
+            $missing[] = $id;
+        }
+    }
+    $missing = array_values(array_unique($missing));
+    sort($missing, SORT_STRING);
+    return $missing;
+}
+
 /** @return list<string> */
 function bakery_schema_migration_ids_from_dir(?string $dir = null): array
 {
