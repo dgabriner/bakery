@@ -258,6 +258,7 @@ if (-not $EnvOnly) {
         try { $sinceUtc = ([datetime]$baseline.recorded_at).ToUniversalTime() } catch { }
     }
 
+    $stampedSha = Write-BakeryDeployGitSha -BakeryRoot $bakeryRoot
     $deployFiles = @(Get-BakeryDeployFileList -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc)
     $currentSnapshot = Get-BakeryDeploySnapshot -BakeryRoot $bakeryRoot -AlsoIncludeRootModifiedAfterUtc $sinceUtc
     $baselineMap = ConvertTo-BakeryDeployBaselineMap -BaselineFiles $(if ($baseline) { $baseline.files } else { $null })
@@ -268,6 +269,9 @@ if (-not $EnvOnly) {
     } else {
         $toUpload = @(Get-BakeryChangedDeployPaths -CurrentSnapshot $currentSnapshot -BaselineMap $baselineMap)
         $mode = "changed"
+    }
+    if ($stampedSha -and -not ($toUpload -contains 'includes/deploy_sha.php')) {
+        $toUpload += 'includes/deploy_sha.php'
     }
 
     $schemaChanges = @(Get-BakerySchemaSqlChanges -BakeryRoot $bakeryRoot -SinceUtc $sinceUtc)

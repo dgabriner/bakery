@@ -54,6 +54,27 @@ function bakery_client_build_id() {
 }
 
 /**
+ * Short git SHA stamped at sync time into includes/deploy_sha.php.
+ * Hosts do not have git. An empty string means this tree was not stamped.
+ */
+function bakery_deploy_git_sha(): string
+{
+    $path = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'includes' . DIRECTORY_SEPARATOR . 'deploy_sha.php';
+    if (!is_file($path)) {
+        return '';
+    }
+    $value = include $path;
+    if (!is_string($value)) {
+        return '';
+    }
+    $value = strtolower(trim($value));
+    if (!preg_match('/^[0-9a-f]{7,40}$/', $value)) {
+        return '';
+    }
+    return $value;
+}
+
+/**
  * Cache-busted URL for a file under the bakery root (css/x.css, includes/x.js, …).
  */
 function bakery_asset_url($relativePath) {

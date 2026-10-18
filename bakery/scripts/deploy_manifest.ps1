@@ -313,6 +313,38 @@ function Write-BakeryJsonFile {
     [System.IO.File]::WriteAllText($Path, $json, $utf8)
 }
 
+function Write-BakeryDeployGitSha {
+    param([Parameter(Mandatory = $true)][string]$BakeryRoot)
+
+    $repoRoot = $BakeryRoot
+    while ($repoRoot -and -not (Test-Path (Join-Path $repoRoot '.git'))) {
+        $parent = Split-Path $repoRoot -Parent
+        if (-not $parent -or $parent -eq $repoRoot) { return '' }
+        $repoRoot = $parent
+    }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $sha = (& git -C $repoRoot rev-parse --short=7 HEAD 2>$null | Out-String).Trim().ToLower()
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    if ($sha -notmatch '^[0-9a-f]{7,40}$') { return '' }
+    $path = Join-Path $BakeryRoot 'includes\deploy_sha.php'
+    if (-not (Test-Path -LiteralPath (Split-Path -Parent $path))) { return '' }
+    $body = "<?php`nreturn '$sha';`n"
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $existing = ''
+    if (Test-Path -LiteralPath $path) {
+        $existing = [System.IO.File]::ReadAllText($path)
+    }
+    if ($existing -ne $body) {
+        [System.IO.File]::WriteAllText($path, $body, $utf8)
+    }
+    return $sha
+}
+
 function Get-BakeryRepoRoot {
     param([Parameter(Mandatory = $true)][string]$BakeryRoot)
     $repoRoot = $BakeryRoot

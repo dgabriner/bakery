@@ -251,6 +251,7 @@ if ($baseline -and $baseline.recorded_at) {
     try { $sinceUtc = ([datetime]$baseline.recorded_at).ToUniversalTime() } catch { }
 }
 
+$stampedSha = Write-BakeryDeployGitSha -BakeryRoot $uploadRoot
 if (-not [string]::IsNullOrWhiteSpace($UploadList)) {
     $toUpload = @([System.IO.File]::ReadAllLines((Resolve-Path -LiteralPath $UploadList).Path) | ForEach-Object { $_.Trim().TrimStart([char]0xFEFF) } | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') })
     $mode = "candidate"
@@ -267,6 +268,9 @@ if (-not [string]::IsNullOrWhiteSpace($UploadList)) {
         $toUpload = @(Get-BakeryChangedDeployPaths -CurrentSnapshot $currentSnapshot -BaselineMap $baselineMap)
         $mode = "changed"
     }
+}
+if ($stampedSha -and -not ($toUpload -contains 'includes/deploy_sha.php')) {
+    $toUpload += 'includes/deploy_sha.php'
 }
 
 $schemaChanges = @(Get-BakerySchemaSqlChanges -BakeryRoot $bakeryRoot -SinceUtc $sinceUtc)
