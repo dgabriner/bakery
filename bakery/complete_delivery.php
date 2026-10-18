@@ -26,6 +26,7 @@ require_once __DIR__ . '/includes/client_request_id.php';
 require_once __DIR__ . '/includes/daily_orders_actions.php';
 require_once __DIR__ . '/includes/cod_square_guard.php';
 require_once __DIR__ . '/includes/billing_header.php';
+require_once __DIR__ . '/includes/delivery_proof.php';
 
 /**
  * Browser navigation (GET/HEAD) should not dump the JSON API.
@@ -1267,6 +1268,11 @@ try {
             if ($clientRequestId !== '') {
                 $confirmOptions['client_request_id'] = $clientRequestId;
             }
+            bakery_delivery_assert_proof_for_confirm(
+                $db,
+                $dailyOrderId,
+                (string)($_POST['proof_skip'] ?? '') === '1'
+            );
             if (isset($_POST['line_delivered']) && is_array($_POST['line_delivered'])) {
                 $lineQuantities = [];
                 foreach ($_POST['line_delivered'] as $itemId => $qty) {

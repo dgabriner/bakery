@@ -10,6 +10,7 @@ require_once 'includes/daily_order_generation.php';
 require_once 'includes/daily_run.php';
 require_once 'includes/driver_assignments.php';
 require_once 'includes/operational_exceptions.php';
+require_once 'includes/driver_day_sms.php';
 
 $user = bakery_current_user();
 if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
@@ -74,6 +75,15 @@ try {
 } catch (Throwable $e) {
     error_log('daily_run page: ' . $e->getMessage());
     $error = bakery_dashboard_safe_error_message($e);
+}
+
+$driverSmsBlocks = [];
+if (is_array($dailyRun)) {
+    try {
+        $driverSmsBlocks = bakery_driver_day_sms_blocks($db, $selectedDate);
+    } catch (Throwable $e) {
+        error_log('daily_run driver sms: ' . $e->getMessage());
+    }
 }
 
 $uiStateLabel = static function (string $state): string {
@@ -220,6 +230,41 @@ require_once 'includes/nav.php';
                 </a>
             </div>
         </section>
+
+        <?php if ($driverSmsBlocks !== []): ?>
+        <section class="dr-driver-sms" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.driver_sms_title')); ?>">
+            <h2><?php bakery_te('daily_run.driver_sms_title'); ?></h2>
+            <p class="dr-driver-sms-help"><?php bakery_te('daily_run.copy_driver_sms_help'); ?></p>
+            <?php foreach ($driverSmsBlocks as $smsBlock): ?>
+                <div class="dr-driver-sms-card">
+                    <h3><?php echo htmlspecialchars((string)$smsBlock['driver_name']); ?></h3>
+                    <textarea class="dr-driver-sms-body" readonly rows="8"><?php echo htmlspecialchars((string)$smsBlock['body']); ?></textarea>
+                    <button type="button" class="dr-btn dr-btn-secondary dr-driver-sms-copy" data-copied="<?php echo htmlspecialchars(bakery_t('daily_run.copy_driver_sms_copied')); ?>">
+                        <?php bakery_te('daily_run.copy_driver_sms'); ?>
+                    </button>
+                </div>
+            <?php endforeach; ?>
+        </section>
+        <script>
+        (function () {
+          document.querySelectorAll('.dr-driver-sms-copy').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var card = btn.closest('.dr-driver-sms-card');
+              var area = card ? card.querySelector('.dr-driver-sms-body') : null;
+              var text = area ? area.value : '';
+              if (!text || !navigator.clipboard || !navigator.clipboard.writeText) {
+                return;
+              }
+              var label = btn.textContent;
+              navigator.clipboard.writeText(text).then(function () {
+                btn.textContent = btn.getAttribute('data-copied') || label;
+                setTimeout(function () { btn.textContent = label; }, 1200);
+              });
+            });
+          });
+        })();
+        </script>
+        <?php endif; ?>
 
         <ol class="dr-stage-list" aria-label="<?php bakery_te('daily_run.stages_aria'); ?>">
             <?php foreach ($dailyRun['stages'] as $stage): ?>

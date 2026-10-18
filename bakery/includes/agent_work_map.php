@@ -273,6 +273,9 @@ function bakery_agent_work_map_core(): array
                 'includes/survey_route_order.php',
                 'includes/survey_route_order_render.php',
                 'includes/survey_dual_hub.php',
+                'includes/survey_dual_open.php',
+                'includes/driver_day_sms.php',
+                'scripts/survey_dual_open.php',
                 'database/schema/073_survey_interactions.sql',
                 'text_comms.php',
                 'text_comms_api.php',
@@ -298,6 +301,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_survey_interactions_tests.php',
                 'tests/run_survey_route_order_tests.php',
                 'tests/run_survey_sell_day_tests.php',
+                'tests/run_driver_survey_flow_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [
@@ -632,6 +636,7 @@ function bakery_agent_work_map_core(): array
                 'includes/driver_delivery.js',
                 'includes/driver_route_map.js',
                 'includes/delivery_skip.php',
+                'includes/delivery_proof.php',
                 'driver_load.php',
             ],
             'tests' => [
@@ -639,6 +644,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_billing_accuracy_tests.php',
                 'tests/run_driver_route_ux_tests.php',
                 'tests/run_driver_photo_ui_tests.php',
+                'tests/run_driver_survey_flow_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',
                 'tests/run_status_alignment_tests.php',
             ],

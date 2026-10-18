@@ -140,7 +140,7 @@ if (!$survey && $token === '') {
                 echo '</form>';
             }
             if ($isManager) {
-                echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys') . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
+                echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys&date=' . rawurlencode($hubDate)) . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
             }
             echo '</div>';
             require __DIR__ . '/includes/footer.php';

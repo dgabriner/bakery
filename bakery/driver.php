@@ -1398,6 +1398,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'phone_camera' => bakery_t('driver.phone_camera'),
     'skip_photo' => bakery_t('driver.skip_photo'),
     'skip_departure_photo' => bakery_t('driver.skip_departure_photo'),
+    'proof_photo_required' => bakery_t('driver.proof_required'),
     'variance_ack_needed' => bakery_t('driver.variance_ack_needed'),
     'saved_leaving_later' => bakery_t('driver.saved_leaving_later'),
     'more_actions' => bakery_t('driver.more_actions'),
