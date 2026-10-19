@@ -239,6 +239,12 @@ $surveyCoverage = [
 ];
 if ($view === 'surveys') {
     require_once __DIR__ . '/includes/surveys.php';
+    require_once __DIR__ . '/includes/survey_dual_open.php';
+    try {
+        bakery_survey_dual_open_if_due($db);
+    } catch (Throwable $e) {
+        error_log('text_comms surveys open if due: ' . $e->getMessage());
+    }
     $surveysReady = bakery_surveys_ready($db);
     if (function_exists('bakery_survey_center_date')) {
         $weekdays = function_exists('bakery_survey_delivery_weekdays')
@@ -901,6 +907,7 @@ require_once __DIR__ . '/includes/nav.php';
         </div>
         <div style="padding:12px 16px; display:grid; gap:12px;">
             <p class="tc-hint" style="margin:0;"><?php bakery_te('texts.survey_coverage_help'); ?></p>
+            <p style="margin:0;"><a href="<?php echo htmlspecialchars(BASE_URL . 'tomorrow_routes.php?date=' . rawurlencode((string)$surveyComposerDate), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('tomorrow_routes.open_link'); ?></a></p>
             <div style="display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
                 <div style="border:1px solid rgba(0,0,0,.1); border-radius:10px; padding:10px 12px; background:#fff;">
                     <div style="font-weight:700; margin-bottom:4px;"><?php bakery_te('texts.survey_step1_title'); ?></div>
@@ -1285,12 +1292,13 @@ require_once __DIR__ . '/includes/nav.php';
                                 </a>
                                 <?php
                                     $surveyDriverId = (int)($s['driver_id'] ?? 0);
-                                    $surveyDriverName = trim((string)($s['driver_name'] ?? ''));
-                                    if ($surveyDriverName === '' || $surveyDriverId <= 0) {
-                                        $surveyDriverName = (string)bakery_t('texts.survey_driver_hq');
-                                    }
+                                    $surveyDriverName = bakery_survey_center_driver_label(
+                                        $surveyDriverId,
+                                        (string)($s['driver_name'] ?? ''),
+                                        (string)bakery_t('texts.survey_driver_hq')
+                                    );
                                 ?>
-                                <span class="tc-survey-driver"><?php echo htmlspecialchars($surveyDriverName, ENT_QUOTES, 'UTF-8'); ?></span>
+                                <span class="tc-survey-driver"><span class="tc-hint"><?php bakery_te('texts.survey_row_driver'); ?></span> <?php echo htmlspecialchars($surveyDriverName, ENT_QUOTES, 'UTF-8'); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['kind'] === 'route_review' ? 'texts.survey_kind_route' : ($s['kind'] === 'store_verify' ? 'texts.survey_kind_stores' : ($s['kind'] === 'route_order' ? 'texts.survey_kind_order' : 'texts.survey_kind_question'))); ?></span>
                                 <span class="tc-lane"><?php bakery_te($s['audience'] === 'driver' ? 'texts.survey_audience_driver' : 'texts.survey_audience_staff'); ?></span>
                                 <span class="tc-status"><?php bakery_te($s['status'] === 'open' ? 'texts.survey_status_open' : 'texts.survey_status_closed'); ?></span>

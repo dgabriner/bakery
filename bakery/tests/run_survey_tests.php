@@ -377,6 +377,8 @@ try {
     $_SERVER['PHP_SELF'] = '/bakery/text_comms.php';
     $_SERVER['REQUEST_URI'] = '/bakery/text_comms.php?view=surveys';
     $beforeGet = survey_db_write_fingerprint($db);
+    $nowPt = new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles'));
+    $afterFive = ((int)$nowPt->format('G') * 60) + (int)$nowPt->format('i') >= (17 * 60);
     ob_start();
     include dirname(__DIR__) . '/text_comms.php';
     $surveyCenterHtml = (string)ob_get_clean();
@@ -387,7 +389,21 @@ try {
             $changedTables[] = $tableName;
         }
     }
-    $assert($changedTables === [], 'a GET of text_comms.php?view=surveys writes nothing' . ($changedTables === [] ? '' : ' (' . implode(', ', $changedTables) . ')'));
+    if ($changedTables === []) {
+        $assert(true, 'a GET of text_comms.php?view=surveys writes nothing');
+    } else {
+        $assert(
+            $afterFive && $changedTables === ['surveys'],
+            'a Survey Center GET writes nothing except the one-time 5 PM survey open'
+                . ($changedTables === [] ? '' : ' (' . implode(', ', $changedTables) . ')')
+        );
+        if (function_exists('bakery_survey_dual_open_if_due')) {
+            $secondBefore = survey_db_write_fingerprint($db);
+            bakery_survey_dual_open_if_due($db, $nowPt);
+            $secondAfter = survey_db_write_fingerprint($db);
+            $assert($secondBefore === $secondAfter, 'a second Survey Center open does not write again');
+        }
+    }
     $assert(strpos($surveyCenterHtml, 'Create today link') !== false, 'GET shows Create today link without inserting a hub');
     } catch (Throwable $e) {
     echo 'FAIL  unexpected exception: ' . $e->getMessage() . "\n";

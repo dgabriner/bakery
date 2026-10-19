@@ -16,6 +16,7 @@ require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/surveys.php';
+require_once __DIR__ . '/includes/survey_dual_open.php';
 require_once __DIR__ . '/includes/text_comms.php';
 
 $token = trim((string)($_REQUEST['t'] ?? ''));
@@ -25,6 +26,12 @@ if (!bakery_surveys_ready($db)) {
         (string)bakery_t('survey.unavailable_title', [], 'Surveys not set up here'),
         (string)bakery_t('survey.unavailable_body', [], 'This environment does not have the survey tables yet (migration 061). Ask the administrator to apply database/schema/061_surveys.sql.')
     );
+}
+
+try {
+    bakery_survey_dual_open_if_due($db);
+} catch (Throwable $e) {
+    error_log('survey.php open if due: ' . $e->getMessage());
 }
 
 $nextDeliveryDate = bakery_survey_next_sell_date_from_db($db, date('Y-m-d'));
@@ -140,6 +147,9 @@ if (!$survey && $token === '') {
                 echo '</form>';
             }
             if ($isManager) {
+                require_once __DIR__ . '/includes/tomorrow_routes.php';
+                echo bakery_tomorrow_routes_loose_html($db, $hubDate);
+                echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'tomorrow_routes.php?date=' . rawurlencode($hubDate)) . '">' . $esc(bakery_t('tomorrow_routes.open_link')) . '</a></p>';
                 echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys&date=' . rawurlencode($hubDate)) . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
             }
             echo '</div>';

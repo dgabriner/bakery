@@ -277,6 +277,9 @@ function bakery_agent_work_map_core(): array
                 'includes/survey_dual_open.php',
                 'includes/driver_day_sms.php',
                 'scripts/survey_dual_open.php',
+                'tomorrow_routes.php',
+                'includes/tomorrow_routes.php',
+                'css/tomorrow_routes.css',
                 'database/schema/073_survey_interactions.sql',
                 'text_comms.php',
                 'text_comms_api.php',
@@ -303,6 +306,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_survey_route_order_tests.php',
                 'tests/run_survey_sell_day_tests.php',
                 'tests/run_driver_survey_flow_tests.php',
+                'tests/run_tomorrow_routes_tests.php',
                 'tests/run_i18n_tests.php',
             ],
             'invariants' => [

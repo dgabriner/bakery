@@ -450,8 +450,79 @@ function bakery_survey_results(PDO $db, int $surveyId): array
 }
 
 /**
- * Full clickable URL for the survey link page — SMS links must be absolute.
- * Falls back to a relative path only when there is no request context (CLI).
+ * Absolute origin for survey links. BAKERY_PUBLIC_ORIGIN wins so a cron
+ * or a page with an empty host still texts a full URL. Otherwise the
+ * request host, then X-Forwarded-Host. Empty means the caller must not
+ * invent a path-only SMS link.
+ */
+function bakery_survey_public_origin(): string
+{
+    $env = trim((string)(getenv('BAKERY_PUBLIC_ORIGIN') ?: ''));
+    if ($env === '' && isset($_ENV['BAKERY_PUBLIC_ORIGIN'])) {
+        $env = trim((string)$_ENV['BAKERY_PUBLIC_ORIGIN']);
+    }
+    if (preg_match('#^https?://[A-Za-z0-9.-]+(?::\d+)?$#', $env) === 1) {
+        return rtrim($env, '/');
+    }
+    $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
+    if ($host === '') {
+        $forwarded = trim((string)($_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''));
+        if ($forwarded !== '') {
+            $host = strtolower((string)preg_replace('/:\d+$/', '', trim(explode(',', $forwarded)[0])));
+        }
+    }
+    if ($host === '') {
+        return '';
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+        || $host === 'staging.sourflour.org'
+        || $host === 'bakery.sourflour.org';
+    return ($https ? 'https://' : 'http://') . $host;
+}
+
+/**
+ * Turn a survey path into an absolute URL. A path with no origin becomes
+ * empty so SMS copy does not send "/bake/survey.php".
+ */
+function bakery_survey_absolute_url(string $url): string
+{
+    $url = trim($url);
+    if ($url === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $url) === 1) {
+        return $url;
+    }
+    $origin = bakery_survey_public_origin();
+    if ($origin === '') {
+        return '';
+    }
+    if ($url[0] !== '/') {
+        $url = '/' . $url;
+    }
+    return $origin . $url;
+}
+
+/**
+ * Survey Center row label. HQ only when the survey is not tied to a driver.
+ * A real driver with a missing name shows the id.
+ */
+function bakery_survey_center_driver_label(int $driverId, string $driverName, string $hqLabel): string
+{
+    if ($driverId <= 0) {
+        return $hqLabel;
+    }
+    $driverName = trim($driverName);
+    if ($driverName !== '') {
+        return $driverName;
+    }
+    return '#' . $driverId;
+}
+
+/**
+ * Full clickable URL for the survey link page. SMS links must be absolute.
+ * Falls back to a path only when there is no public origin and no request host.
  * Optional $date keeps store-verify deep links on the intended delivery day.
  */
 function bakery_survey_link_url(string $token, string $date = ''): string
@@ -460,15 +531,12 @@ function bakery_survey_link_url(string $token, string $date = ''): string
     if ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $path .= '&date=' . rawurlencode($date);
     }
-    $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
-    if ($host === '') {
-        return (defined('BASE_URL') ? BASE_URL : '/') . $path;
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+    $origin = bakery_survey_public_origin();
+    if ($origin === '') {
+        return $base . $path;
     }
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
-        || $host === 'staging.sourflour.org'
-        || $host === 'bakery.sourflour.org';
-    return ($https ? 'https://' : 'http://') . $host . (defined('BASE_URL') ? BASE_URL : '/') . $path;
+    return $origin . $base . $path;
 }
 
 /** i18n with plain fallback so CLI tests and the webhook can use this file. */

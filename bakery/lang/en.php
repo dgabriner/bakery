@@ -5151,9 +5151,36 @@ return [
     'driver_sms.stops_heading' => 'Paradas del :date:',
     'driver_sms.stop_line' => ':n. :date, :store',
     'driver_sms.no_stops' => '(sin paradas)',
-    'driver_sms.ajustes' => 'Ajustes: :url',
+    'driver_sms.ajustes' => 'Mañana. Ajustes: :url',
     'driver_sms.ajustes_missing' => 'Ajustes: sin enlace abierto',
     'driver_sms.skip_add' => 'SKIP/ADD: responde SKIP o ADD y el nombre de la tienda',
+
+    'tomorrow_routes.title' => 'Tomorrow\'s routes',
+    'tomorrow_routes.kicker' => 'Tomorrow',
+    'tomorrow_routes.date_label' => 'Date',
+    'tomorrow_routes.unassigned_title' => 'No driver yet',
+    'tomorrow_routes.orphan_title' => 'Standing order with no route',
+    'tomorrow_routes.orphan_help' => 'This store has an order for this day and is not on anyone\'s route.',
+    'tomorrow_routes.suggestions' => 'Suggested pickups by zone',
+    'tomorrow_routes.zone' => 'Zone',
+    'tomorrow_routes.no_zone' => 'No zone',
+    'tomorrow_routes.driver_stops' => 'Stops for :name',
+    'tomorrow_routes.add' => 'Add',
+    'tomorrow_routes.skip' => 'Skip',
+    'tomorrow_routes.move' => 'Move',
+    'tomorrow_routes.save' => 'Save',
+    'tomorrow_routes.pick_driver' => 'Driver',
+    'tomorrow_routes.driver_off' => ':name is off this day',
+    'tomorrow_routes.driver_off_help' => 'Takes this driver\'s stops off the day and leaves them for the other drivers, by zone.',
+    'tomorrow_routes.empty_driver' => 'No stops',
+    'tomorrow_routes.saved' => 'Saved. The stops are updated.',
+    'tomorrow_routes.none_open' => 'Nothing loose. Every store has a driver.',
+    'tomorrow_routes.open_link' => 'Set tomorrow\'s routes',
+    'tomorrow_routes.reason' => 'Reason',
+    'tomorrow_routes.skipped' => 'Skipped',
+    'texts.survey_row_driver' => 'Driver',
+    'nav.item.tomorrow_routes' => 'Tomorrow\'s routes',
+    'nav.item_desc.tomorrow_routes' => 'Set tomorrow\'s stops. Assign stores with no route, skip a stop, or move it.',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Zazie weekly sheet',
@@ -5207,6 +5234,7 @@ return [
     'zazie_weekly.bad_action' => 'That action is not available.',
     'zazie_weekly.apply_failed' => 'The sheet could not be applied. Nothing was saved.',
     'zazie_weekly.open_orders' => 'Open this week in Daily Orders',
+
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demand',
@@ -5293,4 +5321,5 @@ return [
     'ux.daily_orders.empty_body' => 'Standing forecast expects :count customer(s) on :day. Generate dated orders from standing, or review who is missing.',
     'ux.daily_orders.removed_one_day' => 'Removed for this day only. Standing order is unchanged.',
     'ux.daily_orders.undo_removal' => 'Undo removal',
+
 ];

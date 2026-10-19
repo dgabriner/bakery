@@ -3,6 +3,7 @@ define('ACCESS_ALLOWED', true);
 
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/tomorrow_routes.php';
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
 
@@ -317,52 +318,8 @@ if ($selectedDriverId > 0) {
         }
 
         if ($view === 'day' && $selectedDay > 0) {
-            $stmt = $db->prepare("
-                SELECT
-                    MIN(sr.route_order) AS standing_route_order,
-                    c.id AS customer_id,
-                    c.name AS customer_name,
-                    c.address,
-                    c.phone,
-                    c.email,
-                    c.deliver_after,
-                    c.deliver_by,
-                    c.delivery_time AS stop_duration,
-                    MAX(doa.scheduled_delivery_time) AS scheduled_time,
-                    MAX(doa.estimated_delivery_time) AS estimated_time,
-                    MAX(COALESCE(doa.scheduled_delivery_time, doa.estimated_delivery_time, daily_order.delivery_time)) AS route_time,
-                    GROUP_CONCAT(DISTINCT
-                        CONCAT(
-                            COALESCE(dt.name, 'Unclassified'), '|',
-                            p.name,
-                            ' (', COALESCE(so.quantity, 0), ')'
-                        )
-                        ORDER BY COALESCE(dt.name, 'Unclassified'), p.name
-                        SEPARATOR '||'
-                    ) AS orders
-                FROM standing_routes sr
-                JOIN customers c ON sr.customer_id = c.id
-                " . bakery_sfb_ops_origin_clause('c', $db) . "
-                LEFT JOIN daily_orders daily_order
-                    ON daily_order.customer_id = c.id
-                   AND daily_order.order_date = ?
-                LEFT JOIN daily_order_assignments doa
-                    ON doa.daily_order_id = daily_order.id
-                   AND doa.driver_id = ?
-                   AND doa.delivery_date = ?
-                LEFT JOIN standing_orders so
-                    ON so.customer_id = c.id
-                   AND CASE WHEN so.day_of_week = 0 THEN 7 ELSE so.day_of_week END
-                       = CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END
-                LEFT JOIN products p ON so.product_id = p.id
-                LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
-                WHERE sr.driver_id = ?
-                  AND CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END = ?
-                GROUP BY c.id, c.name, c.address, c.phone, c.email, c.deliver_after, c.deliver_by, c.delivery_time
-                ORDER BY COALESCE(MIN(sr.route_order), 2147483647), c.name
-            ");
-            $stmt->execute([$selectedDate, $selectedDriverId, $selectedDate, $selectedDriverId, $selectedDay]);
-            $routeData = $stmt->fetchAll();
+            $routeData = bakery_daily_route_day_rows($db, $selectedDriverId, $selectedDate);
+
 
             foreach ($routeData as &$customer) {
                 $customer['route_time_label'] = !empty($customer['scheduled_time'])
