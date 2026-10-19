@@ -80,6 +80,12 @@ try {
 $driverSmsBlocks = [];
 if (is_array($dailyRun)) {
     try {
+        require_once __DIR__ . '/includes/survey_dual_open.php';
+        bakery_survey_dual_open_if_due($db);
+    } catch (Throwable $e) {
+        error_log('daily_run open if due: ' . $e->getMessage());
+    }
+    try {
         $driverSmsBlocks = bakery_driver_day_sms_blocks($db, $selectedDate);
     } catch (Throwable $e) {
         error_log('daily_run driver sms: ' . $e->getMessage());

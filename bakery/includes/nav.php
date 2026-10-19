@@ -316,6 +316,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
           <a class="bakery-nav__more-link<?php echo $currentPage === 'survey' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.survey_route'); ?></a>
+          <a class="bakery-nav__more-link<?php echo $currentPage === 'tomorrow_routes' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'tomorrow_routes.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'tomorrow_routes' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.item.tomorrow_routes'); ?></a>
           <?php foreach ($navManagerToolGroups as $group): ?>
             <p class="bakery-nav__more-group"><?php echo htmlspecialchars((string)$group['label'], ENT_QUOTES, 'UTF-8'); ?></p>
             <?php foreach ($group['items'] as $item): ?>

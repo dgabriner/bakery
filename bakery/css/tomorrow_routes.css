@@ -1,0 +1,70 @@
+.tr-page {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 12px 16px 64px;
+}
+
+.tr-kicker {
+    margin: 0;
+    font-weight: 700;
+}
+
+.tr-page h1,
+.tr-date {
+    margin: 0 0 8px;
+}
+
+.tr-date {
+    font-size: 1.4rem;
+}
+
+.tr-section {
+    margin: 20px 0;
+}
+
+.tr-card {
+    border: 1px solid #d8d0c2;
+    border-radius: 12px;
+    padding: 12px;
+    margin: 0 0 12px;
+    background: #fff;
+}
+
+.tr-card h3,
+.tr-card h4 {
+    margin: 0 0 8px;
+}
+
+.tr-actions {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 12px;
+    border: 0;
+}
+
+.tr-actions label,
+.tr-actions legend {
+    font-weight: 700;
+}
+
+.tr-actions label {
+    display: grid;
+    gap: 4px;
+}
+
+.tr-actions select,
+.tr-actions input,
+.tr-actions button {
+    min-height: 48px;
+    font: inherit;
+    font-size: 1rem;
+}
+
+.tr-actions button {
+    padding: 12px 16px;
+}
+
+.tr-saved {
+    font-weight: 700;
+}

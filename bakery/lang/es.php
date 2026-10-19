@@ -5148,9 +5148,36 @@ return [
     'driver_sms.stops_heading' => 'Paradas del :date:',
     'driver_sms.stop_line' => ':n. :date, :store',
     'driver_sms.no_stops' => '(sin paradas)',
-    'driver_sms.ajustes' => 'Ajustes: :url',
+    'driver_sms.ajustes' => 'Mañana. Ajustes: :url',
     'driver_sms.ajustes_missing' => 'Ajustes: sin enlace abierto',
     'driver_sms.skip_add' => 'SKIP/ADD: responde SKIP o ADD y el nombre de la tienda',
+
+    'tomorrow_routes.title' => 'Rutas de mañana',
+    'tomorrow_routes.kicker' => 'Mañana',
+    'tomorrow_routes.date_label' => 'Fecha',
+    'tomorrow_routes.unassigned_title' => 'Sin conductor',
+    'tomorrow_routes.orphan_title' => 'Pedido fijo sin ruta',
+    'tomorrow_routes.orphan_help' => 'Esta tienda tiene pedido para este día y no está en la ruta de nadie.',
+    'tomorrow_routes.suggestions' => 'Sugerencias por zona',
+    'tomorrow_routes.zone' => 'Zona',
+    'tomorrow_routes.no_zone' => 'Sin zona',
+    'tomorrow_routes.driver_stops' => 'Paradas de :name',
+    'tomorrow_routes.add' => 'Agregar',
+    'tomorrow_routes.skip' => 'Saltar',
+    'tomorrow_routes.move' => 'Mover',
+    'tomorrow_routes.save' => 'Guardar',
+    'tomorrow_routes.pick_driver' => 'Conductor',
+    'tomorrow_routes.driver_off' => ':name no trabaja este día',
+    'tomorrow_routes.driver_off_help' => 'Quita las paradas de este conductor y las deja para los demás, por zona.',
+    'tomorrow_routes.empty_driver' => 'Sin paradas',
+    'tomorrow_routes.saved' => 'Listo. Las paradas quedaron guardadas.',
+    'tomorrow_routes.none_open' => 'Nada suelto. Cada tienda tiene conductor.',
+    'tomorrow_routes.open_link' => 'Armar las rutas de mañana',
+    'tomorrow_routes.reason' => 'Motivo',
+    'tomorrow_routes.skipped' => 'Saltada',
+    'texts.survey_row_driver' => 'Conductor',
+    'nav.item.tomorrow_routes' => 'Rutas de mañana',
+    'nav.item_desc.tomorrow_routes' => 'Arma las paradas de mañana. Asigna tiendas sin ruta, salta o mueve una parada.',
 
     // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
     'nav.item.zazie_weekly_sheet' => 'Hoja semanal de Zazie',
@@ -5204,6 +5231,7 @@ return [
     'zazie_weekly.bad_action' => 'Esa acción no está disponible.',
     'zazie_weekly.apply_failed' => 'No se pudo aplicar la hoja. No se guardó nada.',
     'zazie_weekly.open_orders' => 'Abrir esta semana en Pedidos del día',
+
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demanda',
@@ -5290,4 +5318,5 @@ return [
     'ux.daily_orders.empty_body' => 'El pronóstico recurrente espera :count cliente(s) los :day. Genera pedidos con fecha desde lo recurrente, o revisa a quién le falta.',
     'ux.daily_orders.removed_one_day' => 'Quitado solo este día. El pedido fijo no cambia.',
     'ux.daily_orders.undo_removal' => 'Deshacer el quitado',
+
 ];

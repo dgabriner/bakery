@@ -160,6 +160,10 @@ function bakery_driver_day_sms_blocks(PDO $db, string $date): array
             $hub = bakery_survey_dual_hub_existing($db, $driverId, $date);
             $url = trim((string)($hub['verify_url'] ?? ''));
         }
+        if (!function_exists('bakery_survey_absolute_url')) {
+            require_once __DIR__ . '/surveys.php';
+        }
+        $url = bakery_survey_absolute_url($url);
         $blocks[] = [
             'driver_id' => $driverId,
             'driver_name' => (string)($driver['name'] ?? ''),

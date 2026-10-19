@@ -1,11 +1,12 @@
-# Cron Kit — overnight jobs on DreamHost
+# Cron Kit: overnight jobs on DreamHost
 
 Three scripts are designed to run unattended on DreamHost. Page loads already fill the
 demand horizon lazily, so cron makes the system proactive instead of reactive.
-The dual survey does not open on a page view.
+The 5 PM job opens tomorrow's survey. If that crontab line is missing, the first
+manager page load after 5 PM Pacific opens it once and does not insert a second copy.
 
 **Owner installs the crontab on DreamHost.** Agents ship the runbook + in-app
-staleness check only — Staging and Live cron installs are not performed from GitHub.
+staleness check only. Staging and Live cron installs are not performed from GitHub.
 
 ## Jobs
 
@@ -27,17 +28,18 @@ The Live tree is `/home/dh_dp755h/bakery.sourflour.org/bake`. Add this line if i
 0 6 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/dh_dp755h/cron_digest.log 2>&1
 
 # Next-day dual survey, 17:00 America/Los_Angeles
-0 17 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/survey_dual_open.php
+0 17 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/survey_dual_open.php >> /home/dh_dp755h/cron_survey.log 2>&1
 ```
 
-On this Live host, `YOUR_USER` is `dh_dp755h`. The 5:00 PM line is also in the script header. Do not open the dual survey from a GET.
+On this Live host the user is `dh_dp755h`. The script header still shows the `YOUR_USER` placeholder so the install note stays in the file. The job records `cron_run` and `storage/cron/survey_dual_open.json`. If the crontab line is missing, the first manager page load after 5 PM Pacific opens tomorrow's survey once. That page call is `bakery_survey_dual_open_if_due`. It does not write before 5 PM, and a second load does not insert another survey. Pages must not call `bakery_survey_dual_open_for_date` or `bakery_survey_dual_open_next`, because those always write.
 
 Log paths on the shell host:
 - `/home/dh_dp755h/cron_demand.log`
 - `/home/dh_dp755h/cron_digest.log`
-- App stamps: `operational_events` row `cron_run` (the board reads this) and `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`
+- `/home/dh_dp755h/cron_survey.log`
+- App stamps: `operational_events` row `cron_run` (the board reads this) and `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`, `bake/storage/cron/survey_dual_open.json`
 
-Both scripts refuse to run against local/test targets unless `--force` — on DreamHost they run as-is.
+Both scripts refuse to run against local/test targets unless `--force`. On DreamHost they run as-is.
 
 ## Verify after installing
 
@@ -52,6 +54,7 @@ Both scripts refuse to run against local/test targets unless `--force` — on Dr
 2. **From the app** open `health_deploy.php` and confirm:
    - `cron.demand_scheduler.age_hours=<number under 26>`
    - `cron.staff_alert_digest.age_hours=<number under 26>`
+   - `cron.survey_dual_open.age_hours=<number under 26>`
    - `null` means that job has never stamped a run on this host.
 3. **Dashboard / Daily Run:** the board shows the last run in Pacific time.
    It warns only when the 2:30 AM PT run is already due (after 3:30 AM PT)
