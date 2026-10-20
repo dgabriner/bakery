@@ -15,6 +15,8 @@ define('BAKERY_OP_DAILY_ORDER_QUANTITY_CHANGED', 'daily_order_quantity_changed')
 define('BAKERY_OP_DAILY_ORDER_ITEM_ADDED', 'daily_order_item_added');
 define('BAKERY_OP_DAILY_ORDER_STATUS_CHANGED', 'daily_order_status_changed');
 define('BAKERY_OP_DAILY_ORDER_CLEARED', 'daily_order_cleared');
+define('BAKERY_OP_DAILY_ORDER_DAY_SKIPPED', 'daily_order_day_skipped');
+define('BAKERY_OP_DAILY_ORDER_DAY_UNSKIPPED', 'daily_order_day_unskipped');
 define('BAKERY_OP_DRIVER_ROUTE_ASSIGNED', 'driver_route_assigned');
 define('BAKERY_OP_PRODUCTION_PLAN_SAVED', 'production_plan_saved');
 define('BAKERY_OP_PRODUCTION_PLAN_COMMITTED', 'production_plan_committed');
@@ -325,6 +327,8 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_DAILY_ORDER_ITEM_ADDED => 'demand',
         BAKERY_OP_DAILY_ORDER_STATUS_CHANGED => 'demand',
         BAKERY_OP_DAILY_ORDER_CLEARED => 'demand',
+        BAKERY_OP_DAILY_ORDER_DAY_SKIPPED => 'demand',
+        BAKERY_OP_DAILY_ORDER_DAY_UNSKIPPED => 'demand',
         BAKERY_OP_DRIVER_ROUTE_ASSIGNED => 'delivery',
         BAKERY_OP_PRODUCTION_PLAN_SAVED => 'production',
         BAKERY_OP_PRODUCTION_PLAN_COMMITTED => 'production',
