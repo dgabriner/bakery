@@ -161,6 +161,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'product_distribution.php', 'label' => 'Product Distribution', 'description' => 'Explore expected product quantities across customers and days.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'module_guide.php', 'label' => 'Module Guide', 'description' => 'A role and module reference for the current workspace.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'walkthroughs.php', 'label' => 'Walkthroughs', 'description' => 'English and Spanish usage videos recorded on the local production-data mirror.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'login_history.php?view=client_errors', 'nav_key' => 'client_errors', 'label' => 'Client Errors', 'description' => 'Read browser errors reported from the floor.', 'roles' => ['manager'], 'usage' => 'occasional'],
             ],
         ],
         [

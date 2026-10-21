@@ -372,5 +372,45 @@ foreach ([
     );
 }
 
+echo "\n=== Managers can read client errors and nothing else ===\n";
+require_once $root . '/includes/login_history_insights.php';
+require_once $root . '/includes/navigation_catalog.php';
+$adminAccess = bakery_login_history_access(['id' => 1, 'role_slug' => 'administrator'], 'overview', 'GET', '');
+$assert(!empty($adminAccess['allowed']) && empty($adminAccess['read_only']), 'administrator keeps full login history');
+$managerRead = bakery_login_history_access(['id' => 2, 'role_slug' => 'manager'], 'client_errors', 'GET', '');
+$assert(!empty($managerRead['allowed']) && !empty($managerRead['read_only']), 'manager can read client errors');
+$managerOverview = bakery_login_history_access(['id' => 2, 'role_slug' => 'manager'], 'overview', 'GET', '');
+$assert(empty($managerOverview['allowed']), 'manager cannot open the rest of login history');
+$managerRecords = bakery_login_history_access(['id' => 2, 'role_slug' => 'manager'], 'records', 'GET', '');
+$assert(empty($managerRecords['allowed']), 'manager cannot open login records');
+$managerExport = bakery_login_history_access(['id' => 2, 'role_slug' => 'manager'], 'client_errors', 'GET', 'csv');
+$assert(empty($managerExport['allowed']), 'manager cannot export login history');
+$managerPost = bakery_login_history_access(['id' => 2, 'role_slug' => 'manager'], 'client_errors', 'POST', '');
+$assert(empty($managerPost['allowed']), 'manager cannot change login history');
+$driverRead = bakery_login_history_access(['id' => 3, 'role_slug' => 'driver'], 'client_errors', 'GET', '');
+$assert(empty($driverRead['allowed']), 'a driver cannot open client errors');
+
+$historyPage = (string)file_get_contents($root . '/login_history.php');
+$assert(strpos($historyPage, 'bakery_login_history_access') !== false, 'the page checks login history access');
+$assert(strpos($historyPage, 'empty($loginHistoryReadOnly)') !== false, 'read-only managers do not get the export link');
+$assert(strpos($historyPage, 'bakery_require_role([\'administrator\'])') === false, 'managers are not rejected before the client errors check');
+
+$hrefsFor = static function (string $role): array {
+    $hrefs = [];
+    foreach (bakery_navigation_groups_for_role($role) as $group) {
+        foreach ($group['items'] as $item) {
+            $hrefs[] = (string)($item['href'] ?? '');
+        }
+    }
+    return $hrefs;
+};
+$managerHrefs = $hrefsFor('manager');
+$adminHrefs = $hrefsFor('administrator');
+$assert(in_array('login_history.php?view=client_errors', $managerHrefs, true), 'managers get a client errors menu item');
+$assert(!in_array('login_history.php', $managerHrefs, true), 'managers do not get the full login history menu');
+$assert(in_array('login_history.php', $adminHrefs, true), 'administrators still get Login History');
+$historyRoles = bakery_navigation_roles_for_script('login_history.php');
+$assert(in_array('administrator', $historyRoles, true) && in_array('manager', $historyRoles, true), 'the script gate allows administrators and managers');
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);
