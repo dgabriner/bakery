@@ -63,6 +63,8 @@ function Get-BakeryDeployExcludeNamePatterns {
         'auto_push_api.php', 'sourflour.html',
         # Staging-only night-shift tour (PR #1). Never send to Live.
         'staging_update.php', 'oven_light.php', 'proof_window.php',
+        # Staging-only portal seeder and SF 2.0 page. Never send to Live.
+        'seed_portal_session_router.php', 'sf20.html',
         'tmp_*.php', 'tmp_*.js', 'tmp_*.txt'
     )
 }
