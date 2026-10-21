@@ -8,6 +8,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/survey_store_verify.php';
+
 /** Statuses that stay fixed at the front of the route and are not tappable. */
 function bakery_survey_route_order_locked_statuses(): array
 {
@@ -117,34 +119,44 @@ function bakery_survey_route_order_plan(array $locked, array $movable, array $or
 }
 
 /**
- * @param array{driver_name?:string,delivery_date?:string,stores?:list<array{name?:string}>} $payload
+ * Short HQ text for a saved stop order: driver, date, stop count, and a link.
+ * The numbered list stays on the survey page. Hard cap is 3 segments.
+ *
+ * @param array{driver_name?:string,delivery_date?:string,stores?:list<array{name?:string}>,link?:string} $payload
  */
 function bakery_survey_route_order_sms_body(array $payload): string
 {
-    $driver = trim((string)($payload['driver_name'] ?? 'Driver'));
+    $driver = function_exists('bakery_survey_hq_sms_driver_label')
+        ? bakery_survey_hq_sms_driver_label((string)($payload['driver_name'] ?? 'Driver'))
+        : trim((string)($payload['driver_name'] ?? 'Driver'));
     $date = trim((string)($payload['delivery_date'] ?? ''));
-    $lines = ['Route order.' . $driver . ($date !== '' ? (' - ' . $date) : '')];
-    $n = 1;
+    $count = 0;
     foreach ((array)($payload['stores'] ?? []) as $store) {
         if (!is_array($store)) {
             continue;
         }
-        $name = trim((string)($store['name'] ?? ''));
-        if ($name === '') {
+        if (trim((string)($store['name'] ?? '')) === '') {
             continue;
         }
-        $lines[] = $n . '. ' . $name;
-        $n++;
-        if (count($lines) > 40) {
-            $lines[] = '…';
-            break;
-        }
+        $count++;
     }
-    $body = implode("\n", $lines);
-    if (strlen($body) > 1500) {
-        $body = substr($body, 0, 1497) . '...';
+    $key = $count === 1 ? 'survey.hq_sms_stop' : 'survey.hq_sms_stops';
+    $fallback = $count === 1
+        ? $driver . ' ' . $date . ': 1 stop'
+        : $driver . ' ' . $date . ': ' . $count . ' stops';
+    $summary = function_exists('bakery_survey_hq_sms_phrase')
+        ? bakery_survey_hq_sms_phrase($key, [
+            'driver' => $driver,
+            'date' => $date,
+            'count' => (string)$count,
+        ], $fallback)
+        : $fallback;
+    $link = trim((string)($payload['link'] ?? ''));
+    $max = function_exists('bakery_sms_hq_max_segments') ? bakery_sms_hq_max_segments() : 3;
+    if (!function_exists('bakery_sms_cap_body')) {
+        return $link === '' ? $summary : $summary . "\n" . $link;
     }
-    return $body;
+    return bakery_sms_cap_body($summary, $link, $max);
 }
 
 /**
@@ -450,22 +462,32 @@ function bakery_survey_route_order_submit(PDO $db, array $fields): array
         }
     }
 
-    $body = bakery_survey_route_order_sms_body($payload);
-    $smsOk = false;
-    if (function_exists('bakery_text_send') && function_exists('bakery_survey_hq_sms_number')) {
-        $sms = bakery_text_send($db, bakery_survey_hq_sms_number(), $body, [
+    $link = function_exists('bakery_survey_hq_sms_link')
+        ? bakery_survey_hq_sms_link($db, $surveyId, $date)
+        : '';
+    $body = bakery_survey_route_order_sms_body($payload + ['link' => $link]);
+    $sms = [
+        'ok' => false,
+        'recorded_only' => false,
+        'status' => 'failed',
+        'error' => 'sms_helper_missing',
+        'id' => 0,
+    ];
+    if (function_exists('bakery_survey_hq_sms_dispatch')) {
+        $sms = bakery_survey_hq_sms_dispatch($db, 'route_order', $driverId, $date, $body, [
             'staff_user_id' => (int)($fields['staff_user_id'] ?? 0) ?: null,
             'context_type' => 'driver',
             'context_id' => $surveyId > 0 ? $surveyId : null,
             'operating_date' => $date !== '' ? $date : date('Y-m-d'),
         ]);
-        $smsOk = !empty($sms['ok']) && empty($sms['recorded_only']);
     }
+    $smsOk = !empty($sms['ok']) && empty($sms['recorded_only']);
 
     return [
         'ok' => true,
         'apply' => $apply,
         'sms_ok' => $smsOk,
+        'sms_skipped' => (string)($sms['skipped'] ?? ''),
         'recorded' => $recorded,
     ];
 }

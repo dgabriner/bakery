@@ -127,7 +127,8 @@ $assert(
     'move applies store onto target driver ON set only'
 );
 
-// ---- SMS body lists stores one-per-line and names what changed --------------
+// ---- SMS is a short count summary, not the store list -----------------------
+$surveyLink = 'https://bakery.sourflour.org/bake/survey.php?t=aabbccddeeff00112233445566778899&date=2026-08-25';
 $sms = bakery_survey_store_verify_sms_body([
     'driver_name' => 'Maria',
     'delivery_date' => '2026-08-25',
@@ -142,17 +143,21 @@ $sms = bakery_survey_store_verify_sms_body([
         ['id' => 11, 'name' => 'Bi-Rite'],
     ],
     'assigned_off_count' => 1,
+    'link' => $surveyLink,
 ]);
+$smsInfo = bakery_sms_segment_info($sms);
 $assert(
     strpos($sms, 'Maria') !== false
         && strpos($sms, '2026-08-25') !== false
-        && strpos($sms, 'Tamalero') !== false
-        && strpos($sms, 'Rainbow') !== false
-        && strpos($sms, "ON:\nTamalero\nRainbow") !== false
-        && strpos($sms, "Changed:\n+ Other Cafe\n- Bi-Rite") !== false,
-    'SMS lists each store on its own line and names adds/drops'
+        && strpos($sms, '2 on') !== false
+        && strpos($sms, '+1') !== false
+        && strpos($sms, '-1') !== false
+        && strpos($sms, $surveyLink) !== false
+        && strpos($sms, 'Tamalero') === false
+        && strpos($sms, "ON:\n") === false,
+    'SMS summarizes counts and links to the survey instead of listing stores'
 );
-$assert(strlen($sms) <= 1500, 'SMS body stays within the soft HQ ceiling');
+$assert($smsInfo['encoding'] === 'GSM-7' && $smsInfo['segments'] <= 3, 'single-driver SMS stays within 3 GSM-7 segments');
 
 $payload = bakery_survey_store_verify_log_payload([
     'driver_id' => 7,
@@ -292,16 +297,118 @@ $assert(
         && (int)$hq['drivers'][1]['assigned_off_count'] === 0,
     'HQ Luis can turn an other store ON'
 );
-$hqSms = bakery_survey_store_verify_sms_body($hq + ['delivery_date' => '2026-08-30', 'driver_name' => 'HQ']);
+$hqLink = 'https://bakery.sourflour.org/bake/survey.php?t=aabbccddeeff00112233445566778899&date=2026-08-30';
+$hqSms = bakery_survey_store_verify_sms_body($hq + [
+    'delivery_date' => '2026-08-30',
+    'driver_name' => 'HQ',
+    'link' => $hqLink,
+]);
+$hqInfo = bakery_sms_segment_info($hqSms);
 $assert(
-    strpos($hqSms, 'Maria') !== false && strpos($hqSms, 'Luis') !== false && strpos($hqSms, '2026-08-30') !== false,
-    'HQ SMS names each driver and the delivery date'
+    strpos($hqSms, 'HQ 2026-08-30') !== false
+        && strpos($hqSms, 'Maria') !== false
+        && strpos($hqSms, 'Luis') !== false
+        && strpos($hqSms, $hqLink) !== false
+        && strpos($hqSms, 'Bi-Rite') === false,
+    'HQ SMS names each driver, the date, and the survey link'
 );
 $assert(
-    strpos($hqSms, "Luis\nON:\nBi-Rite\nOther Cafe") !== false
-        && strpos($hqSms, "+ Other Cafe") !== false,
-    'HQ SMS lists Luis stores one-per-line and shows Other Cafe as added'
+    strpos($hqSms, 'Maria: 1 on') !== false && strpos($hqSms, 'Luis: 2 on, +1') !== false,
+    'HQ SMS counts Luis adds without listing store names'
 );
+$assert($hqInfo['segments'] <= 3, 'combined HQ SMS stays within 3 segments');
+
+// ---- Segment math: GSM-7, extension chars, UCS-2, and the hard cap ---------
+$gsmOne = bakery_sms_segment_info(str_repeat('a', 160));
+$gsmTwo = bakery_sms_segment_info(str_repeat('a', 161));
+$gsmConcat = bakery_sms_segment_info(str_repeat('a', 306));
+$gsmThree = bakery_sms_segment_info(str_repeat('a', 307));
+$assert($gsmOne['encoding'] === 'GSM-7' && $gsmOne['segments'] === 1 && $gsmOne['units'] === 160, '160 GSM-7 chars are 1 segment');
+$assert($gsmTwo['encoding'] === 'GSM-7' && $gsmTwo['segments'] === 2, '161 GSM-7 chars are 2 segments');
+$assert($gsmConcat['segments'] === 2 && $gsmThree['segments'] === 3, 'concatenated GSM-7 uses 153 septets per segment');
+$caretInfo = bakery_sms_segment_info(str_repeat('^', 80));
+$assert($caretInfo['encoding'] === 'GSM-7' && $caretInfo['units'] === 160 && $caretInfo['segments'] === 1, 'GSM-7 extension chars count as two septets');
+$assert(bakery_sms_segment_info('Cafe n')['encoding'] === 'GSM-7', 'plain ASCII is GSM-7');
+$assert(bakery_sms_gsm7_septets('Senor') !== null, 'ASCII letters are GSM-7');
+$ene = bakery_sms_segment_info('Senor ' . "\u{00F1}");
+$assert($ene['encoding'] === 'GSM-7', 'Spanish n with tilde stays GSM-7');
+$acute = bakery_sms_segment_info('Jose ' . "\u{00E1}");
+$assert($acute['encoding'] === 'UCS-2', 'Spanish a with acute forces UCS-2');
+$ucsOne = bakery_sms_segment_info(str_repeat("\u{00E1}", 70));
+$ucsTwo = bakery_sms_segment_info(str_repeat("\u{00E1}", 71));
+$ucsThree = bakery_sms_segment_info(str_repeat("\u{00E1}", 135));
+$assert($ucsOne['encoding'] === 'UCS-2' && $ucsOne['segments'] === 1 && $ucsOne['units'] === 70, '70 UCS-2 chars are 1 segment');
+$assert($ucsTwo['segments'] === 2 && $ucsThree['segments'] === 3, 'concatenated UCS-2 uses 67 units per segment');
+$emoji = bakery_sms_segment_info('OK ' . "\u{1F600}");
+$assert($emoji['encoding'] === 'UCS-2' && $emoji['units'] === 5, 'emoji is UCS-2 and counts as two UTF-16 units');
+
+$longLink = 'https://bakery.sourflour.org/bake/survey.php?t=aabbccddeeff00112233445566778899&date=2026-10-20';
+$longGsm = '';
+for ($i = 1; $i <= 80; $i++) {
+    $longGsm .= 'Driver ' . $i . ': 20 on, +3 -1' . "\n";
+}
+$cappedGsm = bakery_sms_cap_body($longGsm, $longLink, 3);
+$cappedGsmInfo = bakery_sms_segment_info($cappedGsm);
+$assert($cappedGsmInfo['segments'] <= 3 && strpos($cappedGsm, $longLink) !== false, 'GSM cap trims the summary and keeps the full link');
+$longUcs = '';
+for ($i = 1; $i <= 40; $i++) {
+    $longUcs .= 'Martin ' . "\u{00ED}" . ' ' . $i . ': 20 on, +3 -1' . "\n";
+}
+$cappedUcs = bakery_sms_cap_body($longUcs, $longLink, 3);
+$cappedUcsInfo = bakery_sms_segment_info($cappedUcs);
+$assert(
+    $cappedUcsInfo['encoding'] === 'UCS-2' && $cappedUcsInfo['segments'] <= 3 && strpos($cappedUcs, $longLink) !== false,
+    'UCS-2 cap trims the summary and keeps the full link'
+);
+
+$beforeLines = ['HQ 2026-10-20', 'Juan', 'ON:'];
+for ($i = 1; $i <= 50; $i++) {
+    $beforeLines[] = 'La Palma Market ' . $i;
+}
+$beforeLines[] = 'Changed:';
+$beforeLines[] = '+ Extra Cafe';
+$beforeLines[] = '- Old Cafe';
+$beforeLines[] = 'Ana';
+$beforeLines[] = 'ON:';
+for ($i = 1; $i <= 40; $i++) {
+    $beforeLines[] = 'Sunset Stop ' . $i;
+}
+$beforeBody = implode("\n", $beforeLines);
+$beforeInfo = bakery_sms_segment_info($beforeBody);
+$afterDrivers = [];
+$juanOn = [];
+for ($i = 1; $i <= 50; $i++) {
+    $juanOn[] = ['id' => $i, 'name' => 'La Palma Market ' . $i];
+}
+$anaOn = [];
+for ($i = 1; $i <= 40; $i++) {
+    $anaOn[] = ['id' => 100 + $i, 'name' => 'Sunset Stop ' . $i];
+}
+$afterDrivers[] = [
+    'driver_name' => 'Juan',
+    'on' => $juanOn,
+    'added' => [['id' => 900, 'name' => 'Extra Cafe']],
+    'dropped' => [['id' => 901, 'name' => 'Old Cafe']],
+];
+$afterDrivers[] = [
+    'driver_name' => 'Ana',
+    'on' => $anaOn,
+    'added' => [],
+    'dropped' => [],
+];
+$afterBody = bakery_survey_store_verify_sms_body([
+    'delivery_date' => '2026-10-20',
+    'driver_name' => 'HQ',
+    'drivers' => $afterDrivers,
+    'link' => $longLink,
+    'route_line' => 'Route updated: +1, -1',
+]);
+$afterInfo = bakery_sms_segment_info($afterBody);
+$assert($beforeInfo['segments'] > 10, 'the old store-list shape exceeds the 10-segment carrier cap');
+$assert($afterInfo['segments'] <= 3 && strpos($afterBody, $longLink) !== false && strpos($afterBody, 'La Palma') === false, 'the capped summary stays at or under 3 segments');
+echo 'SAMPLE before ' . $beforeInfo['encoding'] . ' segments=' . $beforeInfo['segments'] . ' units=' . $beforeInfo['units'] . "\n";
+echo 'SAMPLE after ' . $afterInfo['encoding'] . ' segments=' . $afterInfo['segments'] . ' units=' . $afterInfo['units'] . "\n";
+echo "SAMPLE after body:\n" . $afterBody . "\n";
 
 // ---- Route reconcile (dated assignments, not standing) ----------------------
 $plan = bakery_survey_store_verify_route_reconcile(
@@ -492,6 +599,18 @@ $keys = [
     'survey.store_verify_done_route',
     'survey.store_verify_done_route_partial',
     'survey.store_verify_sms_failed',
+    'survey.store_verify_sms_already',
+    'survey.store_verify_sms_already_route',
+    'survey.hq_sms_on',
+    'survey.hq_sms_added',
+    'survey.hq_sms_dropped',
+    'survey.hq_sms_single',
+    'survey.hq_sms_head',
+    'survey.hq_sms_driver',
+    'survey.hq_sms_more',
+    'survey.hq_sms_stops',
+    'survey.hq_sms_stop',
+    'survey.route_order_sms_already',
     'survey.store_verify_no_stores',
     'survey.action_store_verify',
     'survey.msg_store_verify_link',

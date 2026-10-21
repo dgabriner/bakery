@@ -17,6 +17,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/twilio_config.php';
+require_once __DIR__ . '/sms_segments.php';
 
 /**
  * Keep only digits, then canonicalize US numbers to +1XXXXXXXXXX.
@@ -109,6 +110,15 @@ function bakery_text_context_from_purpose(string $purpose): string
 function bakery_text_not_connected_notice(): string
 {
     return 'Not connected, nothing delivered';
+}
+
+/** Record a send warning. Tests may collect lines in $GLOBALS['bakery_text_warnings']. */
+function bakery_text_warn(string $message): void
+{
+    if (isset($GLOBALS['bakery_text_warnings']) && is_array($GLOBALS['bakery_text_warnings'])) {
+        $GLOBALS['bakery_text_warnings'][] = $message;
+    }
+    error_log($message);
 }
 
 /** True when outbound sends can really leave via Twilio. */
@@ -299,10 +309,14 @@ function bakery_text_send(PDO $db, string $to, string $body, array $opts = []): 
         }
         $form['MediaUrl'] = $mediaUrl;
     }
-    if (TWILIO_MESSAGING_SERVICE_SID !== '') {
-        $form['MessagingServiceSid'] = TWILIO_MESSAGING_SERVICE_SID;
+    $serviceSid = function_exists('bakery_twilio_messaging_service_sid')
+        ? bakery_twilio_messaging_service_sid()
+        : (defined('TWILIO_MESSAGING_SERVICE_SID') ? trim((string)TWILIO_MESSAGING_SERVICE_SID) : '');
+    if ($serviceSid !== '') {
+        $form['MessagingServiceSid'] = $serviceSid;
     } else {
-        $form['From'] = TWILIO_FROM_NUMBER;
+        $form['From'] = defined('TWILIO_FROM_NUMBER') ? TWILIO_FROM_NUMBER : '';
+        bakery_text_warn('text comms: TWILIO_MESSAGING_SERVICE_SID is empty; sending From the phone number instead of the A2P Messaging Service');
     }
     $statusCallback = defined('TWILIO_STATUS_CALLBACK_URL') ? TWILIO_STATUS_CALLBACK_URL : '';
     if ($statusCallback !== '') {

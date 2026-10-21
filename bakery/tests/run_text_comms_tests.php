@@ -115,6 +115,45 @@ try {
     $assert($mms['ok'] && ($capturedForm['MediaUrl'] ?? '') === 'https://staging.sourflour.org/ops-monday-routes.png', 'https media_url is posted as MediaUrl');
     $badMedia = bakery_text_send($db, '+14155550002', 'nope', ['media_url' => 'http://example.com/x.png']);
     $assert(!$badMedia['ok'] && $badMedia['error'] === 'media_url must be https' && $badMedia['id'] === 0, 'non-https media_url is refused without a ledger row');
+
+    $GLOBALS['bakery_twilio_messaging_service_sid_override'] = 'MGaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    $GLOBALS['bakery_text_warnings'] = [];
+    $serviceForm = [];
+    $GLOBALS['bakery_twilio_api_handler'] = static function (string $method, string $path, array $form) use (&$serviceForm): array {
+        $serviceForm = $form;
+        return ['sid' => 'SMfake00000000000000000000000006', 'status' => 'queued', 'from' => '+14155550999'];
+    };
+    $viaService = bakery_text_send($db, '+14155550002', 'HQ summary', ['operating_date' => '2026-08-23']);
+    $cleanupMessageIds[] = $viaService['id'];
+    $assert(
+        $viaService['ok']
+            && ($serviceForm['MessagingServiceSid'] ?? '') === 'MGaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            && !array_key_exists('From', $serviceForm),
+        'configured Messaging Service SID is posted and From is omitted'
+    );
+    $assert($GLOBALS['bakery_text_warnings'] === [], 'Messaging Service send does not warn');
+
+    $GLOBALS['bakery_twilio_messaging_service_sid_override'] = '';
+    $GLOBALS['bakery_text_warnings'] = [];
+    $fromForm = [];
+    $GLOBALS['bakery_twilio_api_handler'] = static function (string $method, string $path, array $form) use (&$fromForm): array {
+        $fromForm = $form;
+        return ['sid' => 'SMfake00000000000000000000000007', 'status' => 'queued', 'from' => '+14155550999'];
+    };
+    $viaFrom = bakery_text_send($db, '+14155550002', 'HQ summary fallback', ['operating_date' => '2026-08-23']);
+    $cleanupMessageIds[] = $viaFrom['id'];
+    $assert(
+        $viaFrom['ok']
+            && !array_key_exists('MessagingServiceSid', $fromForm)
+            && array_key_exists('From', $fromForm),
+        'empty Messaging Service SID falls back to From'
+    );
+    $assert(
+        count($GLOBALS['bakery_text_warnings']) === 1
+            && strpos((string)$GLOBALS['bakery_text_warnings'][0], 'TWILIO_MESSAGING_SERVICE_SID') !== false,
+        'From fallback logs a warning'
+    );
+    unset($GLOBALS['bakery_twilio_messaging_service_sid_override'], $GLOBALS['bakery_text_warnings']);
     $sentRow = $db->query("SELECT status, twilio_sid, from_number FROM text_messages WHERE id = " . (int)$sent['id'])->fetch(PDO::FETCH_ASSOC);
     $assert($sentRow && $sentRow['status'] === 'queued' && $sentRow['twilio_sid'] === 'SMfake00000000000000000000000001', 'sent row stores twilio sid');
 
