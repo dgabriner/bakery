@@ -81,6 +81,15 @@ $refId = bakery_client_error_record($db, [
     'reference' => 'ab12cd',
 ]);
 $assert($refId > 0, 'reference beacon inserts');
+$late = new DateTimeImmutable($today . ' 23:30:00');
+$offsetSec = (int)$db->query('SELECT TIME_TO_SEC(TIMEDIFF(NOW(), UTC_TIMESTAMP()))')->fetchColumn();
+$offsetSign = $offsetSec >= 0 ? '+' : '-';
+$offsetAbs = abs($offsetSec);
+$mysqlTz = new DateTimeZone(sprintf('%s%02d:%02d', $offsetSign, intdiv($offsetAbs, 3600), intdiv($offsetAbs % 3600, 60)));
+$db->prepare('UPDATE client_errors SET created_at = ? WHERE id = ?')->execute([
+    $late->setTimezone($mysqlTz)->format('Y-m-d H:i:s'),
+    $refId,
+]);
 $matched = bakery_client_errors_search($db, [
     'user_id' => $userId,
     'page_path' => 'driver.php',
