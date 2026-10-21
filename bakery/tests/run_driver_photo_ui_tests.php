@@ -72,6 +72,16 @@ driver_photo_assert(
         && strpos($script, 'function useNativeCamera()') !== false
 );
 driver_photo_assert(
+    'Android takes the photo in the page instead of the system camera',
+    strpos($script, 'function isAndroid()') !== false
+        && strpos($script, 'function prefersNativeCamera()') !== false
+        && strpos(driver_photo_section($script, 'function prefersNativeCamera()', 'function usesCompactCapture'), 'isAndroid()') !== false
+        && strpos(driver_photo_section($script, 'function beginPhotoCapture()', 'function hasPhotoType'), 'prefersNativeCamera()') !== false
+        && strpos(driver_photo_section($script, 'function beginPhotoCapture()', 'function hasPhotoType'), 'usesCompactCapture()') === false
+        && strpos(driver_photo_section($script, 'function retakeCapture', 'function getCoords'), 'prefersNativeCamera()') !== false
+        && strpos(driver_photo_section($script, 'function retakePhotoFlow', 'function maybeEnableGpsTracking'), 'prefersNativeCamera()') !== false
+);
+driver_photo_assert(
     'stop open shows Take / Library / Skip without auto-launching the camera',
     strpos($script, 'function openNativeCameraPicker()') !== false
         && strpos($script, 'autoOpenCamera: false') !== false
@@ -128,9 +138,27 @@ driver_photo_assert(
 );
 driver_photo_assert(
     'large mobile photos are normalized to a bounded JPEG',
-    strpos($script, 'var maxDimension = 1920;') !== false
+    strpos($script, 'var maxDimension = 1600;') !== false
+        && strpos($script, 'function fitWithinEdge(') !== false
+        && strpos($script, 'function readJpegSize(') !== false
+        && strpos($script, 'createImageBitmap') !== false
+        && strpos($script, 'resizeWidth') !== false
+        && strpos($script, 'width: { ideal: 1280, max: 1280 }') !== false
+        && strpos($script, 'height: { ideal: 720, max: 1280 }') !== false
+        && strpos(driver_photo_section($script, 'function captureFromVideo()', 'function retakeCapture'), 'fitWithinEdge(') !== false
+        && strpos(driver_photo_section($script, 'function captureFromVideo()', 'function retakeCapture'), 'canvas.width = video.videoWidth') === false
+        && strpos(driver_photo_section($script, 'function captureFromVideo()', 'function retakeCapture'), 'stopCamera()') !== false
+        && strpos(driver_photo_section($script, 'async function onFileChosen', 'function onGalleryClick'), 'showCapturedPreview(URL.createObjectURL(file))') === false
         && strpos($script, "canvas.toBlob") !== false
         && strpos($script, "'image/jpeg'") !== false
+);
+driver_photo_assert(
+    'a too-large photo tells the driver to take it again',
+    strpos($script, "i18n('photo_too_large'") !== false
+        && strpos($page, "'photo_too_large' => bakery_t('driver.photo_too_large')") !== false
+        && isset($english['driver.photo_too_large'], $spanish['driver.photo_too_large'])
+        && trim((string)$english['driver.photo_too_large']) !== ''
+        && trim((string)$spanish['driver.photo_too_large']) !== ''
 );
 driver_photo_assert(
     'mobile images with a missing browser MIME type still reach server validation',
@@ -503,6 +531,41 @@ driver_photo_assert(
         && strpos($clientErrorsHelper, 'function bakery_client_errors_search') !== false
         && strpos($clientErrorsHelper, 'function bakery_client_error_reference_code') !== false
         && strpos($shell, 'window.bakeryReportClientError') !== false
+);
+
+if (!defined('ACCESS_ALLOWED')) {
+    define('ACCESS_ALLOWED', true);
+}
+require_once $root . '/includes/photo_handler.php';
+driver_photo_assert(
+    'server memory limit parser reads megabytes and unlimited',
+    function_exists('bakery_photo_parse_memory_limit')
+        && bakery_photo_parse_memory_limit('128M') === 128 * 1024 * 1024
+        && bakery_photo_parse_memory_limit('-1') === -1
+);
+driver_photo_assert(
+    'GD skips a 12MP still on a 128M limit and a 48MP still on a 256M limit',
+    function_exists('bakery_photo_gd_decode_allowed')
+        && bakery_photo_gd_decode_allowed(4032, 3024, 128 * 1024 * 1024) === false
+        && bakery_photo_gd_decode_allowed(8000, 6000, 256 * 1024 * 1024) === false
+        && bakery_photo_gd_decode_allowed(1600, 1200, 128 * 1024 * 1024) === true
+        && bakery_photo_gd_decode_allowed(0, 1200, 128 * 1024 * 1024) === false
+);
+driver_photo_assert(
+    'photo optimize consults the GD budget before decoding',
+    strpos(driver_photo_section($handler, 'function optimizeImage', 'function resizeImage'), 'bakery_photo_gd_decode_allowed') !== false
+        && strpos(driver_photo_section($handler, 'function optimizeImage', 'function resizeImage'), 'catch (Throwable') !== false
+);
+
+$memoryScript = $root . '/tests/driver_photo_memory.js';
+$memoryOut = [];
+$memoryCode = 1;
+exec('node ' . escapeshellarg($memoryScript) . ' 2>&1', $memoryOut, $memoryCode);
+$memoryText = implode("\n", $memoryOut);
+echo $memoryText . ($memoryText === '' ? '' : "\n");
+driver_photo_assert(
+    'photo memory helpers cap JPEG dimensions before decode',
+    $memoryCode === 0 && strpos($memoryText, 'FAIL') === false
 );
 
 $nodeScript = $root . '/tests/driver_takeover_arrival_photo.js';

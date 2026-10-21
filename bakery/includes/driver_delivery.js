@@ -368,6 +368,123 @@
     return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   }
 
+  function isAndroid() {
+    return /Android/i.test(navigator.userAgent || '');
+  }
+
+  function isIos() {
+    var ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    var touch = navigator.maxTouchPoints || 0;
+    return /Macintosh/i.test(ua) && touch > 1;
+  }
+
+  function prefersNativeCamera() {
+    // Android's system camera reports that there is not enough memory for the
+    // photo when this page already holds the route map. Take that photo in the
+    // page at a capped size. iPhone and iPad keep the system camera.
+    if (isAndroid()) return false;
+    return isIos();
+  }
+
+  var maxDimension = 1600;
+
+  function fitWithinEdge(width, height, maxEdge) {
+    var w = width || 0;
+    var h = height || 0;
+    var edge = maxEdge || maxDimension;
+    if (w < 1 || h < 1) return { width: 0, height: 0 };
+    var largest = Math.max(w, h);
+    if (largest <= edge) return { width: w, height: h };
+    var scale = edge / largest;
+    return {
+      width: Math.max(1, Math.round(w * scale)),
+      height: Math.max(1, Math.round(h * scale))
+    };
+  }
+
+  function orientedJpegSize(size, orientation) {
+    if (!size || !size.width || !size.height) return null;
+    var swap = orientation === 5 || orientation === 6 || orientation === 7 || orientation === 8;
+    if (swap) return { width: size.height, height: size.width };
+    return { width: size.width, height: size.height };
+  }
+
+  function readExifOrientation(bytes, start, end) {
+    if (end - start < 14) return 0;
+    if (bytes[start] !== 0x45 || bytes[start + 1] !== 0x78 || bytes[start + 2] !== 0x69 || bytes[start + 3] !== 0x66) {
+      return 0;
+    }
+    var tiff = start + 6;
+    if (tiff + 8 > end) return 0;
+    var little = bytes[tiff] === 0x49 && bytes[tiff + 1] === 0x49;
+    var big = bytes[tiff] === 0x4d && bytes[tiff + 1] === 0x4d;
+    if (!little && !big) return 0;
+    function u16(pos) {
+      if (pos + 1 >= end) return 0;
+      return little ? bytes[pos] + (bytes[pos + 1] << 8) : (bytes[pos] << 8) + bytes[pos + 1];
+    }
+    function u32(pos) {
+      if (pos + 3 >= end) return 0;
+      return little
+        ? (bytes[pos] + (bytes[pos + 1] << 8) + (bytes[pos + 2] << 16) + (bytes[pos + 3] * 16777216))
+        : (bytes[pos] * 16777216 + (bytes[pos + 1] << 16) + (bytes[pos + 2] << 8) + bytes[pos + 3]);
+    }
+    var ifd = tiff + u32(tiff + 4);
+    if (ifd + 2 > end) return 0;
+    var count = u16(ifd);
+    var entry = ifd + 2;
+    var i;
+    for (i = 0; i < count; i++) {
+      var pos = entry + i * 12;
+      if (pos + 9 >= end) break;
+      if (u16(pos) === 0x0112 && u16(pos + 2) === 3) {
+        var value = u16(pos + 8);
+        if (value >= 1 && value <= 8) return value;
+      }
+    }
+    return 0;
+  }
+
+  function readJpegSize(bytes) {
+    if (!bytes || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+    var orientation = 1;
+    var width = 0;
+    var height = 0;
+    var offset = 2;
+    var guard = 0;
+    while (offset + 3 < bytes.length && guard < 20000) {
+      guard++;
+      if (bytes[offset] !== 0xff) {
+        offset++;
+        continue;
+      }
+      var marker = bytes[offset + 1];
+      if (marker === 0xff) {
+        offset++;
+        continue;
+      }
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+        offset += 2;
+        continue;
+      }
+      if (marker === 0xd9) break;
+      var segmentLength = (bytes[offset + 2] << 8) + bytes[offset + 3];
+      if (segmentLength < 2 || offset + 2 + segmentLength > bytes.length) break;
+      if (marker === 0xe1) {
+        var found = readExifOrientation(bytes, offset + 4, offset + 2 + segmentLength);
+        if (found) orientation = found;
+      }
+      if ((marker === 0xc0 || marker === 0xc1 || marker === 0xc2) && offset + 8 < bytes.length) {
+        height = (bytes[offset + 5] << 8) + bytes[offset + 6];
+        width = (bytes[offset + 7] << 8) + bytes[offset + 8];
+      }
+      offset += 2 + segmentLength;
+    }
+    if (!width || !height) return null;
+    return { width: width, height: height, orientation: orientation };
+  }
+
   function usesCompactCapture() {
     if (isLikelyMobile()) return true;
     if (window.matchMedia) {
@@ -497,7 +614,7 @@
 
   function beginPhotoCapture() {
     try {
-      if (usesCompactCapture()) {
+      if (prefersNativeCamera()) {
         useNativeCamera();
         return;
       }
@@ -752,40 +869,53 @@
       audio: false,
       video: {
         facingMode: { ideal: isLikelyMobile() ? 'environment' : 'user' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        width: { ideal: 1280, max: 1280 },
+        height: { ideal: 720, max: 1280 }
       }
     };
 
     try {
       state.stream = await navigator.mediaDevices.getUserMedia(constraints);
       state.cameraActive = true;
-      var captureButton = $('deliveryCaptureBtn');
-      if (captureButton) captureButton.textContent = i18n('take_photo');
     } catch (err) {
       try {
         state.stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: true
+          video: {
+            facingMode: { ideal: isLikelyMobile() ? 'environment' : 'user' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
         });
         state.cameraActive = true;
-      } catch (err2) {
-        var msg = i18n('could_not_open_camera');
-        if (err2 && err2.name === 'NotAllowedError') {
-          msg = i18n('camera_permission_denied');
-        } else if (
-          location.protocol === 'http:' &&
-          location.hostname !== 'localhost' &&
-          location.hostname !== '127.0.0.1'
-        ) {
-          msg = i18n('camera_https');
+      } catch (errIdeal) {
+        try {
+          state.stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true
+          });
+          state.cameraActive = true;
+        } catch (err2) {
+          var msg = i18n('could_not_open_camera');
+          if (err2 && err2.name === 'NotAllowedError') {
+            msg = i18n('camera_permission_denied');
+          } else if (
+            location.protocol === 'http:' &&
+            location.hostname !== 'localhost' &&
+            location.hostname !== '127.0.0.1'
+          ) {
+            msg = i18n('camera_https');
+          }
+          var unavailableModal = $('deliveryPhotoModal');
+          if (unavailableModal) unavailableModal.classList.add('camera-unavailable');
+          setStatus(msg, 'error');
+          return;
         }
-        var unavailableModal = $('deliveryPhotoModal');
-        if (unavailableModal) unavailableModal.classList.add('camera-unavailable');
-        setStatus(msg, 'error');
-        return;
       }
     }
+
+    var captureButton = $('deliveryCaptureBtn');
+    if (captureButton) captureButton.textContent = i18n('take_photo');
 
     var video = $('deliveryCameraVideo');
     var frame = $('deliveryCameraFrame');
@@ -827,11 +957,26 @@
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    var fit = fitWithinEdge(video.videoWidth, video.videoHeight, maxDimension);
+    if (!fit.width || !fit.height) {
+      setStatus(i18n('camera_not_ready'), 'error');
+      return;
+    }
+    canvas.width = fit.width;
+    canvas.height = fit.height;
+    var context = canvas.getContext('2d', { alpha: false });
+    if (!context) {
+      canvas.width = 0;
+      canvas.height = 0;
+      setStatus(i18n('capture_failed'), 'error');
+      return;
+    }
+    context.drawImage(video, 0, 0, fit.width, fit.height);
 
     canvas.toBlob(function (blob) {
+      canvas.width = 0;
+      canvas.height = 0;
+      stopCamera();
       if (!blob) {
         setStatus(i18n('capture_failed'), 'error');
         return;
@@ -840,7 +985,7 @@
       showCapturedPreview(URL.createObjectURL(blob));
       setStatus(i18n('photo_captured_saving'), 'loading');
       uploadBlob(blob, 'arrival-photo.jpg');
-    }, 'image/jpeg', 0.88);
+    }, 'image/jpeg', 0.82);
   }
 
   function retakeCapture(options) {
@@ -848,11 +993,11 @@
     if (state.blob) {
       state.blob = null;
     }
-    if (usesCompactCapture()) {
+    var message = options.message || '';
+    var kind = options.kind || (message ? 'error' : '');
+    if (prefersNativeCamera()) {
       useNativeCamera();
-      if (options.message) {
-        setStatus(options.message, options.kind || '');
-      }
+      if (message) setStatus(message, kind);
       return;
     }
     showLivePreview();
@@ -862,9 +1007,16 @@
         video.srcObject = state.stream;
         video.play().catch(function () {});
       }
-      setStatus(i18n('camera_ready'), 'success');
-    } else {
-      startCamera();
+      setStatus(message || i18n('camera_ready'), message ? kind : 'success');
+      return;
+    }
+    var started = startCamera();
+    if (message && started && typeof started.then === 'function') {
+      started.then(function () {
+        setStatus(message, kind);
+      }, function () {
+        setStatus(message, kind);
+      });
     }
   }
 
@@ -1172,7 +1324,7 @@
     if (section && section.scrollIntoView && !usesCompactCapture()) {
       section.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    if (usesCompactCapture()) {
+    if (prefersNativeCamera()) {
       useNativeCamera();
       openNativeCameraPicker();
     } else {
@@ -1220,7 +1372,88 @@
     });
   }
 
+  async function jpegPixelSize(file) {
+    try {
+      var slice = file.size > 1024 * 1024 ? file.slice(0, 1024 * 1024) : file;
+      var bytes = new Uint8Array(await slice.arrayBuffer());
+      return readJpegSize(bytes);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async function bitmapToJpeg(bitmap) {
+    var width = bitmap.width || 0;
+    var height = bitmap.height || 0;
+    var canvas = document.createElement('canvas');
+    if (!width || !height) {
+      if (bitmap.close) bitmap.close();
+      throw new Error(i18n('capture_failed'));
+    }
+    canvas.width = width;
+    canvas.height = height;
+    var context = canvas.getContext('2d', { alpha: false });
+    if (!context) {
+      if (bitmap.close) bitmap.close();
+      canvas.width = 0;
+      canvas.height = 0;
+      throw new Error(i18n('capture_failed'));
+    }
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    if (bitmap.close) bitmap.close();
+    var blob = await canvasToJpeg(canvas, 0.82);
+    canvas.width = 0;
+    canvas.height = 0;
+    return blob;
+  }
+
+  function photoTooLargeError() {
+    return new Error(i18n('photo_too_large', 'This photo is too large for this phone. Take it again.'));
+  }
+
   async function preparePhotoForUpload(file) {
+    var type = String((file && file.type) || '').toLowerCase();
+    var name = String((file && file.name) || '');
+    var namedJpeg = /\.jpe?g$/i.test(name);
+    var heic = type.indexOf('heic') !== -1 || type.indexOf('heif') !== -1 || /\.hei[cf]$/i.test(name);
+    var stored = !heic ? await jpegPixelSize(file) : null;
+    var oriented = stored ? orientedJpegSize(stored, stored.orientation || 1) : null;
+    var width = oriented ? oriented.width : 0;
+    var height = oriented ? oriented.height : 0;
+    var largest = Math.max(width, height);
+    var isSmallJpeg = (type === 'image/jpeg' || type === 'image/jpg' || (namedJpeg && !type))
+      && file.size <= 1500 * 1024
+      && largest > 0
+      && largest <= maxDimension;
+    if (isSmallJpeg) {
+      return { blob: file, filename: file.name || 'delivery-photo.jpg' };
+    }
+
+    if (typeof createImageBitmap === 'function') {
+      try {
+        var options = { imageOrientation: 'from-image', resizeQuality: 'medium' };
+        if (width && height) {
+          var fit = fitWithinEdge(width, height, maxDimension);
+          options.resizeWidth = fit.width;
+          options.resizeHeight = fit.height;
+        } else {
+          options.resizeWidth = maxDimension;
+        }
+        var bitmap = await createImageBitmap(file, options);
+        var shrunk = await bitmapToJpeg(bitmap);
+        var baseName = (file.name || 'delivery-photo').replace(/\.[^.]+$/, '');
+        return { blob: shrunk, filename: baseName + '.jpg' };
+      } catch (err) {
+        if (!heic && (largest > maxDimension || (stored && file.size > 1500 * 1024))) {
+          throw photoTooLargeError();
+        }
+      }
+    } else if (!heic && largest > maxDimension) {
+      throw photoTooLargeError();
+    }
+
     var image;
     try {
       image = await loadPhotoImage(file);
@@ -1230,35 +1463,32 @@
       return { blob: file, filename: file.name || 'delivery-photo' };
     }
 
-    var width = image.naturalWidth || image.width || 0;
-    var height = image.naturalHeight || image.height || 0;
-    var maxDimension = 1920;
-    var largest = Math.max(width, height);
-    var isSmallJpeg = /^image\/jpe?g$/i.test(file.type || '')
-      && file.size <= 1500 * 1024
-      && largest > 0
-      && largest <= maxDimension;
-    if (isSmallJpeg) {
-      return { blob: file, filename: file.name || 'delivery-photo.jpg' };
-    }
-
-    if (!width || !height) {
+    var decodedWidth = image.naturalWidth || image.width || 0;
+    var decodedHeight = image.naturalHeight || image.height || 0;
+    var decodedLargest = Math.max(decodedWidth, decodedHeight);
+    if (!decodedWidth || !decodedHeight) {
       return { blob: file, filename: file.name || 'delivery-photo' };
     }
-    var scale = largest > maxDimension ? maxDimension / largest : 1;
+    var decodedFit = fitWithinEdge(decodedWidth, decodedHeight, maxDimension);
+    if (decodedLargest <= maxDimension && /^image\/jpe?g$/i.test(type) && file.size <= 1500 * 1024) {
+      return { blob: file, filename: file.name || 'delivery-photo.jpg' };
+    }
     var canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
+    canvas.width = decodedFit.width;
+    canvas.height = decodedFit.height;
     var context = canvas.getContext('2d', { alpha: false });
     if (!context) {
+      if (decodedLargest > maxDimension) throw photoTooLargeError();
       return { blob: file, filename: file.name || 'delivery-photo' };
     }
     context.fillStyle = '#fff';
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     var blob = await canvasToJpeg(canvas, 0.82);
- var baseName = (file.name || 'delivery-photo').replace(/\\.[^.]+$/, '');
-    return { blob: blob, filename: baseName + '.jpg' };
+    canvas.width = 0;
+    canvas.height = 0;
+    var decodedName = (file.name || 'delivery-photo').replace(/\.[^.]+$/, '');
+    return { blob: blob, filename: decodedName + '.jpg' };
   }
 
   async function uploadBlob(blob, filename) {
@@ -2347,8 +2577,6 @@
       setStatus(i18n('choose_image'), 'error');
       return;
     }
-    state.blob = file;
-    showCapturedPreview(URL.createObjectURL(file));
     state.preparing = true;
     setPhotoControlsBusy(true);
     var modal = $('deliveryPhotoModal');
@@ -2357,6 +2585,7 @@
     try {
       var prepared = await preparePhotoForUpload(file);
       state.blob = prepared.blob;
+      showCapturedPreview(URL.createObjectURL(prepared.blob));
       state.preparing = false;
       setPhotoControlsBusy(false);
       setStatus(i18n('photo_selected_saving'), 'loading');
@@ -2560,7 +2789,7 @@
       if (frame && frame.scrollIntoView && !usesCompactCapture()) {
         frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-      if (usesCompactCapture()) {
+      if (prefersNativeCamera()) {
         useNativeCamera();
         openNativeCameraPicker();
       } else {

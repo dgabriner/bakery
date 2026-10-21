@@ -1525,6 +1525,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'take_photo' => bakery_t('driver.take_photo'),
     'camera_not_ready' => bakery_t('driver.camera_not_ready'),
     'capture_failed' => bakery_t('driver.capture_failed'),
+    'photo_too_large' => bakery_t('driver.photo_too_large'),
     'photo_captured_saving' => bakery_t('driver.photo_captured_saving'),
     'could_not_load_photos' => bakery_t('driver.could_not_load_photos'),
     'photo_removed' => bakery_t('driver.photo_removed'),
