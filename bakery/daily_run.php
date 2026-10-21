@@ -164,6 +164,14 @@ require_once 'includes/nav.php';
             </div>
         <?php endif; ?>
 
+        <?php $routedZeroCount = (int)($dailyRun['routed_zero']['count'] ?? 0); ?>
+        <?php if ($routedZeroCount > 0): ?>
+            <div class="ops-alert ops-alert-danger" role="alert">
+                <?php echo htmlspecialchars(bakery_t('daily_run.routed_zero_count', ['count' => $routedZeroCount])); ?>
+                <a href="<?php echo htmlspecialchars(bakery_ops_link_daily_orders($selectedDate, ['review' => 'routed_zero'], 'daily_run')); ?>"><?php bakery_te('daily_run.routed_zero_link'); ?></a>
+            </div>
+        <?php endif; ?>
+
         <?php
         $routeRestoreGroups = [];
         if (function_exists('bakery_route_missing_standing_by_driver')) {

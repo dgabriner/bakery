@@ -761,6 +761,11 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                         if ($assignmentHasNotes) {
                             $assignmentParams[] = null;
                         }
+                        // driver_assignments.php loads this file, so the helper is required here.
+                        if (!function_exists('bakery_route_stop_restore_removed_day')) {
+                            require_once __DIR__ . '/driver_assignments.php';
+                        }
+                        bakery_route_stop_restore_removed_day($db, (int)$dailyOrderId);
                         $insertAssignmentStmt->execute($assignmentParams);
                         // Keep the legacy column aligned for older views
                         // while daily_order_assignments remains canonical.
@@ -839,6 +844,11 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                 if ($assignmentHasNotes) {
                     $assignmentParams[] = null;
                 }
+                // driver_assignments.php loads this file, so the helper is required here.
+                if (!function_exists('bakery_route_stop_restore_removed_day')) {
+                    require_once __DIR__ . '/driver_assignments.php';
+                }
+                bakery_route_stop_restore_removed_day($db, (int)$dailyOrderId);
                 $insertAssignmentStmt->execute($assignmentParams);
                 $updateLegacyDriverStmt->execute([$driverId, $dailyOrderId]);
                 $driversAssigned++;

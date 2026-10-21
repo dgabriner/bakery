@@ -258,7 +258,9 @@
   font-weight: 700;
 }
 
-.journey-badge.is-pending {
+.journey-badge.is-pending,
+.journey-badge.is-arrived-open,
+.journey-swatch i.is-arrived-open {
   background: #fff;
   color: var(--j-red);
   border: 1px solid var(--j-red);

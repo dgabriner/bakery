@@ -37,6 +37,8 @@ function bakery_route_photo_journey_badge_key(string $badge): string
             return 'route_photo_journey.badge_arrival';
         case 'pending':
             return 'route_photo_journey.badge_pending';
+        case 'arrived_open':
+            return 'route_photo_journey.badge_arrived_open';
         default:
             throw new InvalidArgumentException('Unknown journey badge: ' . $badge);
     }
@@ -51,6 +53,8 @@ function bakery_route_photo_journey_badge_class(string $badge): string
             return 'is-arrival';
         case 'pending':
             return 'is-pending';
+        case 'arrived_open':
+            return 'is-arrived-open';
         default:
             throw new InvalidArgumentException('Unknown journey badge: ' . $badge);
     }
@@ -357,14 +361,14 @@ function bakery_route_photo_journey_assemble(array $input): array
         if ($planned > 0 && $credited > 0 && $planned !== $credited) {
             $otherByDriver[$planned][] = bakery_route_photo_journey_other_note(
                 $store,
-                'delivered_by',
+                $status === 'delivered' ? 'delivered_by' : 'moved_pending',
                 $credited,
                 (string)($driverNames[$credited] ?? ''),
-                (string)($stop['completion_at'] ?? '')
+                $status === 'delivered' ? (string)($stop['completion_at'] ?? '') : ''
             );
         }
         if ($standing > 0 && $standing !== $planned && $standing !== $credited) {
-            if ($credited > 0) {
+            if ($credited > 0 && $status === 'delivered') {
                 $otherByDriver[$standing][] = bakery_route_photo_journey_other_note(
                     $store,
                     'delivered_by',
@@ -441,12 +445,29 @@ function bakery_route_photo_journey_visited_stop(array $stop, array $photos): ar
             $arrival = $at;
         }
     }
-    $delivered = bakery_route_photo_journey_delivered_at($stop, $ordered);
-    $badge = 'arrival';
-    foreach ($ordered as $photo) {
-        if (in_array((string)$photo['photo_type'], ['After', 'Receipt'], true)) {
-            $badge = 'pod';
-            break;
+    $hasPodPhoto = false;
+    $hasArrivalPhoto = false;
+    foreach ($photos as $photo) {
+        $type = (string)($photo['_photo_type'] ?? bakery_route_photo_journey_photo_type($photo));
+        if ($type === 'After' || $type === 'Receipt') {
+            $hasPodPhoto = true;
+        } elseif ($type === 'Before') {
+            $hasArrivalPhoto = true;
+        }
+    }
+    $status = (string)($stop['delivery_status'] ?? 'pending');
+    $visit = bakery_route_stop_visit_state($status, $hasArrivalPhoto, $hasPodPhoto);
+    if ($visit === 'arrived_not_closed') {
+        $badge = 'arrived_open';
+        $delivered = null;
+    } else {
+        $delivered = bakery_route_photo_journey_delivered_at($stop, $ordered);
+        $badge = 'arrival';
+        foreach ($ordered as $photo) {
+            if (in_array((string)$photo['photo_type'], ['After', 'Receipt'], true)) {
+                $badge = 'pod';
+                break;
+            }
         }
     }
     $row = bakery_route_photo_journey_stop_base($stop);
@@ -633,6 +654,9 @@ function bakery_route_photo_journey_finish_driver(
         if ($gap !== null && $gap > 90) {
             $longGaps[] = ['store' => $store, 'minutes' => (int)$gap];
         }
+        if ((string)$stop['badge'] === 'arrived_open') {
+            continue;
+        }
         if ((int)$stop['stay_minutes'] < 2 && (string)$stop['badge'] !== 'pod') {
             $shortCloses[] = $store;
         }
@@ -650,7 +674,9 @@ function bakery_route_photo_journey_finish_driver(
         'name' => $name,
         'clock_in_at' => $clockIn !== '' ? $clockIn : null,
         'no_clock_in' => $clockIn === '',
-        'delivered_count' => count($visited),
+        'delivered_count' => count(array_filter($visited, static function (array $stop): bool {
+            return (string)($stop['badge'] ?? '') !== 'arrived_open';
+        })),
         'pending_count' => count($pending),
         'pending_names' => $pendingNames,
         'stops' => array_merge($visited, $pending),

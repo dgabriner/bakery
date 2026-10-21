@@ -330,6 +330,9 @@ function bakery_special_order_ensure_routed_stop(PDO $db, array $customer, strin
     if (count($driverIds) !== 1) {
         return $dailyOrderId;
     }
+    // Lines for this special order are inserted after the assignment.
+    // Restoring a removed-day skip here would copy pan standing onto a
+    // special-only stop. Later assignment paths see the special quantity.
     $driverId = $driverIds[0];
     $maxStmt = $db->prepare(
         'SELECT COALESCE(MAX(route_order), 0) FROM daily_order_assignments
