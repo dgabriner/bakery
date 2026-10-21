@@ -17,6 +17,11 @@
     Require all denied
 </FilesMatch>
 
+# Staging-only portal seeder and SF 2.0 page. Deny even if an older snapshot left the files in place.
+<FilesMatch "^(seed_portal_session_router\.php|sf20\.html)$">
+    Require all denied
+</FilesMatch>
+
 # Block raw SQL dumps and logs if present under docroot
 <FilesMatch "\.(sql|log|env)$">
     Require all denied

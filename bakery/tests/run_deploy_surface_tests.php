@@ -115,8 +115,24 @@ deploy_surface_assert(!bakery_staging_live_skip_name('staff_alerts_api.php'), 's
 /* Staging-only night-shift tour (PR #1). Keep off Live send even if the files
  * exist on a mixed Staging/desktop tree. Do not merge those pages onto main. */
 $tourPages = ['staging_update.php', 'oven_light.php', 'proof_window.php'];
+$strayLivePages = ['seed_portal_session_router.php', 'sf20.html'];
 $excludeBody = deploy_surface_function_body($manifestSrc, 'Get-BakeryDeployExcludeNamePatterns');
 $rootFilesBody = deploy_surface_function_body($manifestSrc, 'Get-BakeryDeployRootFiles');
+foreach ([
+    '*_backup.php', '*backup.php', '*_fixed.php', '*_optimized.php', '*_working.php',
+    '*Copy*.php', 'debug*.php', 'simple-debug.php', 'simple_performance_test.php',
+    'health_local.php', 'health_prod.php', 'health_driver.php', 'health_deploy.php',
+    'driver_pages_probe.php', 'trace_driver_list.php', 'ping.php',
+    'run_sql_setup.php', 'db_test.php', 'setup_directories.php', 'oauth_setup.php',
+    'auto_push_api.php', 'sourflour.html',
+    'staging_update.php', 'oven_light.php', 'proof_window.php',
+    'tmp_*.php', 'tmp_*.js', 'tmp_*.txt',
+] as $keptPattern) {
+    deploy_surface_assert(
+        strpos($excludeBody, "'" . $keptPattern . "'") !== false,
+        "existing skip pattern still present: $keptPattern"
+    );
+}
 foreach ($tourPages as $tourPage) {
     deploy_surface_assert(
         bakery_staging_live_skip_name($tourPage),
@@ -129,6 +145,20 @@ foreach ($tourPages as $tourPage) {
     deploy_surface_assert(
         strpos($rootFilesBody, "'" . $tourPage . "'") === false,
         "Get-BakeryDeployRootFiles does not whitelist $tourPage"
+    );
+}
+foreach ($strayLivePages as $strayPage) {
+    deploy_surface_assert(
+        bakery_staging_live_skip_name($strayPage),
+        "hosted Live skip excludes $strayPage"
+    );
+    deploy_surface_assert(
+        strpos($excludeBody, "'" . $strayPage . "'") !== false,
+        "Get-BakeryDeployExcludeNamePatterns lists $strayPage"
+    );
+    deploy_surface_assert(
+        strpos($rootFilesBody, "'" . $strayPage . "'") === false,
+        "Get-BakeryDeployRootFiles does not whitelist $strayPage"
     );
 }
 deploy_surface_assert(
@@ -147,12 +177,24 @@ deploy_surface_assert($missingFromPhpList === [] && $staleInPhpList === [],
     'bakery_staging_live_root_files matches disk web-root minus skip patterns'
     . ($missingFromPhpList ? ' [missing: ' . implode(', ', $missingFromPhpList) . ']' : '')
     . ($staleInPhpList ? ' [stale: ' . implode(', ', $staleInPhpList) . ']' : ''));
-foreach ($tourPages as $tourPage) {
+foreach (array_merge($tourPages, $strayLivePages) as $blockedPage) {
     deploy_surface_assert(
-        !in_array($tourPage, $liveRootFiles, true),
-        "$tourPage is not in bakery_staging_live_root_files"
+        !in_array($blockedPage, $liveRootFiles, true),
+        "$blockedPage is not in bakery_staging_live_root_files"
     );
 }
+$htaccess = (string)file_get_contents($root . '/.htaccess');
+deploy_surface_assert(
+    (bool)preg_match(
+        '/<FilesMatch "\^\(seed_portal_session_router\\\\\.php\|sf20\\\\\.html\)\$">\s+Require all denied\s+<\/FilesMatch>/',
+        $htaccess
+    ),
+    'root htaccess denies seed_portal_session_router.php and sf20.html'
+);
+deploy_surface_assert(
+    strpos($htaccess, 'uploads/driver_photos/') !== false,
+    'root htaccess still blocks the public driver photo URL'
+);
 
 /* 5. Nav link-rot guard: catalog pages are inside the deployable root set. */
 $catalogSrc = (string)@file_get_contents($root . '/includes/navigation_catalog.php');

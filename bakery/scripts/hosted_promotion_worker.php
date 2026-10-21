@@ -159,7 +159,10 @@ function promotion_manifest_bounds(string $scope): array {
 }
 
 function promotion_files_only_blocked(string $path): bool {
-    return in_array(basename($path), ['staging_update.php', 'oven_light.php', 'proof_window.php'], true);
+    return in_array(basename($path), [
+        'staging_update.php', 'oven_light.php', 'proof_window.php',
+        'seed_portal_session_router.php', 'sf20.html',
+    ], true);
 }
 
 function promotion_files_only_commit_ok(array $approval): bool {

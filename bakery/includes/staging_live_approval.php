@@ -90,6 +90,7 @@ function bakery_staging_live_skip_name(string $name): bool {
         'db_test.php', 'setup_directories.php', 'oauth_setup.php', 'auto_push_api.php',
         'sourflour.html', 'tmp_*.php', 'tmp_*.js', 'tmp_*.txt',
         'staging_update.php', 'oven_light.php', 'proof_window.php',
+        'seed_portal_session_router.php', 'sf20.html',
         '.DS_Store', 'Thumbs.db', 'desktop.ini', '*.bak', '*~', '._*', '* (*).*',
     ] as $pattern) {
         if (fnmatch($pattern, $name, FNM_CASEFOLD)) return true;
@@ -460,7 +461,10 @@ function bakery_staging_live_history_board(): array {
  * @return list<string>
  */
 function bakery_staging_live_files_only_blocked_names(): array {
-    return ['staging_update.php', 'oven_light.php', 'proof_window.php'];
+    return [
+        'staging_update.php', 'oven_light.php', 'proof_window.php',
+        'seed_portal_session_router.php', 'sf20.html',
+    ];
 }
 
 function bakery_staging_live_path_in_promotion_set(string $path): bool {

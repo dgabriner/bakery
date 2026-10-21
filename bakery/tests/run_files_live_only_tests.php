@@ -134,7 +134,21 @@ $assert(promotion_manifest_bounds('files_only') === ['min' => 1, 'max' => 2000],
 $assert(promotion_files_only_blocked('staging_update.php'), 'worker blocks staging_update.php');
 $assert(promotion_files_only_blocked('css/oven_light.php'), 'worker blocks oven_light.php by basename');
 $assert(promotion_files_only_blocked('proof_window.php'), 'worker blocks proof_window.php');
+$assert(promotion_files_only_blocked('seed_portal_session_router.php'), 'worker blocks seed_portal_session_router.php');
+$assert(promotion_files_only_blocked('css/sf20.html'), 'worker blocks sf20.html by basename');
 $assert(!promotion_files_only_blocked('route_photo_journey.php'), 'worker allows a normal page');
+$blockedNames = bakery_staging_live_files_only_blocked_names();
+foreach (['staging_update.php', 'oven_light.php', 'proof_window.php', 'seed_portal_session_router.php', 'sf20.html'] as $blockedName) {
+    $assert(in_array($blockedName, $blockedNames, true), 'files-only block list keeps ' . $blockedName);
+    $assert(bakery_staging_live_skip_name($blockedName), 'snapshot skip keeps ' . $blockedName);
+    $refusal = '';
+    try {
+        bakery_staging_live_files_only_normalize([$blockedName]);
+    } catch (Throwable $e) {
+        $refusal = $e->getMessage();
+    }
+    $assert(strpos($refusal, 'Refusing skip-list file') !== false, 'skip-list refusal for ' . $blockedName);
+}
 $assert(promotion_files_only_commit_ok(['commit' => '8285e99']), 'a 7 character commit is accepted');
 $assert(promotion_files_only_commit_ok(['commit' => '8285e99f28104be30474357f17b3cc1f957688c2']), 'a 40 character commit is accepted');
 $assert(!promotion_files_only_commit_ok(['commit' => 'main']), 'a branch name is not a commit SHA');
@@ -168,6 +182,8 @@ $assert(strpos($queuePhp, 'bakery_staging_live_approval_submit_files') !== false
 $assert(strpos($queuePhp, 'pass either --files or --files-only-manifest, not both') !== false, 'queue refuses both file modes');
 $assert(strpos($worker, "return ['min' => 50, 'max' => 2000];") !== false, 'worker source keeps the snapshot floor');
 $assert(strpos($manifest, "'staging_update.php', 'oven_light.php', 'proof_window.php'") !== false, 'deploy skip patterns still name the tour pages');
+$assert(strpos($manifest, "'seed_portal_session_router.php'") !== false, 'deploy skip patterns name seed_portal_session_router.php');
+$assert(strpos($manifest, "'sf20.html'") !== false, 'deploy skip patterns name sf20.html');
 
 $python = <<<PY
 import hashlib, importlib.util, sys
@@ -177,7 +193,7 @@ spec = importlib.util.spec_from_file_location("cloud_agent_stage", root / "scrip
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 mod.reject_files_live_only_paths([".htaccess", "includes/photo_handler.php", "vendor/phpmailer/src/PHPMailer.php"])
-for bad in ["staging_update.php", "oven_light.php", "proof_window.php", "uploads/driver_photos/.htaccess", "scripts/deploy_manifest.ps1", ""]:
+for bad in ["staging_update.php", "oven_light.php", "proof_window.php", "seed_portal_session_router.php", "sf20.html", "includes/sf20.html", "uploads/driver_photos/.htaccess", "scripts/deploy_manifest.ps1", ""]:
     try:
         mod.reject_files_live_only_paths([bad] if bad != "" else [])
     except SystemExit:

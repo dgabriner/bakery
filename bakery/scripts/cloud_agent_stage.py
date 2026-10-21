@@ -78,7 +78,13 @@ def ssh_capture(command: str, timeout: int = 120) -> tuple[int, str, str]:
         client.close()
 
 
-FILES_ONLY_BLOCKED = ("staging_update.php", "oven_light.php", "proof_window.php")
+FILES_ONLY_BLOCKED = (
+    "staging_update.php",
+    "oven_light.php",
+    "proof_window.php",
+    "seed_portal_session_router.php",
+    "sf20.html",
+)
 FILES_ONLY_TOPS = {"includes", "css", "assets", "lang"}
 
 
