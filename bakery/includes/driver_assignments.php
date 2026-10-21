@@ -1192,6 +1192,56 @@ function bakery_driver_reorder_remaining_stops(
  *     standing_orders_updated:int
  * }
  */
+function bakery_dated_order_has_no_positive_quantity(PDO $db, int $dailyOrderId): bool
+{
+    if ($dailyOrderId <= 0) {
+        return false;
+    }
+    $stmt = $db->prepare(
+        'SELECT COALESCE(SUM(CASE WHEN quantity > 0 THEN quantity ELSE 0 END), 0)
+         FROM daily_order_items
+         WHERE daily_order_id = ?'
+    );
+    $stmt->execute([$dailyOrderId]);
+    return (int)$stmt->fetchColumn() <= 0;
+}
+
+/**
+ * Put this customer's standing order back onto one dated order and log it.
+ * Other customers on the same date are left alone.
+ */
+function bakery_driver_restore_standing_for_dated_order(
+    PDO $db,
+    int $customerId,
+    string $deliveryDate,
+    int $dailyOrderId
+): void {
+    require_once __DIR__ . '/daily_order_generation.php';
+    bakery_generate_daily_orders_from_standing($db, $deliveryDate, [
+        'overwrite_changed' => true,
+        'assign_routes' => false,
+        'record_event' => false,
+        'only_customer_id' => $customerId,
+    ]);
+    if (!function_exists('bakery_record_operational_event')) {
+        return;
+    }
+    $eventType = defined('BAKERY_OP_STANDING_ORDER_RESTORED')
+        ? BAKERY_OP_STANDING_ORDER_RESTORED
+        : 'standing_order_restored';
+    bakery_record_operational_event(
+        $db,
+        $eventType,
+        'Restored standing order onto the dated order',
+        [
+            'operational_date' => $deliveryDate,
+            'customer_id' => $customerId,
+            'daily_order_id' => $dailyOrderId,
+            'metadata' => ['source' => 'route_add_restore'],
+        ]
+    );
+}
+
 function bakery_driver_add_customer_to_route(
     PDO $db,
     int $customerId,
@@ -1199,7 +1249,8 @@ function bakery_driver_add_customer_to_route(
     string $deliveryDate,
     bool $saveStandingRoute = false,
     array $standingOrderLines = [],
-    bool $applyPanDulceStandard = false
+    bool $applyPanDulceStandard = false,
+    array $options = []
 ): array {
     bakery_require_role(['administrator', 'manager']);
 
@@ -1228,6 +1279,34 @@ function bakery_driver_add_customer_to_route(
 
     $dayOfWeek = (int)date('N', strtotime($deliveryDate));
     $standingOrdersUpdated = 0;
+
+    require_once __DIR__ . '/customer_order_mutations.php';
+    $guardOrder = bakery_customer_daily_order_row($db, $customerId, $deliveryDate);
+    if ($guardOrder && bakery_dated_order_has_no_positive_quantity($db, (int)$guardOrder['id'])) {
+        $restoreStanding = !empty($options['restore_standing']);
+        $keepEmpty = !empty($options['keep_empty']);
+        if (!$restoreStanding && !$keepEmpty) {
+            $warning = function_exists('bakery_t')
+                ? bakery_t('driver_assignment.empty_order_warning', ['customer' => (string)$customer['name']])
+                : (string)$customer['name'] . ' has an empty dated order.';
+            return [
+                'needs_restore' => true,
+                'daily_order_id' => (int)$guardOrder['id'],
+                'customer_name' => (string)$customer['name'],
+                'message' => $warning,
+                'standing_route_saved' => false,
+                'standing_orders_updated' => 0,
+            ];
+        }
+        if ($restoreStanding) {
+            bakery_driver_restore_standing_for_dated_order(
+                $db,
+                $customerId,
+                $deliveryDate,
+                (int)$guardOrder['id']
+            );
+        }
+    }
 
     bakery_dated_route_removal_log_ready($db);
     $db->beginTransaction();

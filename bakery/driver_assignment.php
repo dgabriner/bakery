@@ -692,6 +692,11 @@ try {
                 <input type="hidden" id="add-customer-apply-pan-dulce" value="0">
             </div>
             <div id="add-customer-status" class="add-customer-status" aria-live="polite"></div>
+            <div id="add-customer-empty-actions" hidden>
+                <p id="add-customer-empty-warning"></p>
+                <button type="button" class="btn btn-primary" id="add-customer-restore-btn"><?php bakery_te('driver_assignment.restore_standing'); ?></button>
+                <button type="button" class="btn btn-outline" id="add-customer-keep-empty-btn"><?php bakery_te('driver_assignment.add_without_restore'); ?></button>
+            </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-primary" onclick="submitAddCustomerToRoute()">Add Stop to Today’s Route</button>
@@ -732,7 +737,10 @@ window.__DRIVER_ASSIGNMENT__ = {
     productsForStanding: <?php echo bakery_json_for_html($productsForStanding, '[]'); ?>,
     assignedCustomerIdsToday: <?php echo bakery_json_for_html($assignedCustomerIdsToday, '{}'); ?>,
     buildConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.build_confirm'), '""'); ?>,
-    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>
+    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>,
+    emptyOrderWarning: <?php echo bakery_json_for_html(bakery_t('driver_assignment.empty_order_warning', ['customer' => '']), '""'); ?>,
+    restoreStanding: <?php echo bakery_json_for_html(bakery_t('driver_assignment.restore_standing'), '""'); ?>,
+    addWithoutRestore: <?php echo bakery_json_for_html(bakery_t('driver_assignment.add_without_restore'), '""'); ?>
 };
 </script>
 <script src="<?php echo bakery_asset_href('includes/driver_assignment.js'); ?>" defer></script>

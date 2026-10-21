@@ -624,6 +624,61 @@ function bakery_demand_review_classify_customer(array $customer) {
     return 'matches';
 }
 
+/**
+ * A routed stop whose dated lines have no positive quantity.
+ * An intentional "removed for this day only" order stays classified as
+ * changed. This is the morning-board signal for that stop once it is on a route.
+ * A standing-route visit with no standing order and no pieces is not included.
+ */
+function bakery_demand_review_is_routed_zero_order(array $customer): bool
+{
+    if (empty($customer['has_daily'])) {
+        return false;
+    }
+    if ((int)($customer['assignment_driver_id'] ?? 0) <= 0) {
+        return false;
+    }
+    foreach ($customer['line_map'] ?? [] as $line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        if (($line['daily_qty'] ?? null) !== null && (int)$line['daily_qty'] > 0) {
+            return false;
+        }
+    }
+    if (empty($customer['has_standing']) && !empty($customer['on_standing_route'])) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Empty dated orders plus routed stops whose dated quantity is zero.
+ *
+ * @param list<array<string, mixed>> $customers
+ * @return array{count:int, names:list<string>}
+ */
+function bakery_demand_review_empty_stop_flags(array $customers): array
+{
+    $names = [];
+    $count = 0;
+    foreach ($customers as $customer) {
+        if (!is_array($customer)) {
+            continue;
+        }
+        $state = (string)($customer['state'] ?? '');
+        if ($state !== 'empty_daily' && !bakery_demand_review_is_routed_zero_order($customer)) {
+            continue;
+        }
+        $count++;
+        $name = trim((string)($customer['customer_name'] ?? ''));
+        if ($name !== '' && !in_array($name, $names, true)) {
+            $names[] = $name;
+        }
+    }
+    return ['count' => $count, 'names' => $names];
+}
+
 function bakery_demand_review_diff_lines(array $lineMap) {
     $diffs = [];
     foreach ($lineMap as $line) {

@@ -26,6 +26,7 @@
     orderTotal: 0,
     pricingLabel: '',
     pricingMissing: false,
+    orderEmpty: false,
     pricePerPieceOverride: null,
     invoiceItems: [],
     savedTotal: 0,
@@ -1412,12 +1413,51 @@
     }
   }
 
+  function emptyOrderPricedTotal() {
+    var panel = $('deliveryProductCounts');
+    if (!panel) return 0;
+    var total = 0;
+    panel.querySelectorAll('input[data-line-id]').forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      var count = raw === '' ? 0 : parseInt(raw, 10);
+      if (!Number.isInteger(count) || count <= 0) return;
+      var id = String(input.getAttribute('data-line-id'));
+      var item = (state.invoiceItems || []).find(function (row) { return String(row.id) === id; });
+      if (!item || Number(item.is_no_charge) === 1) return;
+      var price = Number(item.unit_price) || 0;
+      if (price > 0) total += count * price;
+    });
+    return total;
+  }
+
+  function syncEmptyOrderPiecesFromLines() {
+    var panel = $('deliveryProductCounts');
+    var piecesInput = $('deliveryPiecesInput');
+    if (!panel || !piecesInput) return 0;
+    var sum = 0;
+    panel.querySelectorAll('input[data-line-id]').forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      var count = raw === '' ? 0 : parseInt(raw, 10);
+      if (Number.isInteger(count) && count > 0) sum += count;
+    });
+    piecesInput.value = String(sum);
+    return sum;
+  }
+
   function getEffectivePricePerPiece() {
     if (state.pricingMissing) {
       var override = state.pricePerPieceOverride;
       if (Number.isFinite(override) && override > 0) {
         return override;
       }
+      return 0;
+    }
+    if (state.orderEmpty) {
+      var priced = emptyOrderPricedTotal();
+      var pieces = Math.max(0, parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10) || 0);
+      var credits = Math.max(0, parseInt($('deliveryCreditsInput') && $('deliveryCreditsInput').value, 10) || 0);
+      var billable = Math.max(0, pieces - credits);
+      if (billable > 0 && priced > 0) return priced / billable;
       return 0;
     }
     return state.orderedPieces > 0 ? state.orderTotal / state.orderedPieces : 0;
@@ -1536,7 +1576,7 @@
 
   function readProductCounts(pieces) {
     var panel = $('deliveryProductCounts');
-    if (!panel || panel.hidden) return { ok: true, body: '' };
+    if (!panel || (panel.hidden && !state.orderEmpty)) return { ok: true, body: '' };
     var inputs = panel.querySelectorAll('input[data-line-id]');
     if (!inputs.length) return { ok: true, body: '' };
     var any = false;
@@ -1551,6 +1591,19 @@
       if (count != null) sum += count;
       parts.push({ id: input.getAttribute('data-line-id'), count: count, filled: raw !== '' });
     });
+    if (state.orderEmpty) {
+      if (bad) return { ok: false, body: '' };
+      var emptySum = 0;
+      var emptyBody = '';
+      parts.forEach(function (part) {
+        var count = part.filled ? part.count : 0;
+        if (!Number.isInteger(count) || count < 0) count = 0;
+        emptySum += count;
+        emptyBody += '&line_delivered[' + encodeURIComponent(part.id) + ']=' + encodeURIComponent(String(count));
+      });
+      if (emptySum !== pieces) return { ok: false, body: '' };
+      return { ok: true, body: emptyBody };
+    }
     if (!any) return { ok: true, body: '' };
     var allFilled = parts.every(function (part) { return part.filled; });
     if (bad || !allFilled || sum !== pieces) {
@@ -1585,14 +1638,25 @@
     var countsPanel = $('deliveryProductCounts');
     var wellOverEl = $('deliveryWellOverWarning');
     var countsPrompt = $('deliveryProductCountsPrompt');
-    var askForCounts = ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
-    if (countsPanel) countsPanel.hidden = !askForCounts;
-    if (askForCounts) {
+    var orderEmpty = state.orderEmpty === true;
+    var askForCounts = !orderEmpty && ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
+    if (piecesInput) piecesInput.readOnly = orderEmpty;
+    if (countsPanel) countsPanel.hidden = orderEmpty ? false : !askForCounts;
+    var emptyNotice = $('deliveryEmptyOrderNotice');
+    if (emptyNotice) {
+      emptyNotice.hidden = !orderEmpty;
+      emptyNotice.textContent = orderEmpty ? i18n('empty_order_call_office') : '';
+    }
+    var flagBtn = $('deliveryFlagEmptyBtn');
+    if (flagBtn) flagBtn.hidden = !orderEmpty;
+    if (askForCounts || orderEmpty) {
       var adjust = $('deliveryAdjustDetails');
       if (adjust) adjust.open = true;
     }
-    if (countsPrompt && askForCounts) countsPrompt.textContent = i18n('product_counts_prompt');
-    var wellOver = deliveryTotalIsWellOver(pieces, ordered);
+    if (countsPrompt && (askForCounts || orderEmpty)) {
+      countsPrompt.textContent = orderEmpty ? i18n('empty_order_enter_qty') : i18n('product_counts_prompt');
+    }
+    var wellOver = !orderEmpty && deliveryTotalIsWellOver(pieces, ordered);
     if (wellOverEl) {
       wellOverEl.hidden = !wellOver;
       wellOverEl.textContent = wellOver
@@ -1896,6 +1960,7 @@
       state.orderTotal = Number(data.order_total) || 0;
       state.pricingLabel = data.pricing_label || i18n('order_pricing');
       state.pricingMissing = data.pricing_missing === true;
+      state.orderEmpty = data.order_empty === true;
       state.pricePerPieceOverride = null;
       if (data.customer_name) {
         state.customerName = data.customer_name;
@@ -1972,6 +2037,15 @@
     if (credits > pieces) {
       setStatus(i18n('credits_exceed_pieces'), 'error');
       return;
+    }
+    if (state.orderEmpty) {
+      syncEmptyOrderPiecesFromLines();
+      pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
+      if (!Number.isInteger(pieces) || pieces <= 0) {
+        openDeliveryAdjust();
+        setStatus(i18n('empty_order_call_office'), 'error');
+        return;
+      }
     }
     var productCounts = readProductCounts(pieces);
     if (!productCounts.ok) {
@@ -2421,6 +2495,33 @@
     });
   }
 
+  async function flagEmptyOrder() {
+    if (state.submitting || !state.orderEmpty || !state.dailyOrderId) return;
+    setSubmitting(true);
+    setStatus(i18n('saving_delivery'), 'loading');
+    try {
+      await refreshRouteSession();
+      var response = await fetch('complete_delivery.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=flag_empty_order&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId))
+      });
+      var data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+      if (!data || !data.success || data.flagged !== true) {
+        throw new Error((data && data.error) || i18n('could_not_complete_delivery'));
+      }
+      setSubmitting(false);
+      var message = data.message || i18n('empty_order_flagged');
+      if (window.DriverRoute && typeof window.DriverRoute.afterOfficeFlag === 'function') {
+        window.DriverRoute.afterOfficeFlag(state.dailyOrderId, message);
+      }
+      closeModal();
+    } catch (err) {
+      setStatus((err && err.message) || i18n('could_not_complete_delivery'), 'error');
+      setSubmitting(false);
+    }
+  }
+
   function bind() {
     var modal = $('deliveryPhotoModal');
     if (!modal) return;
@@ -2534,10 +2635,24 @@
         cashInput.dataset.userEdited = '1';
       });
     }
+    var countList = $('deliveryProductCountList');
+    if (countList) {
+      countList.addEventListener('input', function () {
+        if (!state.orderEmpty) return;
+        syncEmptyOrderPiecesFromLines();
+        updateDeliveryPreview();
+      });
+    }
+    var flagEmptyBtn = $('deliveryFlagEmptyBtn');
+    if (flagEmptyBtn) {
+      flagEmptyBtn.addEventListener('click', function () {
+        flagEmptyOrder();
+      });
+    }
     document.querySelectorAll('.quantity-stepper-btn').forEach(function (button) {
       button.addEventListener('click', function () {
         var input = $(button.getAttribute('data-quantity-target'));
-        if (!input || input.disabled) return;
+        if (!input || input.disabled || input.readOnly) return;
         var next = Math.max(0, (parseInt(input.value, 10) || 0) + parseInt(button.getAttribute('data-quantity-step') || '0', 10));
         input.value = next;
         updateDeliveryPreview();

@@ -325,6 +325,13 @@ function bakery_driver_assignment_action_add_customer_to_route(PDO $db, array $i
     if (!$saveStandingRoute) {
         $standingOrderLines = [];
     }
+    $options = [];
+    if ((string)($input['restore_standing'] ?? '0') === '1') {
+        $options['restore_standing'] = true;
+    }
+    if ((string)($input['keep_empty'] ?? '0') === '1') {
+        $options['keep_empty'] = true;
+    }
 
     $result = bakery_driver_add_customer_to_route(
         $db,
@@ -333,8 +340,18 @@ function bakery_driver_assignment_action_add_customer_to_route(PDO $db, array $i
         $deliveryDate,
         $saveStandingRoute,
         $standingOrderLines,
-        $applyPanDulce
+        $applyPanDulce,
+        $options
     );
+    if (!empty($result['needs_restore'])) {
+        return [
+            'success' => false,
+            'needs_restore' => true,
+            'message' => $result['message'],
+            'daily_order_id' => $result['daily_order_id'],
+            'customer_name' => $result['customer_name'] ?? '',
+        ];
+    }
 
     return [
         'success' => true,
