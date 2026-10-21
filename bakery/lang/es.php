@@ -3576,6 +3576,7 @@ return [
     'driver.saving_photo' => 'Guardando foto…',
     'driver.camera_not_ready' => 'La cámara aún no está lista. Espera un momento o usa el selector de archivos.',
     'driver.capture_failed' => 'No se pudo capturar la imagen. Intenta con el selector de archivos.',
+    'driver.photo_too_large' => 'Esta foto es demasiado grande para este teléfono. Tómala de nuevo.',
     'driver.photo_captured_saving' => 'Foto capturada. Guardando…',
     'driver.no_photos' => 'Aún no hay fotos para esta parada.',
     'driver.view_photo' => 'Ver foto de :type',

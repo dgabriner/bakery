@@ -3710,6 +3710,7 @@ return [
     'driver.saving_photo' => 'Saving photo…',
     'driver.camera_not_ready' => 'Camera not ready yet. Wait a moment or use file picker.',
     'driver.capture_failed' => 'Could not capture frame. Try the file picker.',
+    'driver.photo_too_large' => 'This photo is too large for this phone. Take it again.',
     'driver.photo_captured_saving' => 'Photo captured. Saving…',
     'driver.no_photos' => 'No photos yet for this stop.',
     'driver.view_photo' => 'View :type photo',
