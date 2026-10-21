@@ -281,6 +281,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
               ['href' => 'daily_brief.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_brief')],
               ['href' => 'index.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.index')],
               ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
+              ['href' => 'special_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.special_orders')],
           ],
       ],
   ];

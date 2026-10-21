@@ -6466,3 +6466,37 @@ body.route-prep-saving .route-prep-move-btn {
     min-height: 32px;
     font-size: 0.72rem;
 }
+
+.special-order-stop {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f4f0e4;
+    border: 1px solid #e2d3a2;
+}
+
+.special-order-stop__label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #7a5b12;
+}
+
+.delivery-special-counts {
+    margin: 8px 0 12px;
+    padding: 10px;
+    border-radius: 12px;
+    background: #f4f0e4;
+    border: 1px solid #e2d3a2;
+}
+
+.delivery-special-counts__label {
+    margin: 0 0 8px;
+    font-weight: 700;
+    color: #7a5b12;
+}
+
+.delivery-invoice-item--special {
+    background: #fbf8ef;
+}

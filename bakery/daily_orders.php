@@ -296,6 +296,7 @@ $summary = $demandSummaryAll['summary'];
                 <?= htmlspecialchars(bakery_t('ux.daily_orders.clear_day')) ?>
             </button>
             <a class="btn btn-outline" href="standing_orders_manager.php"><?= htmlspecialchars(bakery_t('ux.daily_orders.edit_standing')) ?></a>
+            <a class="btn btn-outline" href="special_orders.php?date=<?= htmlspecialchars(rawurlencode($selectedDate)) ?>"><?= htmlspecialchars(bakery_t('special_order.open_page')) ?></a>
             <a class="btn btn-outline" href="pan_dulce_quantities.php"><?= htmlspecialchars(bakery_t('nav.item.pan_dulce_quantities')) ?></a>
             <a class="btn btn-outline" href="production.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.production_baker')) ?></a>
             <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.driver_assignment')) ?></a>
