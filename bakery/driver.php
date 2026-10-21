@@ -210,6 +210,32 @@ function bakery_driver_route_day_url(int $driverId, string $date, array $extra =
 }
 
 /**
+ * Special-order lines for one dated stop. Loaded once per date.
+ *
+ * @return list<array<string, mixed>>
+ */
+function bakery_driver_special_lines_for_stop(int $dailyOrderId, string $date): array
+{
+    static $byOrder = null;
+    static $loadedDate = null;
+    if ($byOrder === null || $loadedDate !== $date) {
+        $byOrder = [];
+        $loadedDate = $date;
+        global $db;
+        if ($db instanceof PDO) {
+            $specialInclude = __DIR__ . '/includes/special_orders.php';
+            if (is_file($specialInclude)) {
+                require_once $specialInclude;
+            }
+            if (function_exists('bakery_special_order_lines_by_daily_order')) {
+                $byOrder = bakery_special_order_lines_by_daily_order($db, $date);
+            }
+        }
+    }
+    return $byOrder[$dailyOrderId] ?? [];
+}
+
+/**
  * Render one driver route stop card for the active queue or history panel.
  */
 function bakery_render_driver_stop_item(
@@ -295,6 +321,12 @@ function bakery_render_driver_stop_item(
                     <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
                     <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
                 </div>
+                <?php
+                $specialStopLines = bakery_driver_special_lines_for_stop((int)$stop['daily_order_id'], $selectedDate);
+                if ($specialStopLines !== [] && function_exists('bakery_special_order_stop_summary_html')) {
+                    echo bakery_special_order_stop_summary_html($specialStopLines);
+                }
+                ?>
             </div>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
             <span class="driver-outbox-chip driver-outbox-chip--stop" data-outbox-chip hidden></span>
@@ -1224,6 +1256,10 @@ document.body.classList.add('driver-route-prep');
                                     <p id="deliveryProductCountsPrompt"></p>
                                     <div id="deliveryProductCountList"></div>
                                 </div>
+                                <div id="deliverySpecialCounts" class="delivery-special-counts" hidden>
+                                    <p id="deliverySpecialCountsLabel" class="delivery-special-counts__label"></p>
+                                    <div id="deliverySpecialCountList"></div>
+                                </div>
                                 <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
                                     <div class="quantity-stepper quantity-stepper--large">
                                         <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
@@ -1507,6 +1543,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'empty_order_call_office' => bakery_t('driver.empty_order_call_office'),
     'empty_order_enter_qty' => bakery_t('driver.empty_order_enter_qty'),
     'empty_order_flagged' => bakery_t('driver.empty_order_flagged'),
+    'special_order_heading' => bakery_t('driver.special_order_heading'),
+    'special_order_ordered' => bakery_t('driver.special_order_ordered'),
+    'special_order_qty' => bakery_t('driver.special_order_qty'),
     'status_pending' => bakery_t('driver.status_pending'),
     'status_in_transit' => bakery_t('driver.status_in_transit'),
     'status_failed' => bakery_t('driver.status_failed'),

@@ -27,6 +27,7 @@ require_once __DIR__ . '/includes/daily_orders_actions.php';
 require_once __DIR__ . '/includes/cod_square_guard.php';
 require_once __DIR__ . '/includes/billing_header.php';
 require_once __DIR__ . '/includes/delivery_proof.php';
+require_once __DIR__ . '/includes/special_orders.php';
 
 /**
  * Browser navigation (GET/HEAD) should not dump the JSON API.
@@ -638,6 +639,15 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
     }
     unset($item);
 
+    $specialItems = function_exists('bakery_special_order_invoice_lines')
+        ? bakery_special_order_invoice_lines($db, $dailyOrderId)
+        : [];
+    $specialTotal = 0.0;
+    foreach ($specialItems as $specialItem) {
+        $specialTotal += (float)($specialItem['line_total'] ?? 0);
+    }
+    $specialTotal = round($specialTotal, 2);
+
     $pricingLabel = (string)($order['delivery_pricing_label'] ?? '');
     if ($pricingLabel === '') {
         $pricingLabel = bakery_delivery_pricing_label_code($hasStorePrice, $hasStandardPrice, $hasPanDulce);
@@ -657,6 +667,8 @@ function bakery_delivery_invoice(PDO $db, int $dailyOrderId): array {
         'order_total' => $orderTotal,
         'average_price' => $averagePrice,
         'pricing_label' => $pricingLabel,
+        'special_items' => $specialItems,
+        'special_total' => $specialTotal,
     ];
 }
 
@@ -913,9 +925,20 @@ function bakery_delivery_order_is_empty(array $invoice): bool
 {
     $pieces = 0;
     foreach ($invoice['items'] ?? [] as $item) {
+        if (!empty($item['is_special_order'])) {
+            continue;
+        }
         $pieces += max(0, (int)($item['quantity'] ?? 0));
     }
-    return $pieces <= 0;
+    if ($pieces > 0) {
+        return false;
+    }
+    foreach ($invoice['special_items'] ?? [] as $item) {
+        if ((int)($item['quantity'] ?? 0) > 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /** An empty order still needs a typed price when the catalog price is missing. */
@@ -1289,6 +1312,14 @@ function bakery_confirm_delivery(
             $dailyOrderId,
             $creditsTakenBack
         );
+        if (function_exists('bakery_special_order_invoice_lines')
+            && bakery_special_order_invoice_lines($db, $dailyOrderId) !== []) {
+            $specialPosted = null;
+            if (isset($options['special_quantities']) && is_array($options['special_quantities'])) {
+                $specialPosted = $options['special_quantities'];
+            }
+            $total = bakery_special_order_book_delivery($db, $dailyOrderId, $specialPosted);
+        }
         if ($ownTransaction) {
             $db->commit();
         }
@@ -1364,6 +1395,8 @@ try {
                 'payment_collection' => $paymentCollection,
                 'is_saved' => $order['delivery_confirmed_at'] !== null,
                 'items' => $invoice['items'],
+                'special_items' => $invoice['special_items'] ?? [],
+                'special_total' => $invoice['special_total'] ?? 0,
                 'square_prepaid' => bakery_stop_square_prepaid($summaryGuard),
                 'cod_cash_blocked' => ($paymentCollection === 'cod') && bakery_cod_cash_blocked($summaryGuard),
                 'cod_override_reason' => $summaryGuard['cod_square_override_reason'],
@@ -1449,6 +1482,19 @@ try {
                 $dailyOrderId,
                 (string)($_POST['proof_skip'] ?? '') === '1'
             );
+            if (isset($_POST['special_delivered']) && is_array($_POST['special_delivered'])) {
+                $specialQuantities = [];
+                foreach ($_POST['special_delivered'] as $lineId => $qty) {
+                    $count = filter_var($qty, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+                    if ($count === false) {
+                        throw new Exception('Enter whole numbers for special order quantities');
+                    }
+                    $specialQuantities[(int)$lineId] = (int)$count;
+                }
+                if ($specialQuantities !== []) {
+                    $confirmOptions['special_quantities'] = $specialQuantities;
+                }
+            }
             if (isset($_POST['line_delivered']) && is_array($_POST['line_delivered'])) {
                 $lineQuantities = [];
                 foreach ($_POST['line_delivered'] as $itemId => $qty) {

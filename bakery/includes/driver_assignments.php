@@ -1203,7 +1203,20 @@ function bakery_dated_order_has_no_positive_quantity(PDO $db, int $dailyOrderId)
          WHERE daily_order_id = ?'
     );
     $stmt->execute([$dailyOrderId]);
-    return (int)$stmt->fetchColumn() <= 0;
+    if ((int)$stmt->fetchColumn() > 0) {
+        return false;
+    }
+    if (!function_exists('bakery_special_order_has_positive_qty')) {
+        $specialPath = __DIR__ . '/special_orders.php';
+        if (is_file($specialPath)) {
+            require_once $specialPath;
+        }
+    }
+    if (function_exists('bakery_special_order_has_positive_qty')
+        && bakery_special_order_has_positive_qty($db, $dailyOrderId)) {
+        return false;
+    }
+    return true;
 }
 
 /**

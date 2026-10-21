@@ -57,6 +57,15 @@ try {
     ");
     $stmt->execute([$dailyOrderId]);
     $items = $stmt->fetchAll();
+
+    $specialLines = [];
+    $specialInclude = __DIR__ . '/includes/special_orders.php';
+    if (is_file($specialInclude)) {
+        require_once $specialInclude;
+    }
+    if (function_exists('bakery_special_order_invoice_lines')) {
+        $specialLines = bakery_special_order_invoice_lines($db, $dailyOrderId);
+    }
     
     // Group items by product line and dough type
     $groupedItems = [];
@@ -78,7 +87,7 @@ try {
     // Generate HTML
     $html = '<div class="order-details-content">';
     
-    if (empty($groupedItems)) {
+    if (empty($groupedItems) && $specialLines === []) {
         $html .= '<div style="text-align: center; color: #6c757d; font-style: italic; padding: 20px;">No products found for this order.</div>';
     } else {
         foreach ($groupedItems as $productLine => $doughTypes) {
@@ -100,6 +109,26 @@ try {
             
             $html .= '</div>';
         }
+    }
+
+    if ($specialLines !== []) {
+        $specialLabel = function_exists('bakery_t') ? bakery_t('special_order.badge') : 'Special order';
+        if ($specialLabel === 'special_order.badge') {
+            $specialLabel = 'Special order';
+        }
+        $html .= '<div class="product-line-group special-order-stop">';
+        $html .= '<div class="product-line-header">' . htmlspecialchars($specialLabel, ENT_QUOTES, 'UTF-8') . '</div>';
+        foreach ($specialLines as $specialLine) {
+            $html .= '<div class="product-item">';
+            $html .= '<div class="product-info">';
+            $html .= '<div class="product-name">' . htmlspecialchars((string)($specialLine['description'] ?? ''), ENT_QUOTES, 'UTF-8') . '</div>';
+            $html .= '<div class="product-meta">$' . number_format((float)($specialLine['unit_price'] ?? 0), 2) . ' each</div>';
+            $html .= '</div>';
+            $html .= '<div class="product-quantity">' . (int)$specialLine['quantity'] . '</div>';
+            $html .= '<div class="product-total">$' . number_format((float)($specialLine['line_total'] ?? 0), 2) . '</div>';
+            $html .= '</div>';
+        }
+        $html .= '</div>';
     }
     
     $html .= '</div>';

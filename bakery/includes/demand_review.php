@@ -323,6 +323,19 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
             }
         }
         $customer['on_standing_route'] = isset($standingRouteByCustomer[$cid]);
+        if (!isset($specialUnitsByCustomer)) {
+            $specialUnitsByCustomer = [];
+            // Loaded here so a demand review that never saved a special order stays cheap,
+            // and so this file does not include special_orders.php while that file is still loading.
+            $specialPath = __DIR__ . '/special_orders.php';
+            if (is_file($specialPath)) {
+                require_once $specialPath;
+            }
+            if (function_exists('bakery_special_order_units_by_customer')) {
+                $specialUnitsByCustomer = bakery_special_order_units_by_customer($db, $date);
+            }
+        }
+        $customer['special_units'] = (int)($specialUnitsByCustomer[$cid] ?? 0);
         $customer['state'] = bakery_demand_review_classify_customer($customer);
         $customer['diff_lines'] = bakery_demand_review_diff_lines($customer['line_map']);
         $customer['standing_units'] = 0;
@@ -548,6 +561,7 @@ function bakery_demand_review_empty_customer(array $row, $standingRoute = null) 
         'diff_lines' => [],
         'standing_units' => 0,
         'daily_units' => 0,
+        'special_units' => 0,
         'is_advanced' => false,
     ];
 }
@@ -581,10 +595,10 @@ function bakery_demand_review_classify_customer(array $customer) {
         if (!$hasQty && !empty($customer['on_standing_route'])) {
             return 'matches';
         }
-        return $hasBillable ? 'one_off' : 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, $hasBillable ? 'one_off' : 'empty_daily');
     }
     if (!empty($customer['has_daily']) && empty($customer['line_map'])) {
-        return 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, 'empty_daily');
     }
 
     $hasDailyItems = false;
@@ -613,7 +627,7 @@ function bakery_demand_review_classify_customer(array $customer) {
         if (!empty($customer['standing_fill_blocked']) && !empty($customer['has_standing']) && !$hasDailyItems) {
             return 'changed';
         }
-        return 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, 'empty_daily');
     }
     if ($hasDiff) {
         return 'changed';
@@ -630,8 +644,22 @@ function bakery_demand_review_classify_customer(array $customer) {
  * changed. This is the morning-board signal for that stop once it is on a route.
  * A standing-route visit with no standing order and no pieces is not included.
  */
+/**
+ * A positive special order is dated demand. It is not an empty pan dulce shell.
+ */
+function bakery_demand_review_state_when_special(array $customer, string $otherwise): string
+{
+    if ($otherwise !== 'empty_daily' || (int)($customer['special_units'] ?? 0) <= 0) {
+        return $otherwise;
+    }
+    return !empty($customer['has_standing']) ? 'changed' : 'one_off';
+}
+
 function bakery_demand_review_is_routed_zero_order(array $customer): bool
 {
+    if ((int)($customer['special_units'] ?? 0) > 0) {
+        return false;
+    }
     if (empty($customer['has_daily'])) {
         return false;
     }
@@ -664,6 +692,9 @@ function bakery_demand_review_empty_stop_flags(array $customers): array
     $count = 0;
     foreach ($customers as $customer) {
         if (!is_array($customer)) {
+            continue;
+        }
+        if ((int)($customer['special_units'] ?? 0) > 0) {
             continue;
         }
         $state = (string)($customer['state'] ?? '');
