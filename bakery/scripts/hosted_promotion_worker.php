@@ -134,6 +134,75 @@ function promotion_safe_path(string $path): bool {
         && !preg_match('#(?:^|/)(?:\.env|\.git)(?:/|$)#', $path);
 }
 
+function promotion_manifest_scope(array $approval): string {
+    $scope = (string)($approval['scope'] ?? 'snapshot');
+    if ($scope !== 'snapshot' && $scope !== 'files_only') {
+        throw new RuntimeException('Unknown promotion scope.');
+    }
+    return $scope;
+}
+
+/**
+ * Snapshot promotions stay at the historical 50-file floor.
+ * A named file list may be smaller and is copied as that list only.
+ *
+ * @return array{min: int, max: int}
+ */
+function promotion_manifest_bounds(string $scope): array {
+    if ($scope === 'files_only') {
+        return ['min' => 1, 'max' => 2000];
+    }
+    if ($scope !== 'snapshot') {
+        throw new RuntimeException('Unknown promotion scope.');
+    }
+    return ['min' => 50, 'max' => 2000];
+}
+
+function promotion_files_only_blocked(string $path): bool {
+    return in_array(basename($path), ['staging_update.php', 'oven_light.php', 'proof_window.php'], true);
+}
+
+function promotion_files_only_commit_ok(array $approval): bool {
+    return (bool)preg_match('/^[0-9a-f]{7,40}$/', (string)($approval['commit'] ?? ''));
+}
+
+/**
+ * Keep every prior hash and replace only the paths in this named list.
+ *
+ * @param list<array<string, mixed>> $priorFiles
+ * @param list<array<string, mixed>> $approvedFiles
+ * @return list<array<string, mixed>>
+ */
+function promotion_merge_hash_index(array $priorFiles, array $approvedFiles): array {
+    $byPath = [];
+    foreach ($priorFiles as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $path = (string)($entry['path'] ?? '');
+        if ($path === '') {
+            continue;
+        }
+        $byPath[$path] = $entry;
+    }
+    foreach ($approvedFiles as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $path = (string)($entry['path'] ?? '');
+        if ($path === '') {
+            continue;
+        }
+        $byPath[$path] = $entry;
+    }
+    ksort($byPath, SORT_STRING);
+    return array_values($byPath);
+}
+
+if (defined('BAKERY_PROMOTION_WORKER_LIBRARY')) {
+    return;
+}
+
 $configPath = $argv[1] ?? '/home/dh_dp755h/.bakery-hosted-promotion.env';
 $config = promotion_env($configPath);
 foreach (['STAGE_HOST', 'STAGE_USER', 'STAGE_KEY', 'LIVE_ROOT', 'WORK_ROOT', 'BACKUP_ROOT'] as $required) {
@@ -174,8 +243,13 @@ try {
     if (!preg_match('/^stage-[0-9]{8}-[0-9]{6}-[a-f0-9]{6}$/', $releaseId)) throw new RuntimeException('Invalid release identifier.');
     $prior = promotion_read_json($statusPath);
     if (($prior['release_id'] ?? '') === $releaseId && in_array(($prior['status'] ?? ''), ['succeeded', 'failed', 'rolled_back', 'promoting'], true)) exit(0);
+    $scope = promotion_manifest_scope($approval);
+    if ($scope === 'files_only' && !promotion_files_only_commit_ok($approval)) {
+        throw new RuntimeException('Files-only manifest is missing its commit SHA.');
+    }
+    $bounds = promotion_manifest_bounds($scope);
     $files = $approval['files'] ?? [];
-    if (!is_array($files) || count($files) < 50 || count($files) > 2000 || count($files) !== (int)($approval['file_count'] ?? -1)) {
+    if (!is_array($files) || count($files) < $bounds['min'] || count($files) > $bounds['max'] || count($files) !== (int)($approval['file_count'] ?? -1)) {
         throw new RuntimeException('Staging manifest file count is invalid.');
     }
     $paths = [];
@@ -185,9 +259,15 @@ try {
         if (!promotion_safe_path($path) || !preg_match('/^[a-f0-9]{64}$/', $hash) || isset($paths[$path])) {
             throw new RuntimeException('Staging manifest contains an unsafe file entry: ' . $path);
         }
+        if ($scope === 'files_only' && promotion_files_only_blocked($path)) {
+            throw new RuntimeException('Staging manifest contains a skip-list file: ' . $path);
+        }
         $paths[$path] = $hash;
     }
     $priorIndex = promotion_read_json($hashIndexPath);
+    $indexFiles = $scope === 'files_only'
+        ? promotion_merge_hash_index((array)($priorIndex['files'] ?? []), $files)
+        : $files;
     $liveHashes = [];
     foreach ((array)($priorIndex['files'] ?? []) as $entry) {
         $path = (string)($entry['path'] ?? '');
@@ -210,7 +290,7 @@ try {
     if (!$deployPaths) {
         $health = promotion_run(['/usr/bin/curl', '--fail', '--silent', '--show-error', '--max-time', '20', '-o', '/dev/null', '-w', '%{http_code}', 'https://bakery.sourflour.org/bake/login.php'], 30);
         if ($health['exit'] !== 0 || trim($health['stdout']) !== '200') throw new RuntimeException('Live health check failed.');
-        promotion_write_json($hashIndexPath, ['release_id' => $releaseId, 'updated_at' => gmdate('c'), 'files' => $files]);
+        promotion_write_json($hashIndexPath, ['release_id' => $releaseId, 'updated_at' => gmdate('c'), 'files' => $indexFiles]);
         $status['status'] = 'succeeded';
         $status['health'] = 'http_200';
         $status['completed_at'] = gmdate('c');
@@ -301,7 +381,7 @@ try {
     $status['completed_at'] = gmdate('c');
     $status['public_message'] = count($deployPaths) . ' changed file(s) from the approved Staging version are now Live.';
     $status['backup_path'] = $releaseBackup;
-    promotion_write_json($hashIndexPath, ['release_id' => $releaseId, 'updated_at' => gmdate('c'), 'files' => $files]);
+    promotion_write_json($hashIndexPath, ['release_id' => $releaseId, 'updated_at' => gmdate('c'), 'files' => $indexFiles]);
     promotion_write_json($statusPath, $status);
     promotion_history_append($historyPath, $status);
     echo "PROMOTED {$releaseId} changed_files=" . count($deployPaths) . " total_files=" . count($paths) . "\n";
