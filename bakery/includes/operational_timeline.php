@@ -23,6 +23,8 @@ define('BAKERY_OP_PRODUCTION_CUT', 'production_cut');
 define('BAKERY_OP_DRIVER_LOAD_SAVED', 'driver_load_saved');
 define('BAKERY_OP_DRIVER_ROUTE_CLOSED', 'driver_route_closed');
 define('BAKERY_OP_DELIVERY_COMPLETED', 'delivery_completed');
+define('BAKERY_OP_DELIVERY_EMPTY_FLAGGED', 'delivery_empty_flagged');
+define('BAKERY_OP_STANDING_ORDER_RESTORED', 'standing_order_restored');
 define('BAKERY_OP_DELIVERY_PROOF_SKIPPED', 'delivery_proof_photo_skipped');
 define('BAKERY_OP_DELIVERY_MARKED', 'delivery_marked');
 define('BAKERY_OP_DELIVERY_MODIFIED', 'delivery_modified');
@@ -332,6 +334,8 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_PRODUCTION_CUT => 'production',
         BAKERY_OP_DRIVER_LOAD_SAVED => 'inventory',
         BAKERY_OP_DELIVERY_COMPLETED => 'delivery',
+        BAKERY_OP_DELIVERY_EMPTY_FLAGGED => 'delivery',
+        BAKERY_OP_STANDING_ORDER_RESTORED => 'demand',
         BAKERY_OP_DELIVERY_PROOF_SKIPPED => 'delivery',
         BAKERY_OP_DELIVERY_MARKED => 'delivery',
         BAKERY_OP_DELIVERY_MODIFIED => 'delivery',
@@ -365,6 +369,34 @@ function bakery_operational_event_category(string $eventType): string
         BAKERY_OP_EXCEPTION_WORK_COMPLETED => 'delivery',
     ];
     return $map[$eventType] ?? 'demand';
+}
+
+/**
+ * Dated orders a driver flagged as empty for the office.
+ * The assignment stays pending. The route treats these stops as finished
+ * so the driver is not stuck, and they are not Delivered at $0.
+ *
+ * @return array<int, true>
+ */
+function bakery_delivery_empty_flagged_order_ids(PDO $db, string $date): array
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'operational_events')) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT DISTINCT daily_order_id
+         FROM operational_events
+         WHERE event_type = ? AND operational_date = ? AND daily_order_id IS NOT NULL'
+    );
+    $stmt->execute([BAKERY_OP_DELIVERY_EMPTY_FLAGGED, $date]);
+    $ids = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        $id = (int)$id;
+        if ($id > 0) {
+            $ids[$id] = true;
+        }
+    }
+    return $ids;
 }
 
 /**

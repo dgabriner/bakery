@@ -367,15 +367,16 @@ function bakery_daily_run_build(PDO $db, string $date): array
         $demandStage['summary'] = 'Daily orders not installed';
     } else {
         $ds = $demandReview['summary'];
+        $emptyStopFlags = bakery_demand_review_empty_stop_flags($demandReview['customers'] ?? []);
         $demandStage['metrics'] = [
             ['label' => 'Expected customers', 'value' => (int)$ds['expected_customers']],
             ['label' => 'With dated orders', 'value' => (int)$ds['customers_with_daily']],
             ['label' => 'Missing daily order', 'value' => (int)$ds['missing_daily']],
             ['label' => 'Changed from standing', 'value' => (int)$ds['changed']],
-            ['label' => 'Empty dated orders', 'value' => (int)$ds['empty_daily']],
+            ['label' => 'Empty dated orders', 'value' => (int)$emptyStopFlags['count']],
         ];
 
-        $attentionCount = (int)$ds['missing_daily'] + (int)$ds['empty_daily'];
+        $attentionCount = (int)$ds['missing_daily'] + (int)$emptyStopFlags['count'];
         if ((int)$ds['expected_customers'] === 0 && (int)$ds['customers_with_daily'] === 0) {
             $demandStage['ui_state'] = 'empty';
             $demandStage['summary'] = 'No demand on file for this date';
@@ -399,19 +400,10 @@ function bakery_daily_run_build(PDO $db, string $date): array
                     'action' => 'Review Demand',
                 ]);
             }
-            if ((int)$ds['empty_daily'] > 0) {
-                $emptyNames = [];
-                foreach ($demandReview['customers'] ?? [] as $emptyCustomer) {
-                    if (($emptyCustomer['state'] ?? '') !== 'empty_daily') {
-                        continue;
-                    }
-                    $emptyName = trim((string)($emptyCustomer['customer_name'] ?? ''));
-                    if ($emptyName !== '') {
-                        $emptyNames[] = $emptyName;
-                    }
-                }
-                $parts[] = (int)$ds['empty_daily'] . ' empty dated order'
-                    . ((int)$ds['empty_daily'] === 1 ? '' : 's');
+            if ((int)$emptyStopFlags['count'] > 0) {
+                $emptyNames = $emptyStopFlags['names'];
+                $parts[] = (int)$emptyStopFlags['count'] . ' empty dated order'
+                    . ((int)$emptyStopFlags['count'] === 1 ? '' : 's');
                 $blockers[] = bakery_ops_exception([
                     'type' => 'demand_empty_daily',
                     'severity' => 'warning',
@@ -419,10 +411,10 @@ function bakery_daily_run_build(PDO $db, string $date): array
                     'category' => 'demand',
                     'title' => bakery_t('demand.empty_daily_label'),
                     'detail' => bakery_t('daily_run.empty_orders_detail', [
-                        'count' => (int)$ds['empty_daily'],
+                        'count' => (int)$emptyStopFlags['count'],
                         'stores' => implode(', ', $emptyNames),
                     ]),
-                    'count' => (int)$ds['empty_daily'],
+                    'count' => (int)$emptyStopFlags['count'],
                     'href' => bakery_ops_link_daily_orders($date, ['review' => 'empty'], 'daily_run'),
                     'action' => 'Review Demand',
                 ]);

@@ -876,7 +876,9 @@ function bakery_delivery_summary(PDO $db, int $dailyOrderId): array {
         'order_total' => $invoice['order_total'],
         'average_price' => $invoice['average_price'],
         'pricing_label' => bakery_delivery_pricing_label_display((string)$invoice['pricing_label']),
-        'pricing_missing' => bakery_delivery_pricing_missing($invoice),
+        'pricing_missing' => bakery_delivery_pricing_missing($invoice)
+            || bakery_delivery_empty_order_needs_price($invoice),
+        'order_empty' => bakery_delivery_order_is_empty($invoice),
     ];
 }
 
@@ -903,6 +905,160 @@ function bakery_delivery_gps_payload(array $post): array
         'longitude' => $gps['longitude'],
         'accuracy_m' => $gps['accuracy_m'],
         'status' => $gps['status'],
+    ];
+}
+
+/** True when the dated order has no pieces to deliver. A no-charge line with quantity is not empty. */
+function bakery_delivery_order_is_empty(array $invoice): bool
+{
+    $pieces = 0;
+    foreach ($invoice['items'] ?? [] as $item) {
+        $pieces += max(0, (int)($item['quantity'] ?? 0));
+    }
+    return $pieces <= 0;
+}
+
+/** An empty order still needs a typed price when the catalog price is missing. */
+function bakery_delivery_empty_order_needs_price(array $invoice): bool
+{
+    if (!bakery_delivery_order_is_empty($invoice)) {
+        return false;
+    }
+    foreach ($invoice['items'] ?? [] as $item) {
+        if (function_exists('bakery_order_line_is_no_charge') && bakery_order_line_is_no_charge($item)) {
+            continue;
+        }
+        if ((float)($item['unit_price'] ?? 0) <= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function bakery_delivery_empty_order_office_message(): string
+{
+    $fallback = 'This order is empty. Call the office.';
+    if (!function_exists('bakery_t')) {
+        return $fallback;
+    }
+    $text = bakery_t('driver.empty_order_call_office');
+    if ($text === '' || $text === 'driver.empty_order_call_office') {
+        return $fallback;
+    }
+    return $text;
+}
+
+/**
+ * Write the driver's delivered counts onto an all-zero dated order and price
+ * them from the customer catalog. Deliberate no-charge lines stay at $0.
+ *
+ * @param array<int, int> $lineQuantities
+ */
+function bakery_delivery_fill_empty_order_lines(PDO $db, int $dailyOrderId, int $deliveredPieces, array $lineQuantities): void
+{
+    $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    if (!bakery_delivery_order_is_empty($invoice)) {
+        return;
+    }
+    $items = $invoice['items'] ?? [];
+    if ($items === []) {
+        throw new Exception(bakery_delivery_empty_order_office_message());
+    }
+
+    $counts = [];
+    if ($lineQuantities !== []) {
+        $sum = 0;
+        foreach ($items as $item) {
+            $id = (int)$item['id'];
+            $raw = $lineQuantities[$id] ?? ($lineQuantities[(string)$id] ?? 0);
+            $parsed = filter_var($raw, FILTER_VALIDATE_INT);
+            if ($parsed === false || (int)$parsed < 0) {
+                throw new Exception(bakery_delivery_product_count_mismatch_message());
+            }
+            $counts[$id] = (int)$parsed;
+            $sum += (int)$parsed;
+        }
+        if ($sum !== $deliveredPieces) {
+            throw new Exception(bakery_delivery_product_count_mismatch_message());
+        }
+    } elseif (count($items) === 1) {
+        $counts[(int)$items[0]['id']] = $deliveredPieces;
+    } else {
+        $message = function_exists('bakery_t')
+            ? bakery_t('driver.empty_order_needs_qty')
+            : 'Enter how many of each product you delivered.';
+        throw new Exception($message === 'driver.empty_order_needs_qty'
+            ? 'Enter how many of each product you delivered.'
+            : $message);
+    }
+    if (array_sum($counts) <= 0) {
+        throw new Exception(bakery_delivery_empty_order_office_message());
+    }
+
+    $update = $db->prepare(
+        'UPDATE daily_order_items
+         SET quantity = ?, unit_price = ?, line_total = ?
+         WHERE id = ? AND daily_order_id = ?'
+    );
+    foreach ($items as $item) {
+        $id = (int)$item['id'];
+        $qty = (int)($counts[$id] ?? 0);
+        $isNoCharge = function_exists('bakery_order_line_is_no_charge') && bakery_order_line_is_no_charge($item);
+        $price = $isNoCharge ? 0.0 : round((float)($item['unit_price'] ?? 0), 2);
+        $update->execute([$qty, $price, round($qty * $price, 2), $id, $dailyOrderId]);
+    }
+    if (function_exists('bakery_daily_order_set_standing_fill_blocked')) {
+        bakery_daily_order_set_standing_fill_blocked($db, $dailyOrderId, false);
+    }
+    if (function_exists('bakery_customer_update_daily_total')) {
+        bakery_customer_update_daily_total($db, $dailyOrderId);
+    }
+}
+
+/**
+ * Ask the office to handle an empty stop. Does not mark it delivered.
+ *
+ * @return array{success:bool, flagged:bool, delivered:bool, message:string}
+ */
+function bakery_flag_empty_delivery(PDO $db, int $dailyOrderId): array
+{
+    if ($dailyOrderId <= 0) {
+        throw new Exception('Daily order ID is required');
+    }
+    $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    if (!bakery_delivery_order_is_empty($invoice)) {
+        throw new Exception('This order is not empty');
+    }
+    $statusStmt = $db->prepare('SELECT status FROM daily_orders WHERE id = ?');
+    $statusStmt->execute([$dailyOrderId]);
+    if ((string)$statusStmt->fetchColumn() === 'delivered') {
+        throw new Exception('This stop is already delivered');
+    }
+    $message = function_exists('bakery_t')
+        ? bakery_t('driver.empty_order_flagged')
+        : 'Flagged for the office. This stop was not closed as delivered.';
+    if ($message === 'driver.empty_order_flagged') {
+        $message = 'Flagged for the office. This stop was not closed as delivered.';
+    }
+    if (function_exists('bakery_record_operational_event')) {
+        bakery_record_operational_event(
+            $db,
+            BAKERY_OP_DELIVERY_EMPTY_FLAGGED,
+            $message,
+            [
+                'operational_date' => $invoice['order']['order_date'] ?? null,
+                'customer_id' => (int)($invoice['order']['customer_id'] ?? 0) ?: null,
+                'daily_order_id' => $dailyOrderId,
+                'driver_id' => (int)($invoice['order']['driver_id'] ?? 0) ?: null,
+                'metadata' => ['source' => 'driver_empty_flag'],
+            ]
+        );
+    }
+    return [
+        'success' => true,
+        'flagged' => true,
+        'delivered' => false,
+        'message' => $message,
     ];
 }
 
@@ -977,6 +1133,9 @@ function bakery_confirm_delivery(
     }
 
     $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    if (bakery_delivery_order_is_empty($invoice) && $deliveredPieces <= 0) {
+        throw new Exception(bakery_delivery_empty_order_office_message());
+    }
     $summary = [
         'ordered_pieces' => $invoice['ordered_pieces'],
         'order_total' => $invoice['order_total'],
@@ -1052,6 +1211,13 @@ function bakery_confirm_delivery(
         $db->beginTransaction();
     }
     try {
+        if (bakery_delivery_order_is_empty($invoice) && $deliveredPieces > 0) {
+            $pendingLines = [];
+            if (isset($options['line_quantities']) && is_array($options['line_quantities'])) {
+                $pendingLines = $options['line_quantities'];
+            }
+            bakery_delivery_fill_empty_order_lines($db, $dailyOrderId, $deliveredPieces, $pendingLines);
+        }
         bakery_delivery_repair_missing_item_prices($db, $dailyOrderId);
         $appliedKnown = bakery_delivery_apply_known_price_if_missing($db, $dailyOrderId);
         $invoice = bakery_delivery_invoice($db, $dailyOrderId);
@@ -1185,6 +1351,7 @@ try {
                 'average_price' => $summary['average_price'],
                 'pricing_label' => $summary['pricing_label'],
                 'pricing_missing' => $summary['pricing_missing'],
+                'order_empty' => !empty($summary['order_empty']),
                 'order_date' => $invoice['order']['order_date'] ?? '',
                 'customer_name' => $invoice['order']['customer_name'] ?? '',
                 'customer_address' => $invoice['order']['customer_address'] ?? '',
@@ -1234,6 +1401,15 @@ try {
                     'items' => $invoice['items'],
                 ],
             ]);
+            break;
+
+        case 'flag_empty_order':
+            if (!isset($_POST['daily_order_id'])) {
+                throw new Exception('Daily order ID is required');
+            }
+            $flagOrderId = (int)$_POST['daily_order_id'];
+            bakery_delivery_assert_driver_access($db, $flagOrderId);
+            echo json_encode(bakery_flag_empty_delivery($db, $flagOrderId));
             break;
 
         case 'confirm_delivery':

@@ -652,6 +652,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_driver_survey_flow_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',
                 'tests/run_status_alignment_tests.php',
+                'tests/run_empty_stop_guard_tests.php',
             ],
             'invariants' => [
                 'Driver Assignment is the canonical route board',

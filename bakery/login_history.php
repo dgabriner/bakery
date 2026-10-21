@@ -1,5 +1,5 @@
 <?php
-/** Administrator-only sign-in, session, navigation, and usage history. */
+/** Sign-in history for administrators. Managers may only read client errors. */
 define('ACCESS_ALLOWED', true);
 
 require_once __DIR__ . '/includes/config.php';
@@ -9,10 +9,22 @@ require_once __DIR__ . '/includes/navigation_catalog.php';
 require_once __DIR__ . '/includes/login_history_insights.php';
 require_once __DIR__ . '/includes/client_errors.php';
 
-bakery_require_role(['administrator']);
-bakery_ensure_login_audit_schema($db);
-
+bakery_require_login();
 $filters = bakery_login_history_parse_filters($_GET);
+$loginHistoryAccess = bakery_login_history_access(
+    bakery_current_user(),
+    (string)($filters['view'] ?? ''),
+    (string)($_SERVER['REQUEST_METHOD'] ?? 'GET'),
+    (string)($filters['export'] ?? '')
+);
+if (empty($loginHistoryAccess['allowed'])) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Forbidden: your role cannot access this resource.\n";
+    exit;
+}
+$loginHistoryReadOnly = !empty($loginHistoryAccess['read_only']);
+bakery_ensure_login_audit_schema($db);
 $ready = bakery_login_history_ready($db);
 $data = bakery_login_history_load($db, $filters, $ready);
 $options = $data['options'];
@@ -247,6 +259,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
     <p class="login-history-lead"><?php bakery_te('login_history.lead'); ?></p>
   </header>
 
+  <?php if (empty($loginHistoryReadOnly)): ?>
   <?php if (!empty($data['briefing'])): ?>
     <section class="login-history-briefing" aria-label="<?php echo htmlspecialchars(bakery_t('login_history.briefing')); ?>">
       <p class="login-history-briefing__kicker"><?php bakery_te('login_history.briefing'); ?></p>
@@ -484,6 +497,7 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
       <div class="timeline-empty"><?php bakery_te('login_history.no_activity'); ?></div>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
   <?php endif; ?>
 
   <?php if ($view === 'overview'): ?>
@@ -989,7 +1003,9 @@ function bakery_login_history_render_person_card(array $personRow, bool $compact
     <section class="login-history-list" id="login-records" aria-label="<?php echo htmlspecialchars(bakery_t('login_history.login_records')); ?>">
       <div class="login-history-panel__head">
         <h2><?php bakery_te('login_history.login_records'); ?></h2>
+        <?php if (empty($loginHistoryReadOnly)): ?>
         <a href="<?php echo htmlspecialchars(bakery_login_history_url(['export' => 'csv'])); ?>"><?php bakery_te('login_history.export_csv'); ?></a>
+        <?php endif; ?>
       </div>
       <?php if (!$records['rows']): ?><div class="login-history-empty"><?php echo $ready['audit'] ? bakery_t('login_history.no_records') : bakery_t('login_history.no_storage'); ?></div><?php endif; ?>
       <?php foreach ($records['rows'] as $row) { bakery_login_history_render_session($row, $sessionTrail, $trailId); } ?>
