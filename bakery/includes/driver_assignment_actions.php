@@ -231,12 +231,27 @@ function bakery_driver_assignment_action_sync_driver_route(PDO $db, array $input
         'assign_routes' => false,
     ]);
 
+    $deliveredElsewhere = bakery_route_customers_delivered_elsewhere($db, $deliveryDate, $driverId);
     $assignments = [];
     foreach ($routeStops as $index => $stop) {
-        $dailyOrderId = bakery_daily_order_find_or_create($db, (int)$stop['customer_id'], $deliveryDate);
+        $customerId = (int)$stop['customer_id'];
+        if (!empty($deliveredElsewhere[$customerId])) {
+            continue;
+        }
+        $dailyOrderId = bakery_daily_order_find_or_create($db, $customerId, $deliveryDate);
         $assignments[] = [
             'daily_order_id' => $dailyOrderId,
             'route_order' => $index + 1,
+        ];
+    }
+
+    if ($assignments === []) {
+        return [
+            'success' => true,
+            'message' => bakery_t('driver_assignment.restore_done_none', [
+                'driver' => (string)$driverRow['name'],
+            ]),
+            'stores' => [],
         ];
     }
 

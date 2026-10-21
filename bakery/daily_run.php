@@ -78,11 +78,18 @@ try {
 }
 
 $driverSmsBlocks = [];
+$closeoutSplits = [];
 if (is_array($dailyRun)) {
     try {
         $driverSmsBlocks = bakery_driver_day_sms_blocks($db, $selectedDate);
     } catch (Throwable $e) {
         error_log('daily_run driver sms: ' . $e->getMessage());
+    }
+    try {
+        require_once 'includes/route_summary.php';
+        $closeoutSplits = bakery_route_closeout_driver_splits($db, $selectedDate);
+    } catch (Throwable $e) {
+        error_log('daily_run closeout split: ' . $e->getMessage());
     }
 }
 
@@ -434,6 +441,47 @@ require_once 'includes/nav.php';
                     <?php endif; ?>
 
                     <?php if ($isCloseout): ?>
+                        <?php if ($closeoutSplits !== []): ?>
+                        <section class="dr-closeout-split" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.closeout_split_title')); ?>">
+                            <h4><?php bakery_te('daily_run.closeout_split_title'); ?></h4>
+                            <p class="dr-closeout-split-help"><?php bakery_te('daily_run.closeout_split_help'); ?></p>
+                            <?php foreach ($closeoutSplits as $split): ?>
+                                <?php $splitCounts = $split['counts']; ?>
+                                <article class="dr-closeout-split-card">
+                                    <h5><?php echo htmlspecialchars((string)$split['driver_name']); ?></h5>
+                                    <ul>
+                                        <li><?php echo htmlspecialchars(bakery_t('daily_run.closeout_after')); ?>: <?php echo (int)$splitCounts['after']; ?></li>
+                                        <li><?php echo htmlspecialchars(bakery_t('daily_run.closeout_arrival')); ?>: <?php echo (int)$splitCounts['arrival_only']; ?></li>
+                                        <li><?php echo htmlspecialchars(bakery_t('daily_run.closeout_none')); ?>: <?php echo (int)$splitCounts['no_photo']; ?></li>
+                                        <li><?php echo htmlspecialchars(bakery_t('daily_run.closeout_open')); ?>: <?php echo (int)$splitCounts['open']; ?></li>
+                                    </ul>
+                                    <textarea class="dr-closeout-sms-body" readonly rows="6"><?php echo htmlspecialchars((string)$split['body']); ?></textarea>
+                                    <button type="button" class="dr-btn dr-btn-secondary dr-closeout-sms-copy" data-copied="<?php echo htmlspecialchars(bakery_t('daily_run.closeout_copied')); ?>">
+                                        <?php bakery_te('daily_run.closeout_copy'); ?>
+                                    </button>
+                                </article>
+                            <?php endforeach; ?>
+                        </section>
+                        <script>
+                        (function () {
+                          document.querySelectorAll('.dr-closeout-sms-copy').forEach(function (btn) {
+                            btn.addEventListener('click', function () {
+                              var card = btn.closest('.dr-closeout-split-card');
+                              var area = card ? card.querySelector('.dr-closeout-sms-body') : null;
+                              var text = area ? area.value : '';
+                              if (!text || !navigator.clipboard || !navigator.clipboard.writeText) {
+                                return;
+                              }
+                              var label = btn.textContent;
+                              navigator.clipboard.writeText(text).then(function () {
+                                btn.textContent = btn.getAttribute('data-copied') || label;
+                                setTimeout(function () { btn.textContent = label; }, 1200);
+                              });
+                            });
+                          });
+                        })();
+                        </script>
+                        <?php endif; ?>
                         <div class="dr-closeout-panel">
                             <?php if (!empty($dailyRun['is_closed'])): ?>
                                 <div class="dr-closeout-status dr-closeout-status--closed">

@@ -189,6 +189,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_route_integrity_tests.php',
                 'tests/run_manager_mode_tests.php',
                 'tests/run_daily_run_core_tests.php',
+                'tests/run_closeout_proof_tests.php',
             ],
             'invariants' => [
                 'Completing exception work never hides a still-true operational fact',
@@ -641,6 +642,11 @@ function bakery_agent_work_map_core(): array
                 'includes/driver_route_map.js',
                 'includes/delivery_skip.php',
                 'includes/delivery_proof.php',
+                'includes/photo_capture.php',
+                'includes/photo_handler.php',
+                'includes/driver_assignment_actions.php',
+                'upload_driver_photo.php',
+                'database/schema/107_driver_photo_capture.sql',
                 'driver_load.php',
             ],
             'tests' => [
@@ -652,6 +658,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_driver_survey_flow_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',
                 'tests/run_status_alignment_tests.php',
+                'tests/run_closeout_proof_tests.php',
             ],
             'invariants' => [
                 'Driver Assignment is the canonical route board',
@@ -836,6 +843,7 @@ function bakery_agent_work_map_core(): array
                 'css/route_manager.css',
                 'includes/product_pack_yields.php',
                 'route_summary.php',
+                'includes/route_summary.php',
                 'css/route_summary.css',
                 'route_photo_journey.php',
                 'driver_photo.php',
@@ -854,6 +862,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_route_summary_tests.php',
                 'tests/run_route_photo_journey_tests.php',
                 'tests/run_route_manager_pickup_tests.php',
+                'tests/run_closeout_proof_tests.php',
             ],
             'invariants' => [
                 'Driver Assignment is the canonical route board',

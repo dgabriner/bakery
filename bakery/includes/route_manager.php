@@ -1496,6 +1496,14 @@ function route_manager_normalize_photo(PhotoHandler $photoHandler, array $row): 
         'photo_type' => $row['photo_type'] ?? 'Photo',
         'notes' => $row['notes'] ?? '',
         'created_at' => $row['created_at'] ?? '',
+        'captured_at' => $row['captured_at'] ?? '',
+        'capture_source' => $row['capture_source'] ?? '',
+        'latitude' => isset($row['latitude']) && $row['latitude'] !== null && $row['latitude'] !== ''
+            ? (float)$row['latitude']
+            : null,
+        'longitude' => isset($row['longitude']) && $row['longitude'] !== null && $row['longitude'] !== ''
+            ? (float)$row['longitude']
+            : null,
         'url' => $urls['primary'],
         'fallback_url' => $urls['fallback'],
         'customer_name' => $row['customer_name'] ?? '',

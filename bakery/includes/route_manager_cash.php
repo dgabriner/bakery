@@ -8,7 +8,26 @@
  */
 
 /**
- * Best-known dollar amount for a stop (confirmed cash, then order totals).
+ * Booked snapshot for a stop, including a real zero or a negative credit net.
+ * Null means the snapshot was never written. Zero is a saved total.
+ */
+function route_manager_booked_amount(array $delivery): ?float
+{
+    if (!array_key_exists('delivery_order_total', $delivery)) {
+        return null;
+    }
+    $snapshot = $delivery['delivery_order_total'];
+    if ($snapshot === null || $snapshot === '') {
+        return null;
+    }
+    return round((float)$snapshot, 2);
+}
+
+/**
+ * Best-known dollar amount for a stop (confirmed cash, then the booked snapshot).
+ *
+ * A negative snapshot is a credit or return larger than the bread left that
+ * day. It is not a missing total, so it is not replaced by the raw line sum.
  */
 function route_manager_estimate_amount(array $delivery): float
 {
@@ -20,14 +39,17 @@ function route_manager_estimate_amount(array $delivery): float
         }
     }
 
-    $amount = (float)($delivery['delivery_order_total'] ?? 0);
-    if ($amount <= 0) {
-        $amount = (float)($delivery['total_amount'] ?? 0);
+    $booked = route_manager_booked_amount($delivery);
+    if ($booked !== null) {
+        return $booked;
     }
-    if ($amount <= 0) {
-        $amount = (float)($delivery['order_total_estimate'] ?? 0);
+
+    $total = $delivery['total_amount'] ?? null;
+    if ($total !== null && $total !== '' && abs((float)$total) > 0.00001) {
+        return round((float)$total, 2);
     }
-    return $amount;
+
+    return round((float)($delivery['order_total_estimate'] ?? 0), 2);
 }
 
 function route_manager_compute_cash_summary(array $deliveries, ?float $cashTurnedIn = null): array

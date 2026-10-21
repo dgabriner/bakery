@@ -11,6 +11,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/route_manager.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/photo_capture.php';
 
 /**
  * @return array<string, string>
@@ -181,6 +182,107 @@ function bakery_route_summary_status_key(string $status): string
     return 'route_summary.status_pending';
 }
 
+function bakery_route_summary_photo_time(array $photo): ?int
+{
+    $raw = trim((string)($photo['captured_at'] ?? ''));
+    if ($raw === '') {
+        $raw = trim((string)($photo['created_at'] ?? ''));
+    }
+    if ($raw === '' || $raw === '0000-00-00 00:00:00') {
+        return null;
+    }
+    $timestamp = strtotime($raw);
+    return $timestamp === false ? null : $timestamp;
+}
+
+function bakery_route_summary_stop_photo_time(array $stop): ?int
+{
+    $earliest = null;
+    foreach ($stop['photos'] ?? [] as $photo) {
+        if (!is_array($photo)) {
+            continue;
+        }
+        $timestamp = bakery_route_summary_photo_time($photo);
+        if ($timestamp === null) {
+            continue;
+        }
+        if ($earliest === null || $timestamp < $earliest) {
+            $earliest = $timestamp;
+        }
+    }
+    return $earliest;
+}
+
+/**
+ * A photo taken before the previous stop on the same route.
+ *
+ * @param list<array<string, mixed>> $stops
+ */
+function bakery_route_summary_mark_out_of_order(array &$stops): void
+{
+    $indexed = [];
+    foreach ($stops as $index => $stop) {
+        $indexed[] = [
+            'index' => $index,
+            'order' => (int)($stop['route_order'] ?? 0),
+            'time' => bakery_route_summary_stop_photo_time($stop),
+        ];
+    }
+    usort($indexed, static function (array $left, array $right): int {
+        $order = $left['order'] <=> $right['order'];
+        return $order !== 0 ? $order : ($left['index'] <=> $right['index']);
+    });
+    $previousTime = null;
+    foreach ($indexed as $row) {
+        $stops[$row['index']]['photo_out_of_order'] = false;
+        if ($row['time'] === null) {
+            continue;
+        }
+        if ($previousTime !== null && ($row['time'] + 60) < $previousTime) {
+            $stops[$row['index']]['photo_out_of_order'] = true;
+        }
+        if ($previousTime === null || $row['time'] > $previousTime) {
+            $previousTime = $row['time'];
+        }
+    }
+}
+
+/**
+ * @param list<array<string, mixed>> $stops
+ */
+function bakery_route_summary_mark_proof_flags(array &$stops): void
+{
+    bakery_route_summary_mark_out_of_order($stops);
+    foreach ($stops as &$stop) {
+        $status = (string)($stop['delivery_status'] ?? 'pending');
+        $closed = $status === 'delivered';
+        $photos = is_array($stop['photos'] ?? null) ? $stop['photos'] : [];
+        $hasPhoto = $photos !== [];
+        $booked = array_key_exists('booked_amount', $stop) ? $stop['booked_amount'] : null;
+        $sold = (float)($stop['sold_amount'] ?? 0);
+        $stop['negative_total'] = $sold < -0.004 || ($booked !== null && (float)$booked < -0.004);
+        $stop['photo_without_closeout'] = $hasPhoto && !$closed && $status !== 'cancelled';
+        $stop['closeout_without_photo'] = $closed && !$hasPhoto;
+        $far = false;
+        foreach ($photos as $photo) {
+            if (!is_array($photo)) {
+                continue;
+            }
+            if (bakery_photo_is_far_from_store(
+                $photo['latitude'] ?? null,
+                $photo['longitude'] ?? null,
+                $stop['latitude'] ?? null,
+                $stop['longitude'] ?? null
+            )) {
+                $far = true;
+                break;
+            }
+        }
+        $stop['photo_far'] = $far;
+    }
+    unset($stop);
+}
+
 function bakery_route_summary_matches_filter(array $stop, string $filter): bool
 {
     $status = (string)($stop['delivery_status'] ?? 'pending');
@@ -224,15 +326,22 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
         'sold' => 0.0,
         'pieces' => 0,
         'drivers' => 0,
+        'negative_stops' => 0,
+        'photo_without_closeout' => 0,
+        'closeout_without_photo' => 0,
+        'photo_far' => 0,
+        'photo_out_of_order' => 0,
     ];
 
     foreach ($driversData as $driver) {
         $visibleStops = [];
+        $preparedStops = [];
         $driverPhotos = 0;
         $driverMissing = 0;
         $driverArrivalOnly = 0;
         $driverArrivalPhotos = 0;
         $driverPodPhotos = 0;
+        $driverNegative = 0;
         foreach ($driver['deliveries'] ?? [] as $delivery) {
             $driverId = (int)($driver['id'] ?? $delivery['driver_id'] ?? 0);
             $customerId = (int)($delivery['customer_id'] ?? 0);
@@ -259,9 +368,26 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             $stop['photo_status'] = bakery_route_summary_photo_status($status, $hasArrival, $hasPod);
             $stop['hero_photo'] = bakery_route_summary_choose_hero_photo($photos);
             $stop['sold_amount'] = $sold;
+            $stop['booked_amount'] = route_manager_booked_amount($delivery);
             $stop['pieces'] = $pieces;
             $stop['show_time'] = bakery_route_summary_stop_time($stop);
             $stop['counts_toward_sold'] = bakery_route_summary_counts_toward_sold($stop);
+            $stop['negative_total'] = false;
+            $stop['photo_without_closeout'] = false;
+            $stop['closeout_without_photo'] = false;
+            $stop['photo_far'] = false;
+            $stop['photo_out_of_order'] = false;
+            $preparedStops[] = $stop;
+        }
+
+        bakery_route_summary_mark_proof_flags($preparedStops);
+        foreach ($preparedStops as $stop) {
+            $status = (string)($stop['delivery_status'] ?? 'pending');
+            $photos = is_array($stop['photos'] ?? null) ? $stop['photos'] : [];
+            $hasPod = !empty($stop['has_pod_photo']);
+            $arrivalOnly = !empty($stop['arrival_only']);
+            $sold = (float)($stop['sold_amount'] ?? 0);
+            $pieces = (int)($stop['pieces'] ?? 0);
 
             $stats['stops']++;
             if ($status === 'delivered') {
@@ -271,10 +397,10 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             } elseif ($status !== 'cancelled') {
                 $stats['pending']++;
             }
-            $stats['arrival_photo_count'] += count($classified['arrival']);
-            $stats['pod_photo_count'] += count($classified['pod']);
-            $driverArrivalPhotos += count($classified['arrival']);
-            $driverPodPhotos += count($classified['pod']);
+            $stats['arrival_photo_count'] += (int)($stop['arrival_count'] ?? 0);
+            $stats['pod_photo_count'] += (int)($stop['pod_count'] ?? 0);
+            $driverArrivalPhotos += (int)($stop['arrival_count'] ?? 0);
+            $driverPodPhotos += (int)($stop['pod_count'] ?? 0);
             if ($photos !== []) {
                 $stats['photo_count'] += count($photos);
                 $driverPhotos += count($photos);
@@ -289,6 +415,22 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             if ($status !== 'cancelled' && !$hasPod) {
                 $stats['missing_photos']++;
                 $driverMissing++;
+            }
+            if (!empty($stop['negative_total'])) {
+                $stats['negative_stops']++;
+                $driverNegative++;
+            }
+            if (!empty($stop['photo_without_closeout'])) {
+                $stats['photo_without_closeout']++;
+            }
+            if (!empty($stop['closeout_without_photo'])) {
+                $stats['closeout_without_photo']++;
+            }
+            if (!empty($stop['photo_far'])) {
+                $stats['photo_far']++;
+            }
+            if (!empty($stop['photo_out_of_order'])) {
+                $stats['photo_out_of_order']++;
             }
             if ($stop['counts_toward_sold']) {
                 $stats['sold'] += $sold;
@@ -316,6 +458,7 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             'pod_photo_count' => $driverPodPhotos,
             'arrival_only' => $driverArrivalOnly,
             'missing_photos' => $driverMissing,
+            'negative_stops' => $driverNegative,
             'cash_summary' => $cashSummary,
         ];
     }
@@ -438,4 +581,71 @@ function bakery_route_closeout_stops(PDO $db, string $date, int $driverId): arra
         return strcasecmp((string)$a['customer_name'], (string)$b['customer_name']);
     });
     return $stops;
+}
+
+/**
+ * @param list<array<string, mixed>> $stops
+ * @return array{after:int,arrival_only:int,no_photo:int,open:int}
+ */
+function bakery_route_closeout_counts(array $stops): array
+{
+    $counts = [
+        'after' => 0,
+        'arrival_only' => 0,
+        'no_photo' => 0,
+        'open' => 0,
+    ];
+    foreach ($stops as $stop) {
+        if (!is_array($stop)) {
+            continue;
+        }
+        $status = (string)($stop['delivery_status'] ?? 'pending');
+        if ($status === 'cancelled') {
+            continue;
+        }
+        if ($status !== 'delivered') {
+            $counts['open']++;
+            continue;
+        }
+        if (!empty($stop['has_pod_photo'])) {
+            $counts['after']++;
+        } elseif (!empty($stop['has_arrival_photo'])) {
+            $counts['arrival_only']++;
+        } else {
+            $counts['no_photo']++;
+        }
+    }
+    return $counts;
+}
+
+/**
+ * Per-driver closeout counts and a Spanish note that is only copied.
+ *
+ * @return list<array{driver_id:int,driver_name:string,counts:array{after:int,arrival_only:int,no_photo:int,open:int},body:string}>
+ */
+function bakery_route_closeout_driver_splits(PDO $db, string $date): array
+{
+    if (!function_exists('bakery_driver_closeout_sms_body')) {
+        require_once __DIR__ . '/driver_day_sms.php';
+    }
+    $day = bakery_route_summary_load($db, $date);
+    $splits = [];
+    foreach ($day['drivers'] as $driver) {
+        if (!is_array($driver)) {
+            continue;
+        }
+        $counts = bakery_route_closeout_counts($driver['stops'] ?? []);
+        $name = (string)($driver['name'] ?? '');
+        $splits[] = [
+            'driver_id' => (int)($driver['id'] ?? 0),
+            'driver_name' => $name,
+            'counts' => $counts,
+            'body' => bakery_driver_closeout_sms_body([
+                'driver_name' => $name,
+                'date' => $date,
+                'counts' => $counts,
+            ]),
+        ];
+    }
+    return $splits;
 }

@@ -64,6 +64,30 @@ $withTurnin = route_manager_compute_cash_summary([
 route_manager_cash_assert_same(25.0, $withTurnin['cash_turned_in'], 'cash summary accepts recorded turn-in amount');
 route_manager_cash_assert_same(15.0, $withTurnin['cash_still_owed'], 'still owed is collected minus turned in');
 
+route_manager_cash_assert_same(
+    -8.0,
+    route_manager_estimate_amount([
+        'payment_collection' => 'signature',
+        'delivery_status' => 'delivered',
+        'delivery_order_total' => -8,
+        'total_amount' => -8,
+        'order_total_estimate' => -42,
+    ]),
+    'a negative booked snapshot is kept instead of the raw line sum'
+);
+
+route_manager_cash_assert_same(
+    0.0,
+    route_manager_estimate_amount([
+        'payment_collection' => 'signature',
+        'delivery_status' => 'delivered',
+        'delivery_order_total' => 0,
+        'total_amount' => 20,
+        'order_total_estimate' => 20,
+    ]),
+    'a booked zero is a saved total, not a missing one'
+);
+
 $codSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/cod_turnins.php');
 route_manager_cash_assert_same(
     true,

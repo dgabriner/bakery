@@ -22,6 +22,7 @@
     viewingPhotoId: null,
     retakePhotoId: null,
     photoMode: 'capture',
+    pendingCapture: null,
     orderedPieces: 0,
     orderTotal: 0,
     pricingLabel: '',
@@ -47,7 +48,8 @@
     completionMessage: '',
     stopFinished: false,
     sessionRefreshPromise: null,
-    scrollLockY: 0
+    scrollLockY: 0,
+    photoCoords: null
   };
 
   var STEPS = ['photo', 'delivery', 'invoice'];
@@ -460,7 +462,8 @@
     var cameraInput = $('deliveryFileInput');
     var galleryInput = $('deliveryGalleryInput');
     if (cameraInput) cameraInput.disabled = isBusy;
-    if (galleryInput) galleryInput.disabled = isBusy;
+    if (galleryInput) galleryInput.disabled = isBusy || isAfterPhotoStep();
+    syncAfterPhotoGallery();
   }
 
   function useNativeCamera() {
@@ -554,6 +557,25 @@
           : i18n('receipt_guidance');
     }
     updateNativeCameraControls();
+    syncAfterPhotoGallery();
+  }
+
+  function isAfterPhotoStep() {
+    var typeSelect = $('deliveryPhotoType');
+    var type = typeSelect && typeSelect.value ? typeSelect.value : '';
+    return type === 'After' || state.photoReturnStep === 'complete';
+  }
+
+  function syncAfterPhotoGallery() {
+    var lock = isAfterPhotoStep();
+    var galleryBtn = $('deliveryGalleryPickerBtn');
+    var galleryInput = $('deliveryGalleryInput');
+    if (galleryBtn) {
+      galleryBtn.hidden = lock;
+    }
+    if (galleryInput && lock) {
+      galleryInput.disabled = true;
+    }
   }
 
   function setPhotoMode(mode) {
@@ -827,6 +849,7 @@
       return;
     }
 
+    notePhotoPosition();
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -837,6 +860,13 @@
         return;
       }
       state.blob = blob;
+      state.pendingCapture = {
+        method: 'camera',
+        captured_at: new Date().toISOString(),
+        source: 'browser',
+        latitude: '',
+        longitude: ''
+      };
       showCapturedPreview(URL.createObjectURL(blob));
       setStatus(i18n('photo_captured_saving'), 'loading');
       uploadBlob(blob, 'arrival-photo.jpg');
@@ -866,6 +896,18 @@
     } else {
       startCamera();
     }
+  }
+
+  function notePhotoPosition() {
+    if (state.photoCoordPromise) return;
+    state.photoCoordPromise = getCoords({ timeout: 1200, maximumAge: 120000 }).then(function (coords) {
+      if (!coords || coords.latitude === '' || coords.longitude === '') return;
+      state.photoCoords = coords;
+      if (state.pendingCapture && !state.pendingCapture.latitude) {
+        state.pendingCapture.latitude = coords.latitude;
+        state.pendingCapture.longitude = coords.longitude;
+      }
+    });
   }
 
   function getCoords(options) {
@@ -1261,6 +1303,133 @@
     return { blob: blob, filename: baseName + '.jpg' };
   }
 
+  function readJpegCapture(file) {
+    var empty = { captured_at: '', latitude: '', longitude: '' };
+    if (!file || typeof file.arrayBuffer !== 'function') {
+      return Promise.resolve(empty);
+    }
+    return file.arrayBuffer().then(function (buffer) {
+      return parseJpegExif(buffer) || empty;
+    }).catch(function () {
+      return empty;
+    });
+  }
+
+  function parseJpegExif(buffer) {
+    var empty = { captured_at: '', latitude: '', longitude: '' };
+    if (!buffer || buffer.byteLength < 16) return empty;
+    var view = new DataView(buffer);
+    if (view.getUint16(0) !== 0xFFD8) return empty;
+    var offset = 2;
+    while (offset + 4 < view.byteLength) {
+      var marker = view.getUint16(offset);
+      if (marker === 0xFFDA) break;
+      var size = view.getUint16(offset + 2);
+      if (size < 2) break;
+      if (marker === 0xFFE1) {
+        var found = readExifApp1(view, offset + 4, size - 2);
+        if (found) return found;
+      }
+      offset += 2 + size;
+    }
+    return empty;
+  }
+
+  function readExifApp1(view, start, length) {
+    if (length < 14) return null;
+    if (view.getUint8(start) !== 0x45 || view.getUint8(start + 1) !== 0x78) return null;
+    var tiff = start + 6;
+    var little = view.getUint16(tiff) === 0x4949;
+    function u16(pos) { return view.getUint16(pos, little); }
+    function u32(pos) { return view.getUint32(pos, little); }
+    if (u16(tiff + 2) !== 42) return null;
+    var result = { captured_at: '', latitude: '', longitude: '' };
+    var exifOffset = null;
+    var gpsOffset = null;
+    function ascii(pos, n) {
+      var chars = '';
+      for (var i = 0; i < n; i++) {
+        if (pos + i >= view.byteLength) break;
+        var code = view.getUint8(pos + i);
+        if (!code) break;
+        chars += String.fromCharCode(code);
+      }
+      return chars;
+    }
+    function rational(pos) {
+      if (pos + 8 > view.byteLength) return null;
+      var den = u32(pos + 4);
+      if (!den) return null;
+      return u32(pos) / den;
+    }
+    function walk(ifd) {
+      if (ifd < tiff || ifd + 2 > view.byteLength) return;
+      var count = u16(ifd);
+      for (var i = 0; i < count; i++) {
+        var entry = ifd + 2 + i * 12;
+        if (entry + 12 > view.byteLength) return;
+        var tag = u16(entry);
+        var type = u16(entry + 2);
+        var n = u32(entry + 4);
+        var valuePos = entry + 8;
+        if ((type === 2 && n > 4) || type === 5) {
+          valuePos = tiff + u32(entry + 8);
+        }
+        if (tag === 0x8769) exifOffset = tiff + u32(entry + 8);
+        if (tag === 0x8825) gpsOffset = tiff + u32(entry + 8);
+        if ((tag === 0x9003 || tag === 0x0132) && !result.captured_at) {
+          var text = ascii(valuePos, Math.min(n, 19));
+          var match = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})/.exec(text);
+          if (match) {
+            result.captured_at = match[1] + '-' + match[2] + '-' + match[3] + ' ' + match[4];
+          }
+        }
+      }
+    }
+    walk(tiff + u32(tiff + 4));
+    if (exifOffset) walk(exifOffset);
+    if (gpsOffset && gpsOffset + 2 < view.byteLength) {
+      var lat = null;
+      var lng = null;
+      var latRef = 'N';
+      var lngRef = 'E';
+      var count = u16(gpsOffset);
+      for (var g = 0; g < count; g++) {
+        var entry = gpsOffset + 2 + g * 12;
+        if (entry + 12 > view.byteLength) break;
+        var tag = u16(entry);
+        var type = u16(entry + 2);
+        var n = u32(entry + 4);
+        var valuePos = entry + 8;
+        if (type === 5 || (type === 2 && n > 4)) valuePos = tiff + u32(entry + 8);
+        if (tag === 1) latRef = ascii(type === 2 && n <= 4 ? entry + 8 : valuePos, 2);
+        if (tag === 3) lngRef = ascii(type === 2 && n <= 4 ? entry + 8 : valuePos, 2);
+        if (tag === 2 && n >= 3) {
+          var d = rational(valuePos);
+          var m = rational(valuePos + 8);
+          var s = rational(valuePos + 16);
+          if (d !== null && m !== null && s !== null) lat = d + (m / 60) + (s / 3600);
+        }
+        if (tag === 4 && n >= 3) {
+          var d2 = rational(valuePos);
+          var m2 = rational(valuePos + 8);
+          var s2 = rational(valuePos + 16);
+          if (d2 !== null && m2 !== null && s2 !== null) lng = d2 + (m2 / 60) + (s2 / 3600);
+        }
+      }
+      if (lat !== null) {
+        if (String(latRef).toUpperCase().charAt(0) === 'S') lat = -lat;
+        result.latitude = String(Math.round(lat * 1e8) / 1e8);
+      }
+      if (lng !== null) {
+        if (String(lngRef).toUpperCase().charAt(0) === 'W') lng = -lng;
+        result.longitude = String(Math.round(lng * 1e8) / 1e8);
+      }
+    }
+    if (!result.captured_at && !result.latitude && !result.longitude) return null;
+    return result;
+  }
+
   async function uploadBlob(blob, filename) {
     if (state.uploading) return;
     if (!blob) {
@@ -1281,6 +1450,19 @@
     try {
       await refreshRouteSession();
       var photoType = ($('deliveryPhotoType') && $('deliveryPhotoType').value) || 'Before';
+      if (photoType === 'After' && state.pendingCapture && state.pendingCapture.method === 'gallery') {
+        state.pendingCapture = null;
+        throw new Error(i18n('after_camera_only'));
+      }
+      var capture = state.pendingCapture || {
+        method: 'camera',
+        captured_at: new Date().toISOString(),
+        source: 'browser',
+        latitude: '',
+        longitude: ''
+      };
+      state.pendingCapture = null;
+      var coords = state.photoCoords || { latitude: '', longitude: '' };
       var outbox = window.BakeryDriverOutbox;
       var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('photo') : '';
       var payload = {
@@ -1290,8 +1472,11 @@
         date: state.date,
         photo_type: photoType,
         notes: ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '',
-        latitude: '',
-        longitude: ''
+        latitude: capture.latitude || coords.latitude || '',
+        longitude: capture.longitude || coords.longitude || '',
+        captured_at: capture.captured_at || '',
+        capture_source: capture.source || 'browser',
+        capture_method: capture.method || 'camera'
       };
 
       if (fill) fill.style.width = '70%';
@@ -1783,6 +1968,7 @@
   }
 
   function promptDeparturePhoto() {
+    notePhotoPosition();
     if ($('deliveryPhotoType')) {
       $('deliveryPhotoType').value = 'After';
     }
@@ -2171,6 +2357,9 @@
       photoModal.setAttribute('data-assignment-id', String(opts.assignmentId || 0));
     }
     state.blob = null;
+    state.photoCoords = null;
+    state.photoCoordPromise = null;
+    notePhotoPosition();
     state.preparing = false;
     revokePreviewUrl();
     state.photos = [];
@@ -2340,13 +2529,27 @@
   }
 
   async function onFileChosen(event) {
+    notePhotoPosition();
     var file = event.target.files && event.target.files[0];
+    var fromGallery = event.target && event.target.id === 'deliveryGalleryInput';
     event.target.value = '';
     if (!file) return;
+    if (fromGallery && isAfterPhotoStep()) {
+      setStatus(i18n('after_camera_only'), 'error');
+      return;
+    }
     if (!looksLikeImageFile(file)) {
       setStatus(i18n('choose_image'), 'error');
       return;
     }
+    var exif = await readJpegCapture(file);
+    state.pendingCapture = {
+      method: fromGallery ? 'gallery' : 'camera',
+      captured_at: exif.captured_at || new Date(file.lastModified || Date.now()).toISOString(),
+      source: (exif.captured_at || exif.latitude) ? 'exif' : 'browser',
+      latitude: exif.latitude || '',
+      longitude: exif.longitude || ''
+    };
     state.blob = file;
     showCapturedPreview(URL.createObjectURL(file));
     state.preparing = true;

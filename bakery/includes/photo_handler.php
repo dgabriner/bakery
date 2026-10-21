@@ -593,15 +593,22 @@ class PhotoHandler {
             }
             $hasClientRequestCol = function_exists('column_exists')
                 && column_exists($db, 'driver_photos', 'client_request_id');
+            $hasCaptureCol = function_exists('column_exists')
+                && column_exists($db, 'driver_photos', 'captured_at');
+            $captureCols = $hasCaptureCol ? ', captured_at, capture_source' : '';
+            $captureVals = $hasCaptureCol ? ', ?, ?' : '';
+            $captureParams = $hasCaptureCol
+                ? [$photoData['captured_at'] ?? null, $photoData['capture_source'] ?? null]
+                : [];
 
             if ($hasClientRequestCol && $clientRequestId !== '') {
                 $stmt = $db->prepare("
                     INSERT INTO driver_photos
                     (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
-                     file_size, mime_type, photo_type, latitude, longitude, notes, client_request_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     file_size, mime_type, photo_type, latitude, longitude, notes, client_request_id{$captureCols})
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{$captureVals})
                 ");
-                $result = $stmt->execute([
+                $result = $stmt->execute(array_merge([
                     $driverId,
                     $customerId,
                     $deliveryDate,
@@ -616,15 +623,15 @@ class PhotoHandler {
                     $photoData['longitude'],
                     $photoData['notes'],
                     $clientRequestId,
-                ]);
+                ], $captureParams));
             } else {
                 $stmt = $db->prepare("
                     INSERT INTO driver_photos
                     (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
-                     file_size, mime_type, photo_type, latitude, longitude, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     file_size, mime_type, photo_type, latitude, longitude, notes{$captureCols})
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{$captureVals})
                 ");
-                $result = $stmt->execute([
+                $result = $stmt->execute(array_merge([
                     $driverId,
                     $customerId,
                     $deliveryDate,
@@ -638,7 +645,7 @@ class PhotoHandler {
                     $photoData['latitude'],
                     $photoData['longitude'],
                     $photoData['notes'],
-                ]);
+                ], $captureParams));
             }
 
             if ($result) {

@@ -96,6 +96,9 @@ require_once 'includes/nav.php';
   <?php if ((int)$stats['arrival_only'] > 0): ?>
     <p class="rs-note rs-note--warn" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
   <?php endif; ?>
+  <?php if ((int)($stats['negative_stops'] ?? 0) > 0): ?>
+    <p class="rs-note rs-note--warn" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.negative_help', ['count' => (int)$stats['negative_stops']]), ENT_QUOTES, 'UTF-8'); ?></p>
+  <?php endif; ?>
 
   <?php if (!$day['photos_available']): ?>
     <div class="rs-note" role="status"><?php bakery_te('route_summary.photos_unavailable'); ?></div>
@@ -164,6 +167,17 @@ require_once 'includes/nav.php';
                 <?php if (!empty($stop['arrival_only'])): ?>
                   <p class="rs-flag"><?php bakery_te('route_summary.arrival_only'); ?></p>
                 <?php endif; ?>
+                <?php foreach ([
+                    'negative_total' => 'route_summary.negative_total',
+                    'photo_without_closeout' => 'route_summary.photo_without_closeout',
+                    'closeout_without_photo' => 'route_summary.closeout_without_photo',
+                    'photo_far' => 'route_summary.photo_far',
+                    'photo_out_of_order' => 'route_summary.photo_out_of_order',
+                ] as $flagKey => $flagLabel): ?>
+                  <?php if (!empty($stop[$flagKey])): ?>
+                    <p class="rs-flag"><?php bakery_te($flagLabel); ?></p>
+                  <?php endif; ?>
+                <?php endforeach; ?>
                 <p class="rs-card__sold"><?php echo htmlspecialchars(bakery_route_summary_format_money((float)$stop['sold_amount'])); ?><?php if ((int)$stop['pieces'] > 0): ?> <span>· <?php echo (int)$stop['pieces']; ?> <?php bakery_te('route_summary.stat_pieces'); ?></span><?php endif; ?></p>
                 <p class="rs-card__meta">
                   <span><?php echo htmlspecialchars((string)$stop['driver_name']); ?></span>
