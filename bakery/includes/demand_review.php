@@ -323,6 +323,19 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
             }
         }
         $customer['on_standing_route'] = isset($standingRouteByCustomer[$cid]);
+        if (!isset($specialUnitsByCustomer)) {
+            $specialUnitsByCustomer = [];
+            // Loaded here so a demand review that never saved a special order stays cheap,
+            // and so this file does not include special_orders.php while that file is still loading.
+            $specialPath = __DIR__ . '/special_orders.php';
+            if (is_file($specialPath)) {
+                require_once $specialPath;
+            }
+            if (function_exists('bakery_special_order_units_by_customer')) {
+                $specialUnitsByCustomer = bakery_special_order_units_by_customer($db, $date);
+            }
+        }
+        $customer['special_units'] = (int)($specialUnitsByCustomer[$cid] ?? 0);
         $customer['state'] = bakery_demand_review_classify_customer($customer);
         $customer['diff_lines'] = bakery_demand_review_diff_lines($customer['line_map']);
         $customer['standing_units'] = 0;
@@ -548,6 +561,7 @@ function bakery_demand_review_empty_customer(array $row, $standingRoute = null) 
         'diff_lines' => [],
         'standing_units' => 0,
         'daily_units' => 0,
+        'special_units' => 0,
         'is_advanced' => false,
     ];
 }
@@ -581,10 +595,10 @@ function bakery_demand_review_classify_customer(array $customer) {
         if (!$hasQty && !empty($customer['on_standing_route'])) {
             return 'matches';
         }
-        return $hasBillable ? 'one_off' : 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, $hasBillable ? 'one_off' : 'empty_daily');
     }
     if (!empty($customer['has_daily']) && empty($customer['line_map'])) {
-        return 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, 'empty_daily');
     }
 
     $hasDailyItems = false;
@@ -613,7 +627,7 @@ function bakery_demand_review_classify_customer(array $customer) {
         if (!empty($customer['standing_fill_blocked']) && !empty($customer['has_standing']) && !$hasDailyItems) {
             return 'changed';
         }
-        return 'empty_daily';
+        return bakery_demand_review_state_when_special($customer, 'empty_daily');
     }
     if ($hasDiff) {
         return 'changed';
@@ -622,6 +636,102 @@ function bakery_demand_review_classify_customer(array $customer) {
         return 'paused';
     }
     return 'matches';
+}
+
+/**
+ * A routed stop whose dated lines have no positive quantity.
+ * An intentional "removed for this day only" order stays classified as
+ * changed. This is the morning-board signal for that stop once it is on a route.
+ * A standing-route visit with no standing order and no pieces is not included.
+ */
+/**
+ * A positive special order is dated demand. It is not an empty pan dulce shell.
+ */
+function bakery_demand_review_state_when_special(array $customer, string $otherwise): string
+{
+    if ($otherwise !== 'empty_daily' || (int)($customer['special_units'] ?? 0) <= 0) {
+        return $otherwise;
+    }
+    return !empty($customer['has_standing']) ? 'changed' : 'one_off';
+}
+
+function bakery_demand_review_is_routed_zero_order(array $customer): bool
+{
+    if ((int)($customer['special_units'] ?? 0) > 0) {
+        return false;
+    }
+    if (empty($customer['has_daily'])) {
+        return false;
+    }
+    if ((int)($customer['assignment_driver_id'] ?? 0) <= 0) {
+        return false;
+    }
+    foreach ($customer['line_map'] ?? [] as $line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        if (($line['daily_qty'] ?? null) !== null && (int)$line['daily_qty'] > 0) {
+            return false;
+        }
+    }
+    if (empty($customer['has_standing']) && !empty($customer['on_standing_route'])) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Empty dated orders plus routed stops whose dated quantity is zero.
+ *
+ * @param list<array<string, mixed>> $customers
+ * @return array{count:int, names:list<string>}
+ */
+function bakery_demand_review_empty_stop_flags(array $customers): array
+{
+    $names = [];
+    $count = 0;
+    foreach ($customers as $customer) {
+        if (!is_array($customer)) {
+            continue;
+        }
+        if ((int)($customer['special_units'] ?? 0) > 0) {
+            continue;
+        }
+        $state = (string)($customer['state'] ?? '');
+        if ($state !== 'empty_daily' && !bakery_demand_review_is_routed_zero_order($customer)) {
+            continue;
+        }
+        $count++;
+        $name = trim((string)($customer['customer_name'] ?? ''));
+        if ($name !== '' && !in_array($name, $names, true)) {
+            $names[] = $name;
+        }
+    }
+    return ['count' => $count, 'names' => $names];
+}
+
+/**
+ * Routed stops whose dated order has no positive quantity.
+ * Special-order quantity and a standing-route shell with no standing order are skipped.
+ *
+ * @param list<array<string, mixed>> $customers
+ * @return array{count:int, names:list<string>}
+ */
+function bakery_demand_review_routed_zero_stops(array $customers): array
+{
+    $names = [];
+    $count = 0;
+    foreach ($customers as $customer) {
+        if (!is_array($customer) || !bakery_demand_review_is_routed_zero_order($customer)) {
+            continue;
+        }
+        $count++;
+        $name = trim((string)($customer['customer_name'] ?? ''));
+        if ($name !== '' && !in_array($name, $names, true)) {
+            $names[] = $name;
+        }
+    }
+    return ['count' => $count, 'names' => $names];
 }
 
 function bakery_demand_review_diff_lines(array $lineMap) {
@@ -680,6 +790,8 @@ function bakery_demand_review_matches_filter(array $customer, $filter) {
             return $customer['state'] === 'paused' || !empty($customer['paused']);
         case 'empty':
             return $customer['state'] === 'empty_daily';
+        case 'routed_zero':
+            return bakery_demand_review_is_routed_zero_order($customer);
         default:
             return true;
     }

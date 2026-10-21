@@ -210,6 +210,32 @@ function bakery_driver_route_day_url(int $driverId, string $date, array $extra =
 }
 
 /**
+ * Special-order lines for one dated stop. Loaded once per date.
+ *
+ * @return list<array<string, mixed>>
+ */
+function bakery_driver_special_lines_for_stop(int $dailyOrderId, string $date): array
+{
+    static $byOrder = null;
+    static $loadedDate = null;
+    if ($byOrder === null || $loadedDate !== $date) {
+        $byOrder = [];
+        $loadedDate = $date;
+        global $db;
+        if ($db instanceof PDO) {
+            $specialInclude = __DIR__ . '/includes/special_orders.php';
+            if (is_file($specialInclude)) {
+                require_once $specialInclude;
+            }
+            if (function_exists('bakery_special_order_lines_by_daily_order')) {
+                $byOrder = bakery_special_order_lines_by_daily_order($db, $date);
+            }
+        }
+    }
+    return $byOrder[$dailyOrderId] ?? [];
+}
+
+/**
  * Render one driver route stop card for the active queue or history panel.
  */
 function bakery_render_driver_stop_item(
@@ -221,8 +247,8 @@ function bakery_render_driver_stop_item(
     string $listKind = 'active'
 ): void {
     $status = $stop['delivery_status'] ?? 'pending';
-    $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $status : 'pending';
-    $isDone = in_array($status, ['delivered', 'cancelled', 'failed'], true);
+    $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled', 'office_flag'], true) ? $status : 'pending';
+    $isDone = in_array($status, ['delivered', 'cancelled', 'failed', 'office_flag'], true);
     $isPastList = $listKind === 'past';
     $phoneHref = preg_replace('/\D+/', '', bakery_driver_stop_phone($stop));
     $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
@@ -295,6 +321,12 @@ function bakery_render_driver_stop_item(
                     <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
                     <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
                 </div>
+                <?php
+                $specialStopLines = bakery_driver_special_lines_for_stop((int)$stop['daily_order_id'], $selectedDate);
+                if ($specialStopLines !== [] && function_exists('bakery_special_order_stop_summary_html')) {
+                    echo bakery_special_order_stop_summary_html($specialStopLines);
+                }
+                ?>
             </div>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
             <span class="driver-outbox-chip driver-outbox-chip--stop" data-outbox-chip hidden></span>
@@ -366,8 +398,8 @@ function bakery_render_driver_stop_item(
 function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int $selectedDriverId, string $selectedDate, string $driverName): void
 {
     $status = $stop['delivery_status'] ?? 'pending';
-    $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $status : 'pending';
-    $locked = in_array($status, ['delivered', 'in_transit'], true);
+    $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled', 'office_flag'], true) ? $status : 'pending';
+    $locked = in_array($status, ['delivered', 'in_transit', 'office_flag'], true);
     $skipped = $status === 'cancelled';
     $movable = !$locked && !$skipped;
     $receivingHours = bakery_driver_receiving_hours_label($stop);
@@ -474,6 +506,9 @@ if ($selectedDriverId > 0 && $driver) {
 
         $stmt->execute([$selectedDriverId, $selectedDate]);
         $results = $stmt->fetchAll();
+        $officeFlaggedOrders = function_exists('bakery_delivery_empty_flagged_order_ids')
+            ? bakery_delivery_empty_flagged_order_ids($db, $selectedDate)
+            : [];
 
         foreach ($results as $row) {
             $zone = $row['zone'] ?: bakery_t('driver.no_zone');
@@ -483,7 +518,10 @@ if ($selectedDriverId > 0 && $driver) {
             }
 
             $status = $row['delivery_status'] ?? 'pending';
-            if (in_array($status, ['delivered', 'cancelled', 'failed'], true)) {
+            if (isset($officeFlaggedOrders[(int)$row['daily_order_id']])) {
+                $status = 'office_flag';
+            }
+            if (in_array($status, ['delivered', 'cancelled', 'failed', 'office_flag'], true)) {
                 $driverCompletedStops++;
             }
 
@@ -531,7 +569,7 @@ $upcomingStops = [];
 $pastStops = [];
 foreach ($orderedStops as $stop) {
     $status = $stop['delivery_status'] ?? 'pending';
-    $isDone = in_array($status, ['delivered', 'cancelled', 'failed'], true);
+    $isDone = in_array($status, ['delivered', 'cancelled', 'failed', 'office_flag'], true);
     if ($isDone) {
         $pastStops[] = $stop;
     } elseif ($nextStop === null) {
@@ -1190,6 +1228,8 @@ document.body.classList.add('driver-route-prep');
                         <div><strong><?php bakery_te('driver.confirm_delivery'); ?></strong><span id="deliveryConfirmationHint"><?php bakery_te('driver.confirm_delivery_hint'); ?></span></div>
                         <span class="delivery-confirmation-total" id="deliveryConfirmationTotal">$0.00</span>
                     </div>
+                    <p id="deliveryEmptyOrderNotice" class="delivery-variance-alert" hidden role="alert"></p>
+                    <button type="button" class="btn btn-outline" id="deliveryFlagEmptyBtn" hidden><?php bakery_te('driver.flag_for_office'); ?></button>
                     <p id="deliveryWellOverWarning" class="delivery-well-over" hidden></p>
                     <div class="delivery-variance-alert" id="deliveryVarianceAlert" hidden role="alert">
                         <strong><?php bakery_te('driver.variance_title'); ?></strong>
@@ -1215,6 +1255,10 @@ document.body.classList.add('driver-route-prep');
                                 <div id="deliveryProductCounts" class="delivery-product-counts" hidden>
                                     <p id="deliveryProductCountsPrompt"></p>
                                     <div id="deliveryProductCountList"></div>
+                                </div>
+                                <div id="deliverySpecialCounts" class="delivery-special-counts" hidden>
+                                    <p id="deliverySpecialCountsLabel" class="delivery-special-counts__label"></p>
+                                    <div id="deliverySpecialCountList"></div>
                                 </div>
                                 <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
                                     <div class="quantity-stepper quantity-stepper--large">
@@ -1495,6 +1539,13 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'photo' => bakery_t('driver.photo'),
     'call' => bakery_t('driver.call'),
     'status_delivered' => bakery_t('driver.status_delivered'),
+    'status_office_flag' => bakery_t('driver.status_office_flag'),
+    'empty_order_call_office' => bakery_t('driver.empty_order_call_office'),
+    'empty_order_enter_qty' => bakery_t('driver.empty_order_enter_qty'),
+    'empty_order_flagged' => bakery_t('driver.empty_order_flagged'),
+    'special_order_heading' => bakery_t('driver.special_order_heading'),
+    'special_order_ordered' => bakery_t('driver.special_order_ordered'),
+    'special_order_qty' => bakery_t('driver.special_order_qty'),
     'status_pending' => bakery_t('driver.status_pending'),
     'status_in_transit' => bakery_t('driver.status_in_transit'),
     'status_failed' => bakery_t('driver.status_failed'),
@@ -1794,7 +1845,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     function getActiveStops() {
         return Array.prototype.slice.call(document.querySelectorAll('#stopList .stop-item')).filter(function (el) {
             var status = el.getAttribute('data-status') || '';
-            return status !== 'delivered' && status !== 'cancelled' && status !== 'failed';
+            return status !== 'delivered' && status !== 'cancelled' && status !== 'failed' && status !== 'office_flag';
         });
     }
 
@@ -2141,6 +2192,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         var statusLabel = status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
         if (status === 'cancelled' && di.status_cancelled) statusLabel = di.status_cancelled;
         if (status === 'delivered' && di.status_delivered) statusLabel = di.status_delivered;
+        if (status === 'office_flag' && di.status_office_flag) statusLabel = di.status_office_flag;
         badge.textContent = statusLabel;
         badge.className = 'status-badge status-badge--' + status;
     }
@@ -2171,7 +2223,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         items.forEach(function (el) {
             var status = el.getAttribute('data-status') || '';
             el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
-            if (status === 'delivered' || status === 'cancelled' || status === 'failed') {
+            if (status === 'delivered' || status === 'cancelled' || status === 'failed' || status === 'office_flag') {
                 moveStopToPastList(el);
                 return;
             }
@@ -2440,6 +2492,17 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
         },
         openStop: function (dailyOrderId, opts) {
             return openStopDeliveryFromEl(findRouteStop(dailyOrderId), opts || {});
+        },
+        afterOfficeFlag: function (dailyOrderId, message) {
+            var stop = findRouteStop(dailyOrderId);
+            if (stop) {
+                stop.setAttribute('data-status', 'office_flag');
+                updateStopStatusBadge(stop, 'office_flag');
+                rebuildStopContactActions(stop);
+                moveStopToPastList(stop);
+            }
+            refreshRouteUi();
+            showSuccessToast(message || di.empty_order_flagged);
         },
         afterDeliveryComplete: function (dailyOrderId, message) {
             var stop = findRouteStop(dailyOrderId);

@@ -26,8 +26,11 @@
     orderTotal: 0,
     pricingLabel: '',
     pricingMissing: false,
+    orderEmpty: false,
     pricePerPieceOverride: null,
     invoiceItems: [],
+    specialItems: [],
+    specialTotal: 0,
     savedTotal: 0,
     isSaved: false,
     paymentCollection: 'signature',
@@ -1412,12 +1415,51 @@
     }
   }
 
+  function emptyOrderPricedTotal() {
+    var panel = $('deliveryProductCounts');
+    if (!panel) return 0;
+    var total = 0;
+    panel.querySelectorAll('input[data-line-id]').forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      var count = raw === '' ? 0 : parseInt(raw, 10);
+      if (!Number.isInteger(count) || count <= 0) return;
+      var id = String(input.getAttribute('data-line-id'));
+      var item = (state.invoiceItems || []).find(function (row) { return String(row.id) === id; });
+      if (!item || Number(item.is_no_charge) === 1) return;
+      var price = Number(item.unit_price) || 0;
+      if (price > 0) total += count * price;
+    });
+    return total;
+  }
+
+  function syncEmptyOrderPiecesFromLines() {
+    var panel = $('deliveryProductCounts');
+    var piecesInput = $('deliveryPiecesInput');
+    if (!panel || !piecesInput) return 0;
+    var sum = 0;
+    panel.querySelectorAll('input[data-line-id]').forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      var count = raw === '' ? 0 : parseInt(raw, 10);
+      if (Number.isInteger(count) && count > 0) sum += count;
+    });
+    piecesInput.value = String(sum);
+    return sum;
+  }
+
   function getEffectivePricePerPiece() {
     if (state.pricingMissing) {
       var override = state.pricePerPieceOverride;
       if (Number.isFinite(override) && override > 0) {
         return override;
       }
+      return 0;
+    }
+    if (state.orderEmpty) {
+      var priced = emptyOrderPricedTotal();
+      var pieces = Math.max(0, parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10) || 0);
+      var credits = Math.max(0, parseInt($('deliveryCreditsInput') && $('deliveryCreditsInput').value, 10) || 0);
+      var billable = Math.max(0, pieces - credits);
+      if (billable > 0 && priced > 0) return priced / billable;
       return 0;
     }
     return state.orderedPieces > 0 ? state.orderTotal / state.orderedPieces : 0;
@@ -1534,9 +1576,87 @@
     list.innerHTML = html;
   }
 
+  function specialLineQuantity(item) {
+    var id = String(item.id || '');
+    var input = document.querySelector('#deliverySpecialCountList input[data-special-id="' + id + '"]');
+    if (input) {
+      var raw = String(input.value || '').trim();
+      if (raw !== '') {
+        var typed = parseInt(raw, 10);
+        if (Number.isInteger(typed) && typed >= 0) return typed;
+      }
+    }
+    if (item.delivered_quantity != null && item.delivered_quantity !== '') {
+      return Math.max(0, parseInt(item.delivered_quantity, 10) || 0);
+    }
+    return Math.max(0, Number(item.quantity) || 0);
+  }
+
+  function specialChargeTotal() {
+    var sum = 0;
+    (state.specialItems || []).forEach(function (item) {
+      if (Number(item.is_no_charge) === 1) return;
+      sum += specialLineQuantity(item) * (Number(item.unit_price) || 0);
+    });
+    return Math.round(sum * 100) / 100;
+  }
+
+  function displayDeliveryTotal(panTotal) {
+    if (state.photoMode === 'review' && state.isSaved) return panTotal;
+    return Math.round((panTotal + specialChargeTotal()) * 100) / 100;
+  }
+
+  function renderSpecialCounts() {
+    var panel = $('deliverySpecialCounts');
+    var list = $('deliverySpecialCountList');
+    var label = $('deliverySpecialCountsLabel');
+    if (!panel || !list) return;
+    var items = state.specialItems || [];
+    if (!items.length) {
+      panel.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+    panel.hidden = false;
+    if (label) label.textContent = i18n('special_order_heading', 'Special order');
+    var html = '';
+    items.forEach(function (item) {
+      var id = Number(item.id) || 0;
+      if (id <= 0) return;
+      var ordered = Number(item.quantity) || 0;
+      var name = item.description || item.product_name || i18n('product');
+      var current = specialLineQuantity(item);
+      var price = Number(item.is_no_charge) === 1 ? 0 : Number(item.unit_price) || 0;
+      html += '<label class="delivery-product-count delivery-special-count">'
+        + '<span><strong>' + escapeHtml(name) + '</strong>'
+        + '<small>' + escapeHtml(i18n('special_order_ordered', 'Ordered :count').replace(':count', String(ordered)))
+        + ' · $' + price.toFixed(2) + '</small></span>'
+        + '<input type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" data-special-id="' + id
+        + '" value="' + current + '" aria-label="'
+        + escapeHtml(i18n('special_order_qty', 'Special order quantity for :product').replace(':product', name)) + '">'
+        + '</label>';
+    });
+    list.innerHTML = html;
+  }
+
+  function readSpecialCounts() {
+    var inputs = document.querySelectorAll('#deliverySpecialCountList input[data-special-id]');
+    if (!inputs.length) return { ok: true, body: '' };
+    var body = '';
+    var bad = false;
+    inputs.forEach(function (input) {
+      var raw = String(input.value || '').trim();
+      var count = raw === '' ? 0 : parseInt(raw, 10);
+      if (!Number.isInteger(count) || count < 0) bad = true;
+      body += '&special_delivered[' + encodeURIComponent(input.getAttribute('data-special-id')) + ']='
+        + encodeURIComponent(String(Number.isInteger(count) && count >= 0 ? count : 0));
+    });
+    return bad ? { ok: false, body: '' } : { ok: true, body: body };
+  }
+
   function readProductCounts(pieces) {
     var panel = $('deliveryProductCounts');
-    if (!panel || panel.hidden) return { ok: true, body: '' };
+    if (!panel || (panel.hidden && !state.orderEmpty)) return { ok: true, body: '' };
     var inputs = panel.querySelectorAll('input[data-line-id]');
     if (!inputs.length) return { ok: true, body: '' };
     var any = false;
@@ -1551,6 +1671,19 @@
       if (count != null) sum += count;
       parts.push({ id: input.getAttribute('data-line-id'), count: count, filled: raw !== '' });
     });
+    if (state.orderEmpty) {
+      if (bad) return { ok: false, body: '' };
+      var emptySum = 0;
+      var emptyBody = '';
+      parts.forEach(function (part) {
+        var count = part.filled ? part.count : 0;
+        if (!Number.isInteger(count) || count < 0) count = 0;
+        emptySum += count;
+        emptyBody += '&line_delivered[' + encodeURIComponent(part.id) + ']=' + encodeURIComponent(String(count));
+      });
+      if (emptySum !== pieces) return { ok: false, body: '' };
+      return { ok: true, body: emptyBody };
+    }
     if (!any) return { ok: true, body: '' };
     var allFilled = parts.every(function (part) { return part.filled; });
     if (bad || !allFilled || sum !== pieces) {
@@ -1585,14 +1718,25 @@
     var countsPanel = $('deliveryProductCounts');
     var wellOverEl = $('deliveryWellOverWarning');
     var countsPrompt = $('deliveryProductCountsPrompt');
-    var askForCounts = ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
-    if (countsPanel) countsPanel.hidden = !askForCounts;
-    if (askForCounts) {
+    var orderEmpty = state.orderEmpty === true;
+    var askForCounts = !orderEmpty && ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
+    if (piecesInput) piecesInput.readOnly = orderEmpty;
+    if (countsPanel) countsPanel.hidden = orderEmpty ? false : !askForCounts;
+    var emptyNotice = $('deliveryEmptyOrderNotice');
+    if (emptyNotice) {
+      emptyNotice.hidden = !orderEmpty;
+      emptyNotice.textContent = orderEmpty ? i18n('empty_order_call_office') : '';
+    }
+    var flagBtn = $('deliveryFlagEmptyBtn');
+    if (flagBtn) flagBtn.hidden = !orderEmpty;
+    if (askForCounts || orderEmpty) {
       var adjust = $('deliveryAdjustDetails');
       if (adjust) adjust.open = true;
     }
-    if (countsPrompt && askForCounts) countsPrompt.textContent = i18n('product_counts_prompt');
-    var wellOver = deliveryTotalIsWellOver(pieces, ordered);
+    if (countsPrompt && (askForCounts || orderEmpty)) {
+      countsPrompt.textContent = orderEmpty ? i18n('empty_order_enter_qty') : i18n('product_counts_prompt');
+    }
+    var wellOver = !orderEmpty && deliveryTotalIsWellOver(pieces, ordered);
     if (wellOverEl) {
       wellOverEl.hidden = !wellOver;
       wellOverEl.textContent = wellOver
@@ -1654,7 +1798,8 @@
     var credits = Math.max(0, parseInt($('deliveryCreditsInput') && $('deliveryCreditsInput').value, 10) || 0);
     var billable = Math.max(0, pieces - credits);
     var perPiece = getEffectivePricePerPiece();
-    var total = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var panTotal = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var total = displayDeliveryTotal(panTotal);
     if (!cashInput.dataset.userEdited) {
       cashInput.value = total.toFixed(2);
     }
@@ -1710,7 +1855,8 @@
     var credits = Math.max(0, parseInt(creditsInput && creditsInput.value, 10) || 0);
     var billable = Math.max(0, pieces - credits);
     var perPiece = getEffectivePricePerPiece();
-    var total = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var panTotal = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var total = displayDeliveryTotal(panTotal);
     if (totalEl) totalEl.textContent = '$' + total.toFixed(2);
     var breakdown = i18n('billable_pieces').replace(':count', billable) + ' · ' + (perPiece ? i18n('average_per_piece').replace(':price', '$' + perPiece.toFixed(2)) + ' · ' + state.pricingLabel : (state.pricingMissing ? i18n('enter_price_below') : i18n('no_priced_items')));
     if (state.paymentCollection === 'cod') {
@@ -1804,7 +1950,8 @@
     var credits = validated.credits;
     var billable = Math.max(0, pieces - credits);
     var perPiece = getEffectivePricePerPiece();
-    var total = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var panTotal = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
+    var total = displayDeliveryTotal(panTotal);
     setInvoiceText('deliveryInvoiceDate', formatInvoiceDate(state.date));
  setInvoiceText('deliveryInvoiceCustomer', state.customerName || '-');
     setInvoiceText('deliveryInvoiceAddress', state.address || i18n('no_address_invoice'));
@@ -1860,9 +2007,22 @@
           };
         });
       }
-      itemsEl.innerHTML = displayItems.length
-        ? '<div class="delivery-invoice-items-heading"><span>' + escapeHtml(i18n('order_pricing_basis')) + '</span><span>' + escapeHtml(i18n('amount')) + '</span></div>' + displayItems.map(function (item) {
-            return '<div class="delivery-invoice-item"><span><strong>' + escapeHtml(item.product_name || i18n('product')) + '</strong><small>' + escapeHtml(String(item.quantity || 0)) + ' × $' + Number(item.unit_price || 0).toFixed(2) + '</small></span><strong>$' + Number(item.line_total || 0).toFixed(2) + '</strong></div>';
+      var specialRows = (state.specialItems || []).map(function (item) {
+        var qty = specialLineQuantity(item);
+        var price = Number(item.is_no_charge) === 1 ? 0 : Number(item.unit_price) || 0;
+        return {
+          product_name: item.product_name || item.description || i18n('special_order_heading', 'Special order'),
+          quantity: qty,
+          unit_price: price,
+          line_total: Math.round(qty * price * 100) / 100,
+          is_special: true
+        };
+      });
+      var rows = displayItems.concat(specialRows);
+      itemsEl.innerHTML = rows.length
+        ? '<div class="delivery-invoice-items-heading"><span>' + escapeHtml(i18n('order_pricing_basis')) + '</span><span>' + escapeHtml(i18n('amount')) + '</span></div>' + rows.map(function (item) {
+            var rowClass = item.is_special ? 'delivery-invoice-item delivery-invoice-item--special' : 'delivery-invoice-item';
+            return '<div class="' + rowClass + '"><span><strong>' + escapeHtml(item.product_name || i18n('product')) + '</strong><small>' + escapeHtml(String(item.quantity || 0)) + ' × $' + Number(item.unit_price || 0).toFixed(2) + '</small></span><strong>$' + Number(item.line_total || 0).toFixed(2) + '</strong></div>';
           }).join('')
         : '<p class="delivery-invoice-empty">' + escapeHtml(i18n('no_item_pricing')) + '</p>';
     }
@@ -1896,6 +2056,7 @@
       state.orderTotal = Number(data.order_total) || 0;
       state.pricingLabel = data.pricing_label || i18n('order_pricing');
       state.pricingMissing = data.pricing_missing === true;
+      state.orderEmpty = data.order_empty === true;
       state.pricePerPieceOverride = null;
       if (data.customer_name) {
         state.customerName = data.customer_name;
@@ -1906,7 +2067,10 @@
       if (data.order_date) state.date = data.order_date;
       if (data.driver_name) state.driverName = data.driver_name;
       state.invoiceItems = Array.isArray(data.items) ? data.items : [];
+      state.specialItems = Array.isArray(data.special_items) ? data.special_items : [];
+      state.specialTotal = Number(data.special_total) || 0;
       renderProductCounts();
+      renderSpecialCounts();
       state.savedTotal = Number(data.saved_total) || 0;
       state.isSaved = data.is_saved === true;
       state.paymentCollection = data.payment_collection === 'cod' ? 'cod' : 'signature';
@@ -1973,10 +2137,24 @@
       setStatus(i18n('credits_exceed_pieces'), 'error');
       return;
     }
+    if (state.orderEmpty) {
+      syncEmptyOrderPiecesFromLines();
+      pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
+      if (!Number.isInteger(pieces) || pieces <= 0) {
+        openDeliveryAdjust();
+        setStatus(i18n('empty_order_call_office'), 'error');
+        return;
+      }
+    }
     var productCounts = readProductCounts(pieces);
     if (!productCounts.ok) {
       openDeliveryAdjust();
       setStatus(i18n('product_counts_mismatch'), 'error');
+      return;
+    }
+    var specialCounts = readSpecialCounts();
+    if (!specialCounts.ok) {
+      setStatus(i18n('whole_numbers_required'), 'error');
       return;
     }
 
@@ -2052,7 +2230,7 @@
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
         '&delivered_pieces=' + encodeURIComponent(String(pieces)) +
         '&credits_taken_back=' + encodeURIComponent(String(credits)) +
-        productCounts.body;
+        productCounts.body + specialCounts.body;
       if (state.pricingMissing && canEditPricing() && state.pricePerPieceOverride != null) {
         body += '&price_per_piece=' + encodeURIComponent(String(state.pricePerPieceOverride));
       }
@@ -2181,6 +2359,9 @@
     state.pricingMissing = false;
     state.pricePerPieceOverride = null;
     state.invoiceItems = [];
+    state.specialItems = [];
+    state.specialTotal = 0;
+    state.orderEmpty = false;
     state.savedTotal = 0;
     state.isSaved = false;
     state.paymentCollection = 'signature';
@@ -2421,6 +2602,33 @@
     });
   }
 
+  async function flagEmptyOrder() {
+    if (state.submitting || !state.orderEmpty || !state.dailyOrderId) return;
+    setSubmitting(true);
+    setStatus(i18n('saving_delivery'), 'loading');
+    try {
+      await refreshRouteSession();
+      var response = await fetch('complete_delivery.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=flag_empty_order&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId))
+      });
+      var data = await readJsonResponse(response, i18n('could_not_complete_delivery'));
+      if (!data || !data.success || data.flagged !== true) {
+        throw new Error((data && data.error) || i18n('could_not_complete_delivery'));
+      }
+      setSubmitting(false);
+      var message = data.message || i18n('empty_order_flagged');
+      if (window.DriverRoute && typeof window.DriverRoute.afterOfficeFlag === 'function') {
+        window.DriverRoute.afterOfficeFlag(state.dailyOrderId, message);
+      }
+      closeModal();
+    } catch (err) {
+      setStatus((err && err.message) || i18n('could_not_complete_delivery'), 'error');
+      setSubmitting(false);
+    }
+  }
+
   function bind() {
     var modal = $('deliveryPhotoModal');
     if (!modal) return;
@@ -2514,6 +2722,13 @@
       updateDeliveryPreview();
     });
     $('deliveryPiecesInput').addEventListener('input', updateDeliveryPreview);
+    var specialCountsPanel = $('deliverySpecialCounts');
+    if (specialCountsPanel) {
+      specialCountsPanel.addEventListener('input', function () {
+        updateDeliveryPreview();
+        if (state.invoiceReady) populateInvoicePreview();
+      });
+    }
     $('deliveryCreditsInput').addEventListener('input', updateDeliveryPreview);
     function onPricePerPieceInput() {
       var value = readPricePerPieceInput();
@@ -2534,10 +2749,24 @@
         cashInput.dataset.userEdited = '1';
       });
     }
+    var countList = $('deliveryProductCountList');
+    if (countList) {
+      countList.addEventListener('input', function () {
+        if (!state.orderEmpty) return;
+        syncEmptyOrderPiecesFromLines();
+        updateDeliveryPreview();
+      });
+    }
+    var flagEmptyBtn = $('deliveryFlagEmptyBtn');
+    if (flagEmptyBtn) {
+      flagEmptyBtn.addEventListener('click', function () {
+        flagEmptyOrder();
+      });
+    }
     document.querySelectorAll('.quantity-stepper-btn').forEach(function (button) {
       button.addEventListener('click', function () {
         var input = $(button.getAttribute('data-quantity-target'));
-        if (!input || input.disabled) return;
+        if (!input || input.disabled || input.readOnly) return;
         var next = Math.max(0, (parseInt(input.value, 10) || 0) + parseInt(button.getAttribute('data-quantity-step') || '0', 10));
         input.value = next;
         updateDeliveryPreview();

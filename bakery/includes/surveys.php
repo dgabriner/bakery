@@ -454,21 +454,55 @@ function bakery_survey_results(PDO $db, int $surveyId): array
  * Falls back to a relative path only when there is no request context (CLI).
  * Optional $date keeps store-verify deep links on the intended delivery day.
  */
+function bakery_survey_absolute_url(string $path): string
+{
+    $path = ltrim($path, '/');
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+    $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
+    if ($host === '') {
+        return $base . $path;
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+        || $host === 'staging.sourflour.org'
+        || $host === 'bakery.sourflour.org';
+    return ($https ? 'https://' : 'http://') . $host . $base . $path;
+}
+
 function bakery_survey_link_url(string $token, string $date = ''): string
 {
     $path = 'survey.php?t=' . rawurlencode($token);
     if ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $path .= '&date=' . rawurlencode($date);
     }
-    $host = function_exists('bakery_request_host') ? bakery_request_host() : '';
-    if ($host === '') {
-        return (defined('BASE_URL') ? BASE_URL : '/') . $path;
+    return bakery_survey_absolute_url($path);
+}
+
+/** Route summary for the delivery day, used when a survey token is missing. */
+function bakery_survey_route_summary_url(string $date = ''): string
+{
+    $path = 'route_summary.php';
+    if ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $path .= '?date=' . rawurlencode($date);
     }
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
-        || $host === 'staging.sourflour.org'
-        || $host === 'bakery.sourflour.org';
-    return ($https ? 'https://' : 'http://') . $host . (defined('BASE_URL') ? BASE_URL : '/') . $path;
+    return bakery_survey_absolute_url($path);
+}
+
+/**
+ * Link carried by the short HQ text. Prefer the survey page (full list).
+ * Fall back to Route summary when the survey row has no token.
+ */
+function bakery_survey_hq_sms_link(PDO $db, int $surveyId, string $date): string
+{
+    $token = '';
+    if ($surveyId > 0) {
+        $row = bakery_survey_find_by_id($db, $surveyId);
+        $token = trim((string)($row['token'] ?? ''));
+    }
+    if ($token !== '') {
+        return bakery_survey_link_url($token, $date);
+    }
+    return bakery_survey_route_summary_url($date);
 }
 
 /** i18n with plain fallback so CLI tests and the webhook can use this file. */

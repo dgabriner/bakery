@@ -47,12 +47,22 @@ $assert((int)$plan[0]['daily_order_id'] === 10 && (int)$plan[0]['route_order'] =
 $assert((int)$plan[2]['daily_order_id'] === 40 && (int)$plan[2]['route_order'] === 3, 'first tap becomes next after locked');
 $assert((int)$plan[3]['daily_order_id'] === 20 && (int)$plan[3]['route_order'] === 4, 'second tap last');
 
+$orderLink = 'https://bakery.sourflour.org/bake/survey.php?t=aabbccddeeff00112233445566778899&date=2026-09-01';
 $sms = bakery_survey_route_order_sms_body([
     'driver_name' => 'Laura',
     'delivery_date' => '2026-09-01',
     'stores' => [['name' => 'Amigos'], ['name' => 'Bar 49']],
+    'link' => $orderLink,
 ]);
-$assert(strpos($sms, 'Laura') !== false && strpos($sms, '1. Amigos') !== false, 'SMS lists numbered stores');
+$assert(
+    strpos($sms, 'Laura') !== false
+        && strpos($sms, '2026-09-01') !== false
+        && strpos($sms, '2 stops') !== false
+        && strpos($sms, $orderLink) !== false
+        && strpos($sms, 'Amigos') === false,
+    'route-order SMS counts stops and links to the survey'
+);
+$assert(bakery_sms_segment_count($sms) <= 3, 'route-order SMS stays within 3 segments');
 
 $assert(in_array('route_order', ['route_order'], true), 'kind name reserved');
 

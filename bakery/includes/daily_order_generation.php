@@ -458,6 +458,7 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
     $overwriteChanged = !empty($options['overwrite_changed']);
     $recordEvent = !array_key_exists('record_event', $options) || !empty($options['record_event']);
     $assignRoutes = !array_key_exists('assign_routes', $options) || !empty($options['assign_routes']);
+    $onlyCustomerId = max(0, (int)($options['only_customer_id'] ?? 0));
 
     $dateObject = DateTime::createFromFormat('!Y-m-d', $date);
     if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
@@ -619,6 +620,9 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
 
             // Process each customer's orders
             foreach ($customerOrders as $customerId => $orders) {
+                if ($onlyCustomerId > 0 && (int)$customerId !== $onlyCustomerId) {
+                    continue;
+                }
                 $orderWeekStart = bakery_week_start_monday($date);
                 if (bakery_customer_week_is_paused($db, $customerId, $orderWeekStart)) {
                     continue;
@@ -757,6 +761,11 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                         if ($assignmentHasNotes) {
                             $assignmentParams[] = null;
                         }
+                        // driver_assignments.php loads this file, so the helper is required here.
+                        if (!function_exists('bakery_route_stop_restore_removed_day')) {
+                            require_once __DIR__ . '/driver_assignments.php';
+                        }
+                        bakery_route_stop_restore_removed_day($db, (int)$dailyOrderId);
                         $insertAssignmentStmt->execute($assignmentParams);
                         // Keep the legacy column aligned for older views
                         // while daily_order_assignments remains canonical.
@@ -835,6 +844,11 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
                 if ($assignmentHasNotes) {
                     $assignmentParams[] = null;
                 }
+                // driver_assignments.php loads this file, so the helper is required here.
+                if (!function_exists('bakery_route_stop_restore_removed_day')) {
+                    require_once __DIR__ . '/driver_assignments.php';
+                }
+                bakery_route_stop_restore_removed_day($db, (int)$dailyOrderId);
                 $insertAssignmentStmt->execute($assignmentParams);
                 $updateLegacyDriverStmt->execute([$driverId, $dailyOrderId]);
                 $driversAssigned++;

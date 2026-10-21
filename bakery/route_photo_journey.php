@@ -87,6 +87,7 @@ require_once __DIR__ . '/includes/nav.php';
       <span class="journey-swatch"><i class="is-bakery">P</i><?php bakery_te('route_photo_journey.legend_bakery'); ?></span>
       <span class="journey-swatch"><i class="is-pod">1</i><?php bakery_te('route_photo_journey.legend_pod'); ?></span>
       <span class="journey-swatch"><i class="is-arrival">1</i><?php bakery_te('route_photo_journey.legend_arrival'); ?></span>
+      <span class="journey-swatch"><i class="is-arrived-open">!</i><?php bakery_te('route_photo_journey.legend_arrived_open'); ?></span>
       <span class="journey-swatch"><i class="is-pending">!</i><?php bakery_te('route_photo_journey.legend_pending'); ?></span>
     </div>
     <p><?php bakery_te('route_photo_journey.legend_help'); ?></p>
@@ -102,7 +103,13 @@ require_once __DIR__ . '/includes/nav.php';
           return (string)($stop['badge'] ?? '') !== 'pending';
       }));
       $first = $visited[0] ?? null;
-      $last = $visited === [] ? null : $visited[count($visited) - 1];
+      $last = null;
+      foreach (array_reverse($visited) as $visitedStop) {
+          if ((string)($visitedStop['badge'] ?? '') !== 'arrived_open') {
+              $last = $visitedStop;
+              break;
+          }
+      }
       $mapId = 'journey-map-data-' . (int)$driver['id'];
       $pendingNames = implode(', ', $driver['pending_names'] ?? []);
     ?>

@@ -100,6 +100,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'zazie_weekly_sheet.php', 'label' => 'Zazie weekly sheet', 'description' => 'Upload the Zazie weekly order file and apply it to dated orders.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'counter_orders.php', 'nav_key' => 'counter_orders', 'label' => 'Counter orders', 'description' => 'Write a pickup: date, Capp, Panadería, or delivery, what they want, and whether it is paid. A photo of the slip is enough.', 'roles' => ['cashier', 'baker', 'administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'standing_orders_manager.php', 'label' => 'Standing Orders', 'description' => 'Manage recurring orders by customer and delivery day.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'special_orders.php', 'label' => 'Special Orders', 'description' => 'One-off items that are not pan dulce, for one customer and one delivery date.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'customers.php', 'label' => 'Customers', 'description' => 'Customer records, contact information, and ordering details.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'customer_record.php', 'label' => 'Customer Hub', 'description' => 'Find one customer and jump to their orders, standing pattern, pricing, billing, and issues.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'billing_center.php', 'label' => 'Billing Center', 'description' => 'Customer accounts, delivery invoices, Square pay links, statements, and accounting export. Not driver COD cash.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
@@ -161,6 +162,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'product_distribution.php', 'label' => 'Product Distribution', 'description' => 'Explore expected product quantities across customers and days.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'module_guide.php', 'label' => 'Module Guide', 'description' => 'A role and module reference for the current workspace.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'walkthroughs.php', 'label' => 'Walkthroughs', 'description' => 'English and Spanish usage videos recorded on the local production-data mirror.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
+                ['href' => 'login_history.php?view=client_errors', 'nav_key' => 'client_errors', 'label' => 'Client Errors', 'description' => 'Read browser errors reported from the floor.', 'roles' => ['manager'], 'usage' => 'occasional'],
             ],
         ],
         [

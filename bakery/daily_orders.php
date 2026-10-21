@@ -56,7 +56,7 @@ $selectedDriverId = isset($_GET['driver_id']) ? (int)$_GET['driver_id'] : 0;
 $selectedZone = isset($_GET['zone']) ? trim((string)$_GET['zone']) : '';
 $groupBy = ($_GET['group_by'] ?? 'driver') === 'zone' ? 'zone' : 'driver';
 $reviewFilter = trim((string)($_GET['review'] ?? 'differences'));
-$allowedReviewFilters = ['all', 'differences', 'missing', 'changed', 'one_off', 'matches', 'paused', 'empty'];
+$allowedReviewFilters = ['all', 'differences', 'missing', 'changed', 'one_off', 'matches', 'paused', 'empty', 'routed_zero'];
 if (!in_array($reviewFilter, $allowedReviewFilters, true)) {
     $reviewFilter = 'differences';
 }
@@ -84,7 +84,7 @@ $attentionLabels = [
     'differences' => bakery_t('ux.daily_orders.attention_differences'),
 ];
 $attentionLabel = $attentionLabels[$reviewFilter] ?? (
-    in_array($reviewFilter, ['missing', 'empty', 'changed', 'one_off'], true) ? bakery_t('ux.daily_orders.attention_items') : ''
+    in_array($reviewFilter, ['missing', 'empty', 'changed', 'one_off', 'routed_zero'], true) ? bakery_t('ux.daily_orders.attention_items') : ''
 );
 
 function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver', $extra = []) {
@@ -296,6 +296,7 @@ $summary = $demandSummaryAll['summary'];
                 <?= htmlspecialchars(bakery_t('ux.daily_orders.clear_day')) ?>
             </button>
             <a class="btn btn-outline" href="standing_orders_manager.php"><?= htmlspecialchars(bakery_t('ux.daily_orders.edit_standing')) ?></a>
+            <a class="btn btn-outline" href="special_orders.php?date=<?= htmlspecialchars(rawurlencode($selectedDate)) ?>"><?= htmlspecialchars(bakery_t('special_order.open_page')) ?></a>
             <a class="btn btn-outline" href="pan_dulce_quantities.php"><?= htmlspecialchars(bakery_t('nav.item.pan_dulce_quantities')) ?></a>
             <a class="btn btn-outline" href="production.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.production_baker')) ?></a>
             <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.driver_assignment')) ?></a>
@@ -377,6 +378,7 @@ $summary = $demandSummaryAll['summary'];
                 <option value="changed" <?= $reviewFilter === 'changed' ? 'selected' : '' ?>>Changed quantities</option>
                 <option value="one_off" <?= $reviewFilter === 'one_off' ? 'selected' : '' ?>>Added for this date</option>
                 <option value="empty" <?= $reviewFilter === 'empty' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('demand.empty_daily_label')) ?></option>
+                <option value="routed_zero" <?= $reviewFilter === 'routed_zero' ? 'selected' : '' ?>><?= htmlspecialchars(bakery_t('demand.review_routed_zero')) ?></option>
                 <option value="paused" <?= $reviewFilter === 'paused' ? 'selected' : '' ?>>Paused this week</option>
                 <option value="matches" <?= $reviewFilter === 'matches' ? 'selected' : '' ?>>Matches standing</option>
                 <option value="all" <?= $reviewFilter === 'all' ? 'selected' : '' ?>>All customers</option>

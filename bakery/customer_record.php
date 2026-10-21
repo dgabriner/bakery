@@ -538,6 +538,7 @@ require_once __DIR__ . '/includes/nav.php';
             <div class="cr-actions">
                 <a class="cr-btn cr-btn-secondary" href="customers.php?q=<?php echo $customerNameEnc; ?>&amp;highlight=<?php echo $customerId; ?>">Edit contact details</a>
                 <a class="cr-btn cr-btn-secondary" href="standing_orders_manager.php?customer_id=<?php echo $customerId; ?>">Standing orders</a>
+                <a class="cr-btn cr-btn-secondary" href="special_orders.php?customer_id=<?php echo $customerId; ?>&amp;date=<?php echo htmlspecialchars(rawurlencode($selectedDate)); ?>"><?php echo htmlspecialchars(bakery_t('special_order.open_page')); ?></a>
                 <a class="cr-btn cr-btn-secondary" href="customer_schedule.php?customer_id=<?php echo $customerId; ?>">Delivery schedule</a>
                 <a class="cr-btn cr-btn-secondary" href="customer_pricing.php?customer_id=<?php echo $customerId; ?>">Custom pricing</a>
                 <a class="cr-btn cr-btn-secondary" href="billing_center.php?panel=customer&amp;customer_id=<?php echo $customerId; ?>">Billing &amp; statements</a>

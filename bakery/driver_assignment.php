@@ -8,6 +8,7 @@ require_once 'includes/google_maps_config.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/driver_assignments.php';
 require_once 'includes/driver_assignment_actions.php';
+require_once 'includes/demand_review.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/customer_record.php';
 
@@ -68,6 +69,8 @@ $activeCustomers = [];
 $productsForStanding = [];
 $assignedCustomerIdsToday = [];
 $pageExceptions = [];
+$routedZeroCount = 0;
+$routedZeroHref = '';
 $driverColors = [
     '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
     '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
@@ -238,6 +241,17 @@ try {
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
+    try {
+        $routedZeroReview = bakery_demand_review_build($db, $selectedDate, []);
+        $routedZero = bakery_demand_review_routed_zero_stops($routedZeroReview['customers'] ?? []);
+        $routedZeroCount = (int)($routedZero['count'] ?? 0);
+        $routedZeroHref = 'daily_orders.php?' . http_build_query([
+            'date' => $selectedDate,
+            'review' => 'routed_zero',
+        ]);
+    } catch (Throwable $routedZeroError) {
+        error_log('driver_assignment routed zero count: ' . $routedZeroError->getMessage());
+    }
 } catch (Throwable $e) {
     $pageLoadError = bakery_error_message_for_user($e);
     error_log('driver_assignment.php load failed: ' . $e->getMessage());
@@ -278,7 +292,14 @@ try {
             </button>
         </div>
     </div>
-    
+
+    <?php if ($routedZeroCount > 0 && $routedZeroHref !== ''): ?>
+        <div class="ops-alert ops-alert-danger" role="alert" style="background:#f8d7da;color:#721c24;padding:0.85rem 1rem;border-radius:6px;margin:0.75rem 0;">
+            <?php echo htmlspecialchars(bakery_t('driver_assignment.routed_zero_count', ['count' => $routedZeroCount])); ?>
+            <a href="<?php echo htmlspecialchars($routedZeroHref); ?>"><?php bakery_te('driver_assignment.routed_zero_link'); ?></a>
+        </div>
+    <?php endif; ?>
+
     <!-- Date Navigation -->
     <div class="date-navigation">
         <div class="date-info">
@@ -692,6 +713,11 @@ try {
                 <input type="hidden" id="add-customer-apply-pan-dulce" value="0">
             </div>
             <div id="add-customer-status" class="add-customer-status" aria-live="polite"></div>
+            <div id="add-customer-empty-actions" hidden>
+                <p id="add-customer-empty-warning"></p>
+                <button type="button" class="btn btn-primary" id="add-customer-restore-btn"><?php bakery_te('driver_assignment.restore_standing'); ?></button>
+                <button type="button" class="btn btn-outline" id="add-customer-keep-empty-btn"><?php bakery_te('driver_assignment.add_without_restore'); ?></button>
+            </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-primary" onclick="submitAddCustomerToRoute()">Add Stop to Today’s Route</button>
@@ -732,7 +758,10 @@ window.__DRIVER_ASSIGNMENT__ = {
     productsForStanding: <?php echo bakery_json_for_html($productsForStanding, '[]'); ?>,
     assignedCustomerIdsToday: <?php echo bakery_json_for_html($assignedCustomerIdsToday, '{}'); ?>,
     buildConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.build_confirm'), '""'); ?>,
-    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>
+    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>,
+    emptyOrderWarning: <?php echo bakery_json_for_html(bakery_t('driver_assignment.empty_order_warning', ['customer' => '']), '""'); ?>,
+    restoreStanding: <?php echo bakery_json_for_html(bakery_t('driver_assignment.restore_standing'), '""'); ?>,
+    addWithoutRestore: <?php echo bakery_json_for_html(bakery_t('driver_assignment.add_without_restore'), '""'); ?>
 };
 </script>
 <script src="<?php echo bakery_asset_href('includes/driver_assignment.js'); ?>" defer></script>
