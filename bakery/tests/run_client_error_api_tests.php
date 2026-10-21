@@ -72,7 +72,7 @@ $db->prepare('DELETE FROM client_errors WHERE id = ?')->execute([$id]);
 
 $userId = (int)$db->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
 $assert($userId > 0, 'a user exists for client error filters');
-$today = date('Y-m-d');
+$today = (string)$db->query('SELECT CURDATE()')->fetchColumn();
 $refId = bakery_client_error_record($db, [
     'user_id' => $userId,
     'kind' => 'error',
