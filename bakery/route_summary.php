@@ -45,6 +45,7 @@ require_once 'includes/nav.php';
       <p class="rs-subtitle"><?php bakery_te('route_summary.subtitle'); ?></p>
     </div>
     <div class="rs-header__actions">
+      <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_photo_journey.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('page.route_photo_journey'); ?></a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_manager.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('route_summary.board_link'); ?></a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_closeout.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('route_summary.closeout_link'); ?></a>
     </div>

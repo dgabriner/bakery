@@ -1,12 +1,10 @@
-# Prevent direct access to uploaded files
+# Delivery photos are login-gated. driver_photo.php reads the files.
+# Direct web access stays closed. PHP readfile does not use this file.
 Options -Indexes
-# Allow only image files
-<FilesMatch "\.(jpg|jpeg|png|webp)$">
-    Order Allow,Deny
-    Allow from all
-</FilesMatch>
-# Deny everything else
-<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|jsp|asp|sh|cgi)$">
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
     Order Allow,Deny
     Deny from all
-</FilesMatch>
+</IfModule>

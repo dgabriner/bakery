@@ -772,6 +772,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
     </section>
   <?php endif; ?>
 
+  <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_photo_journey.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.journey'); ?></a></p>
   <section class="manager-phone__drivers" aria-label="<?php bakery_te('manager_phone.driver_board'); ?>">
     <?php if (empty($ctx['driverRows'])): ?>
       <p class="manager-phone__cadence"><?php bakery_te('manager_phone.no_drivers'); ?></p>
@@ -951,6 +952,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
           <?php if ($needsClose && !$isClosed): ?>
             <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h(bakery_manager_phone_href($date, 'routes', ['sheet' => 'close', 'driver_id' => $id])); ?>"><?php bakery_te('manager_phone.close_route'); ?></a>
           <?php endif; ?>
+          <a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_photo_journey.php?date=' . rawurlencode($date) . '&driver_id=' . $id); ?>"><?php bakery_te('manager_phone.journey'); ?></a>
           <a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'driver.php?driver_id=' . $id . '&date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.open_route'); ?></a>
         </div>
       </article>

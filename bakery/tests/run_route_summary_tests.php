@@ -347,9 +347,9 @@ route_summary_assert(
 $photoHandlerSrc = (string)file_get_contents($root . '/includes/photo_handler.php');
 $shopPhotoSrc = (string)file_get_contents($root . '/includes/shop_photo_handler.php');
 route_summary_assert(
-    'Driver photo URLs are not hard-coded to the site-root host',
+    'Driver photo URLs go through the login handler',
     strpos($photoHandlerSrc, 'https://bakery.sourflour.org/uploads/driver_photos/') === false
-        && strpos($photoHandlerSrc, "return bakery_upload_display_url('driver_photos'") !== false
+        && strpos($photoHandlerSrc, 'driver_photo.php?file=') !== false
 );
 route_summary_assert(
     'Shop photo URLs are not hard-coded to the site-root host',
