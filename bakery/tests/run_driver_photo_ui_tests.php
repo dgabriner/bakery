@@ -418,6 +418,17 @@ driver_photo_assert(
         && strpos($page, 'id="driverOutboxChip"') !== false
 );
 driver_photo_assert(
+    'offline outbox reopens a lost IndexedDB connection and does not reject flush',
+    strpos($outbox, 'onclose') !== false
+        && strpos($outbox, 'onversionchange') !== false
+        && strpos($outbox, 'Indexed Database server lost') !== false
+        && strpos($outbox, 'attempt < 1') !== false
+        && strpos($outbox, 'preventDefault') !== false
+        && strpos($outbox, 'visibilitychange') !== false
+        && strpos($outbox, 'memoryJobs') !== false
+        && strpos($outbox, 'function safeFlush') !== false
+);
+driver_photo_assert(
     'failed stops update live and include HQ contact links',
     strpos($page, 'id="failStopHqLinks"') !== false
         && strpos($page, 'id="failStopWaLink"') !== false

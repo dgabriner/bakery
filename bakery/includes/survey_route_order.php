@@ -268,6 +268,13 @@ function bakery_survey_route_order_apply(PDO $db, int $driverId, string $deliver
             $db->rollBack();
             return ['ok' => false, 'error' => 'no_stops'];
         }
+        // Loaded only on apply so the pure route-order helpers stay free of assignment includes.
+        if (!function_exists('bakery_route_stop_restore_removed_day')) {
+            require_once __DIR__ . '/driver_assignments.php';
+        }
+        foreach ($rows as $row) {
+            bakery_route_stop_restore_removed_day($db, (int)$row['daily_order_id']);
+        }
         $part = bakery_survey_route_order_partition($rows);
         $locked = $part['locked'];
         $movable = $part['movable'];

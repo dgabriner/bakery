@@ -113,6 +113,9 @@ function bakery_driver_assign_orders(
 
     $db->beginTransaction();
     try {
+        foreach ($normalized as $assignment) {
+            bakery_route_stop_restore_removed_day($db, (int)$assignment['daily_order_id']);
+        }
         $insertStmt = $db->prepare('
             INSERT INTO daily_order_assignments (
                 daily_order_id, driver_id, delivery_date, route_order,
@@ -791,6 +794,7 @@ function bakery_driver_assign_from_standing_routes(PDO $db, string $deliveryDate
         ');
         $updateDriver = $db->prepare('UPDATE daily_orders SET driver_id = ? WHERE id = ?');
         foreach ($assignments as $assignment) {
+            bakery_route_stop_restore_removed_day($db, (int)$assignment['daily_order_id']);
             $insertAssignment->execute([
                 $assignment['daily_order_id'],
                 $assignment['driver_id'],
@@ -954,6 +958,7 @@ function bakery_driver_transfer_assignments(
             );
 
             $deleteStmt->execute([$orderId, $deliveryDate]);
+            bakery_route_stop_restore_removed_day($db, $orderId);
             $insertStmt->execute([
                 $orderId,
                 $toDriverId,
@@ -1082,6 +1087,9 @@ function bakery_driver_reorder_remaining_stops(
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if ($rows === []) {
             throw new RuntimeException('No stops on this route');
+        }
+        foreach ($rows as $row) {
+            bakery_route_stop_restore_removed_day($db, (int)$row['daily_order_id']);
         }
 
         $locked = [];
@@ -1220,6 +1228,160 @@ function bakery_dated_order_has_no_positive_quantity(PDO $db, int $dailyOrderId)
 }
 
 /**
+ * A dated order zeroed as "removed for this day only": the fill block is on,
+ * every pan line is 0, and the standing order for that weekday still has pieces.
+ * A special-order line with quantity above 0 is not this skip.
+ */
+function bakery_route_stop_is_removed_day_skip(PDO $db, int $dailyOrderId): bool
+{
+    if ($dailyOrderId <= 0) {
+        return false;
+    }
+    if (!function_exists('bakery_special_order_has_positive_qty')) {
+        $specialPath = __DIR__ . '/special_orders.php';
+        if (is_file($specialPath)) {
+            require_once $specialPath;
+        }
+    }
+    if (function_exists('bakery_special_order_has_positive_qty')
+        && bakery_special_order_has_positive_qty($db, $dailyOrderId)) {
+        return false;
+    }
+    if (!bakery_dated_order_has_no_positive_quantity($db, $dailyOrderId)) {
+        return false;
+    }
+    if (!function_exists('column_exists') || !column_exists($db, 'daily_orders', 'standing_fill_blocked')) {
+        return false;
+    }
+    $stmt = $db->prepare(
+        'SELECT customer_id, order_date, standing_fill_blocked FROM daily_orders WHERE id = ?'
+    );
+    $stmt->execute([$dailyOrderId]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order || (int)($order['standing_fill_blocked'] ?? 0) !== 1) {
+        return false;
+    }
+    $date = (string)$order['order_date'];
+    $customerId = (int)$order['customer_id'];
+    if ($customerId <= 0 || !function_exists('bakery_standing_day_from_date')) {
+        return false;
+    }
+    $dayClause = bakery_standing_day_in_clause(bakery_standing_day_from_date($date));
+    $stand = $db->prepare(
+        "SELECT COALESCE(SUM(quantity), 0)
+         FROM standing_orders
+         WHERE customer_id = ? AND day_of_week {$dayClause['sql']} AND quantity > 0"
+    );
+    $stand->execute(array_merge([$customerId], $dayClause['values']));
+    return (int)$stand->fetchColumn() > 0;
+}
+
+/**
+ * When a removed-for-this-day skip is about to sit on a route, copy that
+ * weekday's standing lines back onto the dated order. One rule for every
+ * assignment path. Special-order quantity is left alone.
+ *
+ * @return bool True when standing lines were copied.
+ */
+function bakery_route_stop_restore_removed_day(PDO $db, int $dailyOrderId): bool
+{
+    if (!bakery_route_stop_is_removed_day_skip($db, $dailyOrderId)) {
+        return false;
+    }
+    if (!function_exists('bakery_resolve_customer_price')) {
+        require_once __DIR__ . '/customer_portal.php';
+    }
+    if (!function_exists('bakery_daily_order_recompute_total')) {
+        require_once __DIR__ . '/customer_order_mutations.php';
+    }
+
+    $orderStmt = $db->prepare(
+        'SELECT do.customer_id, do.order_date, c.pricing_tier, c.default_pan_dulce_price
+         FROM daily_orders do
+         JOIN customers c ON c.id = do.customer_id
+         WHERE do.id = ?'
+    );
+    $orderStmt->execute([$dailyOrderId]);
+    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        return false;
+    }
+    $customerId = (int)$order['customer_id'];
+    $date = (string)$order['order_date'];
+    $dayClause = bakery_standing_day_in_clause(bakery_standing_day_from_date($date));
+    $lines = $db->prepare(
+        "SELECT so.product_id, so.quantity, COALESCE(p.price, 0) AS price,
+                p.wholesale_price, pl.name AS product_line_name
+         FROM standing_orders so
+         JOIN products p ON p.id = so.product_id
+         JOIN dough_types dt ON dt.id = p.dough_type_id
+         JOIN product_lines pl ON pl.id = dt.product_line_id
+         WHERE so.customer_id = ? AND so.day_of_week {$dayClause['sql']} AND so.quantity > 0"
+    );
+    $lines->execute(array_merge([$customerId], $dayClause['values']));
+    $standingLines = $lines->fetchAll(PDO::FETCH_ASSOC);
+    if ($standingLines === []) {
+        return false;
+    }
+
+    $customer = [
+        'id' => $customerId,
+        'pricing_tier' => $order['pricing_tier'] ?? 'retail',
+        'default_pan_dulce_price' => $order['default_pan_dulce_price'] ?? null,
+    ];
+    $upsert = $db->prepare(
+        'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            quantity = VALUES(quantity),
+            unit_price = VALUES(unit_price),
+            line_total = VALUES(line_total)'
+    );
+    $wrote = 0;
+    foreach ($standingLines as $line) {
+        $qty = (int)$line['quantity'];
+        if ($qty <= 0) {
+            continue;
+        }
+        $unit = bakery_resolve_customer_price($db, $customer, [
+            'id' => (int)$line['product_id'],
+            'price' => (float)$line['price'],
+            'wholesale_price' => $line['wholesale_price'] ?? null,
+            'product_line_name' => (string)($line['product_line_name'] ?? ''),
+        ]);
+        $unit = round((float)$unit, 2);
+        $upsert->execute([$dailyOrderId, (int)$line['product_id'], $qty, $unit, round($qty * $unit, 2)]);
+        $wrote++;
+    }
+    if ($wrote === 0) {
+        return false;
+    }
+    if (function_exists('bakery_daily_order_set_standing_fill_blocked')) {
+        bakery_daily_order_set_standing_fill_blocked($db, $dailyOrderId, false);
+    }
+    if (function_exists('bakery_daily_order_recompute_total')) {
+        bakery_daily_order_recompute_total($db, $dailyOrderId);
+    }
+    if (function_exists('bakery_record_operational_event')) {
+        $eventType = defined('BAKERY_OP_STANDING_ORDER_RESTORED')
+            ? BAKERY_OP_STANDING_ORDER_RESTORED
+            : 'standing_order_restored';
+        bakery_record_operational_event(
+            $db,
+            $eventType,
+            'Restored standing order onto the dated order',
+            [
+                'operational_date' => $date,
+                'customer_id' => $customerId,
+                'daily_order_id' => $dailyOrderId,
+                'metadata' => ['source' => 'route_stop_restore'],
+            ]
+        );
+    }
+    return true;
+}
+
+/**
  * Put this customer's standing order back onto one dated order and log it.
  * Other customers on the same date are left alone.
  */
@@ -1295,7 +1457,12 @@ function bakery_driver_add_customer_to_route(
 
     require_once __DIR__ . '/customer_order_mutations.php';
     $guardOrder = bakery_customer_daily_order_row($db, $customerId, $deliveryDate);
-    if ($guardOrder && bakery_dated_order_has_no_positive_quantity($db, (int)$guardOrder['id'])) {
+    $guardIsRemovedDay = $guardOrder
+        && bakery_route_stop_is_removed_day_skip($db, (int)$guardOrder['id']);
+    if ($guardOrder
+        && !$guardIsRemovedDay
+        && bakery_dated_order_has_no_positive_quantity($db, (int)$guardOrder['id'])
+    ) {
         $restoreStanding = !empty($options['restore_standing']);
         $keepEmpty = !empty($options['keep_empty']);
         if (!$restoreStanding && !$keepEmpty) {
@@ -1436,6 +1603,7 @@ function bakery_driver_add_customer_to_route(
                 scheduled_delivery_time, delivery_status
             ) VALUES (?, ?, ?, ?, NULL, \'pending\')
         ');
+        bakery_route_stop_restore_removed_day($db, $dailyOrderId);
         $insertAssignment->execute([$dailyOrderId, $driverId, $deliveryDate, $nextRouteOrder]);
 
         $db->commit();
@@ -1764,6 +1932,7 @@ function bakery_driver_plan_insert_assignment(
     int $dailyOrderId,
     $scheduledDeliveryTime
 ): void {
+    bakery_route_stop_restore_removed_day($db, $dailyOrderId);
     $maxStmt = $db->prepare(
         'SELECT COALESCE(MAX(route_order), 0)
          FROM daily_order_assignments

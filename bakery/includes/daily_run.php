@@ -1335,6 +1335,9 @@ function bakery_daily_run_build(PDO $db, string $date): array
         'stale_closeout' => $staleCloseout,
         'links' => $links,
         'demand_review' => $demandReview,
+        'routed_zero' => is_array($demandReview)
+            ? bakery_demand_review_routed_zero_stops($demandReview['customers'] ?? [])
+            : ['count' => 0, 'names' => []],
         'inventory_ready' => $inventoryReady,
         'unrouted_standing_orders' => $unroutedStandingOrders,
         'route_losses' => $routeLosses,

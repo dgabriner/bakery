@@ -157,6 +157,37 @@ $assert(($juan['flags']['short_closes'] ?? []) === ['Casa Lucas', 'City Discount
 $longGapStores = array_map(static fn(array $gap): string => (string)$gap['store'], $juan['flags']['long_gaps'] ?? []);
 $assert($longGapStores === ['Casa Lucas', 'El chavo', 'Amigos'], 'gaps over 90 min are flagged and 83 min is not');
 
+$openArrival = bakery_route_photo_journey_assemble([
+    'date' => '2026-10-20',
+    'selected_driver_id' => 0,
+    'drivers' => [9 => 'Sergio', 2 => 'Laura'],
+    'clock_ins' => [],
+    'stops' => [
+        journey_stop(9, 900, 'El Chavo 2', '', 0, 0, 1, 'pending'),
+        journey_stop(9, 901, 'Closed Store', '2026-10-20 16:10:00', 12, 4, 2, 'delivered'),
+        journey_stop(2, 910, 'Open Move', '', 0, 0, 3, 'pending'),
+    ],
+    'photos' => [
+        journey_photo(90, 9, 900, 'Before', '2026-10-20 15:56:00'),
+        journey_photo(91, 9, 901, 'After', '2026-10-20 16:10:00'),
+        journey_photo(92, 2, 910, 'Before', '2026-10-20 15:40:00', 9),
+    ],
+]);
+$sergio = $byName($openArrival['drivers'], 'Sergio');
+$sergioByName = [];
+foreach ($sergio['stops'] ?? [] as $stop) {
+    $sergioByName[(string)$stop['customer_name']] = $stop;
+}
+$assert(($sergioByName['El Chavo 2']['badge'] ?? '') === 'arrived_open', 'a pending stop with an arrival photo is arrived, not closed');
+$assert(array_key_exists('delivered_at', $sergioByName['El Chavo 2'] ?? []) && $sergioByName['El Chavo 2']['delivered_at'] === null, 'an open arrival has no delivered time');
+$assert(($sergioByName['Closed Store']['badge'] ?? '') === 'pod', 'a closed stop with an After photo stays a delivery photo');
+$assert(($sergio['delivered_count'] ?? -1) === 1, 'arrived, not closed is not counted as delivered');
+$assert(!in_array('El Chavo 2', $sergio['flags']['zero_dollar'] ?? [], true), 'an open arrival is not a zero-dollar delivery');
+$assert(!in_array('El Chavo 2', $sergio['flags']['short_closes'] ?? [], true), 'an open arrival is not a short close');
+$lauraOpen = $byName($openArrival['drivers'], 'Laura');
+$openMove = $lauraOpen['other'][0] ?? [];
+$assert(($openMove['kind'] ?? '') === 'moved_pending' && ($openMove['customer_name'] ?? '') === 'Open Move', 'a photo on an open stop is not marked delivered by another driver');
+
 $assert(count($boundary['flags']['long_gaps'] ?? []) === 1 && ($boundary['flags']['long_gaps'][0]['store'] ?? '') === 'Ninety one', 'a 90 min gap is not over 90, and 91 min is');
 $assert(($boundary['stops'][0]['gap_minutes'] ?? -1) === 90 && ($boundary['stops'][1]['gap_minutes'] ?? -1) === 91, 'boundary gaps are 90 and 91 minutes');
 

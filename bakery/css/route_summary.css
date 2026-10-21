@@ -340,7 +340,8 @@
 }
 
 .rs-status--failed,
-.rs-status--cancelled {
+.rs-status--cancelled,
+.rs-status--arrived_not_closed {
   background: var(--sf-danger);
 }
 

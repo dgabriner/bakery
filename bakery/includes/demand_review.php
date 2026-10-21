@@ -710,6 +710,30 @@ function bakery_demand_review_empty_stop_flags(array $customers): array
     return ['count' => $count, 'names' => $names];
 }
 
+/**
+ * Routed stops whose dated order has no positive quantity.
+ * Special-order quantity and a standing-route shell with no standing order are skipped.
+ *
+ * @param list<array<string, mixed>> $customers
+ * @return array{count:int, names:list<string>}
+ */
+function bakery_demand_review_routed_zero_stops(array $customers): array
+{
+    $names = [];
+    $count = 0;
+    foreach ($customers as $customer) {
+        if (!is_array($customer) || !bakery_demand_review_is_routed_zero_order($customer)) {
+            continue;
+        }
+        $count++;
+        $name = trim((string)($customer['customer_name'] ?? ''));
+        if ($name !== '' && !in_array($name, $names, true)) {
+            $names[] = $name;
+        }
+    }
+    return ['count' => $count, 'names' => $names];
+}
+
 function bakery_demand_review_diff_lines(array $lineMap) {
     $diffs = [];
     foreach ($lineMap as $line) {
@@ -766,6 +790,8 @@ function bakery_demand_review_matches_filter(array $customer, $filter) {
             return $customer['state'] === 'paused' || !empty($customer['paused']);
         case 'empty':
             return $customer['state'] === 'empty_daily';
+        case 'routed_zero':
+            return bakery_demand_review_is_routed_zero_order($customer);
         default:
             return true;
     }

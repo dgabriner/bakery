@@ -3,9 +3,10 @@
  * Empty routed stops must not disappear.
  *
  * A dated order zeroed as "removed for this day only" stays classified as
- * changed. Adding it to a route has to warn and can restore standing for
- * that customer only. A driver cannot close it as Delivered $0, and the
- * morning board has to name it. Deliberate no-charge lines still confirm at $0.
+ * changed until a route path touches it. Landing it on a route restores
+ * that customer's standing lines. A plain empty order still asks first.
+ * A driver cannot close an empty stop as Delivered $0, and the morning
+ * board names routed zeros. Deliberate no-charge lines still confirm at $0.
  *
  * CLI / bakerysf_test only.
  */
@@ -114,6 +115,14 @@ $cleanup = static function () use ($db, &$customerIds, $date): void {
     }
     $db->exec("DELETE FROM standing_orders WHERE customer_id IN ($in)");
     $db->exec("DELETE FROM standing_routes WHERE customer_id IN ($in)");
+    if (function_exists('table_exists') && table_exists($db, 'special_orders')) {
+        $specialIds = $db->query("SELECT id FROM special_orders WHERE customer_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
+        if ($specialIds) {
+            $specialIn = implode(',', array_map('intval', $specialIds));
+            $db->exec("DELETE FROM special_order_lines WHERE special_order_id IN ($specialIn)");
+            $db->exec("DELETE FROM special_orders WHERE id IN ($specialIn)");
+        }
+    }
     if (function_exists('table_exists') && table_exists($db, 'operational_events')) {
         $db->exec("DELETE FROM operational_events WHERE customer_id IN ($in) AND operational_date = " . $db->quote($date));
     }
@@ -192,33 +201,6 @@ $deliverOrder = $insertOrder($db, $deliverId, $date, 0, 0.0, true, true, $driver
 $noChargeOrder = $insertOrder($db, $noChargeId, $date, 3, 0.0, false, true, $driverId, true);
 $openOrder = $insertOrder($db, $openId, $date, 4, $catalogPrice, false, false, $driverId);
 
-echo "\n=== Route add warns and restores only that customer ===\n";
-$blocked = bakery_driver_assignment_action_add_customer_to_route($db, [
-    'customer_id' => $luckyId,
-    'driver_id' => $driverId,
-    'delivery_date' => $date,
-], null);
-$assert_eq(false, $blocked['success'] ?? null, 'zeroed dated order is not added silently');
-$assert(!empty($blocked['needs_restore']), 'route add asks to restore the standing order');
-$assert_eq(0, $itemQty($db, $luckyOrder), 'blocked add leaves the dated lines at zero');
-$assert_eq(1, $assignmentCount($db, $luckyOrder), 'blocked add does not drop the existing stop');
-
-$neighborBlocked = bakery_driver_assignment_action_add_customer_to_route($db, [
-    'customer_id' => $neighborId,
-    'driver_id' => $driverId,
-    'delivery_date' => $date,
-], null);
-$assert(!empty($neighborBlocked['needs_restore']), 'neighbor zeroed order also warns');
-$assert_eq(0, $assignmentCount($db, $neighborOrder), 'neighbor is not assigned until a choice is made');
-
-$openAdd = bakery_driver_assignment_action_add_customer_to_route($db, [
-    'customer_id' => $openId,
-    'driver_id' => $driverId,
-    'delivery_date' => $date,
-], null);
-$assert_eq(true, $openAdd['success'] ?? null, 'a dated order with pieces is added without a restore prompt');
-$assert(empty($openAdd['needs_restore']), 'positive dated order does not ask for restore');
-
 echo "\n=== Morning board flags routed zeros that are classified as changed ===\n";
 $review = bakery_demand_review_build($db, $date, []);
 $byName = [];
@@ -237,6 +219,19 @@ $blockerText = json_encode($run['blockers'] ?? []);
 $assert(is_string($blockerText) && strpos($blockerText, 'EmptyGuard Lucky') !== false, 'daily run names the routed zero order');
 $assert(is_string($blockerText) && strpos($blockerText, 'EmptyGuard Plain') !== false, 'daily run still names a true empty dated order');
 $assert(is_string($blockerText) && strpos($blockerText, 'EmptyGuard Shell') === false, 'daily run does not flag the standing-route shell');
+$routedZeroNames = $run['routed_zero']['names'] ?? [];
+$assert(in_array('EmptyGuard Lucky', $routedZeroNames, true), 'morning board names the routed zero order in the red count');
+$assert(!in_array('EmptyGuard Shell', $routedZeroNames, true), 'the red count skips the standing-route shell');
+$assert(!in_array('EmptyGuard Neighbor', $routedZeroNames, true), 'an unassigned zero is not in the red count');
+$assert((int)($run['routed_zero']['count'] ?? 0) === count($routedZeroNames), 'routed zero count matches the named stops');
+
+$dailyRunPage = (string)file_get_contents($root . '/daily_run.php');
+$assignmentPage = (string)file_get_contents($root . '/driver_assignment.php');
+$ordersPage = (string)file_get_contents($root . '/daily_orders.php');
+$assert(strpos($dailyRunPage, 'daily_run.routed_zero_count') !== false, 'morning board shows the routed zero count');
+$assert(strpos($dailyRunPage, 'review=routed_zero') !== false || strpos($dailyRunPage, "'routed_zero'") !== false, 'morning board links to the routed zero list');
+$assert(strpos($assignmentPage, 'driver_assignment.routed_zero_count') !== false, 'driver assignment shows the routed zero count');
+$assert(strpos($ordersPage, 'routed_zero') !== false, 'daily orders can filter routed zeros');
 
 $changes = bakery_daily_brief_important_changes($db, $date, $review);
 $titles = array_column($changes, 'title');
@@ -249,32 +244,130 @@ $shellTitles = array_values(array_filter($titles, static function ($title) {
 $assert($luckyTitles !== [] && strpos((string)$luckyTitles[0], 'Empty dated order') !== false, 'morning brief flags the routed zero order as empty');
 $assert($shellTitles === [], 'morning brief does not call the standing-route shell empty');
 
-echo "\n=== Restore refills one customer and is logged ===\n";
+echo "\n=== Removed-day skips restore when they land on a route ===\n";
 $restored = bakery_driver_assignment_action_add_customer_to_route($db, [
     'customer_id' => $luckyId,
     'driver_id' => $driverId,
     'delivery_date' => $date,
-    'restore_standing' => '1',
 ], null);
-$assert_eq(true, $restored['success'] ?? null, 'restore then add succeeds');
-$assert_eq($standingQty, $itemQty($db, $luckyOrder), 'restore copies the standing quantity onto that date');
-$assert_eq(0, $itemQty($db, $neighborOrder), 'restore does not refill the neighbor');
+$assert_eq(true, $restored['success'] ?? null, 'a removed-day skip is added without a prompt');
+$assert(empty($restored['needs_restore']), 'a removed-day skip does not ask to restore');
+$assert_eq($standingQty, $itemQty($db, $luckyOrder), 'adding the stop copies standing quantity onto that date');
+$assert_eq(1, $assignmentCount($db, $luckyOrder), 'the existing stop stays assigned');
 $eventStmt = $db->prepare(
     'SELECT COUNT(*) FROM operational_events
      WHERE event_type = ? AND customer_id = ? AND operational_date = ?'
 );
 $eventStmt->execute(['standing_order_restored', $luckyId, $date]);
-$assert((int)$eventStmt->fetchColumn() >= 1, 'restore is logged');
+$assert((int)$eventStmt->fetchColumn() >= 1, 'route restore is logged');
 
-$kept = bakery_driver_assignment_action_add_customer_to_route($db, [
+$neighborAdd = bakery_driver_assignment_action_add_customer_to_route($db, [
     'customer_id' => $neighborId,
     'driver_id' => $driverId,
     'delivery_date' => $date,
     'keep_empty' => '1',
 ], null);
-$assert_eq(true, $kept['success'] ?? null, 'explicit keep-empty still adds the stop');
-$assert_eq(0, $itemQty($db, $neighborOrder), 'keep-empty does not refill standing');
-$assert_eq(1, $assignmentCount($db, $neighborOrder), 'keep-empty assigns the stop');
+$assert_eq(true, $neighborAdd['success'] ?? null, 'keep-empty still adds a removed-day skip');
+$assert_eq($standingQty, $itemQty($db, $neighborOrder), 'keep-empty does not leave a removed-day skip at zero');
+$assert_eq(1, $assignmentCount($db, $neighborOrder), 'keep-empty assigns the restored stop');
+
+$plainAdd = bakery_driver_assignment_action_add_customer_to_route($db, [
+    'customer_id' => $plainId,
+    'driver_id' => $driverId,
+    'delivery_date' => $date,
+], null);
+$assert(!empty($plainAdd['needs_restore']), 'a plain empty order still asks before it is added again');
+$assert_eq(0, $itemQty($db, $plainOrder), 'the prompt leaves the plain empty lines at zero');
+
+$openAdd = bakery_driver_assignment_action_add_customer_to_route($db, [
+    'customer_id' => $openId,
+    'driver_id' => $driverId,
+    'delivery_date' => $date,
+], null);
+$assert_eq(true, $openAdd['success'] ?? null, 'a dated order with pieces is added without a restore prompt');
+$assert(empty($openAdd['needs_restore']), 'positive dated order does not ask for restore');
+
+$assignCustomer = $insertCustomer($db, 'EmptyGuard Assign');
+$db->prepare(
+    'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)'
+)->execute([$assignCustomer, $productId, $weekday, $standingQty]);
+$assignOrder = $insertOrder($db, $assignCustomer, $date, 0, 0.0, true, false, $driverId);
+$assigned = bakery_driver_assign_orders($db, $driverId, $date, [
+    ['daily_order_id' => $assignOrder],
+], 'append');
+$assert((int)($assigned['stop_count'] ?? 0) >= 1, 'assign selected accepts the removed-day order');
+$assert_eq($standingQty, $itemQty($db, $assignOrder), 'assign selected restores standing quantity');
+$assert_eq(1, $assignmentCount($db, $assignOrder), 'assign selected puts the stop on the route');
+
+$planCustomer = $insertCustomer($db, 'EmptyGuard Plan');
+$db->prepare(
+    'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)'
+)->execute([$planCustomer, $productId, $weekday, $standingQty]);
+$planOrder = $insertOrder($db, $planCustomer, $date, 0, 0.0, true, false, $driverId);
+bakery_driver_plan_insert_assignment($db, $driverId, $date, $planOrder, null);
+$assert_eq($standingQty, $itemQty($db, $planOrder), 'prep add and survey move restore standing quantity');
+$assert_eq(1, $assignmentCount($db, $planOrder), 'prep add assigns the restored stop');
+
+$otherDriverId = (int)$db->query(
+    'SELECT id FROM drivers WHERE archived = 0 AND id <> ' . (int)$driverId . ' ORDER BY id LIMIT 1'
+)->fetchColumn();
+if ($otherDriverId > 0) {
+    $moveCustomer = $insertCustomer($db, 'EmptyGuard Move');
+    $db->prepare(
+        'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)'
+    )->execute([$moveCustomer, $productId, $weekday, $standingQty]);
+    $moveOrder = $insertOrder($db, $moveCustomer, $date, 0, 0.0, true, true, $driverId);
+    $moved = bakery_driver_transfer_assignments($db, [$moveOrder], $otherDriverId, $date, $driverId);
+    $assert_eq(1, (int)($moved['transferred_count'] ?? 0), 'move to transfers the removed-day stop');
+    $assert_eq($standingQty, $itemQty($db, $moveOrder), 'move to restores standing quantity');
+} else {
+    $assert(false, 'bakerysf_test has a second driver for the move-to restore');
+}
+
+require_once $root . '/includes/special_orders.php';
+if (bakery_special_orders_ready($db)) {
+    $specialCustomer = $insertCustomer($db, 'EmptyGuard Special');
+    $db->prepare(
+        'INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)'
+    )->execute([$specialCustomer, $productId, $weekday, $standingQty]);
+    $db->prepare(
+        'INSERT INTO standing_routes (driver_id, customer_id, day_of_week) VALUES (?, ?, ?)'
+    )->execute([$driverId, $specialCustomer, $weekday]);
+    $specialOrder = $insertOrder($db, $specialCustomer, $date, 0, 0.0, true, false, $driverId);
+    $savedSpecial = bakery_special_order_save($db, [
+        'customer_id' => $specialCustomer,
+        'delivery_date' => $date,
+        'lines' => [[
+            'line_kind' => 'text',
+            'description' => 'Sample tray',
+            'quantity' => 2,
+            'unit_price' => 4.00,
+        ]],
+    ]);
+    $assert(!empty($savedSpecial['ok']), 'a special order can attach to the removed-day stop');
+    $assert_eq(0, $itemQty($db, $specialOrder), 'special-order attach does not copy pan standing');
+    bakery_driver_assign_orders($db, $driverId, $date, [
+        ['daily_order_id' => $specialOrder],
+    ], 'append');
+    $assert_eq(0, $itemQty($db, $specialOrder), 'a special line above zero blocks the standing restore');
+    $specialIds = $db->query(
+        'SELECT id FROM special_orders WHERE customer_id = ' . (int)$specialCustomer
+    )->fetchAll(PDO::FETCH_COLUMN);
+    if ($specialIds) {
+        $specialIn = implode(',', array_map('intval', $specialIds));
+        $db->exec('DELETE FROM special_order_lines WHERE special_order_id IN (' . $specialIn . ')');
+        $db->exec('DELETE FROM special_orders WHERE id IN (' . $specialIn . ')');
+    }
+}
+
+$generation = (string)file_get_contents($root . '/includes/daily_order_generation.php');
+$surveyOrder = (string)file_get_contents($root . '/includes/survey_route_order.php');
+$reorder = (string)file_get_contents($root . '/includes/driver_assignments.php');
+$specialSource = (string)file_get_contents($root . '/includes/special_orders.php');
+$assert(substr_count($generation, 'bakery_route_stop_restore_removed_day') === 4, 'route generation restores before both assignment inserts');
+$assert(strpos($surveyOrder, 'bakery_route_stop_restore_removed_day') !== false, 'survey route order restores a removed-day skip');
+$assert(substr_count($reorder, 'bakery_route_stop_restore_removed_day') >= 6, 'assignment, transfer, add, prep, and reorder call the shared helper');
+$assert(strpos($specialSource, 'bakery_route_stop_restore_removed_day') === false, 'special-order attach does not call the restore helper');
 
 echo "\n=== Driver cannot close an empty stop as Delivered $0 ===\n";
 $officeMessage = bakery_t('driver.empty_order_call_office');
