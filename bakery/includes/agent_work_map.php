@@ -267,6 +267,7 @@ function bakery_agent_work_map_core(): array
             'files' => [
                 'includes/twilio_config.php',
                 'includes/text_comms.php',
+                'includes/sms_segments.php',
                 'includes/text_comms_media.php',
                 'includes/surveys.php',
                 'includes/survey_store_verify.php',
@@ -284,6 +285,7 @@ function bakery_agent_work_map_core(): array
                 'survey.php',
                 'twilio_webhook.php',
                 'database/schema/057_text_messages.sql',
+                'database/schema/109_survey_hq_sms_sent.sql',
                 'database/schema/058_text_media.sql',
                 'database/schema/061_surveys.sql',
                 'database/schema/062_surveys_custom.sql',
@@ -314,6 +316,7 @@ function bakery_agent_work_map_core(): array
                 'Command Center shows customer, test, and general texts from the same ledger',
                 'MMS media is stored under storage/text_media and served only through role-gated text_media.php',
                 'History sync upserts by twilio sid; re-running never duplicates',
+                'HQ survey texts stay within 3 SMS segments, use the Messaging Service when a SID is configured, and send at most once per driver per delivery date',
             ],
             'bugs' => [],
         ],

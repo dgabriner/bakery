@@ -408,7 +408,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'Saved your list. Some route updates could not apply. Ask the bakery to check Driver Assignment.'
                 );
             }
-            if (empty($result['sms_ok'])) {
+            if (($result['sms_skipped'] ?? '') === 'already_sent') {
+                if ($routeTouched) {
+                    $done = (string)bakery_t(
+                        'survey.store_verify_sms_already_route',
+                        [],
+                        'Saved and updated the route. Headquarters already has the text for this day.'
+                    );
+                } elseif (empty($route['errors'])) {
+                    $done = (string)bakery_t(
+                        'survey.store_verify_sms_already',
+                        [],
+                        'Saved. Headquarters already has the text for this day.'
+                    );
+                }
+            } elseif (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.store_verify_sms_failed',
                     [],
@@ -472,7 +486,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
             $done = (string)bakery_t('survey.route_order_done', [], 'Order saved. Headquarters got the sequence.');
-            if (empty($result['sms_ok'])) {
+            if (($result['sms_skipped'] ?? '') === 'already_sent') {
+                $done = (string)bakery_t(
+                    'survey.route_order_sms_already',
+                    [],
+                    'Order saved. Headquarters already has the text for this day.'
+                );
+            } elseif (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.route_order_sms_failed',
                     [],
