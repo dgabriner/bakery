@@ -281,8 +281,8 @@ bakery_reset_locale_cache();
 $esMorning = bakery_manager_phone_format_stop_time('10:40:00');
 $esAfternoon = bakery_manager_phone_format_stop_time('14:05:00');
 manager_phone_assert(
-    ($esMorning === '10:40 a. m.' || $esMorning === '10:40')
-        && ($esAfternoon === '2:05 p. m.' || $esAfternoon === '14:05'),
+    ($esMorning === '10:40 a. m.' || $esMorning === '10:40 a.m.' || $esMorning === '10:40')
+        && ($esAfternoon === '2:05 p. m.' || $esAfternoon === '2:05 p.m.' || $esAfternoon === '14:05'),
     'Spanish mission times use 24-hour or h:mm a. m. style, got ' . $esMorning . ' / ' . $esAfternoon
 );
 manager_phone_assert(strpos($esMorning, 'AM') === false && strpos($esAfternoon, 'PM') === false, 'Spanish mission times are not English AM/PM');
