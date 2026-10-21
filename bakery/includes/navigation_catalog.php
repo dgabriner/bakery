@@ -128,6 +128,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'standing_routes.php', 'label' => 'Standing Routes', 'description' => 'Maintain the recurring customer-to-driver route plan.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'route_manager.php', 'label' => 'Route Manager', 'description' => 'Review route stops and track COD cash on hand and turn-in totals per driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'route_summary.php', 'label' => 'Route Summary', 'description' => 'See the day’s deliveries as photos, with customer, amount sold, and driver on each stop.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'route_photo_journey.php', 'label' => 'Route photo journey', 'description' => 'Hours and photos for who actually delivered each stop, in delivery order.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'route_closeout.php', 'label' => 'Route Closeout', 'description' => 'End-of-route loaded vs delivered vs returned vs waste; required before Daily Run closeout.', 'roles' => ['administrator', 'manager', 'driver'], 'usage' => 'everyday'],
                 ['href' => 'route_analysis.php', 'label' => 'Route Analysis', 'description' => 'Compare planned and actual timing for a driver route, and update default stop times when needed.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'map.php', 'label' => 'Customer Map', 'description' => 'Map customer locations and delivery zones.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
@@ -347,6 +348,7 @@ function bakery_historical_navigation_catalog() {
             ['driver_list.php', 'Driver Route List'],
             ['route_manager.php', 'Route Manager'],
             ['route_summary.php', 'Route Summary'],
+            ['route_photo_journey.php', 'Route photo journey'],
             ['route_closeout.php', 'Route Closeout'],
             ['map.php', 'Map'],
             ['call_headquarters.php', 'Call Headquarters'],
@@ -396,7 +398,7 @@ function &bakery_navigation_script_registry(): array
         foreach ([
             'index.php', 'driver.php', 'driver_stops.php', 'pack_list.php', 'driver_list.php',
             'route_closeout.php', 'complete_delivery.php', 'driver_session_ping.php',
-            'upload_driver_photo.php', 'get_customer_order_details.php', 'get_driver_orders.php',
+            'upload_driver_photo.php', 'driver_photo.php', 'get_customer_order_details.php', 'get_driver_orders.php',
             'global_gps_handler.php', 'call_headquarters.php', 'qr_login.php',
         ] as $script) {
             $boot($registry, $script, $driverRoles);

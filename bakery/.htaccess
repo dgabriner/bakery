@@ -37,6 +37,8 @@
 # never matches these host conditions and behaves exactly as before.
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    # Delivery photos are served by driver_photo.php, not as public files.
+    RewriteRule ^uploads/driver_photos/ - [F,L]
     RewriteCond %{HTTP_HOST} ^staging\.sourflour\.org$ [NC]
     RewriteRule .* - [E=STAGING:1]
     RewriteCond %{HTTP_HOST} ^staging\.sourflour\.org$ [NC]
