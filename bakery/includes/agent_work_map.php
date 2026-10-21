@@ -578,6 +578,8 @@ function bakery_agent_work_map_core(): array
                 '.cursor/hooks/auto-push.ps1',
                 'deploy_status.php',
                 'scripts/hosted_promotion_worker.php',
+                'scripts/cloud_agent_stage.py',
+                'scripts/queue_hosted_live.php',
             ],
             'tests' => [
                 'tests/run_local_test_target_guard_tests.php',
@@ -586,6 +588,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_deploy_surface_tests.php',
                 'tests/run_staging_env_tests.php',
                 'tests/run_hosted_promotion_tests.php',
+                'tests/run_files_live_only_tests.php',
                 'tests/run_client_cache_tests.php',
                 'tests/run_google_analytics_tests.php',
                 'tests/run_hosted_migration_worker_tests.php',

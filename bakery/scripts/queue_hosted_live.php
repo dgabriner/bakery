@@ -8,6 +8,7 @@
  *
  *   BAKERY_HOSTED_STAGE_ROOT=/home/.../... \
  *     php scripts/queue_hosted_live.php --confirm-live --migration=074_slug.sql --files
+ *   php scripts/queue_hosted_live.php --confirm-live --files-only-manifest=/path/files_live_only.json
  */
 define('ACCESS_ALLOWED', true);
 define('BAKERY_HOSTED_LIVE_QUEUE', true);
@@ -20,9 +21,12 @@ if (PHP_SAPI !== 'cli') {
 $confirm = in_array('--confirm-live', $argv, true);
 $queueFiles = in_array('--files', $argv, true);
 $migrationFile = '';
+$filesOnlyManifest = '';
 foreach ($argv as $arg) {
     if (strpos($arg, '--migration=') === 0) {
         $migrationFile = basename(trim(substr($arg, 12)));
+    } elseif (strpos($arg, '--files-only-manifest=') === 0) {
+        $filesOnlyManifest = trim(substr($arg, strlen('--files-only-manifest=')));
     }
 }
 
@@ -30,8 +34,12 @@ if (!$confirm) {
     fwrite(STDERR, "Refusing: pass --confirm-live after the owner asked to promote Live.\n");
     exit(1);
 }
-if ($migrationFile === '' && !$queueFiles) {
-    fwrite(STDERR, "Nothing to queue. Pass --migration=NNN_slug.sql and/or --files.\n");
+if ($queueFiles && $filesOnlyManifest !== '') {
+    fwrite(STDERR, "Refusing: pass either --files or --files-only-manifest, not both.\n");
+    exit(1);
+}
+if ($migrationFile === '' && !$queueFiles && $filesOnlyManifest === '') {
+    fwrite(STDERR, "Nothing to queue. Pass --migration=NNN_slug.sql, --files, or --files-only-manifest.\n");
     exit(1);
 }
 
@@ -75,6 +83,11 @@ try {
     if ($queueFiles) {
         $record = bakery_staging_live_approval_submit();
         echo 'Queued Live files release ' . ($record['release_id'] ?? '') . ' (' . (int)($record['file_count'] ?? 0) . " files)\n";
+    }
+    if ($filesOnlyManifest !== '') {
+        $manifest = bakery_staging_live_read_files_only_manifest($filesOnlyManifest, $hostedStageRoot);
+        $record = bakery_staging_live_approval_submit_files($manifest['paths'], $manifest['hashes'], $manifest['commit']);
+        echo 'Queued Live files-only release ' . ($record['release_id'] ?? '') . ' (' . (int)($record['file_count'] ?? 0) . " files)\n";
     }
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . "\n");

@@ -452,12 +452,179 @@ function bakery_staging_live_history_board(): array {
     ];
 }
 
+/**
+ * Skip-list pages that a named Live file list must never carry.
+ * Kept here as well as bakery_staging_live_skip_name() so a later edit to
+ * the deploy skip patterns cannot quietly admit them.
+ *
+ * @return list<string>
+ */
+function bakery_staging_live_files_only_blocked_names(): array {
+    return ['staging_update.php', 'oven_light.php', 'proof_window.php'];
+}
+
+function bakery_staging_live_path_in_promotion_set(string $path): bool {
+    $root = dirname(__DIR__);
+    $absolute = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+    if (!is_file($absolute) || is_link($absolute)) {
+        return false;
+    }
+    $real = realpath($absolute);
+    $realRoot = realpath($root);
+    if ($real === false || $realRoot === false) {
+        return false;
+    }
+    $prefix = $realRoot . DIRECTORY_SEPARATOR;
+    if ($real !== $realRoot && strpos($real, $prefix) !== 0) {
+        return false;
+    }
+    if (strpos($path, '/') === false) {
+        $ext = strtolower((string)strrchr($path, '.'));
+        $allowed = ['.php' => true, '.js' => true, '.css' => true, '.html' => true];
+        return $path === '.htaccess' || $path === 'staging-robots.txt' || isset($allowed[$ext]);
+    }
+    $top = strstr($path, '/', true);
+    if (in_array($top, ['includes', 'css', 'assets', 'lang'], true)) {
+        return true;
+    }
+    return strpos($path, 'vendor/phpmailer/') === 0;
+}
+
+/**
+ * @param list<string> $paths
+ * @return list<string>
+ */
+function bakery_staging_live_files_only_normalize(array $paths): array {
+    if ($paths === []) {
+        throw new InvalidArgumentException('Files-only list is empty.');
+    }
+    $blocked = array_fill_keys(bakery_staging_live_files_only_blocked_names(), true);
+    $out = [];
+    foreach ($paths as $path) {
+        $path = str_replace('\\', '/', trim((string)$path));
+        if ($path === '') {
+            throw new InvalidArgumentException('Empty files-only path.');
+        }
+        if (isset($out[$path])) {
+            throw new InvalidArgumentException('Duplicate files-only path: ' . $path);
+        }
+        $base = basename($path);
+        if (isset($blocked[$base]) || bakery_staging_live_skip_name($base)) {
+            throw new InvalidArgumentException('Refusing skip-list file: ' . $path);
+        }
+        if (!bakery_promotion_live_safe_relpath($path) || !bakery_staging_live_path_in_promotion_set($path)) {
+            throw new InvalidArgumentException('Path is outside the promotion set: ' . $path);
+        }
+        $out[$path] = true;
+    }
+    return array_keys($out);
+}
+
+/**
+ * Hash the files on this disk and require each sha256 to match the caller.
+ * On hosted Staging that disk is the Staging tree, so the caller passes the
+ * sha256 of the same path at a git commit.
+ *
+ * @param list<string> $paths
+ * @param array<string, string> $expectedHashes
+ * @return list<array{path: string, size: int, sha256: string}>
+ */
+function bakery_staging_live_files_only_entries(array $paths, array $expectedHashes): array {
+    $normalized = bakery_staging_live_files_only_normalize($paths);
+    $root = dirname(__DIR__);
+    $entries = [];
+    foreach ($normalized as $path) {
+        $expected = strtolower((string)($expectedHashes[$path] ?? ''));
+        if (!preg_match('/^[a-f0-9]{64}$/', $expected)) {
+            throw new InvalidArgumentException('Missing expected hash for ' . $path);
+        }
+        $absolute = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+        $actual = hash_file('sha256', $absolute);
+        if (!is_string($actual) || !hash_equals($expected, $actual)) {
+            throw new RuntimeException('Staging hash does not match the given commit for ' . $path);
+        }
+        $entries[] = [
+            'path' => $path,
+            'size' => (int)filesize($absolute),
+            'sha256' => $actual,
+        ];
+    }
+    return $entries;
+}
+
+/**
+ * @return array{commit: string, paths: list<string>, hashes: array<string, string>}
+ */
+function bakery_staging_live_read_files_only_manifest(string $manifestPath, string $stageRoot): array {
+    $real = realpath($manifestPath);
+    $tools = realpath(dirname(rtrim($stageRoot, '/')) . DIRECTORY_SEPARATOR . '.sourflour-stage-tools');
+    if ($real === false || $tools === false || !is_file($real) || strpos($real, $tools . DIRECTORY_SEPARATOR) !== 0) {
+        throw new RuntimeException('Refusing files-only manifest outside the stage tools directory.');
+    }
+    $data = json_decode((string)file_get_contents($real), true);
+    if (!is_array($data)) {
+        throw new RuntimeException('Files-only manifest is not JSON.');
+    }
+    $commit = strtolower((string)($data['commit'] ?? ''));
+    if (!preg_match('/^[0-9a-f]{7,40}$/', $commit)) {
+        throw new InvalidArgumentException('Files-only promotion requires a commit SHA.');
+    }
+    $files = $data['files'] ?? null;
+    if (!is_array($files) || $files === []) {
+        throw new InvalidArgumentException('Files-only manifest has no files.');
+    }
+    $paths = [];
+    $hashes = [];
+    foreach ($files as $entry) {
+        if (!is_array($entry)) {
+            throw new InvalidArgumentException('Files-only manifest entry is invalid.');
+        }
+        $path = (string)($entry['path'] ?? '');
+        $hash = strtolower((string)($entry['sha256'] ?? ''));
+        $paths[] = $path;
+        $hashes[$path] = $hash;
+    }
+    return ['commit' => $commit, 'paths' => $paths, 'hashes' => $hashes];
+}
+
 function bakery_staging_live_approval_submit(string $releaseId = '', string $commit = ''): array {
     if (!bakery_staging_live_approval_available()) {
         throw new RuntimeException('Live promotion is available only to administrators on Staging.');
     }
+    return bakery_staging_live_approval_publish(bakery_staging_live_snapshot_files(), []);
+}
+
+/**
+ * Queue only the named files. Each Staging byte hash must already match the
+ * given commit. Does not take the full snapshot.
+ *
+ * @param list<string> $paths
+ * @param array<string, string> $expectedHashes
+ */
+function bakery_staging_live_approval_submit_files(array $paths, array $expectedHashes, string $commit): array {
+    if (!bakery_staging_live_approval_available()) {
+        throw new RuntimeException('Live promotion is available only to administrators on Staging.');
+    }
+    $commit = strtolower($commit);
+    if (!preg_match('/^[0-9a-f]{7,40}$/', $commit)) {
+        throw new InvalidArgumentException('Files-only promotion requires a commit SHA.');
+    }
+    $files = bakery_staging_live_files_only_entries($paths, $expectedHashes);
+    return bakery_staging_live_approval_publish($files, [
+        'scope' => 'files_only',
+        'commit' => $commit,
+    ]);
+}
+
+/**
+ * @param list<array{path: string, size: int, sha256: string}> $files
+ * @param array<string, string> $extra
+ */
+function bakery_staging_live_approval_publish(array $files, array $extra): array {
+    if (!bakery_staging_live_approval_available()) {
+        throw new RuntimeException('Live promotion is available only to administrators on Staging.');
+    }
     $previous = bakery_staging_live_approval_latest();
-    $files = bakery_staging_live_snapshot_files();
     $releaseId = 'stage-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
     $path = bakery_staging_live_approval_path();
     $exportRoot = bakery_staging_live_export_root();
@@ -477,6 +644,9 @@ function bakery_staging_live_approval_submit(string $releaseId = '', string $com
         'file_count' => count($files),
         'files' => $files,
     ];
+    foreach ($extra as $key => $value) {
+        $record[$key] = $value;
+    }
     $releaseTemp = $releasesRoot . DIRECTORY_SEPARATOR . $releaseId . '.tmp-' . bin2hex(random_bytes(3));
     $releasePath = $releasesRoot . DIRECTORY_SEPARATOR . $releaseId;
     if (!@mkdir($releaseTemp . DIRECTORY_SEPARATOR . 'files', 0700, true)) {
