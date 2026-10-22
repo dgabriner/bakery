@@ -1,0 +1,175 @@
+.driver-reports {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 2.5rem;
+  color: #3b2a1d;
+}
+
+.driver-reports__header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.6rem;
+}
+
+.driver-reports__header p,
+.driver-reports__note,
+.driver-reports__kicker,
+.driver-reports__empty {
+  margin: 0.25rem 0 0;
+}
+
+.driver-reports__note,
+.driver-reports__kicker,
+.driver-reports__empty {
+  color: #6d5a48;
+}
+
+.driver-reports__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.driver-reports__tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #e0d4c4;
+  border-radius: 999px;
+  background: #fff;
+  color: #3b2a1d;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.driver-reports__tab.is-active {
+  background: #3b2a1d;
+  color: #fff;
+  border-color: #3b2a1d;
+}
+
+.driver-reports__date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.driver-reports__date label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 700;
+  flex: 1 1 12rem;
+}
+
+.driver-reports__date input {
+  min-height: 44px;
+  width: 100%;
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.driver-reports__driver {
+  margin: 0 0 1.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e8dccb;
+}
+
+.driver-reports__driver h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.25rem;
+}
+
+.driver-reports__driver h3 {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.95rem;
+}
+
+.driver-reports__flags,
+.driver-reports__stops {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.driver-reports__flag,
+.driver-reports__flags li {
+  background: #fff6e8;
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  margin: 0.35rem 0;
+}
+
+.driver-reports__stop {
+  padding: 0.45rem 0;
+}
+
+.driver-reports__stop-name,
+.driver-reports__mark {
+  margin: 0;
+}
+
+.driver-reports__mark {
+  color: #6d5a48;
+  font-size: 0.92rem;
+}
+
+.driver-reports__sheet-stop {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #f0e6d8;
+}
+
+.driver-reports__sheet-stop h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.driver-reports__sheet-stop dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.driver-reports__sheet-stop dl div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 40%) 1fr;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+}
+
+.driver-reports__sheet-stop dt {
+  font-weight: 700;
+}
+
+.driver-reports__sheet-stop dd {
+  margin: 0;
+  min-height: 1.2em;
+}
+
+.driver-reports__thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f6f1ea;
+}
+
+@media (max-width: 640px) {
+  .driver-reports {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .driver-reports__tab,
+  .driver-reports__date .sf-btn {
+    flex: 1 1 auto;
+  }
+
+  .driver-reports__sheet-stop dl div {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+}
