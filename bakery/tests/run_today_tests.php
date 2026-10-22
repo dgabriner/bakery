@@ -374,6 +374,10 @@ $server = proc_open(
 $ready = false;
 for ($i = 0; $i < 30 && is_resource($server); $i++) {
     usleep(100000);
+    $status = proc_get_status($server);
+    if (!is_array($status) || empty($status['running'])) {
+        break;
+    }
     $probe = @file_get_contents($base . '/build_id.php', false, stream_context_create([
         'http' => ['timeout' => 1, 'ignore_errors' => true],
     ]));
