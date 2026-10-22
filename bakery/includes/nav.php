@@ -251,6 +251,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
               ['href' => 'route_manager.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_manager')],
               ['href' => 'route_summary.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_summary')],
               ['href' => 'route_photo_journey.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_photo_journey')],
+              ['href' => 'driver_reports.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.driver_reports')],
               ['href' => 'daily_route.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_route')],
               ['href' => 'route_closeout.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.route_closeout')],
               ['href' => 'drivers.php', 'label' => bakery_t('nav.item.drivers')],
