@@ -592,8 +592,27 @@ function journey_test_stop($proc): void
         return;
     }
     $status = proc_get_status($proc);
-    if (!empty($status['pid'])) {
-        posix_kill((int)$status['pid'], 15);
+    $pid = (int)($status['pid'] ?? 0);
+    if ($pid > 0) {
+        // proc_open runs php -S under a shell. Killing only that shell leaves
+        // the listener on 8098, and the today suite then sends its bearer
+        // token to a server that was never given DAILY_STATUS_TOKEN.
+        if (stripos(PHP_OS, 'WIN') === 0) {
+            @exec('taskkill /F /T /PID ' . $pid . ' 2>NUL');
+        } elseif (function_exists('posix_kill')) {
+            $childFile = '/proc/' . $pid . '/task/' . $pid . '/children';
+            if (is_readable($childFile)) {
+                $raw = trim((string)file_get_contents($childFile));
+                foreach ($raw === '' ? [] : preg_split('/\s+/', $raw) as $child) {
+                    $childPid = (int)$child;
+                    if ($childPid > 0) {
+                        posix_kill($childPid, 15);
+                    }
+                }
+            }
+            posix_kill($pid, 15);
+        }
     }
+    proc_terminate($proc);
     proc_close($proc);
 }
