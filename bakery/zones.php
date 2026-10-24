@@ -2,6 +2,27 @@
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
+require_once 'includes/zones_catalog.php';
+
+if (isset($db) && $db instanceof PDO
+    && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET'
+    && (string)($_GET['export'] ?? '') === 'csv'
+) {
+    $export = bakery_zones_export_csv($db);
+    $exportStatus = (int)($export['status'] ?? 500);
+    http_response_code($exportStatus);
+    if ($exportStatus !== 200) {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $exportStatus === 401
+            ? bakery_t('zones.export_auth') . "\n"
+            : bakery_t('zones.export_denied') . "\n";
+        exit;
+    }
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="delivery-zones.csv"');
+    echo (string)($export['body'] ?? '');
+    exit;
+}
 
 $page_title = bakery_t('page.zones');
 
@@ -469,6 +490,7 @@ require_once 'includes/nav.php';
     <div class="page-header">
         <h1>🗺️ Delivery Zones Management</h1>
         <p>Create and manage delivery zones for customer assignment</p>
+        <p><?php echo htmlspecialchars(bakery_t('zones.export_help'), ENT_QUOTES, 'UTF-8'); ?></p>
     </div>
     
     <!-- Action Bar -->
@@ -476,9 +498,12 @@ require_once 'includes/nav.php';
         <div>
             <h2>Zones (<?php echo count($zones); ?>)</h2>
         </div>
-        <button type="button" class="btn btn-primary" onclick="openCreateModal()">
-            ➕ Add New Zone
-        </button>
+        <div>
+            <a class="btn btn-secondary" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>zones.php?export=csv"><?php echo htmlspecialchars(bakery_t('zones.export'), ENT_QUOTES, 'UTF-8'); ?></a>
+            <button type="button" class="btn btn-primary" onclick="openCreateModal()">
+                ➕ Add New Zone
+            </button>
+        </div>
     </div>
     
     <!-- Zones Grid -->
