@@ -252,6 +252,21 @@ $priorityA = array_column(bakery_sales_leads_list($db, ['priority' => 'A', 'stag
 assert_true(in_array('SalesLead Test Early', $priorityA, true), 'priority and stage filters include the A lead');
 assert_true(!in_array('SalesLead Test Late', $priorityA, true), 'priority filter leaves out the C lead');
 
+$lost = bakery_sales_leads_import(
+    $db,
+    "id,name,stage,priority\nSFL-TLOST,SalesLead Test Lost,Lost,C\n"
+);
+assert_eq(1, (int)$lost['new'], 'lost lead inserts');
+$defaultNames = array_column(bakery_sales_leads_list($db, []), 'customer_name');
+assert_true(!in_array('SalesLead Test Lost', $defaultNames, true), 'default list hides Lost leads');
+assert_true(in_array('SalesLead Test Early', $defaultNames, true), 'default list still shows open leads');
+$lostOnly = array_column(bakery_sales_leads_list($db, ['stage' => 'Lost']), 'customer_name');
+assert_true(in_array('SalesLead Test Lost', $lostOnly, true), 'stage filter shows Lost leads');
+assert_true(!in_array('SalesLead Test Early', $lostOnly, true), 'Lost stage filter leaves out other stages');
+$withLost = array_column(bakery_sales_leads_list($db, ['show_lost' => '1']), 'customer_name');
+assert_true(in_array('SalesLead Test Lost', $withLost, true), 'show Lost toggle includes Lost leads');
+assert_true(in_array('SalesLead Test Early', $withLost, true), 'show Lost toggle keeps open leads');
+
 echo "\n=== Token endpoint ===\n";
 sales_leads_clear_session();
 putenv('SALES_LEADS_TOKEN');

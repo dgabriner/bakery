@@ -1094,6 +1094,8 @@ function bakery_sales_leads_list(PDO $db, array $filters = []): array
     if ($stage !== '' && in_array($stage, bakery_sales_leads_stages(), true)) {
         $where[] = 'l.stage = ?';
         $params[] = $stage;
+    } elseif ((string)($filters['show_lost'] ?? '') !== '1') {
+        $where[] = "(l.stage IS NULL OR l.stage <> 'Lost')";
     }
     $priority = strtoupper(trim((string)($filters['priority'] ?? '')));
     if (in_array($priority, bakery_sales_leads_priorities(), true)) {

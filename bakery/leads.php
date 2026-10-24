@@ -115,6 +115,7 @@ $filters = [
     'stage' => (string)($_GET['stage'] ?? ''),
     'priority' => (string)($_GET['priority'] ?? ''),
     'zone' => (string)($_GET['zone'] ?? ''),
+    'show_lost' => (string)($_GET['show_lost'] ?? '') === '1' ? '1' : '',
 ];
 $zones = $ready ? bakery_sales_leads_zones($db) : [];
 $editing = $ready && array_key_exists('lead', $_GET);
@@ -206,6 +207,7 @@ $exportQuery = http_build_query(array_filter([
     'stage' => $filters['stage'],
     'priority' => $filters['priority'],
     'zone' => $filters['zone'],
+    'show_lost' => $filters['show_lost'],
 ], static function ($value) {
     return $value !== '';
 }));
@@ -471,6 +473,9 @@ $exportQuery = http_build_query(array_filter([
                         <option value="<?php echo (int)$zone['id']; ?>" <?php echo $filters['zone'] === (string)$zone['id'] ? 'selected' : ''; ?>><?php echo bakery_sales_leads_h($zone['name']); ?></option>
                     <?php endforeach; ?>
                 </select>
+            </label>
+            <label><?php echo bakery_sales_leads_h(bakery_t('leads.show_lost')); ?>
+                <input type="checkbox" name="show_lost" value="1" <?php echo $filters['show_lost'] === '1' ? 'checked' : ''; ?>>
             </label>
             <button type="submit" class="btn btn-secondary"><?php echo bakery_sales_leads_h(bakery_t('leads.filter_apply')); ?></button>
         </form>

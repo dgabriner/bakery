@@ -5412,6 +5412,7 @@ return [
     'leads.filter_priority' => 'Priority',
     'leads.filter_zone' => 'Zone',
     'leads.filter_apply' => 'Filter',
+    'leads.show_lost' => 'Show Lost',
     'leads.zone_any' => 'Any zone',
     'leads.zone_none' => 'No zone',
     'leads.empty' => 'No leads match.',

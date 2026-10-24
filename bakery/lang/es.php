@@ -5409,6 +5409,7 @@ return [
     'leads.filter_priority' => 'Prioridad',
     'leads.filter_zone' => 'Zona',
     'leads.filter_apply' => 'Filtrar',
+    'leads.show_lost' => 'Mostrar perdidos',
     'leads.zone_any' => 'Cualquier zona',
     'leads.zone_none' => 'Sin zona',
     'leads.empty' => 'Ningún prospecto coincide.',
