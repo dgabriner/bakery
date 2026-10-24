@@ -3045,6 +3045,28 @@ html {
     margin-bottom: 2px;
 }
 
+.pan-carry-label {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: #fff6e5;
+    color: #8a5a00;
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    vertical-align: middle;
+}
+
+.pan-carry-remove {
+    font: inherit;
+    font-size: 0.75rem;
+    margin-left: 0.25rem;
+    border: 1px solid #c9b89a;
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+}
+
 .stop-item-address {
     font-size: 0.9rem;
     color: var(--route-muted);

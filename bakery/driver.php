@@ -11,6 +11,7 @@ require_once 'includes/product_inventory.php';
 require_once 'includes/customer_account.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
+require_once 'includes/pan_carry.php';
 
 bakery_customer_account_ensure_schema($db);
 
@@ -30,6 +31,18 @@ $attentionLabel = $attentionFailed
     : '';
 $driverDeskNotice = null;
 $driverDeskError = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'remove_pan_carry') {
+    try {
+        if (function_exists('bakery_require_csrf')) {
+            bakery_require_csrf();
+        }
+        bakery_pan_carry_remove($db, (int)($_POST['carry_id'] ?? 0), (int)($routeUser['id'] ?? 0) ?: null);
+        header('Location: driver.php?date=' . rawurlencode((string)$selectedDate) . '&notice=' . rawurlencode(bakery_t('pan_carry.removed')));
+        exit;
+    } catch (Throwable $e) {
+        $driverDeskError = $e->getMessage();
+    }
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'report_failed_stop') {
     try {
         if (function_exists('bakery_require_csrf')) {
@@ -297,7 +310,7 @@ function bakery_render_driver_stop_item(
             <span class="stop-item-pick" aria-hidden="true"></span>
             <div class="stop-item-body">
                 <div class="stop-item-heading">
-                    <div class="stop-item-name"><?php echo htmlspecialchars($stop['customer_name']); ?></div>
+                    <div class="stop-item-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, $routeUser); ?></div>
                     <?php if ($isNext && !$isPastList): ?><span class="stop-item-next-label"><?php bakery_te('driver.next_label'); ?></span><?php endif; ?>
                     <?php if (!$isPastList && !$isDone): ?>
                     <button type="button"
@@ -422,7 +435,7 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
         <div class="route-prep-stop-top">
             <span class="route-prep-stop-num" aria-hidden="true"><?php echo (int)$stop['route_order'] ?: ($index + 1); ?></span>
             <div class="route-prep-stop-body">
-                <strong class="route-prep-stop-name"><?php echo htmlspecialchars($stop['customer_name']); ?></strong>
+                <strong class="route-prep-stop-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, $routeUser); ?></strong>
                 <p class="route-prep-stop-address"><?php echo htmlspecialchars($stop['customer_address'] ?: bakery_t('driver.no_address_short')); ?></p>
                 <p class="route-prep-stop-meta">
                     <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
@@ -549,7 +562,18 @@ if ($selectedDriverId > 0 && $driver) {
                 'scheduled_delivery_time' => $row['scheduled_delivery_time'],
                 'delivery_status' => $status,
                 'zone_color' => $zoneColorMap[$zone],
+                'carry_label' => '',
+                'carry_id' => 0,
             ];
+        }
+        $carryByCustomer = bakery_pan_carry_labels_for_date($db, $selectedDate);
+        foreach ($orderedStops as $stopIndex => $stop) {
+            $carry = $carryByCustomer[(int)$stop['customer_id']] ?? null;
+            if (!is_array($carry)) {
+                continue;
+            }
+            $orderedStops[$stopIndex]['carry_label'] = (string)($carry['label'] ?? '');
+            $orderedStops[$stopIndex]['carry_id'] = (int)($carry['id'] ?? 0);
         }
 
         $totalStops = count($results);

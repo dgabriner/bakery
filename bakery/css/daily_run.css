@@ -476,6 +476,56 @@
     white-space: pre-wrap;
 }
 
+.route-load-warning {
+    margin: 0 0 0.75rem;
+}
+
+.route-load-warning-line {
+    margin: 0 0 0.15rem;
+    font-weight: 700;
+}
+
+.route-load-warning-samples {
+    margin: 0 0 0.45rem;
+    font-size: 0.85rem;
+}
+
+.pan-carry-board {
+    margin: 0 0 0.75rem;
+}
+
+.pan-carry-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0 0 0.35rem;
+}
+
+.pan-carry-label {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #fff6e5;
+    color: #8a5a00;
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+}
+
+.pan-carry-remove-form {
+    display: inline;
+}
+
+.pan-carry-remove {
+    font: inherit;
+    font-size: 0.8rem;
+    border: 1px solid #c9b89a;
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+}
+
 @media (max-width: 720px) {
     .dr-hero {
         grid-template-columns: 1fr;

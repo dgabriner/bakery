@@ -11,6 +11,7 @@ require_once 'includes/daily_run.php';
 require_once 'includes/driver_assignments.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/driver_day_sms.php';
+require_once 'includes/pan_carry.php';
 
 $user = bakery_current_user();
 if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
@@ -62,6 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'delivery_date' => $postDate,
             ]);
             $flash = (string)($restored['message'] ?? '');
+            $selectedDate = $postDate;
+        } elseif ($action === 'remove_pan_carry') {
+            bakery_require_role(['administrator', 'manager']);
+            $removed = bakery_pan_carry_remove($db, (int)($_POST['carry_id'] ?? 0), (int)($user['id'] ?? 0) ?: null);
+            $flash = $removed ? bakery_t('pan_carry.removed') : bakery_t('pan_carry.remove_failed');
             $selectedDate = $postDate;
         }
     } catch (Throwable $e) {
@@ -171,6 +177,8 @@ require_once 'includes/nav.php';
                 <a href="<?php echo htmlspecialchars(bakery_ops_link_daily_orders($selectedDate, ['review' => 'routed_zero'], 'daily_run')); ?>"><?php bakery_te('daily_run.routed_zero_link'); ?></a>
             </div>
         <?php endif; ?>
+
+        <?php echo bakery_route_day_flags_html($db, $selectedDate, $user); ?>
 
         <?php
         $routeRestoreGroups = [];

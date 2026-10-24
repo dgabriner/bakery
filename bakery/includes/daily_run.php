@@ -16,6 +16,7 @@ require_once __DIR__ . '/demand_confirmation.php';
 require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/operational_exceptions.php';
 require_once __DIR__ . '/product_inventory.php';
+require_once __DIR__ . '/pan_carry.php';
 if (file_exists(__DIR__ . '/operational_timeline.php')) {
     require_once __DIR__ . '/operational_timeline.php';
 }
@@ -96,6 +97,13 @@ function bakery_daily_run_close_day(PDO $db, string $date, ?int $userId, ?string
         ]);
     } elseif (function_exists('app_log')) {
         app_log("Daily run closed for {$date} by user " . ($userId ?? 'unknown'), 'info');
+    }
+    try {
+        if (function_exists('bakery_pan_carry_forward_day')) {
+            bakery_pan_carry_forward_day($db, $date);
+        }
+    } catch (Throwable $e) {
+        error_log('pan carry after close ' . $date . ': ' . $e->getMessage());
     }
 }
 

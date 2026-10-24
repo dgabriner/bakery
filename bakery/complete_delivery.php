@@ -28,6 +28,7 @@ require_once __DIR__ . '/includes/cod_square_guard.php';
 require_once __DIR__ . '/includes/billing_header.php';
 require_once __DIR__ . '/includes/delivery_proof.php';
 require_once __DIR__ . '/includes/special_orders.php';
+require_once __DIR__ . '/includes/route_load.php';
 
 /**
  * Browser navigation (GET/HEAD) should not dump the JSON API.
@@ -1322,6 +1323,13 @@ function bakery_confirm_delivery(
         }
         if ($ownTransaction) {
             $db->commit();
+        }
+        if (function_exists('bakery_route_load_refresh_order') && !$db->inTransaction()) {
+            try {
+                bakery_route_load_refresh_order($db, $dailyOrderId);
+            } catch (Throwable $refreshError) {
+                error_log('route load refresh ' . $dailyOrderId . ': ' . $refreshError->getMessage());
+            }
         }
     } catch (Throwable $e) {
         if ($ownTransaction && $db->inTransaction()) {
