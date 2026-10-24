@@ -1,0 +1,345 @@
+<?php
+/**
+ * Sales Leads phase 1.
+ *
+ * Role gate, upsert, dry run, stage log, token read, and the 182-row
+ * Restaurant Week file. bakerysf_test only. The fixture is not seeded
+ * into any other database.
+ *
+ * Usage: php tests/run_sales_leads_tests.php
+ */
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "CLI only\n");
+    exit(1);
+}
+
+$root = dirname(__DIR__);
+require_once $root . '/tests/isolate_test_db.php';
+$db = require $root . '/tests/harness.php';
+require_once $root . '/includes/sales_leads.php';
+require_once $root . '/includes/navigation_catalog.php';
+require_once $root . '/includes/hosted_migration_runtime.php';
+require_once $root . '/includes/schema_migration_numbers.php';
+
+function sales_leads_clear_session(): void
+{
+    $_SESSION = [];
+    unset($_SERVER['HTTP_AUTHORIZATION'], $_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+}
+
+function sales_leads_session(string $role): void
+{
+    sales_leads_clear_session();
+    $_SESSION['user_id'] = 50;
+    $_SESSION['user_email'] = 'sales-leads@example.test';
+    $_SESSION['user_display_name'] = 'Sales Leads';
+    $_SESSION['user_role_slug'] = $role;
+}
+
+function sales_leads_cleanup(PDO $db): void
+{
+    $db->exec("DELETE FROM leads WHERE external_id LIKE 'SFL-%' OR customer_name LIKE 'SalesLead Test %'");
+    $db->exec("DELETE FROM zones WHERE name = 'SalesLead Mission Zone'");
+    $db->exec("DELETE FROM users WHERE email LIKE 'sales-leads-test-%@example.test'");
+}
+
+function sales_leads_count(PDO $db, string $sql): int
+{
+    return (int)$db->query($sql)->fetchColumn();
+}
+
+$dbName = (string)$db->query('SELECT DATABASE()')->fetchColumn();
+assert_eq('bakerysf_test', $dbName, 'tests use bakerysf_test');
+
+if (!bakery_sales_leads_ready($db)) {
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/run_migrations.php');
+    passthru($cmd, $migrateCode);
+    assert_eq(0, $migrateCode, 'migration 110 applies on bakerysf_test');
+    foreach (['external_id', 'stage', 'sample_daily_order_id', 'zone_id', 'last_updated'] as $column) {
+        bakery_forget_column_exists('leads', $column);
+    }
+    bakery_forget_table_exists('lead_activity');
+}
+
+assert_true(bakery_sales_leads_ready($db), 'sales lead columns and activity table exist');
+assert_true(table_exists($db, 'lead_contacts'), 'existing lead_contacts table stays');
+
+$demo = $db->query("SELECT customer_name, status, stage, contact_name, phone FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetch();
+assert_true(is_array($demo), 'existing demo lead is still present');
+if (is_array($demo)) {
+    assert_eq('Demo Prospect Shop', (string)$demo['customer_name'], 'demo lead name is unchanged');
+    assert_eq('new', (string)$demo['status'], 'demo lead status column is kept');
+    assert_eq('New', (string)$demo['stage'], 'demo lead stage is backfilled from status');
+    assert_eq('Casey Contact', (string)$demo['contact_name'], 'demo lead contact name is kept');
+    assert_eq('555-0199', (string)$demo['phone'], 'demo lead phone is kept');
+}
+
+$migrationSql = (string)file_get_contents($root . '/database/schema/110_sales_leads.sql');
+[$migrationSafe, $migrationMessage] = bakery_hosted_migration_sql_safe($migrationSql);
+assert_true($migrationSafe, 'migration 110 is additive (' . $migrationMessage . ')');
+assert_true(bakery_schema_unexpected_duplicate_prefixes() === [], '110 does not reuse a schema number');
+
+$leadsPage = (string)file_get_contents($root . '/leads.php');
+$apiPage = (string)file_get_contents($root . '/sales_leads_api.php');
+assert_true(strpos($leadsPage, 'bakery_sales_leads_require_access()') !== false, 'leads page checks the role gate');
+assert_true(strpos($apiPage, 'BAKERY_SKIP_REQUEST_SECURITY') !== false, 'token endpoint does its own auth');
+assert_true(strpos($apiPage, 'SALES_LEADS_TOKEN') !== false, 'token endpoint documents SALES_LEADS_TOKEN');
+assert_true(stripos($apiPage, 'INSERT INTO') === false, 'token endpoint has no write SQL');
+
+$leadRoles = bakery_navigation_roles_for_script('leads.php');
+sort($leadRoles);
+assert_eq(['administrator', 'manager'], $leadRoles, 'Sales Leads menu is managers and administrators only');
+
+echo "\n=== Role gate ===\n";
+sales_leads_clear_session();
+assert_eq(401, bakery_sales_leads_role_status(), 'guest with no session is denied');
+sales_leads_session('guest');
+assert_eq(403, bakery_sales_leads_role_status(), 'guest role is denied');
+sales_leads_session('driver');
+assert_eq(403, bakery_sales_leads_role_status(), 'driver is denied');
+sales_leads_session('driver_assistant');
+assert_eq(403, bakery_sales_leads_role_status(), 'driver assistant is denied');
+sales_leads_session('baker');
+assert_eq(403, bakery_sales_leads_role_status(), 'baker is denied');
+sales_leads_session('cashier');
+assert_eq(403, bakery_sales_leads_role_status(), 'cashier is denied');
+sales_leads_session('manager');
+assert_eq(200, bakery_sales_leads_role_status(), 'manager is allowed');
+sales_leads_session('administrator');
+assert_eq(200, bakery_sales_leads_role_status(), 'administrator is allowed');
+sales_leads_clear_session();
+
+sales_leads_cleanup($db);
+
+echo "\n=== Dry run and rejects ===\n";
+$beforeLeads = sales_leads_count($db, 'SELECT COUNT(*) FROM leads');
+$beforeActivity = sales_leads_count($db, 'SELECT COUNT(*) FROM lead_activity');
+$previewCsv = "id,name,fit_score,priority,stage,sfrw_meals\n"
+    . "SFL-T1,SalesLead Test Preview,3,A,New,Lunch\n"
+    . "SFL-T2,SalesLead Test Bad Score,9,A,New,\n";
+$dry = bakery_sales_leads_import($db, $previewCsv, ['dry_run' => true]);
+assert_true(!empty($dry['ok']) && !empty($dry['dry_run']), 'dry run returns a preview');
+assert_eq(1, (int)$dry['new'], 'dry run counts the valid row as new');
+assert_eq(1, (int)$dry['rejected'], 'dry run counts the bad score as rejected');
+$rejectedReason = '';
+foreach ($dry['rows'] as $previewRow) {
+    if (($previewRow['outcome'] ?? '') === 'rejected') {
+        $rejectedReason = (string)$previewRow['reason'];
+    }
+}
+assert_eq('bad_fit_score', $rejectedReason, 'rejected row explains the fit score');
+assert_eq($beforeLeads, sales_leads_count($db, 'SELECT COUNT(*) FROM leads'), 'dry run writes no leads');
+assert_eq($beforeActivity, sales_leads_count($db, 'SELECT COUNT(*) FROM lead_activity'), 'dry run writes no activity');
+
+$committed = bakery_sales_leads_import($db, $previewCsv, ['dry_run' => false]);
+assert_true(!empty($committed['ok']), 'commit of the preview file succeeds');
+assert_eq(1, (int)$committed['new'], 'commit inserts only the valid row');
+assert_eq(1, (int)$committed['rejected'], 'commit still rejects the bad score');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE customer_name = 'SalesLead Test Bad Score'"), 'rejected name is not stored');
+$previewLead = $db->query("SELECT notes FROM leads WHERE external_id = 'SFL-T1'")->fetch();
+assert_true(is_array($previewLead) && strpos((string)$previewLead['notes'], 'sfrw_meals: Lunch') !== false, 'unknown column is kept in notes');
+
+echo "\n=== Upsert by id and by name ===\n";
+$byId = bakery_sales_leads_import($db, "id,name,stage\nSFL-T1,SalesLead Test Renamed,Researched\n");
+assert_eq(0, (int)$byId['new'], 'second import of the same id is not new');
+assert_eq(1, (int)$byId['updated'], 'second import of the same id updates');
+assert_eq('SalesLead Test Renamed', (string)$db->query("SELECT customer_name FROM leads WHERE external_id = 'SFL-T1'")->fetchColumn(), 'id upsert changes the name');
+assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE external_id = 'SFL-T1'"), 'id upsert does not duplicate');
+
+$db->prepare(
+    "INSERT INTO leads (customer_name, contact_name, phone, email, address, notes, status)
+     VALUES ('SalesLead Test Named', 'Casey', '555-0100', NULL, NULL, 'keep me', 'new')"
+)->execute();
+$byName = bakery_sales_leads_import($db, "id,name,stage,priority\nSFL-TNAME,saleslead test named,Contacted,B\n");
+assert_eq(0, (int)$byName['new'], 'name match is not a new lead');
+assert_eq(1, (int)$byName['updated'], 'name match updates the existing lead');
+$named = $db->query("SELECT id, external_id, phone, contact_name FROM leads WHERE customer_name = 'saleslead test named'")->fetch();
+assert_true(is_array($named), 'name match finds the lead case-insensitively');
+if (is_array($named)) {
+    assert_eq('SFL-TNAME', (string)$named['external_id'], 'name match attaches the external id');
+    assert_eq('555-0100', (string)$named['phone'], 'name match keeps the existing phone');
+    assert_eq('Casey', (string)$named['contact_name'], 'name match keeps the existing contact name');
+    assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE LOWER(customer_name) = 'saleslead test named'"), 'name match does not duplicate');
+}
+
+echo "\n=== Zone link and stage log ===\n";
+$db->prepare("INSERT INTO zones (name, description, color) VALUES ('SalesLead Mission Zone', 'test', '#336699')")->execute();
+$zoneId = (int)$db->lastInsertId();
+$zoned = bakery_sales_leads_import(
+    $db,
+    "id,name,route_fit,stage\nSFL-TZ,SalesLead Test Zoned,Tuesday on SalesLead Mission Zone,New\n"
+);
+assert_eq(1, (int)$zoned['new'], 'zoned lead inserts');
+assert_eq(
+    $zoneId,
+    (int)$db->query("SELECT zone_id FROM leads WHERE external_id = 'SFL-TZ'")->fetchColumn(),
+    'route fit text links the delivery zone'
+);
+$zoneFiltered = array_column(bakery_sales_leads_list($db, ['zone' => (string)$zoneId]), 'external_id');
+assert_true(in_array('SFL-TZ', $zoneFiltered, true), 'zone filter returns the linked lead');
+$unlinked = array_column(bakery_sales_leads_list($db, ['zone' => 'none']), 'external_id');
+assert_true(!in_array('SFL-TZ', $unlinked, true), 'unlinked zone filter leaves out the linked lead');
+
+$roleId = (int)$db->query("SELECT id FROM roles WHERE slug = 'manager' LIMIT 1")->fetchColumn();
+assert_true($roleId > 0, 'manager role exists for the activity user');
+$testerEmail = 'sales-leads-test-' . bin2hex(random_bytes(3)) . '@example.test';
+$db->prepare(
+    'INSERT INTO users (email, password_hash, display_name, role_id, is_active) VALUES (?, ?, ?, ?, 1)'
+)->execute([$testerEmail, 'test', 'Sales Lead Tester', $roleId]);
+$testerId = (int)$db->lastInsertId();
+
+$created = bakery_sales_leads_save($db, [
+    'name' => 'SalesLead Test Stage',
+    'stage' => 'New',
+    'external_id' => 'SFL-TSTG',
+], $testerId);
+assert_true(!empty($created['ok']), 'create lead for the stage log (' . (string)($created['error'] ?? '') . ')');
+$stageLeadId = (int)($created['id'] ?? 0);
+$db->prepare('UPDATE leads SET contact_name = ?, phone = ?, email = ? WHERE id = ?')
+    ->execute(['Casey Contact', '555-0199', 'casey@example.test', $stageLeadId]);
+$changed = bakery_sales_leads_save($db, [
+    'internal_id' => $stageLeadId,
+    'external_id' => 'SFL-TSTG',
+    'name' => 'SalesLead Test Stage',
+    'stage' => 'Contacted',
+    'change_note' => 'Called the front desk',
+], $testerId);
+assert_true(!empty($changed['ok']), 'stage change saves');
+$log = $db->prepare(
+    "SELECT user_id, note, stage_from, stage_to
+     FROM lead_activity
+     WHERE lead_id = ? AND stage_to = 'Contacted'
+     ORDER BY id DESC LIMIT 1"
+);
+$log->execute([$stageLeadId]);
+$logRow = $log->fetch();
+assert_true(is_array($logRow), 'stage change writes an activity row');
+if (is_array($logRow)) {
+    assert_eq('New', (string)$logRow['stage_from'], 'activity records the previous stage');
+    assert_eq('Contacted', (string)$logRow['stage_to'], 'activity records the new stage');
+    assert_eq($testerId, (int)$logRow['user_id'], 'activity records the user');
+    assert_eq('Called the front desk', (string)$logRow['note'], 'activity keeps the note');
+}
+$keptContact = $db->prepare('SELECT contact_name, phone, email FROM leads WHERE id = ?');
+$keptContact->execute([$stageLeadId]);
+$keptRow = $keptContact->fetch();
+assert_true(is_array($keptRow), 'stage save still finds the lead');
+if (is_array($keptRow)) {
+    assert_eq('Casey Contact', (string)$keptRow['contact_name'], 'manual save keeps the existing contact name');
+    assert_eq('555-0199', (string)$keptRow['phone'], 'manual save keeps a phone the channel did not replace');
+    assert_eq('casey@example.test', (string)$keptRow['email'], 'manual save keeps an email the channel did not replace');
+}
+
+$noted = bakery_sales_leads_add_note($db, $stageLeadId, $testerId, 'Left a sample card', '2026-10-24');
+assert_true(!empty($noted['ok']), 'a dated note can be added without a stage change');
+
+$dated = bakery_sales_leads_import(
+    $db,
+    "id,name,priority,stage,next_action_date\nSFL-TE,SalesLead Test Early,A,New,2026-01-02\nSFL-TL,SalesLead Test Late,C,New,2026-12-02\n"
+);
+assert_eq(2, (int)$dated['new'], 'dated leads insert for the list sort');
+$ordered = bakery_sales_leads_list($db, []);
+$positions = [];
+foreach ($ordered as $index => $row) {
+    $positions[(string)$row['customer_name']] = $index;
+}
+assert_true(
+    isset($positions['SalesLead Test Early'], $positions['SalesLead Test Late'])
+        && $positions['SalesLead Test Early'] < $positions['SalesLead Test Late'],
+    'list is sorted by next action date'
+);
+$priorityA = array_column(bakery_sales_leads_list($db, ['priority' => 'A', 'stage' => 'New']), 'customer_name');
+assert_true(in_array('SalesLead Test Early', $priorityA, true), 'priority and stage filters include the A lead');
+assert_true(!in_array('SalesLead Test Late', $priorityA, true), 'priority filter leaves out the C lead');
+
+echo "\n=== Token endpoint ===\n";
+sales_leads_clear_session();
+putenv('SALES_LEADS_TOKEN');
+unset($_ENV['SALES_LEADS_TOKEN'], $_SERVER['SALES_LEADS_TOKEN']);
+$anonymous = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
+assert_eq(401, $anonymous['status'], 'GET without a token is 401');
+assert_eq(false, $anonymous['body']['ok'] ?? null, 'anonymous body is not ok');
+
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer wrong-token';
+putenv('SALES_LEADS_TOKEN=correct-token');
+$_ENV['SALES_LEADS_TOKEN'] = 'correct-token';
+$wrong = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
+assert_eq(401, $wrong['status'], 'wrong bearer token is 401');
+
+$leadCountBeforeWriteAttempt = sales_leads_count($db, 'SELECT COUNT(*) FROM leads');
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer correct-token';
+$allowed = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
+assert_eq(200, $allowed['status'], 'matching bearer token returns JSON');
+assert_eq(true, $allowed['body']['ok'] ?? null, 'token body is ok');
+$ids = array_column($allowed['body']['leads'] ?? [], 'id');
+assert_true(in_array('SFL-TSTG', $ids, true), 'JSON includes a lead id');
+$posted = bakery_sales_leads_api_dispatch($db, 'POST', [], $_SERVER);
+assert_eq(405, $posted['status'], 'POST is rejected');
+assert_eq($leadCountBeforeWriteAttempt, sales_leads_count($db, 'SELECT COUNT(*) FROM leads'), 'rejected POST writes nothing');
+
+$csvResponse = bakery_sales_leads_api_dispatch($db, 'GET', ['format' => 'csv'], $_SERVER);
+assert_eq(200, $csvResponse['status'], 'CSV export is allowed with the token');
+assert_true(strpos((string)$csvResponse['body'], 'id,name,type,') === 0, 'CSV export starts with the lead columns');
+assert_true(strpos((string)$csvResponse['body'], 'SFL-TSTG') !== false, 'CSV export contains the lead');
+
+sales_leads_clear_session();
+unset($_SERVER['HTTP_AUTHORIZATION']);
+sales_leads_session('driver');
+$driverApi = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
+assert_eq(403, $driverApi['status'], 'driver session cannot read the token endpoint');
+sales_leads_clear_session();
+unset($_SERVER['HTTP_AUTHORIZATION'], $_ENV['SALES_LEADS_TOKEN'], $_SERVER['SALES_LEADS_TOKEN']);
+putenv('SALES_LEADS_TOKEN');
+
+echo "\n=== Restaurant Week file ===\n";
+$fixture = $root . '/tests/fixtures/sales_leads_sfrw_2026.csv';
+$fixtureCsv = (string)file_get_contents($fixture);
+$parsedFixture = bakery_sales_leads_parse_csv($fixtureCsv);
+assert_eq(182, count($parsedFixture['rows']), 'fixture has 182 lead rows');
+$demoBefore = $db->query("SELECT updated_at FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetchColumn();
+$leadsBeforeFile = sales_leads_count($db, 'SELECT COUNT(*) FROM leads');
+$fileDry = bakery_sales_leads_import($db, $fixtureCsv, ['dry_run' => true]);
+assert_true(!empty($fileDry['ok']), 'fixture dry run succeeds (' . (string)($fileDry['error'] ?? '') . ')');
+assert_eq(182, (int)$fileDry['new'], 'fixture dry run would add 182');
+assert_eq(0, (int)$fileDry['rejected'], 'fixture dry run rejects nothing');
+assert_eq($leadsBeforeFile, sales_leads_count($db, 'SELECT COUNT(*) FROM leads'), 'fixture dry run writes nothing');
+assert_eq((string)$demoBefore, (string)$db->query("SELECT updated_at FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetchColumn(), 'fixture dry run leaves the demo lead alone');
+
+$fileCommit = bakery_sales_leads_import($db, $fixtureCsv, ['dry_run' => false]);
+assert_true(!empty($fileCommit['ok']), 'fixture import succeeds (' . (string)($fileCommit['error'] ?? '') . ')');
+assert_eq(182, (int)$fileCommit['new'], 'fixture import adds 182 leads');
+assert_eq(0, (int)$fileCommit['updated'], 'fixture import does not update other leads');
+assert_eq(0, (int)$fileCommit['rejected'], 'fixture import rejects nothing');
+assert_eq(182, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE external_id LIKE 'SFL-%' AND external_id NOT LIKE 'SFL-T%'"), '182 SFL rows are stored');
+$first = $db->query("SELECT notes, stage, customer_name FROM leads WHERE external_id = 'SFL-001'")->fetch();
+assert_true(is_array($first), 'SFL-001 is stored');
+if (is_array($first)) {
+    assert_true(strpos((string)$first['notes'], 'sfrw_meals:') !== false, 'SFL-001 keeps the unknown sfrw_meals column in notes');
+    assert_eq('Researched', (string)$first['stage'], 'SFL-001 stage is Researched');
+}
+assert_eq('Demo Prospect Shop', (string)$db->query("SELECT customer_name FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetchColumn(), 'demo lead survives the real import');
+
+$fileAgain = bakery_sales_leads_import($db, $fixtureCsv, ['dry_run' => false]);
+assert_true(!empty($fileAgain['ok']), 'fixture re-import succeeds');
+assert_eq(0, (int)$fileAgain['new'], 're-import adds 0 leads');
+assert_eq(0, (int)$fileAgain['updated'], 're-import updates 0 leads');
+assert_eq(182, (int)$fileAgain['unchanged'], 're-import leaves 182 unchanged');
+
+$sflRows = $db->query(
+    "SELECT l.*, z.name AS zone_name
+     FROM leads l
+     LEFT JOIN zones z ON z.id = l.zone_id
+     WHERE l.external_id LIKE 'SFL-%' AND l.external_id NOT LIKE 'SFL-T%'
+     ORDER BY l.external_id ASC"
+)->fetchAll();
+$round = bakery_sales_leads_import($db, bakery_sales_leads_export_csv($sflRows), ['dry_run' => false]);
+assert_eq(0, (int)$round['new'], 'export then import adds 0');
+assert_eq(0, (int)$round['updated'], 'export then import updates 0');
+assert_eq(182, (int)$round['unchanged'], 'export uses the same columns the importer reads');
+
+sales_leads_cleanup($db);
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE external_id LIKE 'SFL-%'"), 'test leads are removed from bakerysf_test');
+assert_eq('Demo Prospect Shop', (string)$db->query("SELECT customer_name FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetchColumn(), 'cleanup keeps the demo lead');
+
+echo "\n{$GLOBALS['TEST_PASS']} passed, {$GLOBALS['TEST_FAIL']} failed\n";
+exit($GLOBALS['TEST_FAIL'] > 0 ? 1 : 0);
