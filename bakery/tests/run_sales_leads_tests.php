@@ -17,6 +17,7 @@ $root = dirname(__DIR__);
 require_once $root . '/tests/isolate_test_db.php';
 $db = require $root . '/tests/harness.php';
 require_once $root . '/includes/sales_leads.php';
+require_once $root . '/includes/zones_catalog.php';
 require_once $root . '/includes/navigation_catalog.php';
 require_once $root . '/includes/hosted_migration_runtime.php';
 require_once $root . '/includes/schema_migration_numbers.php';
@@ -38,6 +39,17 @@ function sales_leads_session(string $role): void
 
 function sales_leads_cleanup(PDO $db): void
 {
+    $customerIds = $db->query("SELECT id FROM customers WHERE name LIKE 'SalesLead Test %'")->fetchAll(PDO::FETCH_COLUMN);
+    if ($customerIds !== []) {
+        $in = implode(',', array_map('intval', $customerIds));
+        $orderIds = $db->query("SELECT id FROM daily_orders WHERE customer_id IN ({$in})")->fetchAll(PDO::FETCH_COLUMN);
+        if ($orderIds !== []) {
+            $orders = implode(',', array_map('intval', $orderIds));
+            $db->exec("UPDATE leads SET sample_daily_order_id = NULL WHERE sample_daily_order_id IN ({$orders})");
+            $db->exec("DELETE FROM daily_orders WHERE id IN ({$orders})");
+        }
+        $db->exec("DELETE FROM standing_orders WHERE customer_id IN ({$in})");
+    }
     $db->exec("DELETE FROM leads WHERE external_id LIKE 'SFL-%' OR customer_name LIKE 'SalesLead Test %'");
     $db->exec("DELETE FROM customers WHERE name LIKE 'SalesLead Test %'");
     $db->exec("DELETE FROM zones WHERE name = 'SalesLead Mission Zone'");
@@ -97,6 +109,14 @@ assert_true(strpos($leadsPage, 'convert_lead') === false, 'legacy AJAX convert i
 assert_true(strpos($leadsPage, 'value="convert_create"') !== false, 'confirm create is the convert path');
 assert_true(strpos($leadsPage, 'value="convert_link"') !== false, 'same-name customer can be linked');
 assert_true(strpos($leadsPage, 'leads.convert_handoff') !== false, 'confirm screen names the Accounts and Bakery handoff');
+assert_true(strpos($leadsPage, 'value="log_sample"') !== false, 'sample drop uses the lead page');
+assert_true(strpos($leadsPage, 'leads.sample_handoff') !== false, 'sample screen names the one-time order');
+$zonesPage = (string)file_get_contents($root . '/zones.php');
+$zonesCatalog = (string)file_get_contents($root . '/includes/zones_catalog.php');
+assert_true(strpos($zonesPage, 'bakery_zones_export_csv(') !== false, 'zones page downloads the CSV');
+assert_true(strpos($zonesPage, 'SALES_LEADS_TOKEN') === false, 'zones page has no bearer token');
+assert_true(strpos($zonesCatalog, 'SALES_LEADS_TOKEN') === false, 'zones export has no bearer token');
+assert_true(!is_file($root . '/database/schema/112_sales_lead_sample.sql'), 'sample drop needs no migration 112');
 assert_true(strpos($customersPage, 'bakery_customer_hub_create(') !== false, 'Customer Hub page uses the shared create');
 assert_eq(1, substr_count($customersPage, 'INSERT INTO customers'), 'Customer Hub page no longer has its own create insert');
 assert_true(strpos($hubCreatePage, 'INSERT INTO customers') !== false, 'shared create function owns the insert');
@@ -104,6 +124,9 @@ assert_true(strpos($hubCreatePage, 'INSERT INTO customers') !== false, 'shared c
 $leadRoles = bakery_navigation_roles_for_script('leads.php');
 sort($leadRoles);
 assert_eq(['administrator', 'manager'], $leadRoles, 'Sales Leads menu is managers and administrators only');
+$zoneRoles = bakery_navigation_roles_for_script('zones.php');
+sort($zoneRoles);
+assert_eq(['administrator', 'manager'], $zoneRoles, 'Delivery Zones menu is managers and administrators only');
 
 echo "\n=== Role gate ===\n";
 sales_leads_clear_session();
@@ -441,6 +464,120 @@ assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name =
 $history = bakery_sales_leads_history_for_customer($db, $createdId);
 assert_eq(1, count($history), 'customer page can read the linked lead');
 assert_true(count($history[0]['activity'] ?? []) > 0, 'customer page can read the lead activity');
+
+echo "\n=== Sample drop ===\n";
+sales_leads_session('driver');
+$driverSample = bakery_sales_leads_log_sample($db, $wonId, $testerId, date('Y-m-d', strtotime('+7 days')));
+assert_eq('forbidden', (string)($driverSample['error'] ?? ''), 'driver cannot log a sample');
+sales_leads_clear_session();
+$guestSample = bakery_sales_leads_log_sample($db, $wonId, $testerId, date('Y-m-d', strtotime('+7 days')));
+assert_eq('forbidden', (string)($guestSample['error'] ?? ''), 'guest cannot log a sample');
+sales_leads_session('manager');
+$_SESSION['user_id'] = $testerId;
+$_SESSION['locale'] = 'en';
+bakery_locale(true);
+$needsCustomer = bakery_sales_leads_log_sample($db, $openId, $testerId, date('Y-m-d', strtotime('+7 days')));
+assert_eq('customer_required', (string)($needsCustomer['error'] ?? ''), 'a lead without a customer cannot log a sample');
+$past = bakery_sales_leads_log_sample($db, $wonId, $testerId, '2000-01-01');
+assert_eq('past_date', (string)($past['error'] ?? ''), 'a past sample date is refused');
+$badDay = bakery_sales_leads_log_sample($db, $wonId, $testerId, 'tomorrow');
+assert_eq('bad_date', (string)($badDay['error'] ?? ''), 'a sample date must be YYYY-MM-DD');
+
+$sampleDate = new DateTime('tomorrow');
+while ((int)$sampleDate->format('N') !== 1) {
+    $sampleDate->modify('+1 day');
+}
+$sampleDay = $sampleDate->format('Y-m-d');
+$takenDay = (clone $sampleDate)->modify('+1 day')->format('Y-m-d');
+$db->prepare('INSERT INTO daily_orders (customer_id, order_date, status, total_amount) VALUES (?, ?, ?, 0)')
+    ->execute([$createdId, $takenDay, 'pending']);
+$takenOrderId = (int)$db->lastInsertId();
+$taken = bakery_sales_leads_log_sample($db, $wonId, $testerId, $takenDay);
+assert_eq('date_taken', (string)($taken['error'] ?? ''), 'an existing dated order is left alone');
+assert_eq(0, (int)$db->query("SELECT COUNT(*) FROM leads WHERE id = {$wonId} AND sample_daily_order_id IS NOT NULL")->fetchColumn(), 'a taken date does not link a sample');
+
+$db->prepare('UPDATE customers SET is_active = 0 WHERE id = ?')->execute([$existingId]);
+$inactive = bakery_sales_leads_log_sample($db, $dupId, $testerId, $sampleDay);
+assert_eq('customer_inactive', (string)($inactive['error'] ?? ''), 'an inactive customer cannot take a sample');
+$db->prepare('UPDATE customers SET is_active = 1 WHERE id = ?')->execute([$existingId]);
+
+$productId = (int)$db->query('SELECT id FROM products ORDER BY id ASC LIMIT 1')->fetchColumn();
+assert_true($productId > 0, 'a catalog product exists for the copied sample line');
+$standingDay = (int)bakery_standing_day_from_date($sampleDay);
+$db->prepare('INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, 2)')
+    ->execute([$createdId, $productId, $standingDay]);
+$standingAtSample = sales_leads_count($db, 'SELECT COUNT(*) FROM standing_orders');
+$routesAtSample = sales_leads_count($db, 'SELECT COUNT(*) FROM standing_routes');
+$ordersBefore = sales_leads_count($db, "SELECT COUNT(*) FROM daily_orders WHERE customer_id = {$createdId} AND order_date = " . $db->quote($sampleDay));
+$logged = bakery_sales_leads_log_sample($db, $wonId, $testerId, $sampleDay);
+assert_true(!empty($logged['ok']), 'manager logs a sample (' . (string)($logged['error'] ?? '') . ')');
+$sampleOrderId = (int)($logged['daily_order_id'] ?? 0);
+assert_true($sampleOrderId > 0, 'sample returns the dated order id');
+assert_eq($sampleOrderId, (int)$db->query("SELECT sample_daily_order_id FROM leads WHERE id = {$wonId}")->fetchColumn(), 'lead stores the sample order');
+assert_eq($ordersBefore + 1, sales_leads_count($db, "SELECT COUNT(*) FROM daily_orders WHERE customer_id = {$createdId} AND order_date = " . $db->quote($sampleDay)), 'sample creates one dated order');
+assert_eq($standingAtSample, sales_leads_count($db, 'SELECT COUNT(*) FROM standing_orders'), 'sample does not insert a standing order');
+assert_eq($routesAtSample, sales_leads_count($db, 'SELECT COUNT(*) FROM standing_routes'), 'sample does not insert a route assignment');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM daily_order_assignments WHERE daily_order_id = {$sampleOrderId}"), 'sample does not add a route assignment on the order');
+$sampleLine = $db->query(
+    "SELECT quantity, unit_price, line_total, is_no_charge, no_charge_reason
+     FROM daily_order_items WHERE daily_order_id = {$sampleOrderId}"
+)->fetch(PDO::FETCH_ASSOC);
+assert_true(is_array($sampleLine), 'the one-time order copied the standing line');
+if (is_array($sampleLine)) {
+    assert_eq(2, (int)$sampleLine['quantity'], 'copied quantity stays on the dated order');
+    assert_eq('0.00', number_format((float)$sampleLine['unit_price'], 2, '.', ''), 'sample unit price is 0');
+    assert_eq('0.00', number_format((float)$sampleLine['line_total'], 2, '.', ''), 'sample line total is 0');
+    assert_eq(1, (int)$sampleLine['is_no_charge'], 'sample line is no-charge');
+    assert_eq('sample', (string)$sampleLine['no_charge_reason'], 'no-charge reason is sample');
+}
+assert_eq('0.00', number_format((float)$db->query("SELECT total_amount FROM daily_orders WHERE id = {$sampleOrderId}")->fetchColumn(), 2, '.', ''), 'sample order total is 0');
+$sampleLog = $db->query("SELECT note, stage_from, stage_to FROM lead_activity WHERE lead_id = {$wonId} ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+assert_true(is_array($sampleLog), 'sample writes an activity row');
+if (is_array($sampleLog)) {
+    assert_eq('Sample drop order #' . $sampleOrderId . ' on ' . $sampleDay, (string)$sampleLog['note'], 'activity row links the order');
+    assert_eq(null, $sampleLog['stage_from'], 'sample activity is not a stage change');
+    assert_eq(null, $sampleLog['stage_to'], 'sample activity leaves the stage columns empty');
+}
+$ordersAfter = sales_leads_count($db, 'SELECT COUNT(*) FROM daily_orders');
+$againSample = bakery_sales_leads_log_sample($db, $wonId, $testerId, $sampleDay);
+assert_eq('already_sampled', (string)($againSample['error'] ?? ''), 'a lead logs only one sample');
+assert_eq($ordersAfter, sales_leads_count($db, 'SELECT COUNT(*) FROM daily_orders'), 'a second sample creates no order');
+assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM lead_activity WHERE lead_id = {$wonId} AND note LIKE 'Sample drop order #%'"), 'a second sample writes no activity row');
+
+echo "\n=== Delivery zones export ===\n";
+sales_leads_clear_session();
+putenv('SALES_LEADS_TOKEN=should-not-open-zones');
+$_ENV['SALES_LEADS_TOKEN'] = 'should-not-open-zones';
+$guestZones = bakery_zones_export_csv($db);
+assert_eq(401, $guestZones['status'], 'zones CSV without a session is 401');
+assert_eq('', $guestZones['body'], 'denied zones CSV has an empty body');
+sales_leads_session('driver');
+$driverZones = bakery_zones_export_csv($db);
+assert_eq(403, $driverZones['status'], 'driver cannot download zones CSV');
+sales_leads_session('manager');
+$zoneCsv = bakery_zones_export_csv($db);
+assert_eq(200, $zoneCsv['status'], 'manager downloads zones CSV');
+assert_true(strpos((string)$zoneCsv['body'], "id,name,customer_count,lead_count\n") === 0, 'zones CSV starts with the count columns');
+$expectedCustomers = sales_leads_count($db, "SELECT COUNT(*) FROM customers c WHERE c.zone_id = {$zoneId} OR (c.zone_id IS NULL AND c.zone = 'SalesLead Mission Zone')");
+$expectedLeads = sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE zone_id = {$zoneId}");
+assert_true($expectedCustomers >= 1, 'the test zone has a customer');
+assert_true($expectedLeads >= 1, 'the test zone has a lead');
+$foundZone = false;
+foreach (preg_split("/\r\n|\n|\r/", (string)$zoneCsv['body']) as $csvLine) {
+    if ($csvLine === '') {
+        continue;
+    }
+    $cells = str_getcsv($csvLine, ',', '"', '');
+    if (($cells[1] ?? '') === 'SalesLead Mission Zone') {
+        $foundZone = true;
+        assert_eq((string)$zoneId, (string)$cells[0], 'zones CSV includes the zone id');
+        assert_eq((string)$expectedCustomers, (string)$cells[2], 'zones CSV customer count matches the table');
+        assert_eq((string)$expectedLeads, (string)$cells[3], 'zones CSV lead count matches the table');
+    }
+}
+assert_true($foundZone, 'zones CSV lists the test zone');
+unset($_ENV['SALES_LEADS_TOKEN'], $_SERVER['SALES_LEADS_TOKEN']);
+putenv('SALES_LEADS_TOKEN');
 sales_leads_clear_session();
 
 echo "\n=== Token endpoint ===\n";
