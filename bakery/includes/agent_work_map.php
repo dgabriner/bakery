@@ -1187,6 +1187,10 @@ function bakery_agent_work_map_core(): array
                 'sales_leads_api.php',
                 'includes/sales_leads.php',
                 'database/schema/110_sales_leads.sql',
+                'database/schema/111_sales_lead_customer_neighborhood.sql',
+                'includes/customer_hub_create.php',
+                'customers.php',
+                'customer_record.php',
                 'map.php',
             ],
             'tests' => [

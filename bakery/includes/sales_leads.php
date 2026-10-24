@@ -5,9 +5,11 @@
  * external_id is the business id (SFL-001). The integer id stays so
  * lead_contacts and leads.customer_id keep working.
  *
- * Phase 2 plugs in by creating a customer from a Won lead and setting
- * leads.customer_id. Phone and email are copied from contact_channel when
- * they can be read, and the older columns are left in place.
+ * Phase 2 converts a Won lead through bakery_customer_hub_create and sets
+ * leads.customer_id. That customer id is the converted marker. The stage
+ * stays Won. Phone and email are copied from contact_channel when they can
+ * be read, and the older columns are left in place. The old AJAX
+ * convert_lead insert is not a second path.
  *
  * Phase 3 plugs in by creating one dated order tagged sample and storing
  * its id on leads.sample_daily_order_id. Delivery zone export stays on
@@ -21,6 +23,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/customer_hub_create.php';
 
 function bakery_sales_leads_stages(): array
 {
@@ -1080,6 +1083,179 @@ function bakery_sales_leads_add_note(PDO $db, int $leadId, int $userId, string $
     }
     bakery_sales_leads_log($db, $leadId, $userId, $clean, null, null, $date);
     return ['ok' => true];
+}
+
+/**
+ * Case-insensitive match uses the customers.name unique index collation.
+ */
+function bakery_sales_leads_customer_id_by_name(PDO $db, string $name): int
+{
+    $name = trim($name);
+    if ($name === '') {
+        return 0;
+    }
+    $stmt = $db->prepare('SELECT id FROM customers WHERE name = ? LIMIT 1');
+    $stmt->execute([$name]);
+    $id = $stmt->fetchColumn();
+    return $id === false ? 0 : (int)$id;
+}
+
+/**
+ * Leads already linked to this customer, with their activity log.
+ *
+ * @return list<array{lead:array<string,mixed>,activity:list<array<string,mixed>>}>
+ */
+function bakery_sales_leads_history_for_customer(PDO $db, int $customerId): array
+{
+    if ($customerId <= 0 || !bakery_sales_leads_ready($db) || !function_exists('column_exists') || !column_exists($db, 'leads', 'customer_id')) {
+        return [];
+    }
+    $stmt = $db->prepare('SELECT * FROM leads WHERE customer_id = ? ORDER BY id ASC');
+    $stmt->execute([$customerId]);
+    $history = [];
+    foreach ($stmt->fetchAll() as $lead) {
+        if (!is_array($lead)) {
+            continue;
+        }
+        $history[] = [
+            'lead' => $lead,
+            'activity' => bakery_sales_leads_activity($db, (int)$lead['id']),
+        ];
+    }
+    return $history;
+}
+
+/**
+ * Convert a Won lead into a Customer Hub customer, or link a same-name customer.
+ * mode create calls bakery_customer_hub_create. mode link only sets customer_id.
+ * A lead that already has customer_id is refused. Stage stays Won.
+ * This does not insert standing_orders or standing_routes.
+ *
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function bakery_sales_leads_convert(PDO $db, int $leadId, int $userId, array $input): array
+{
+    if (bakery_sales_leads_role_status() !== 200) {
+        return ['ok' => false, 'error' => 'forbidden'];
+    }
+    if (!bakery_sales_leads_ready($db)) {
+        return ['ok' => false, 'error' => 'schema_missing'];
+    }
+    $mode = (string)($input['mode'] ?? 'create');
+    if ($mode !== 'create' && $mode !== 'link') {
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+    $name = trim((string)($input['name'] ?? ''));
+    if ($name === '') {
+        return ['ok' => false, 'error' => 'missing_name'];
+    }
+    if (strlen($name) > 100) {
+        return ['ok' => false, 'error' => 'name_too_long'];
+    }
+
+    $zoneId = 0;
+    if ($mode === 'create') {
+        $zoneRaw = trim((string)($input['zone_id'] ?? ''));
+        $zoneId = ($zoneRaw !== '' && ctype_digit($zoneRaw)) ? (int)$zoneRaw : 0;
+        if ($zoneId <= 0 || !function_exists('table_exists') || !table_exists($db, 'zones')) {
+            return ['ok' => false, 'error' => 'zone_required'];
+        }
+        $zoneCheck = $db->prepare('SELECT id FROM zones WHERE id = ? LIMIT 1');
+        $zoneCheck->execute([$zoneId]);
+        if (!$zoneCheck->fetchColumn()) {
+            return ['ok' => false, 'error' => 'zone_required'];
+        }
+    }
+
+    $db->beginTransaction();
+    try {
+        $stmt = $db->prepare('SELECT * FROM leads WHERE id = ? FOR UPDATE');
+        $stmt->execute([$leadId]);
+        $lead = $stmt->fetch();
+        if (!is_array($lead)) {
+            $db->rollBack();
+            return ['ok' => false, 'error' => 'not_found'];
+        }
+        if ((string)($lead['stage'] ?? '') !== 'Won') {
+            $db->rollBack();
+            return ['ok' => false, 'error' => 'not_won'];
+        }
+        if (!empty($lead['customer_id'])) {
+            $existingCustomerId = (int)$lead['customer_id'];
+            $db->rollBack();
+            return ['ok' => false, 'error' => 'already_converted', 'customer_id' => $existingCustomerId];
+        }
+
+        $existingId = bakery_sales_leads_customer_id_by_name($db, $name);
+        $linked = false;
+        if ($mode === 'link') {
+            $linkId = (int)($input['link_customer_id'] ?? 0);
+            if ($existingId <= 0 || $linkId !== $existingId) {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'link_mismatch', 'customer_id' => $existingId];
+            }
+            $customerId = $existingId;
+            $linked = true;
+        } else {
+            if ($existingId > 0) {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'duplicate_name', 'customer_id' => $existingId];
+            }
+            $channel = (string)($input['contact_channel'] ?? '');
+            $phone = bakery_sales_leads_parse_phone($channel);
+            $email = bakery_sales_leads_parse_email($channel);
+            if ($phone === null) {
+                $phone = bakery_sales_leads_text($lead['phone'] ?? null);
+            }
+            if ($email === null) {
+                $storedEmail = bakery_sales_leads_text($lead['email'] ?? null);
+                $email = ($storedEmail !== null && strlen($storedEmail) <= 100) ? $storedEmail : null;
+            } elseif (strlen($email) > 100) {
+                $email = null;
+            }
+            $customerId = bakery_customer_hub_create($db, [
+                'name' => $name,
+                'email' => $email,
+                'phone' => $phone ?? '',
+                'address' => (string)($input['address'] ?? ''),
+                'zone_id' => (string)$zoneId,
+                'neighborhood' => (string)($input['neighborhood'] ?? ''),
+                'delivery_instructions' => (string)($input['notes'] ?? ''),
+            ]);
+        }
+
+        $updated = $db->prepare(
+            "UPDATE leads
+             SET customer_id = ?, stage = 'Won', status = 'converted'
+             WHERE id = ? AND customer_id IS NULL"
+        );
+        $updated->execute([$customerId, $leadId]);
+        if ($updated->rowCount() !== 1) {
+            $db->rollBack();
+            return ['ok' => false, 'error' => 'already_converted'];
+        }
+        bakery_sales_leads_log(
+            $db,
+            $leadId,
+            $userId,
+            bakery_t('leads.activity_converted', ['id' => (string)$customerId]),
+            null,
+            null,
+            date('Y-m-d')
+        );
+        $db->commit();
+        return [
+            'ok' => true,
+            'customer_id' => $customerId,
+            'linked' => $linked,
+        ];
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
 }
 
 /**

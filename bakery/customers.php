@@ -11,6 +11,7 @@ require_once 'includes/sf_baker.php';
 require_once 'includes/billing_aging.php';
 require_once 'includes/audit_log.php';
 require_once 'includes/payment_terms.php';
+require_once 'includes/customer_hub_create.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
@@ -23,48 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($_POST['action']) {
             case 'create':
                 try {
-                    $zoneName = empty($_POST['zone']) ? null : $_POST['zone'];
-                    $zoneId = bakery_zone_id_for_name($db, $zoneName);
-                    $pay = bakery_customer_payment_terms_from_post($_POST);
-                    $paySql = 'payment_collection';
-                    $payMarks = '?';
-                    $payParams = [$pay['payment_collection']];
-                    if (column_exists($db, 'customers', 'payment_terms')) {
-                        $paySql .= ', payment_terms';
-                        $payMarks .= ', ?';
-                        $payParams[] = $pay['payment_terms'];
-                    }
-                    $stmt = $db->prepare("INSERT INTO customers (name, email, phone, address, zone, zone_id, deliver_by, deliver_after, default_pan_dulce_price, portal_phone, portal_code, portal_enabled, sf_baker_enabled, pricing_tier, {$paySql}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {$payMarks})");
-                    $portalCode = bakery_normalize_login_code($_POST['portal_code'] ?? '');
-                    $stmt->execute(array_merge([
-                        $_POST['name'],
-                        empty($_POST['email']) ? null : $_POST['email'],
-                        $_POST['phone'],
-                        $_POST['address'],
-                        $zoneName,
-                        $zoneId,
-                        empty($_POST['deliver_by']) ? null : $_POST['deliver_by'],
-                        empty($_POST['deliver_after']) ? null : $_POST['deliver_after'],
-                        empty($_POST['default_pan_dulce_price']) ? null : $_POST['default_pan_dulce_price'],
-                        empty($_POST['portal_phone']) ? null : $_POST['portal_phone'],
-                        $portalCode !== '' ? $portalCode : null,
-                        !empty($_POST['portal_enabled']) ? 1 : 0,
-                        !empty($_POST['sf_baker_enabled']) ? 1 : 0,
-                        in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
-                    ], $payParams));
-                    $newId = (int)$db->lastInsertId();
-                    if ($newId > 0) {
-                        bakery_audit_pricing_tier(
-                            $db,
-                            $newId,
-                            null,
-                            in_array($_POST['pricing_tier'] ?? '', ['retail', 'wholesale', 'custom'], true) ? $_POST['pricing_tier'] : 'retail',
-                            'create'
-                        );
-                        header('Location: customer_record.php?customer_id=' . $newId . '&created=1');
-                    } else {
-                        header('Location: customers.php?success=created');
-                    }
+                    $newId = bakery_customer_hub_create($db, $_POST);
+                    header('Location: customer_record.php?customer_id=' . $newId . '&created=1');
                     exit;
                 } catch (Exception $e) {
                     $error = "Failed to create customer: " . bakery_error_message_for_user($e);
