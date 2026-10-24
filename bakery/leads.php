@@ -120,6 +120,23 @@ if (!$ready) {
         $error = bakery_sales_leads_error_text((string)($converted['error'] ?? 'save_failed'));
         $convertOpen = true;
         $convertDuplicateId = (int)($converted['customer_id'] ?? 0);
+    } elseif ($action === 'log_sample') {
+        $leadId = (int)($_POST['internal_id'] ?? 0);
+        $logged = bakery_sales_leads_log_sample(
+            $db,
+            $leadId,
+            $actorId,
+            (string)($_POST['sample_date'] ?? '')
+        );
+        if (!empty($logged['ok'])) {
+            $savedLead = bakery_sales_leads_find($db, (string)$leadId);
+            $target = $savedLead && trim((string)($savedLead['external_id'] ?? '')) !== ''
+                ? (string)$savedLead['external_id']
+                : (string)$leadId;
+            header('Location: ' . BASE_URL . 'leads.php?lead=' . rawurlencode($target) . '&sampled=1');
+            exit;
+        }
+        $error = bakery_sales_leads_error_text((string)($logged['error'] ?? 'save_failed'));
     }
 }
 
@@ -129,6 +146,8 @@ if (isset($_GET['saved'])) {
     $notice = bakery_t('leads.note_saved');
 } elseif (isset($_GET['converted'])) {
     $notice = bakery_t('leads.converted_saved');
+} elseif (isset($_GET['sampled'])) {
+    $notice = bakery_t('leads.sample_saved');
 } elseif (isset($_GET['imported'])) {
     $notice = bakery_t('leads.imported', [
         'new' => (string)(int)($_GET['new'] ?? 0),
@@ -454,7 +473,22 @@ $exportQuery = http_build_query(array_filter([
                 </p>
             <?php endif; ?>
         <?php endif; ?>
-        <?php if ($lead && !empty($lead['sample_daily_order_id'])): ?>
+        <?php if ($lead && empty($lead['customer_id'])): ?>
+            <p><?php echo bakery_sales_leads_h(bakery_t('leads.sample_needs_customer')); ?></p>
+        <?php elseif ($lead && empty($lead['sample_daily_order_id'])): ?>
+            <h2><?php echo bakery_sales_leads_h(bakery_t('leads.sample_title')); ?></h2>
+            <p><?php echo bakery_sales_leads_h(bakery_t('leads.sample_handoff')); ?></p>
+            <form method="post" class="sales-leads-form" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?lead=<?php echo bakery_sales_leads_h($leadKey); ?>">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="internal_id" value="<?php echo (int)$lead['id']; ?>">
+                <label><?php echo bakery_sales_leads_h(bakery_t('leads.sample_date')); ?>
+                    <input type="date" name="sample_date" value="<?php echo bakery_sales_leads_h(date('Y-m-d')); ?>" required>
+                </label>
+                <div class="span-2">
+                    <button type="submit" class="btn btn-primary" name="action" value="log_sample"><?php echo bakery_sales_leads_h(bakery_t('leads.sample_submit')); ?></button>
+                </div>
+            </form>
+        <?php elseif ($lead && !empty($lead['sample_daily_order_id'])): ?>
             <p><?php echo bakery_sales_leads_h(bakery_t('leads.sample_order', ['id' => (string)(int)$lead['sample_daily_order_id']])); ?></p>
         <?php endif; ?>
 

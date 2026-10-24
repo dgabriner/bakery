@@ -168,3 +168,86 @@ if (!function_exists('bakery_zone_route_color')) {
         return $cycle[$cycle_index % count($cycle)];
     }
 }
+
+if (!function_exists('bakery_zones_export_rows')) {
+    /**
+     * Read-only zone list with customer and lead counts.
+     * Session role is checked by bakery_zones_export_csv.
+     *
+     * @return list<array{id:int,name:string,customer_count:int,lead_count:int}>
+     */
+    function bakery_zones_export_rows(PDO $db): array
+    {
+        if (!function_exists('table_exists') || !table_exists($db, 'zones') || !table_exists($db, 'customers')) {
+            return [];
+        }
+        $customerById = function_exists('column_exists') && column_exists($db, 'customers', 'zone_id');
+        $customerByName = function_exists('column_exists') && column_exists($db, 'customers', 'zone');
+        $leadById = table_exists($db, 'leads')
+            && function_exists('column_exists')
+            && column_exists($db, 'leads', 'zone_id');
+        if ($customerById && $customerByName) {
+            $customerSql = '(SELECT COUNT(*) FROM customers c WHERE c.zone_id = z.id OR (c.zone_id IS NULL AND c.zone = z.name))';
+        } elseif ($customerById) {
+            $customerSql = '(SELECT COUNT(*) FROM customers c WHERE c.zone_id = z.id)';
+        } elseif ($customerByName) {
+            $customerSql = '(SELECT COUNT(*) FROM customers c WHERE c.zone = z.name)';
+        } else {
+            $customerSql = '0';
+        }
+        $leadSql = $leadById
+            ? '(SELECT COUNT(*) FROM leads l WHERE l.zone_id = z.id)'
+            : '0';
+        $sql = 'SELECT z.id, z.name, ' . $customerSql . ' AS customer_count, ' . $leadSql . ' AS lead_count
+            FROM zones z
+            ORDER BY z.name ASC, z.id ASC';
+        $rows = [];
+        foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rows[] = [
+                'id' => (int)$row['id'],
+                'name' => (string)$row['name'],
+                'customer_count' => (int)$row['customer_count'],
+                'lead_count' => (int)$row['lead_count'],
+            ];
+        }
+        return $rows;
+    }
+}
+
+if (!function_exists('bakery_zones_export_csv')) {
+    /**
+     * Manager session only. No bearer token and no server secret.
+     *
+     * @return array{status:int,body:string}
+     */
+    function bakery_zones_export_csv(PDO $db): array
+    {
+        $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+        if (!is_array($user) || (int)($user['id'] ?? 0) <= 0) {
+            return ['status' => 401, 'body' => ''];
+        }
+        if (!function_exists('bakery_user_has_role') || !bakery_user_has_role(['administrator', 'manager'])) {
+            return ['status' => 403, 'body' => ''];
+        }
+        $handle = fopen('php://temp', 'r+');
+        if ($handle === false) {
+            return ['status' => 500, 'body' => ''];
+        }
+        fputcsv($handle, ['id', 'name', 'customer_count', 'lead_count'], ',', '"', '');
+        foreach (bakery_zones_export_rows($db) as $row) {
+            fputcsv($handle, [
+                (string)$row['id'],
+                $row['name'],
+                (string)$row['customer_count'],
+                (string)$row['lead_count'],
+            ], ',', '"', '');
+        }
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+        return ['status' => 200, 'body' => $csv === false ? '' : $csv];
+    }
+}

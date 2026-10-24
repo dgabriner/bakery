@@ -886,6 +886,7 @@ function bakery_agent_work_map_core(): array
                 'includes/route_photo_journey.js',
                 'css/route_photo_journey.css',
                 'includes/zones_catalog.php',
+                'zones.php',
                 'driver_overview.php',
                 'driver_list.php',
                 'customers.php',
@@ -1191,6 +1192,8 @@ function bakery_agent_work_map_core(): array
                 'includes/customer_hub_create.php',
                 'customers.php',
                 'customer_record.php',
+                'zones.php',
+                'includes/zones_catalog.php',
                 'map.php',
             ],
             'tests' => [

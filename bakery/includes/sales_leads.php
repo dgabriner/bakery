@@ -11,9 +11,10 @@
  * be read, and the older columns are left in place. The old AJAX
  * convert_lead insert is not a second path.
  *
- * Phase 3 plugs in by creating one dated order tagged sample and storing
- * its id on leads.sample_daily_order_id. Delivery zone export stays on
- * zones. zone_id is only a link from the route_fit text.
+ * Phase 3 logs a sample through bakery_staff_create_dated_order, marks
+ * copied lines no-charge with reason sample, and stores that order id on
+ * leads.sample_daily_order_id. Standing orders and standing routes are
+ * left alone. zone_id is only a link from the route_fit text.
  *
  * The read API uses SALES_LEADS_TOKEN the same way the today endpoint uses
  * DAILY_STATUS_TOKEN. Never commit a real token.
@@ -24,6 +25,8 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/customer_hub_create.php';
+require_once __DIR__ . '/customer_order_mutations.php';
+require_once __DIR__ . '/daily_orders_actions.php';
 
 function bakery_sales_leads_stages(): array
 {
@@ -1256,6 +1259,149 @@ function bakery_sales_leads_convert(PDO $db, int $leadId, int $userId, array $in
         }
         return ['ok' => false, 'error' => 'save_failed'];
     }
+}
+
+/**
+ * Drop the dated order when this lead never stored it.
+ */
+function bakery_sales_leads_discard_unlinked_order(PDO $db, int $orderId): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+    $linked = $db->prepare('SELECT COUNT(*) FROM leads WHERE sample_daily_order_id = ?');
+    $linked->execute([$orderId]);
+    if ((int)$linked->fetchColumn() > 0) {
+        return;
+    }
+    $db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$orderId]);
+}
+
+/**
+ * Log one sample drop: a dated one-time order tagged sample.
+ * Reuses bakery_staff_create_dated_order. Copied lines become $0 sample
+ * lines. Does not insert standing_orders or standing_routes.
+ *
+ * @return array<string, mixed>
+ */
+function bakery_sales_leads_log_sample(PDO $db, int $leadId, int $userId, string $date): array
+{
+    if (bakery_sales_leads_role_status() !== 200) {
+        return ['ok' => false, 'error' => 'forbidden'];
+    }
+    if (!bakery_sales_leads_ready($db) || !bakery_order_line_no_charge_ready($db)) {
+        return ['ok' => false, 'error' => 'schema_missing'];
+    }
+    $dateObj = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObj || $dateObj->format('Y-m-d') !== $date) {
+        return ['ok' => false, 'error' => 'bad_date'];
+    }
+    if ($date < date('Y-m-d')) {
+        return ['ok' => false, 'error' => 'past_date'];
+    }
+
+    $stmt = $db->prepare('SELECT id, customer_id, sample_daily_order_id FROM leads WHERE id = ?');
+    $stmt->execute([$leadId]);
+    $lead = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($lead)) {
+        return ['ok' => false, 'error' => 'not_found'];
+    }
+    $customerId = (int)($lead['customer_id'] ?? 0);
+    if ($customerId <= 0) {
+        return ['ok' => false, 'error' => 'customer_required'];
+    }
+    if ((int)($lead['sample_daily_order_id'] ?? 0) > 0) {
+        return [
+            'ok' => false,
+            'error' => 'already_sampled',
+            'daily_order_id' => (int)$lead['sample_daily_order_id'],
+        ];
+    }
+
+    $standingBefore = (int)$db->query('SELECT COUNT(*) FROM standing_orders')->fetchColumn();
+    $routesBefore = (int)$db->query('SELECT COUNT(*) FROM standing_routes')->fetchColumn();
+    try {
+        $created = bakery_staff_create_dated_order($db, $customerId, $date);
+    } catch (InvalidArgumentException $e) {
+        return ['ok' => false, 'error' => 'bad_date'];
+    } catch (RuntimeException $e) {
+        $message = strtolower($e->getMessage());
+        if (strpos($message, 'inactive') !== false || strpos($message, 'not found') !== false) {
+            return ['ok' => false, 'error' => 'customer_inactive'];
+        }
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+    if (empty($created['created'])) {
+        return ['ok' => false, 'error' => 'date_taken'];
+    }
+    $orderId = (int)($created['daily_order_id'] ?? 0);
+    if ($orderId <= 0) {
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+
+    try {
+        $lines = $db->prepare('SELECT id FROM daily_order_items WHERE daily_order_id = ?');
+        $lines->execute([$orderId]);
+        $actor = bakery_current_user();
+        foreach ($lines->fetchAll(PDO::FETCH_COLUMN) as $itemId) {
+            bakery_daily_orders_action_set_no_charge($db, [
+                'item_id' => (int)$itemId,
+                'is_no_charge' => '1',
+                'no_charge_reason' => 'sample',
+            ], is_array($actor) ? $actor : null);
+        }
+    } catch (Throwable $e) {
+        bakery_sales_leads_discard_unlinked_order($db, $orderId);
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+
+    $standingAfter = (int)$db->query('SELECT COUNT(*) FROM standing_orders')->fetchColumn();
+    $routesAfter = (int)$db->query('SELECT COUNT(*) FROM standing_routes')->fetchColumn();
+    if ($standingAfter !== $standingBefore || $routesAfter !== $routesBefore) {
+        bakery_sales_leads_discard_unlinked_order($db, $orderId);
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+
+    $note = function_exists('bakery_t')
+        ? bakery_t('leads.activity_sample', ['id' => (string)$orderId, 'date' => $date])
+        : 'Sample drop order #' . $orderId . ' on ' . $date;
+    $db->beginTransaction();
+    try {
+        $lock = $db->prepare('SELECT customer_id, sample_daily_order_id FROM leads WHERE id = ? FOR UPDATE');
+        $lock->execute([$leadId]);
+        $locked = $lock->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($locked)
+            || (int)($locked['customer_id'] ?? 0) !== $customerId
+            || (int)($locked['sample_daily_order_id'] ?? 0) > 0
+        ) {
+            $db->rollBack();
+            bakery_sales_leads_discard_unlinked_order($db, $orderId);
+            return ['ok' => false, 'error' => 'already_sampled'];
+        }
+        $updated = $db->prepare(
+            'UPDATE leads SET sample_daily_order_id = ? WHERE id = ? AND sample_daily_order_id IS NULL'
+        );
+        $updated->execute([$orderId, $leadId]);
+        if ($updated->rowCount() !== 1) {
+            $db->rollBack();
+            bakery_sales_leads_discard_unlinked_order($db, $orderId);
+            return ['ok' => false, 'error' => 'already_sampled'];
+        }
+        bakery_sales_leads_log($db, $leadId, $userId, $note, null, null, $date);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        bakery_sales_leads_discard_unlinked_order($db, $orderId);
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+
+    return [
+        'ok' => true,
+        'daily_order_id' => $orderId,
+        'customer_id' => $customerId,
+    ];
 }
 
 /**
