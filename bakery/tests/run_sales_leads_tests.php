@@ -39,6 +39,7 @@ function sales_leads_session(string $role): void
 function sales_leads_cleanup(PDO $db): void
 {
     $db->exec("DELETE FROM leads WHERE external_id LIKE 'SFL-%' OR customer_name LIKE 'SalesLead Test %'");
+    $db->exec("DELETE FROM customers WHERE name LIKE 'SalesLead Test %'");
     $db->exec("DELETE FROM zones WHERE name = 'SalesLead Mission Zone'");
     $db->exec("DELETE FROM users WHERE email LIKE 'sales-leads-test-%@example.test'");
 }
@@ -51,13 +52,14 @@ function sales_leads_count(PDO $db, string $sql): int
 $dbName = (string)$db->query('SELECT DATABASE()')->fetchColumn();
 assert_eq('bakerysf_test', $dbName, 'tests use bakerysf_test');
 
-if (!bakery_sales_leads_ready($db)) {
+if (!bakery_sales_leads_ready($db) || !column_exists($db, 'customers', 'neighborhood')) {
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/run_migrations.php');
     passthru($cmd, $migrateCode);
-    assert_eq(0, $migrateCode, 'migration 110 applies on bakerysf_test');
+    assert_eq(0, $migrateCode, 'sales lead migrations apply on bakerysf_test');
     foreach (['external_id', 'stage', 'sample_daily_order_id', 'zone_id', 'last_updated'] as $column) {
         bakery_forget_column_exists('leads', $column);
     }
+    bakery_forget_column_exists('customers', 'neighborhood');
     bakery_forget_table_exists('lead_activity');
 }
 
@@ -77,6 +79,10 @@ if (is_array($demo)) {
 $migrationSql = (string)file_get_contents($root . '/database/schema/110_sales_leads.sql');
 [$migrationSafe, $migrationMessage] = bakery_hosted_migration_sql_safe($migrationSql);
 assert_true($migrationSafe, 'migration 110 is additive (' . $migrationMessage . ')');
+$migration111 = (string)file_get_contents($root . '/database/schema/111_sales_lead_customer_neighborhood.sql');
+[$migration111Safe, $migration111Message] = bakery_hosted_migration_sql_safe($migration111);
+assert_true($migration111Safe, 'migration 111 is additive (' . $migration111Message . ')');
+assert_true(column_exists($db, 'customers', 'neighborhood'), 'customer neighborhood column exists');
 assert_true(bakery_schema_unexpected_duplicate_prefixes() === [], '110 does not reuse a schema number');
 
 $leadsPage = (string)file_get_contents($root . '/leads.php');
@@ -85,6 +91,15 @@ assert_true(strpos($leadsPage, 'bakery_sales_leads_require_access()') !== false,
 assert_true(strpos($apiPage, 'BAKERY_SKIP_REQUEST_SECURITY') !== false, 'token endpoint does its own auth');
 assert_true(strpos($apiPage, 'SALES_LEADS_TOKEN') !== false, 'token endpoint documents SALES_LEADS_TOKEN');
 assert_true(stripos($apiPage, 'INSERT INTO') === false, 'token endpoint has no write SQL');
+$customersPage = (string)file_get_contents($root . '/customers.php');
+$hubCreatePage = (string)file_get_contents($root . '/includes/customer_hub_create.php');
+assert_true(strpos($leadsPage, 'convert_lead') === false, 'legacy AJAX convert is not a second path');
+assert_true(strpos($leadsPage, 'value="convert_create"') !== false, 'confirm create is the convert path');
+assert_true(strpos($leadsPage, 'value="convert_link"') !== false, 'same-name customer can be linked');
+assert_true(strpos($leadsPage, 'leads.convert_handoff') !== false, 'confirm screen names the Accounts and Bakery handoff');
+assert_true(strpos($customersPage, 'bakery_customer_hub_create(') !== false, 'Customer Hub page uses the shared create');
+assert_eq(1, substr_count($customersPage, 'INSERT INTO customers'), 'Customer Hub page no longer has its own create insert');
+assert_true(strpos($hubCreatePage, 'INSERT INTO customers') !== false, 'shared create function owns the insert');
 
 $leadRoles = bakery_navigation_roles_for_script('leads.php');
 sort($leadRoles);
@@ -266,6 +281,167 @@ assert_true(!in_array('SalesLead Test Early', $lostOnly, true), 'Lost stage filt
 $withLost = array_column(bakery_sales_leads_list($db, ['show_lost' => '1']), 'customer_name');
 assert_true(in_array('SalesLead Test Lost', $withLost, true), 'show Lost toggle includes Lost leads');
 assert_true(in_array('SalesLead Test Early', $withLost, true), 'show Lost toggle keeps open leads');
+
+echo "\n=== Convert to customer ===\n";
+$standingBefore = sales_leads_count($db, 'SELECT COUNT(*) FROM standing_orders');
+$routesBefore = sales_leads_count($db, 'SELECT COUNT(*) FROM standing_routes');
+$open = bakery_sales_leads_save($db, [
+    'name' => 'SalesLead Test Open',
+    'stage' => 'Contacted',
+    'external_id' => 'SFL-TOPEN',
+], $testerId);
+assert_true(!empty($open['ok']), 'open lead saves for the Won gate');
+$openId = (int)($open['id'] ?? 0);
+$won = bakery_sales_leads_save($db, [
+    'name' => 'SalesLead Test Won',
+    'stage' => 'Won',
+    'external_id' => 'SFL-TWON',
+    'address' => '100 Test St',
+    'neighborhood' => 'Mission',
+    'contact_channel' => '415-555-0199 buyer@example.test',
+    'notes' => 'Dock on the left',
+    'zone_id' => (string)$zoneId,
+], $testerId);
+assert_true(!empty($won['ok']), 'Won lead saves (' . (string)($won['error'] ?? '') . ')');
+$wonId = (int)($won['id'] ?? 0);
+
+sales_leads_session('driver');
+$driverConvert = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'zone_id' => (string)$zoneId,
+    'address' => '100 Test St',
+    'neighborhood' => 'Mission',
+    'contact_channel' => '415-555-0199 buyer@example.test',
+    'notes' => 'Dock on the left',
+]);
+assert_eq('forbidden', (string)($driverConvert['error'] ?? ''), 'driver cannot convert');
+sales_leads_clear_session();
+$guestConvert = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'zone_id' => (string)$zoneId,
+]);
+assert_eq('forbidden', (string)($guestConvert['error'] ?? ''), 'guest cannot convert');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name = 'SalesLead Test Won'"), 'denied convert creates no customer');
+assert_eq(0, (int)$db->query("SELECT COUNT(*) FROM leads WHERE id = {$wonId} AND customer_id IS NOT NULL")->fetchColumn(), 'denied convert leaves customer_id empty');
+
+sales_leads_session('manager');
+$_SESSION['locale'] = 'en';
+bakery_locale(true);
+$notWon = bakery_sales_leads_convert($db, $openId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Open',
+    'zone_id' => (string)$zoneId,
+]);
+assert_eq('not_won', (string)($notWon['error'] ?? ''), 'only Won can convert');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name = 'SalesLead Test Open'"), 'a Contacted lead creates no customer');
+
+$missingZone = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'zone_id' => '',
+]);
+assert_eq('zone_required', (string)($missingZone['error'] ?? ''), 'zone is required');
+$badZone = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'zone_id' => '999999999',
+]);
+assert_eq('zone_required', (string)($badZone['error'] ?? ''), 'unknown zone is refused');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name = 'SalesLead Test Won'"), 'missing zone creates no customer');
+
+$db->prepare('INSERT INTO customers (name, address) VALUES (?, ?)')->execute(['SalesLead Test Existing', '9 Old St']);
+$existingId = (int)$db->lastInsertId();
+$dupLead = bakery_sales_leads_save($db, [
+    'name' => 'saleslead test existing',
+    'stage' => 'Won',
+    'external_id' => 'SFL-TDUP',
+    'zone_id' => (string)$zoneId,
+], $testerId);
+assert_true(!empty($dupLead['ok']), 'duplicate-name lead saves');
+$dupId = (int)($dupLead['id'] ?? 0);
+$duplicate = bakery_sales_leads_convert($db, $dupId, $testerId, [
+    'mode' => 'create',
+    'name' => 'saleslead test existing',
+    'zone_id' => (string)$zoneId,
+]);
+assert_eq('duplicate_name', (string)($duplicate['error'] ?? ''), 'same name warns instead of inserting');
+assert_eq($existingId, (int)($duplicate['customer_id'] ?? 0), 'duplicate warning points at the existing customer');
+assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name = 'SalesLead Test Existing'"), 'duplicate convert does not insert a second customer');
+assert_eq(0, (int)$db->query("SELECT COUNT(*) FROM leads WHERE id = {$dupId} AND customer_id IS NOT NULL")->fetchColumn(), 'refused duplicate leaves the lead unlinked');
+
+$linked = bakery_sales_leads_convert($db, $dupId, $testerId, [
+    'mode' => 'link',
+    'name' => 'saleslead test existing',
+    'link_customer_id' => $existingId,
+]);
+assert_true(!empty($linked['ok']), 'link to the existing customer succeeds (' . (string)($linked['error'] ?? '') . ')');
+assert_eq($existingId, (int)$db->query("SELECT customer_id FROM leads WHERE id = {$dupId}")->fetchColumn(), 'link sets customer_id');
+assert_eq('Won', (string)$db->query("SELECT stage FROM leads WHERE id = {$dupId}")->fetchColumn(), 'linked lead stays Won');
+assert_eq('converted', (string)$db->query("SELECT status FROM leads WHERE id = {$dupId}")->fetchColumn(), 'linked lead keeps the converted status');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM standing_orders WHERE customer_id = {$existingId}"), 'link creates no standing order');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM standing_routes WHERE customer_id = {$existingId}"), 'link creates no route assignment');
+$linkLog = $db->query("SELECT note, stage_from, stage_to FROM lead_activity WHERE lead_id = {$dupId} ORDER BY id DESC LIMIT 1")->fetch();
+assert_true(is_array($linkLog), 'link writes an activity row');
+if (is_array($linkLog)) {
+    assert_eq('Converted to customer #' . $existingId, (string)$linkLog['note'], 'link activity names the customer');
+    assert_eq(null, $linkLog['stage_from'], 'link activity is not a stage change');
+    assert_eq(null, $linkLog['stage_to'], 'link activity leaves the stage columns empty');
+}
+$linkAgain = bakery_sales_leads_convert($db, $dupId, $testerId, [
+    'mode' => 'create',
+    'name' => 'saleslead test existing',
+    'zone_id' => (string)$zoneId,
+]);
+assert_eq('already_converted', (string)($linkAgain['error'] ?? ''), 'a linked lead cannot convert again');
+assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM lead_activity WHERE lead_id = {$dupId} AND note LIKE 'Converted to customer #%'"), 'a second convert writes no activity row');
+
+$created = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'address' => '100 Test St',
+    'neighborhood' => 'Mission',
+    'contact_channel' => '415-555-0199 buyer@example.test',
+    'notes' => 'Dock on the left',
+    'zone_id' => (string)$zoneId,
+]);
+assert_true(!empty($created['ok']), 'Won lead creates a customer (' . (string)($created['error'] ?? '') . ')');
+$createdId = (int)($created['customer_id'] ?? 0);
+assert_true($createdId > 0, 'create returns the customer id');
+$customer = $db->prepare('SELECT name, address, neighborhood, phone, email, zone_id, delivery_instructions FROM customers WHERE id = ?');
+$customer->execute([$createdId]);
+$customerRow = $customer->fetch();
+assert_true(is_array($customerRow), 'created customer is stored');
+if (is_array($customerRow)) {
+    assert_eq('SalesLead Test Won', (string)$customerRow['name'], 'customer name comes from the lead');
+    assert_eq('100 Test St', (string)$customerRow['address'], 'customer address comes from the lead');
+    assert_eq('Mission', (string)$customerRow['neighborhood'], 'customer neighborhood comes from the lead');
+    assert_eq('415-555-0199', (string)$customerRow['phone'], 'contact channel phone is copied');
+    assert_eq('buyer@example.test', (string)$customerRow['email'], 'contact channel email is copied');
+    assert_eq($zoneId, (int)$customerRow['zone_id'], 'customer zone is the chosen zone');
+    assert_eq('Dock on the left', (string)$customerRow['delivery_instructions'], 'lead notes are saved as delivery instructions');
+}
+assert_eq($createdId, (int)$db->query("SELECT customer_id FROM leads WHERE id = {$wonId}")->fetchColumn(), 'create sets leads.customer_id');
+assert_eq('Won', (string)$db->query("SELECT stage FROM leads WHERE id = {$wonId}")->fetchColumn(), 'converted lead stays Won');
+assert_eq('converted', (string)$db->query("SELECT status FROM leads WHERE id = {$wonId}")->fetchColumn(), 'converted lead keeps the converted marker status');
+$createLog = $db->query("SELECT note FROM lead_activity WHERE lead_id = {$wonId} AND note LIKE 'Converted to customer #%'")->fetch();
+assert_true(is_array($createLog), 'create writes an activity row');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM standing_orders WHERE customer_id = {$createdId}"), 'create does not insert a standing order');
+assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM standing_routes WHERE customer_id = {$createdId}"), 'create does not insert a route assignment');
+assert_eq($standingBefore, sales_leads_count($db, 'SELECT COUNT(*) FROM standing_orders'), 'convert does not add standing orders');
+assert_eq($routesBefore, sales_leads_count($db, 'SELECT COUNT(*) FROM standing_routes'), 'convert does not add route assignments');
+$again = bakery_sales_leads_convert($db, $wonId, $testerId, [
+    'mode' => 'create',
+    'name' => 'SalesLead Test Won',
+    'zone_id' => (string)$zoneId,
+]);
+assert_eq('already_converted', (string)($again['error'] ?? ''), 'a converted lead cannot convert again');
+assert_eq(1, sales_leads_count($db, "SELECT COUNT(*) FROM customers WHERE name = 'SalesLead Test Won'"), 'idempotent convert does not insert another customer');
+$history = bakery_sales_leads_history_for_customer($db, $createdId);
+assert_eq(1, count($history), 'customer page can read the linked lead');
+assert_true(count($history[0]['activity'] ?? []) > 0, 'customer page can read the lead activity');
+sales_leads_clear_session();
 
 echo "\n=== Token endpoint ===\n";
 sales_leads_clear_session();

@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/customer_record.php';
 require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 require_once __DIR__ . '/includes/billing_aging.php';
+require_once __DIR__ . '/includes/sales_leads.php';
 
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
@@ -491,6 +492,12 @@ require_once __DIR__ . '/includes/nav.php';
                     <span class="label">Address</span>
                     <span class="value"><?php echo $cust['address'] ? htmlspecialchars($cust['address']) : '-'; ?></span>
                 </div>
+                <?php if (trim((string)($cust['neighborhood'] ?? '')) !== ''): ?>
+                <div class="cr-meta-item">
+                    <span class="label"><?php echo htmlspecialchars(bakery_t('leads.field_neighborhood')); ?></span>
+                    <span class="value"><?php echo htmlspecialchars((string)$cust['neighborhood']); ?></span>
+                </div>
+                <?php endif; ?>
                 <div class="cr-meta-item">
                     <span class="label">Delivery pattern</span>
                     <span class="value">
@@ -547,6 +554,61 @@ require_once __DIR__ . '/includes/nav.php';
                 <a class="cr-btn cr-btn-ghost" href="map.php">Map / coordinates</a>
             </div>
         </div>
+
+        <?php
+        $leadHistory = ($customerId > 0 && bakery_sales_leads_ready($db))
+            ? bakery_sales_leads_history_for_customer($db, $customerId)
+            : [];
+        ?>
+        <?php if ($leadHistory !== []): ?>
+        <div class="cr-card" style="margin-bottom:16px;">
+            <h2><?php echo htmlspecialchars(bakery_t('leads.customer_history_title')); ?></h2>
+            <?php foreach ($leadHistory as $leadBundle): ?>
+                <?php
+                $historyLead = $leadBundle['lead'];
+                $historyActivity = $leadBundle['activity'];
+                $historyPublicId = trim((string)($historyLead['external_id'] ?? ''));
+                if ($historyPublicId === '') {
+                    $historyPublicId = (string)(int)$historyLead['id'];
+                }
+                $historyHref = BASE_URL . 'leads.php?lead=' . rawurlencode($historyPublicId);
+                ?>
+                <p>
+                    <a href="<?php echo htmlspecialchars($historyHref); ?>"><?php echo htmlspecialchars(bakery_t('leads.customer_history_open')); ?> <?php echo htmlspecialchars($historyPublicId); ?></a>
+                </p>
+                <?php if ($historyActivity === []): ?>
+                    <p><?php echo htmlspecialchars(bakery_t('leads.activity_empty')); ?></p>
+                <?php else: ?>
+                    <div class="sales-leads-table-wrap">
+                        <table class="sales-leads-table">
+                            <thead>
+                                <tr>
+                                    <th><?php echo htmlspecialchars(bakery_t('leads.activity_date')); ?></th>
+                                    <th><?php echo htmlspecialchars(bakery_t('leads.activity_user')); ?></th>
+                                    <th><?php echo htmlspecialchars(bakery_t('leads.activity_note')); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($historyActivity as $entry): ?>
+                                <?php
+                                $historyUser = trim((string)($entry['user_name'] ?? ''));
+                                if ($historyUser === '') {
+                                    $historyUser = bakery_t('leads.activity_system');
+                                }
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars((string)$entry['activity_date']); ?></td>
+                                    <td><?php echo htmlspecialchars($historyUser); ?></td>
+                                    <td><?php echo htmlspecialchars((string)($entry['note'] ?? '')); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
 
         <?php if ($record['hints']): ?>
         <div class="cr-card" style="margin-bottom:0;">

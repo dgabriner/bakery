@@ -16,6 +16,8 @@ $ready = isset($db) && $db instanceof PDO && bakery_sales_leads_ready($db);
 $notice = '';
 $error = '';
 $importReport = null;
+$convertOpen = false;
+$convertDuplicateId = 0;
 
 if (!$ready) {
     $error = bakery_t('leads.schema_missing');
@@ -95,6 +97,29 @@ if (!$ready) {
                 exit;
             }
         }
+    } elseif ($action === 'convert_create' || $action === 'convert_link') {
+        $leadId = (int)($_POST['internal_id'] ?? 0);
+        $converted = bakery_sales_leads_convert($db, $leadId, $actorId, [
+            'mode' => $action === 'convert_link' ? 'link' : 'create',
+            'name' => (string)($_POST['name'] ?? ''),
+            'address' => (string)($_POST['address'] ?? ''),
+            'neighborhood' => (string)($_POST['neighborhood'] ?? ''),
+            'contact_channel' => (string)($_POST['contact_channel'] ?? ''),
+            'notes' => (string)($_POST['notes'] ?? ''),
+            'zone_id' => (string)($_POST['zone_id'] ?? ''),
+            'link_customer_id' => (int)($_POST['link_customer_id'] ?? 0),
+        ]);
+        if (!empty($converted['ok'])) {
+            $savedLead = bakery_sales_leads_find($db, (string)$leadId);
+            $target = $savedLead && trim((string)($savedLead['external_id'] ?? '')) !== ''
+                ? (string)$savedLead['external_id']
+                : (string)$leadId;
+            header('Location: ' . BASE_URL . 'leads.php?lead=' . rawurlencode($target) . '&converted=1');
+            exit;
+        }
+        $error = bakery_sales_leads_error_text((string)($converted['error'] ?? 'save_failed'));
+        $convertOpen = true;
+        $convertDuplicateId = (int)($converted['customer_id'] ?? 0);
     }
 }
 
@@ -102,6 +127,8 @@ if (isset($_GET['saved'])) {
     $notice = bakery_t('leads.saved');
 } elseif (isset($_GET['noted'])) {
     $notice = bakery_t('leads.note_saved');
+} elseif (isset($_GET['converted'])) {
+    $notice = bakery_t('leads.converted_saved');
 } elseif (isset($_GET['imported'])) {
     $notice = bakery_t('leads.imported', [
         'new' => (string)(int)($_GET['new'] ?? 0),
@@ -200,6 +227,28 @@ if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['a
             $form[$key] = (string)$_POST[$key];
         }
     }
+}
+
+$convertForm = [
+    'name' => $lead ? (string)$lead['customer_name'] : '',
+    'address' => $lead ? (string)($lead['address'] ?? '') : '',
+    'neighborhood' => $lead ? (string)($lead['neighborhood'] ?? '') : '',
+    'contact_channel' => $lead ? (string)($lead['contact_channel'] ?? '') : '',
+    'notes' => $lead ? (string)($lead['notes'] ?? '') : '',
+    'zone_id' => $lead ? (string)($lead['zone_id'] ?? '') : '',
+];
+if ($lead && empty($lead['customer_id']) && (string)($lead['stage'] ?? '') === 'Won' && isset($_GET['convert'])) {
+    $convertOpen = true;
+}
+if ($convertOpen && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    foreach ($convertForm as $key => $unused) {
+        if (isset($_POST[$key])) {
+            $convertForm[$key] = (string)$_POST[$key];
+        }
+    }
+}
+if ($convertOpen && $convertDuplicateId <= 0 && $ready) {
+    $convertDuplicateId = bakery_sales_leads_customer_id_by_name($db, $convertForm['name']);
 }
 
 $exportQuery = http_build_query(array_filter([
@@ -346,9 +395,64 @@ $exportQuery = http_build_query(array_filter([
         </form>
 
         <?php if ($lead && !empty($lead['customer_id'])): ?>
-            <p><?php echo bakery_sales_leads_h(bakery_t('leads.linked_customer')); ?>
-                <a href="<?php echo bakery_sales_leads_h(BASE_URL); ?>customer_record.php?id=<?php echo (int)$lead['customer_id']; ?>">#<?php echo (int)$lead['customer_id']; ?></a>
+            <p>
+                <strong class="sales-leads-marker"><?php echo bakery_sales_leads_h(bakery_t('leads.converted_marker')); ?></strong>
+                <?php echo bakery_sales_leads_h(bakery_t('leads.linked_customer')); ?>
+                <a href="<?php echo bakery_sales_leads_h(BASE_URL); ?>customer_record.php?customer_id=<?php echo (int)$lead['customer_id']; ?>">#<?php echo (int)$lead['customer_id']; ?></a>
             </p>
+        <?php elseif ($lead && (string)($lead['stage'] ?? '') === 'Won'): ?>
+            <?php if ($convertOpen): ?>
+                <h2><?php echo bakery_sales_leads_h(bakery_t('leads.convert_confirm_title')); ?></h2>
+                <p><?php echo bakery_sales_leads_h(bakery_t('leads.convert_handoff')); ?></p>
+                <p><?php echo bakery_sales_leads_h(bakery_t('leads.convert_notes_hint')); ?></p>
+                <?php if ($convertDuplicateId > 0): ?>
+                    <p class="sales-leads-error" role="alert">
+                        <?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_name')); ?>
+                        <a href="<?php echo bakery_sales_leads_h(BASE_URL); ?>customer_record.php?customer_id=<?php echo (int)$convertDuplicateId; ?>">#<?php echo (int)$convertDuplicateId; ?></a>
+                    </p>
+                <?php endif; ?>
+                <form method="post" class="sales-leads-form" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?lead=<?php echo bakery_sales_leads_h($leadKey); ?>&amp;convert=1">
+                    <?php echo bakery_csrf_field(); ?>
+                    <input type="hidden" name="internal_id" value="<?php echo (int)$lead['id']; ?>">
+                    <label class="span-2"><?php echo bakery_sales_leads_h(bakery_t('leads.field_name')); ?>
+                        <input type="text" name="name" value="<?php echo bakery_sales_leads_h($convertForm['name']); ?>" maxlength="100" required>
+                    </label>
+                    <label class="span-2"><?php echo bakery_sales_leads_h(bakery_t('leads.field_address')); ?>
+                        <input type="text" name="address" value="<?php echo bakery_sales_leads_h($convertForm['address']); ?>">
+                    </label>
+                    <label><?php echo bakery_sales_leads_h(bakery_t('leads.field_neighborhood')); ?>
+                        <input type="text" name="neighborhood" value="<?php echo bakery_sales_leads_h($convertForm['neighborhood']); ?>" maxlength="120">
+                    </label>
+                    <label><?php echo bakery_sales_leads_h(bakery_t('leads.field_contact_channel')); ?>
+                        <input type="text" name="contact_channel" value="<?php echo bakery_sales_leads_h($convertForm['contact_channel']); ?>" maxlength="255">
+                    </label>
+                    <label><?php echo bakery_sales_leads_h(bakery_t('leads.field_zone')); ?>
+                        <select name="zone_id" required>
+                            <option value=""><?php echo bakery_sales_leads_h(bakery_t('leads.zone_none')); ?></option>
+                            <?php foreach ($zones as $zone): ?>
+                                <option value="<?php echo (int)$zone['id']; ?>" <?php echo $convertForm['zone_id'] === (string)$zone['id'] ? 'selected' : ''; ?>><?php echo bakery_sales_leads_h($zone['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label class="span-2"><?php echo bakery_sales_leads_h(bakery_t('leads.field_notes')); ?>
+                        <textarea name="notes" rows="3"><?php echo bakery_sales_leads_h($convertForm['notes']); ?></textarea>
+                    </label>
+                    <div class="span-2 sales-leads-actions">
+                        <?php if ($convertDuplicateId > 0): ?>
+                            <button type="submit" class="btn btn-primary" name="action" value="convert_link"><?php echo bakery_sales_leads_h(bakery_t('leads.link_existing')); ?></button>
+                            <input type="hidden" name="link_customer_id" value="<?php echo (int)$convertDuplicateId; ?>">
+                        <?php endif; ?>
+                        <button type="submit" class="btn <?php echo $convertDuplicateId > 0 ? 'btn-secondary' : 'btn-primary'; ?>" name="action" value="convert_create"><?php echo bakery_sales_leads_h(bakery_t('leads.convert_confirm')); ?></button>
+                    </div>
+                </form>
+                <?php if ($convertDuplicateId > 0): ?>
+                    <p><?php echo bakery_sales_leads_h(bakery_t('leads.link_existing_help')); ?></p>
+                <?php endif; ?>
+            <?php else: ?>
+                <p class="sales-leads-actions">
+                    <a class="btn btn-primary" href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?lead=<?php echo bakery_sales_leads_h($leadKey); ?>&amp;convert=1"><?php echo bakery_sales_leads_h(bakery_t('leads.convert')); ?></a>
+                </p>
+            <?php endif; ?>
         <?php endif; ?>
         <?php if ($lead && !empty($lead['sample_daily_order_id'])): ?>
             <p><?php echo bakery_sales_leads_h(bakery_t('leads.sample_order', ['id' => (string)(int)$lead['sample_daily_order_id']])); ?></p>
@@ -518,6 +622,9 @@ $exportQuery = http_build_query(array_filter([
                             <td><?php
                                 $stageName = (string)($item['stage'] ?? '');
                                 echo bakery_sales_leads_h($stageName !== '' ? bakery_t('leads.stage.' . $stageName) : '');
+                                if (!empty($item['customer_id'])) {
+                                    echo ' <strong class="sales-leads-marker">' . bakery_sales_leads_h(bakery_t('leads.converted_marker')) . '</strong>';
+                                }
                             ?></td>
                             <td><?php echo bakery_sales_leads_h($zoneLabel); ?></td>
                             <td><?php echo bakery_sales_leads_h((string)($item['next_action'] ?? '')); ?></td>
@@ -597,6 +704,7 @@ $exportQuery = http_build_query(array_filter([
     margin: 0.75rem 0;
 }
 .sales-leads-banner { background: #e7f4ec; }
+.sales-leads-marker { font-weight: 700; }
 .sales-leads-error { background: #fdecea; }
 .sales-leads-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
 .sales-leads-filters,
