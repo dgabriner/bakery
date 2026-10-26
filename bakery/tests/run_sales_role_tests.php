@@ -95,21 +95,20 @@ include $root . '/includes/nav.php';
 $salesNav = (string)ob_get_clean();
 $expectedHrefs = [
     'sales_home.php',
-    'leads.php?view=leads',
-    'leads.php?view=prospects',
-    'leads.php?view=followups',
-    'leads.php?view=won',
-    'zones.php',
+    'leads.php?view=pipeline',
     'customers.php',
 ];
 foreach ($expectedHrefs as $href) {
     sales_role_assert(strpos($salesNav, $href) !== false, 'sales nav links ' . $href);
 }
+foreach (['leads.php?view=prospects', 'leads.php?view=followups', 'leads.php?view=won', 'zones.php'] as $retiredHref) {
+    sales_role_assert(strpos($salesNav, $retiredHref) === false, 'sales nav omits ' . $retiredHref);
+}
 sales_role_assert(strpos($salesNav, 'customer_record.php') === false, 'sales nav omits the customer record');
 sales_role_assert(strpos($salesNav, 'billing_center.php') === false, 'sales nav omits billing');
 sales_role_assert(strpos($salesNav, 'manager.php') === false, 'sales nav omits the manager board');
 sales_role_assert(strpos($salesNav, 'users.php') === false, 'sales nav omits Staff');
-sales_role_assert(preg_match_all('/class="bakery-nav__direct /', $salesNav) === 7, 'sales nav has seven links');
+sales_role_assert(preg_match_all('/class="bakery-nav__direct /', $salesNav) === 3, 'sales nav has three links');
 
 $_SESSION['user_role_slug'] = 'administrator';
 $_SERVER['PHP_SELF'] = '/users.php';
@@ -172,6 +171,12 @@ for ($try = 0; $try < 30; $try++) {
 }
 sales_role_assert($code !== '', 'found an unused staff code');
 $salesUserId = 0;
+$staleSales = $db->prepare('SELECT id FROM users WHERE email = ?');
+$staleSales->execute(['sales-role-ce23@example.test']);
+$staleSalesId = (int)$staleSales->fetchColumn();
+if ($staleSalesId > 0) {
+    $db->prepare('DELETE FROM users WHERE id = ?')->execute([$staleSalesId]);
+}
 try {
     $created = bakery_users_save($db, [
         'action' => 'create',
@@ -206,8 +211,57 @@ sales_role_assert(bakery_sales_leads_followup_bucket(['next_action_date' => '202
 
 $counts = bakery_sales_home_counts($db);
 sales_role_assert(($counts['New'] ?? 0) >= 1, 'Sales Home counts New leads');
+sales_role_assert(array_key_exists('Lost', $counts), 'pipeline counts include Lost');
 $homeFollow = bakery_sales_home_followups($db, $today);
 sales_role_assert($homeFollow['overdue'] !== [] || $homeFollow['today'] !== [], 'Sales Home lists due follow-ups');
+
+$insert->execute(['Pipeline Cafe', 'Pat', '4155550144', '1 Pipe Street', 'Standing note', 'qualified', 'Sampling', $marker . '-P', 'pipe@example.test', 'Call back', $today]);
+$pipeId = (int)$db->lastInsertId();
+$db->prepare('INSERT INTO lead_activity (lead_id, activity_date, note) VALUES (?, ?, ?)')->execute([$pipeId, $today, 'Latest pipe note']);
+$found = bakery_sales_home_search($db, 'pipe@example.test');
+$foundIds = array_map('intval', array_column($found['leads'], 'id'));
+sales_role_assert(in_array($pipeId, $foundIds, true), 'search finds a lead by email');
+$byAddress = bakery_sales_home_search($db, '1 Pipe Street');
+sales_role_assert(in_array($pipeId, array_map('intval', array_column($byAddress['leads'], 'id')), true), 'search finds a lead by address');
+$pipeline = bakery_sales_pipeline_list($db, [], $today);
+$pipelineIds = array_map('intval', array_column($pipeline, 'id'));
+$pipeRow = null;
+foreach ($pipeline as $pipelineRow) {
+    if ((int)$pipelineRow['id'] === $pipeId) {
+        $pipeRow = $pipelineRow;
+        break;
+    }
+}
+sales_role_assert(is_array($pipeRow) && strpos((string)$pipeRow['last_note'], 'Latest pipe note') !== false, 'pipeline row carries the last note');
+$overduePos = array_search($keepId, $pipelineIds, true);
+$todayPos = array_search($phoneId, $pipelineIds, true);
+$laterPos = array_search($phoneTwin, $pipelineIds, true);
+sales_role_assert($overduePos !== false && $todayPos !== false && $laterPos !== false && $overduePos < $laterPos && $todayPos < $laterPos, 'due and overdue rows come before a later follow-up');
+$keptScore = $db->prepare('SELECT fit_score, source, priority FROM leads WHERE id = ?');
+$keptScore->execute([$keepId]);
+$beforeSimple = $keptScore->fetch(PDO::FETCH_ASSOC);
+$db->prepare('UPDATE leads SET fit_score = 4, source = ?, priority = ? WHERE id = ?')->execute(['walk-in', 'A', $keepId]);
+$_SESSION = ['user_id' => $salesUserId, 'user_role_slug' => 'sales', 'user_display_name' => 'Sales Role Ce23'];
+$simpleSaved = bakery_sales_leads_save($db, bakery_sales_leads_workspace_input($db, [
+    'internal_id' => (string)$keepId,
+    'name' => '3rd Cousin',
+    'phone' => '4155550109',
+    'email' => '',
+    'address' => '123 Market Street',
+    'neighborhood' => '',
+    'zone_id' => '',
+    'stage' => 'Contacted',
+    'next_action' => 'Call',
+    'next_action_date' => '2026-10-20',
+    'notes' => (string)($kept['notes'] ?? ''),
+]), $salesUserId);
+sales_role_assert(!empty($simpleSaved['ok']), 'sales can change the stage from the short form');
+$afterSimple = $db->prepare('SELECT stage, fit_score, source, priority FROM leads WHERE id = ?');
+$afterSimple->execute([$keepId]);
+$afterRow = $afterSimple->fetch(PDO::FETCH_ASSOC);
+sales_role_assert(is_array($afterRow) && (string)$afterRow['stage'] === 'Contacted', 'short form saved the stage');
+sales_role_assert(is_array($afterRow) && (string)$afterRow['fit_score'] === '4' && (string)$afterRow['source'] === 'walk-in' && (string)$afterRow['priority'] === 'A', 'short form leaves internal fields alone');
+unset($beforeSimple);
 
 $port = 8098;
 $cmd = 'exec ' . escapeshellarg(PHP_BINARY) . ' -S 127.0.0.1:' . $port . ' -t ' . escapeshellarg($root);
@@ -275,19 +329,29 @@ if (is_resource($proc)) {
     sales_role_assert($signed['status'] === 302 && strpos($signed['location'], 'sales_home.php') !== false, 'sales login redirects to Sales Home');
     $home = $http($base . '/sales_home.php');
     sales_role_assert($home['status'] === 200 && strpos($home['body'], 'data-sales-home="1"') !== false, 'Sales Home renders');
-    sales_role_assert(strpos($home['body'], 'leads.php?view=prospects') !== false, 'Sales Home nav includes Prospects');
+    sales_role_assert(strpos($home['body'], 'data-sales-add="1"') !== false, 'Sales Home has an add lead control');
+    sales_role_assert(strpos($home['body'], 'name="q"') !== false, 'Sales Home has one search box');
+    sales_role_assert(strpos($home['body'], 'data-sales-pipeline="1"') !== false, 'Sales Home shows the pipeline');
+    sales_role_assert(strpos($home['body'], 'leads.php?view=prospects') === false, 'Sales Home nav omits Prospects');
     $index = $http($base . '/index.php');
     sales_role_assert($index['status'] === 302 && strpos($index['location'], 'sales_home.php') !== false, 'index redirects sales to Sales Home');
     $leads = $http($base . '/leads.php');
-    sales_role_assert($leads['status'] === 302 && strpos($leads['location'], 'view=leads') !== false, 'bare leads list opens the Leads view');
+    sales_role_assert($leads['status'] === 302 && strpos($leads['location'], 'view=pipeline') !== false, 'bare leads list opens the pipeline');
     $leadsView = $http($base . '/leads.php?view=leads');
-    sales_role_assert($leadsView['status'] === 200 && strpos($leadsView['body'], 'Possible duplicate') !== false, 'Leads shows the duplicate flag');
+    sales_role_assert($leadsView['status'] === 302 && strpos($leadsView['location'], 'focus=leads') !== false, 'Leads view redirects into the pipeline');
     $prospects = $http($base . '/leads.php?view=prospects');
-    sales_role_assert($prospects['status'] === 200 && strpos($prospects['body'], 'Prospects') !== false, 'Prospects view renders');
+    sales_role_assert($prospects['status'] === 302 && strpos($prospects['location'], 'focus=prospects') !== false, 'Prospects view redirects into the pipeline');
     $follow = $http($base . '/leads.php?view=followups');
-    sales_role_assert($follow['status'] === 200 && strpos($follow['body'], 'Overdue') !== false && strpos($follow['body'], 'Upcoming') !== false, 'Follow-ups shows the three buckets');
+    sales_role_assert($follow['status'] === 302 && strpos($follow['location'], 'due=1') !== false, 'Follow-ups view redirects to due pipeline rows');
     $won = $http($base . '/leads.php?view=won');
-    sales_role_assert($won['status'] === 200 && strpos($won['body'], 'value="save"') === false, 'Won view has no save form for sales');
+    sales_role_assert($won['status'] === 302 && strpos($won['location'], 'stage=Won') !== false, 'Won view redirects to the Won stage');
+    $pipeline = $http($base . '/leads.php?view=pipeline');
+    sales_role_assert($pipeline['status'] === 200 && strpos($pipeline['body'], 'data-sales-pipeline="1"') !== false, 'pipeline renders');
+    sales_role_assert(strpos($pipeline['body'], 'name="fit_score"') === false && strpos($pipeline['body'], 'name="priority"') === false, 'pipeline hides internal filters');
+    $detail = $http($base . '/leads.php?lead=' . rawurlencode($marker . '-P'));
+    sales_role_assert($detail['status'] === 200 && strpos($detail['body'], 'data-sales-detail="1"') !== false, 'sales lead detail renders');
+    sales_role_assert(strpos($detail['body'], 'name="stage"') !== false && strpos($detail['body'], 'name="note"') !== false && strpos($detail['body'], 'name="next_action_date"') !== false, 'detail can change stage, note, and follow-up');
+    sales_role_assert(strpos($detail['body'], 'name="fit_score"') === false && strpos($detail['body'], 'name="source_url"') === false && strpos($detail['body'], 'name="priority"') === false, 'detail hides internal fields');
     $customers = $http($base . '/customers.php');
     sales_role_assert($customers['status'] === 200 && strpos($customers['body'], 'customers.sales_readonly') === false, 'customers lookup renders the read only notice');
     sales_role_assert(strpos($customers['body'], 'name="default_pan_dulce_price"') === false, 'customers lookup has no price field');
@@ -296,7 +360,7 @@ if (is_resource($proc)) {
     sales_role_assert($record['status'] === 200 && strpos($record['body'], 'data-sales-readonly="1"') !== false, 'customer record is read only');
     sales_role_assert(strpos($record['body'], 'Pricing tier') === false && strpos($record['body'], 'billing_center.php') === false, 'customer record hides prices and billing');
     $zones = $http($base . '/zones.php');
-    sales_role_assert($zones['status'] === 200 && strpos($zones['body'], 'zones.sales_readonly') === false, 'zones page is readable');
+    sales_role_assert($zones['status'] === 302 && strpos($zones['location'], 'view=pipeline') !== false, 'zones page redirects sales to the pipeline');
     $blocked = $http($base . '/billing_center.php');
     sales_role_assert($blocked['status'] === 302 && strpos($blocked['location'], 'sales_home.php') !== false, 'billing redirects sales home');
     $users = $http($base . '/users.php');

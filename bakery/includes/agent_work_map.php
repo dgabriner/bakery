@@ -1200,6 +1200,9 @@ function bakery_agent_work_map_core(): array
             'files' => [
                 'leads.php',
                 'sales_home.php',
+                'css/sales_home.css',
+                'includes/sales_workspace_page.php',
+                'includes/sales_pipeline_board.php',
                 'sales_leads_api.php',
                 'database/schema/113_sales_role.sql',
                 'includes/sales_leads.php',

@@ -53,7 +53,7 @@ The current workspace is deliberately role-aware. `includes/navigation_catalog.p
 
 Only administrators see the **Administration** area. It contains **Staff** (staff identities, roles, and sign-in codes) and **Historical Navigation** (the full prior menu).
 
-Sales users land on Sales Home. Their menu is Sales Home, Leads, Prospects, Follow-ups, Won (read only), Delivery Zones, and a read only Customers lookup. Other pages redirect to Sales Home. An administrator assigns Sales on Staff. Historical Navigation retains tools that are not part of the primary day-to-day workflow, including older order summaries, bread distribution, driver overview/list, route testing, and diagnostic-adjacent pages.
+Sales users land on Sales Home. Their menu is Sales Home, Leads, and a read only Customers lookup. Leads is one pipeline with the existing stage counts. Follow-ups that are due or overdue come first. Each row shows the name, stage, next follow-up date, and last note. Older Prospects, Follow-ups, Won, and Delivery Zones links redirect into that pipeline, and a zone filter remains on the board. Customers stay lookup only, with no balances or prices. Other pages redirect to Sales Home. An administrator assigns Sales on Staff. Historical Navigation retains tools that are not part of the primary day-to-day workflow, including older order summaries, bread distribution, driver overview/list, route testing, and diagnostic-adjacent pages.
 
 Access is enforced server-side in `includes/auth.php` from the navigation catalog (and the script registry escape hatch). Hiding a menu item is never the only control; an unlisted script defaults to administrator-only.
 
