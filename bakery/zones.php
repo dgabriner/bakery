@@ -5,6 +5,13 @@ require_once 'includes/database.php';
 require_once 'includes/zones_catalog.php';
 
 $salesReadOnly = function_exists('bakery_user_is_sales') && bakery_user_is_sales();
+if ($salesReadOnly
+    && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET'
+    && (string)($_GET['export'] ?? '') !== 'csv'
+) {
+    header('Location: ' . BASE_URL . 'leads.php?view=pipeline');
+    exit;
+}
 
 if (isset($db) && $db instanceof PDO
     && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET'

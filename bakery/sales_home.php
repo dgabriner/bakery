@@ -1,6 +1,6 @@
 <?php
 /**
- * Sales Home. One phone-first screen for the sales role.
+ * Sales Home. Add a lead, search, and the pipeline.
  * Administrators and managers may open it. Sales lands here.
  */
 define('ACCESS_ALLOWED', true);
@@ -11,85 +11,73 @@ require_once __DIR__ . '/includes/sales_leads.php';
 bakery_sales_leads_require_access();
 
 $ready = isset($db) && $db instanceof PDO && bakery_sales_leads_ready($db);
-$today = date('Y-m-d');
-$query = trim((string)($_GET['q'] ?? ''));
-$counts = [
-    'New' => 0,
-    'Researched' => 0,
-    'Contacted' => 0,
-    'Sampling' => 0,
-    'Proposal' => 0,
-    'Won' => 0,
-];
-$followups = ['overdue' => [], 'today' => []];
-$search = ['leads' => [], 'customers' => []];
+$salesToday = date('Y-m-d');
+$queryText = trim((string)($_GET['q'] ?? ''));
+$pipelineCounts = array_fill_keys(bakery_sales_leads_stages(), 0);
+$pipelineRows = [];
+$searchHits = ['leads' => [], 'customers' => []];
 if ($ready) {
-    $counts = bakery_sales_home_counts($db);
-    $followups = bakery_sales_home_followups($db, $today);
-    if ($query !== '') {
-        $search = bakery_sales_home_search($db, $query);
+    $pipelineCounts = bakery_sales_home_counts($db);
+    $pipelineRows = bakery_sales_pipeline_list($db, ['due' => '1'], $salesToday);
+    if ($queryText !== '') {
+        $searchHits = bakery_sales_home_search($db, $queryText);
     }
 }
-
-$stageLinks = [
-    'New' => 'leads.php?view=leads&stage=New',
-    'Researched' => 'leads.php?view=leads&stage=Researched',
-    'Contacted' => 'leads.php?view=prospects&stage=Contacted',
-    'Sampling' => 'leads.php?view=prospects&stage=Sampling',
-    'Proposal' => 'leads.php?view=prospects&stage=Proposal',
-    'Won' => 'leads.php?view=won',
-];
+$activeStage = '';
+$activeDue = true;
+$activeFocus = '';
+$activeZone = '';
+$zones = [];
+$salesPublicId = static function (array $row): string {
+    $external = trim((string)($row['external_id'] ?? ''));
+    return $external !== '' ? $external : (string)(int)($row['id'] ?? 0);
+};
+$salesText = static function (string $value): string {
+    return bakery_sales_leads_h($value);
+};
 
 $page_title = bakery_t('page.sales_home');
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/nav.php';
-
-$leadPublicId = static function (array $row): string {
-    $external = trim((string)($row['external_id'] ?? ''));
-    return $external !== '' ? $external : (string)(int)($row['id'] ?? 0);
-};
 ?>
 <div class="sales-home" data-sales-home="1">
-    <h1><?php echo bakery_sales_leads_h(bakery_t('page.sales_home')); ?></h1>
-    <p class="sales-home__intro"><?php echo bakery_sales_leads_h(bakery_t('sales_home.intro')); ?></p>
-
+    <h1><?php echo $salesText(bakery_t('page.sales_home')); ?></h1>
+    <p class="sales-home__intro"><?php echo $salesText(bakery_t('sales_home.intro')); ?></p>
     <?php if (!$ready): ?>
-        <p class="sales-home__empty" role="alert"><?php echo bakery_sales_leads_h(bakery_t('leads.schema_missing')); ?></p>
+        <p class="sales-home__empty" role="alert"><?php echo $salesText(bakery_t('leads.schema_missing')); ?></p>
     <?php else: ?>
-        <form class="sales-home__search" method="get" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>sales_home.php">
-            <label for="sales-home-q"><?php echo bakery_sales_leads_h(bakery_t('sales_home.search')); ?></label>
-            <input id="sales-home-q" type="search" name="q" value="<?php echo bakery_sales_leads_h($query); ?>" autocomplete="off" enterkeyhint="search">
-            <button type="submit"><?php echo bakery_sales_leads_h(bakery_t('sales_home.search_button')); ?></button>
+        <a class="sales-home__add" data-sales-add="1" href="<?php echo $salesText(BASE_URL . 'leads.php?lead=new'); ?>"><?php echo $salesText(bakery_t('sales_home.add')); ?></a>
+        <form class="sales-home__search" method="get" action="<?php echo $salesText(BASE_URL); ?>sales_home.php">
+            <label for="sales-home-q"><?php echo $salesText(bakery_t('sales_home.search')); ?></label>
+            <input id="sales-home-q" type="search" name="q" value="<?php echo $salesText($queryText); ?>" autocomplete="off" enterkeyhint="search">
+            <button type="submit"><?php echo $salesText(bakery_t('sales_home.search_button')); ?></button>
         </form>
-
-        <?php if ($query !== ''): ?>
+        <?php if ($queryText !== ''): ?>
             <section class="sales-home__results">
-                <h2><?php echo bakery_sales_leads_h(bakery_t('sales_home.lead_results')); ?></h2>
-                <?php if ($search['leads'] === []): ?>
-                    <p class="sales-home__empty"><?php echo bakery_sales_leads_h(bakery_t('sales_home.empty')); ?></p>
+                <h2><?php echo $salesText(bakery_t('sales_home.lead_results')); ?></h2>
+                <?php if ($searchHits['leads'] === []): ?>
+                    <p class="sales-home__empty"><?php echo $salesText(bakery_t('sales_home.empty')); ?></p>
                 <?php else: ?>
                     <ul class="sales-home__hits">
-                        <?php foreach ($search['leads'] as $hit): ?>
-                            <?php $publicId = $leadPublicId($hit); ?>
+                        <?php foreach ($searchHits['leads'] as $hit): ?>
                             <li>
-                                <a href="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php?lead=' . rawurlencode($publicId)); ?>">
-                                    <?php echo bakery_sales_leads_h((string)$hit['customer_name']); ?>
-                                    <span><?php echo bakery_sales_leads_h((string)($hit['stage'] ?? '')); ?></span>
+                                <a href="<?php echo $salesText(BASE_URL . 'leads.php?lead=' . rawurlencode($salesPublicId($hit))); ?>">
+                                    <?php echo $salesText((string)$hit['customer_name']); ?>
+                                    <span><?php echo $salesText(bakery_t('leads.stage.' . (string)($hit['stage'] ?? ''))); ?></span>
                                 </a>
                             </li>
                         <?php endforeach; ?>
                     </ul>
                 <?php endif; ?>
-                <h2><?php echo bakery_sales_leads_h(bakery_t('sales_home.customer_results')); ?></h2>
-                <?php if ($search['customers'] === []): ?>
-                    <p class="sales-home__empty"><?php echo bakery_sales_leads_h(bakery_t('sales_home.empty')); ?></p>
+                <h2><?php echo $salesText(bakery_t('sales_home.customer_results')); ?></h2>
+                <?php if ($searchHits['customers'] === []): ?>
+                    <p class="sales-home__empty"><?php echo $salesText(bakery_t('sales_home.empty')); ?></p>
                 <?php else: ?>
                     <ul class="sales-home__hits">
-                        <?php foreach ($search['customers'] as $hit): ?>
+                        <?php foreach ($searchHits['customers'] as $hit): ?>
                             <li>
-                                <a href="<?php echo bakery_sales_leads_h(BASE_URL . 'customer_record.php?customer_id=' . (int)$hit['id']); ?>">
-                                    <?php echo bakery_sales_leads_h((string)$hit['name']); ?>
-                                    <span><?php echo bakery_sales_leads_h(trim((string)($hit['zone'] ?? ''))); ?></span>
+                                <a href="<?php echo $salesText(BASE_URL . 'customer_record.php?customer_id=' . (int)$hit['id']); ?>">
+                                    <?php echo $salesText((string)$hit['name']); ?>
                                 </a>
                             </li>
                         <?php endforeach; ?>
@@ -97,41 +85,40 @@ $leadPublicId = static function (array $row): string {
                 <?php endif; ?>
             </section>
         <?php endif; ?>
-
-        <h2><?php echo bakery_sales_leads_h(bakery_t('sales_home.counts')); ?></h2>
-        <div class="sales-home__counts">
-            <?php foreach ($stageLinks as $stage => $href): ?>
-                <a class="sales-home__count" href="<?php echo bakery_sales_leads_h(BASE_URL . $href); ?>">
-                    <span class="sales-home__count-n"><?php echo (int)$counts[$stage]; ?></span>
-                    <span class="sales-home__count-l"><?php echo bakery_sales_leads_h(bakery_t('leads.stage.' . $stage)); ?></span>
-                </a>
-            <?php endforeach; ?>
-        </div>
-
-        <?php foreach (['overdue' => 'sales_home.overdue', 'today' => 'sales_home.today'] as $bucket => $labelKey): ?>
-            <section class="sales-home__followups">
-                <h2>
-                    <?php echo bakery_sales_leads_h(bakery_t($labelKey)); ?>
-                    <span><?php echo count($followups[$bucket]); ?></span>
-                </h2>
-                <?php if ($followups[$bucket] === []): ?>
-                    <p class="sales-home__empty"><?php echo bakery_sales_leads_h(bakery_t('sales_home.no_followups')); ?></p>
-                <?php else: ?>
-                    <ul class="sales-home__hits">
-                        <?php foreach ($followups[$bucket] as $hit): ?>
-                            <?php $publicId = $leadPublicId($hit); ?>
-                            <li>
-                                <a href="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php?lead=' . rawurlencode($publicId) . '&view=followups'); ?>">
-                                    <?php echo bakery_sales_leads_h((string)$hit['customer_name']); ?>
-                                    <span><?php echo bakery_sales_leads_h(trim((string)($hit['next_action_date'] ?? '') . ' ' . (string)($hit['next_action'] ?? ''))); ?></span>
-                                </a>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php endif; ?>
-            </section>
-        <?php endforeach; ?>
-        <p class="sales-home__more"><a href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?view=followups"><?php echo bakery_sales_leads_h(bakery_t('leads.view_followups')); ?></a></p>
+        <section data-sales-pipeline="1">
+            <h2><?php echo $salesText(bakery_t('sales_home.pipeline')); ?></h2>
+            <div class="sales-pipe__tabs">
+                <?php foreach (bakery_sales_leads_stages() as $stage): ?>
+                    <a href="<?php echo $salesText(BASE_URL . 'leads.php?view=pipeline&stage=' . rawurlencode($stage)); ?>">
+                        <?php echo $salesText(bakery_t('leads.stage.' . $stage)); ?>
+                        <span><?php echo (int)($pipelineCounts[$stage] ?? 0); ?></span>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            <h2><?php echo $salesText(bakery_t('sales_home.needs_action')); ?></h2>
+            <?php if ($pipelineRows === []): ?>
+                <p class="sales-home__empty"><?php echo $salesText(bakery_t('sales_home.no_followups')); ?></p>
+            <?php else: ?>
+                <ul class="sales-pipe__list">
+                    <?php foreach ($pipelineRows as $item): ?>
+                        <?php
+                        $href = BASE_URL . 'leads.php?lead=' . rawurlencode($salesPublicId($item));
+                        $stageName = (string)($item['stage'] ?? '');
+                        $when = substr((string)($item['next_action_date'] ?? ''), 0, 10);
+                        ?>
+                        <li class="sales-pipe__row is-due">
+                            <a href="<?php echo $salesText($href); ?>">
+                                <strong><?php echo $salesText((string)($item['customer_name'] ?? '')); ?></strong>
+                                <span><?php echo $salesText($stageName !== '' ? bakery_t('leads.stage.' . $stageName) : ''); ?></span>
+                                <span><?php echo $salesText($when); ?></span>
+                                <span><?php echo $salesText((string)($item['last_note'] ?? '')); ?></span>
+                            </a>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+            <p class="sales-home__more"><a href="<?php echo $salesText(BASE_URL); ?>leads.php?view=pipeline"><?php echo $salesText(bakery_t('pipeline.all')); ?></a></p>
+        </section>
     <?php endif; ?>
 </div>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

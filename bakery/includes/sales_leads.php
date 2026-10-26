@@ -1596,7 +1596,7 @@ function bakery_sales_leads_export_csv(array $rows): string
  */
 function bakery_sales_leads_view_names(): array
 {
-    return ['leads', 'prospects', 'followups', 'won'];
+    return ['leads', 'prospects', 'followups', 'won', 'pipeline'];
 }
 
 /**
@@ -1618,7 +1618,8 @@ function bakery_sales_leads_can_merge(): bool
 }
 
 /**
- * Sales may edit open leads. Won, Lost, and the Won view stay read only.
+ * Sales can save a lead, change its stage, and add a note.
+ * Merge, import, convert, and sample logging stay with managers.
  *
  * @param array<string, mixed> $post
  */
@@ -1627,22 +1628,60 @@ function bakery_sales_leads_sales_write_blocked(PDO $db, array $post, string $vi
     if (!bakery_user_is_sales()) {
         return false;
     }
-    if ($view === 'won' || (string)($post['action'] ?? '') === 'merge') {
-        return true;
+    unset($db, $view);
+    $action = (string)($post['action'] ?? '');
+    return !in_array($action, ['save', 'add_note'], true);
+}
+
+/**
+ * Fill the short sales form from the stored lead so hidden fields stay put.
+ *
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function bakery_sales_leads_workspace_input(PDO $db, array $input): array
+{
+    $id = (int)($input['internal_id'] ?? 0);
+    $existing = $id > 0 ? bakery_sales_leads_find($db, (string)$id) : null;
+    $phone = trim((string)($input['phone'] ?? ''));
+    $email = trim((string)($input['email'] ?? ''));
+    $channel = trim($phone . ' ' . $email);
+    if ($channel !== '') {
+        $input['contact_channel'] = $channel;
+    } elseif (is_array($existing)) {
+        $input['contact_channel'] = (string)($existing['contact_channel'] ?? '');
     }
-    if ((string)($post['stage'] ?? '') === 'Lost') {
-        return true;
+    if (!is_array($existing)) {
+        return $input;
     }
-    $id = (int)($post['internal_id'] ?? 0);
-    if ($id <= 0) {
-        return false;
+    $copy = [
+        'external_id' => 'external_id',
+        'type' => 'lead_type',
+        'cuisine' => 'cuisine',
+        'website' => 'website',
+        'contact_verified' => 'contact_verified',
+        'current_supplier' => 'current_supplier',
+        'route_fit' => 'route_fit',
+        'fit_score' => 'fit_score',
+        'fit_reason' => 'fit_reason',
+        'priority' => 'priority',
+        'source' => 'source',
+        'source_url' => 'source_url',
+        'last_updated' => 'last_updated',
+    ];
+    foreach ($copy as $postKey => $column) {
+        if (!array_key_exists($postKey, $input)) {
+            $value = $existing[$column] ?? '';
+            if ($postKey === 'last_updated') {
+                $value = substr((string)$value, 0, 10);
+            }
+            $input[$postKey] = (string)$value;
+        }
     }
-    $lead = bakery_sales_leads_find($db, (string)$id);
-    if (!is_array($lead)) {
-        return false;
+    if (!array_key_exists('zone_id', $input)) {
+        $input['zone_id'] = (string)($existing['zone_id'] ?? '');
     }
-    $stage = (string)($lead['stage'] ?? '');
-    return $stage === 'Won' || $stage === 'Lost';
+    return $input;
 }
 
 function bakery_sales_leads_normalize_match_text(?string $value): string
@@ -1861,14 +1900,7 @@ function bakery_sales_leads_followup_bucket(array $row, string $today): string
  */
 function bakery_sales_home_counts(PDO $db): array
 {
-    $counts = [
-        'New' => 0,
-        'Researched' => 0,
-        'Contacted' => 0,
-        'Sampling' => 0,
-        'Proposal' => 0,
-        'Won' => 0,
-    ];
+    $counts = array_fill_keys(bakery_sales_leads_stages(), 0);
     $rows = $db->query('SELECT stage, COUNT(*) AS n FROM leads GROUP BY stage')->fetchAll(PDO::FETCH_ASSOC) ?: [];
     foreach ($rows as $row) {
         $stage = (string)($row['stage'] ?? '');
@@ -1916,13 +1948,13 @@ function bakery_sales_home_search(PDO $db, string $q): array
     }
     $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
     $leadStmt = $db->prepare(
-        'SELECT id, external_id, customer_name, address, phone, neighborhood, stage
+        'SELECT id, external_id, customer_name, address, phone, email, neighborhood, stage
          FROM leads
-         WHERE (stage IS NULL OR stage <> \'Lost\')
-           AND (
+         WHERE (
                 customer_name LIKE ? ESCAPE \'\\\\\'
              OR address LIKE ? ESCAPE \'\\\\\'
              OR phone LIKE ? ESCAPE \'\\\\\'
+             OR email LIKE ? ESCAPE \'\\\\\'
              OR neighborhood LIKE ? ESCAPE \'\\\\\'
              OR contact_channel LIKE ? ESCAPE \'\\\\\'
              OR external_id LIKE ? ESCAPE \'\\\\\'
@@ -1930,20 +1962,149 @@ function bakery_sales_home_search(PDO $db, string $q): array
          ORDER BY customer_name ASC, id ASC
          LIMIT 12'
     );
-    $leadStmt->execute([$like, $like, $like, $like, $like, $like]);
+    $leadStmt->execute([$like, $like, $like, $like, $like, $like, $like]);
+    $customerWhere = [
+        'name LIKE ? ESCAPE \'\\\\\'',
+        'phone LIKE ? ESCAPE \'\\\\\'',
+        'address LIKE ? ESCAPE \'\\\\\'',
+        'CAST(id AS CHAR) = ?',
+    ];
+    $customerParams = [$like, $like, $like, $q];
+    foreach (['neighborhood', 'email', 'ordering_contact_email', 'billing_contact_email'] as $column) {
+        if (function_exists('column_exists') && column_exists($db, 'customers', $column)) {
+            $customerWhere[] = $column . ' LIKE ? ESCAPE \'\\\\\'';
+            $customerParams[] = $like;
+        }
+    }
     $customerStmt = $db->prepare(
         'SELECT id, name, phone, address, zone
          FROM customers
-         WHERE name LIKE ? ESCAPE \'\\\\\'
-            OR phone LIKE ? ESCAPE \'\\\\\'
-            OR address LIKE ? ESCAPE \'\\\\\'
-            OR CAST(id AS CHAR) = ?
+         WHERE ' . implode(' OR ', $customerWhere) . '
          ORDER BY name ASC, id ASC
          LIMIT 12'
     );
-    $customerStmt->execute([$like, $like, $like, $q]);
+    $customerStmt->execute($customerParams);
     return [
         'leads' => $leadStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
         'customers' => $customerStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
     ];
+}
+
+/**
+ * @param array<string, mixed> $query
+ * @return array<string, mixed>
+ */
+function bakery_sales_pipeline_query_filters(array $query): array
+{
+    $filters = [];
+    $stage = (string)($query['stage'] ?? '');
+    $focus = (string)($query['focus'] ?? '');
+    if ($stage !== '' && in_array($stage, bakery_sales_leads_stages(), true)) {
+        $filters['stage'] = $stage;
+        if ($stage === 'Lost') {
+            $filters['show_lost'] = '1';
+        }
+    } elseif ($focus === 'leads') {
+        $filters['stages'] = ['New', 'Researched'];
+    } elseif ($focus === 'prospects') {
+        $filters['stages'] = ['Contacted', 'Sampling', 'Proposal'];
+    }
+    if ((string)($query['due'] ?? '') === '1') {
+        $filters['due'] = '1';
+    }
+    $zone = trim((string)($query['zone'] ?? ''));
+    if ($zone !== '') {
+        $filters['zone'] = $zone;
+    }
+    return $filters;
+}
+
+/**
+ * @param list<int> $ids
+ * @return array<int, string>
+ */
+function bakery_sales_leads_last_notes(PDO $db, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if ($ids === [] || !function_exists('table_exists') || !table_exists($db, 'lead_activity')) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $db->prepare(
+        'SELECT lead_id, note FROM lead_activity
+         WHERE lead_id IN (' . $placeholders . ')
+           AND note IS NOT NULL AND note <> \'\'
+         ORDER BY activity_date DESC, id DESC'
+    );
+    $stmt->execute($ids);
+    $notes = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+        $leadId = (int)($row['lead_id'] ?? 0);
+        if ($leadId > 0 && !isset($notes[$leadId])) {
+            $notes[$leadId] = trim((string)($row['note'] ?? ''));
+        }
+    }
+    return $notes;
+}
+
+/**
+ * Pipeline rows. Due and overdue leads come first.
+ *
+ * @param array<string, mixed> $filters
+ * @return list<array<string, mixed>>
+ */
+function bakery_sales_pipeline_list(PDO $db, array $filters, string $today): array
+{
+    $listFilters = $filters;
+    $dueOnly = (string)($filters['due'] ?? '') === '1';
+    if ($dueOnly) {
+        $listFilters['followups'] = '1';
+    }
+    unset($listFilters['due']);
+    $rows = bakery_sales_leads_list($db, $listFilters);
+    if ($dueOnly) {
+        $rows = array_values(array_filter($rows, static function (array $row) use ($today): bool {
+            $bucket = bakery_sales_leads_followup_bucket($row, $today);
+            return $bucket === 'overdue' || $bucket === 'today';
+        }));
+    }
+    $notes = bakery_sales_leads_last_notes($db, array_map(static function (array $row): int {
+        return (int)($row['id'] ?? 0);
+    }, $rows));
+    foreach ($rows as &$row) {
+        $leadId = (int)($row['id'] ?? 0);
+        $note = $notes[$leadId] ?? '';
+        if ($note === '') {
+            $note = trim((string)($row['notes'] ?? ''));
+        }
+        $row['last_note'] = $note;
+        $bucket = bakery_sales_leads_followup_bucket($row, $today);
+        if ($bucket === 'overdue' || $bucket === 'today') {
+            $row['action_rank'] = 0;
+        } elseif ($bucket === 'upcoming') {
+            $row['action_rank'] = 1;
+        } else {
+            $row['action_rank'] = 2;
+        }
+    }
+    unset($row);
+    usort($rows, static function (array $a, array $b): int {
+        $rank = ((int)$a['action_rank']) <=> ((int)$b['action_rank']);
+        if ($rank !== 0) {
+            return $rank;
+        }
+        $ad = substr((string)($a['next_action_date'] ?? ''), 0, 10);
+        $bd = substr((string)($b['next_action_date'] ?? ''), 0, 10);
+        if ($ad !== $bd) {
+            if ($ad === '') {
+                return 1;
+            }
+            if ($bd === '') {
+                return -1;
+            }
+            return $ad <=> $bd;
+        }
+        return strcasecmp((string)($a['customer_name'] ?? ''), (string)($b['customer_name'] ?? ''));
+    });
+    return $rows;
 }

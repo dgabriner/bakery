@@ -246,11 +246,7 @@ function bakery_navigation_groups_for_role($role) {
 function bakery_sales_nav_items(): array {
     $items = [
         ['href' => 'sales_home.php', 'nav_key' => 'sales_home', 'label' => 'Sales Home'],
-        ['href' => 'leads.php?view=leads', 'nav_key' => 'sales_leads', 'label' => 'Leads'],
-        ['href' => 'leads.php?view=prospects', 'nav_key' => 'sales_prospects', 'label' => 'Prospects'],
-        ['href' => 'leads.php?view=followups', 'nav_key' => 'sales_followups', 'label' => 'Follow-ups'],
-        ['href' => 'leads.php?view=won', 'nav_key' => 'sales_won', 'label' => 'Won'],
-        ['href' => 'zones.php', 'nav_key' => 'sales_zones', 'label' => 'Delivery Zones'],
+        ['href' => 'leads.php?view=pipeline', 'nav_key' => 'sales_leads', 'label' => 'Leads'],
         ['href' => 'customers.php', 'nav_key' => 'sales_customers', 'label' => 'Customers'],
     ];
     if (function_exists('bakery_t')) {

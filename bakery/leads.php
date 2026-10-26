@@ -60,7 +60,11 @@ if (!$ready) {
         echo bakery_t('leads.sales_forbidden_won') . "\n";
         exit;
     } elseif ($action === 'save') {
-        $saved = bakery_sales_leads_save($db, $_POST, $actorId);
+        $payload = $_POST;
+        if ($salesUser) {
+            $payload = bakery_sales_leads_workspace_input($db, $payload);
+        }
+        $saved = bakery_sales_leads_save($db, $payload, $actorId);
         if (!empty($saved['ok'])) {
             $target = (string)($saved['external_id'] !== '' ? $saved['external_id'] : $saved['id']);
             header('Location: ' . BASE_URL . 'leads.php?lead=' . rawurlencode($target) . '&saved=1');
@@ -207,21 +211,30 @@ if ($editing && $leadKey !== 'new' && !$lead && $error === '') {
     $error = bakery_sales_leads_error_text('not_found');
     $editing = false;
 }
-if ($salesUser && $ready && !$editing && $view === '') {
-    if ((string)($_GET['export'] ?? '') === 'csv') {
-        $view = 'leads';
-    } else {
-        header('Location: ' . BASE_URL . 'leads.php?view=leads');
+if ($salesUser && $ready && !$editing && (string)($_GET['export'] ?? '') !== 'csv') {
+    $legacyTarget = '';
+    if ($view === '') {
+        $legacyTarget = 'view=pipeline';
+    } elseif ($view === 'leads') {
+        $legacyTarget = 'view=pipeline&focus=leads';
+    } elseif ($view === 'prospects') {
+        $legacyTarget = 'view=pipeline&focus=prospects';
+    } elseif ($view === 'followups') {
+        $legacyTarget = 'view=pipeline&due=1';
+    } elseif ($view === 'won') {
+        $legacyTarget = 'view=pipeline&stage=Won';
+    }
+    if ($legacyTarget !== '') {
+        $keptStage = (string)($_GET['stage'] ?? '');
+        if ($keptStage !== '' && $view !== 'won' && in_array($keptStage, bakery_sales_leads_stages(), true)) {
+            $legacyTarget .= '&stage=' . rawurlencode($keptStage);
+        }
+        header('Location: ' . BASE_URL . 'leads.php?' . $legacyTarget);
         exit;
     }
 }
-if ($salesUser && is_array($lead) && (string)($lead['stage'] ?? '') === 'Lost') {
-    header('Location: ' . BASE_URL . 'sales_home.php');
-    exit;
-}
-if ($salesUser && $view === 'won' && $leadKey === 'new') {
-    header('Location: ' . BASE_URL . 'leads.php?view=won');
-    exit;
+if ($salesUser && $ready && !$editing && $view === '' && (string)($_GET['export'] ?? '') === 'csv') {
+    $view = 'pipeline';
 }
 
 $filters = [
@@ -274,6 +287,11 @@ $page_title = isset($viewTitleKeys[$view]) ? bakery_t($viewTitleKeys[$view]) : b
 $pageHelp = isset($viewHelpKeys[$view]) ? bakery_t($viewHelpKeys[$view]) : bakery_t('leads.subtitle');
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/nav.php';
+if ($salesUser) {
+    require __DIR__ . '/includes/sales_workspace_page.php';
+    require __DIR__ . '/includes/footer.php';
+    exit;
+}
 
 $form = [
     'internal_id' => '0',
