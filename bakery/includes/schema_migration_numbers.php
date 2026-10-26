@@ -5,7 +5,11 @@
  * schema_migrations is keyed by the full id (filename without .sql), so two
  * files can share 062 and both apply. Competing agents already did that
  * (010, 021, 025, 062, 073). Those historical pairs stay; new files take 074+.
- * Never rename an applied file — Live and Staging already recorded the old ids.
+ * Never rename an applied file. Live and Staging already recorded the old ids.
+ *
+ * Live schema_migrations also has 114_user_112_role_probe and
+ * 115_user_112_sales_role. Those rows are not files in git. Do not reuse
+ * 114 or 115. The next schema file starts at 116.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -100,14 +104,40 @@ function bakery_schema_unexpected_duplicate_prefixes(?array $ids = null): array
 }
 
 /**
- * 093 is reserved for PR #62. 094, 095, and 096 are taken or reserved by
- * other work. This branch uses 097. The next id is 098.
+ * 093 through 096 stay reserved. 114 and 115 are Live-only ledger rows
+ * with no file in git. New files start at 116.
  *
  * @return list<int>
  */
+function bakery_schema_live_only_ledger_numbers(): array
+{
+    return [114, 115];
+}
+
+/** @return list<int> */
 function bakery_schema_reserved_migration_numbers(): array
 {
-    return [93, 94, 95, 96];
+    return array_merge([93, 94, 95, 96], bakery_schema_live_only_ledger_numbers());
+}
+
+/**
+ * Schema files whose number is already a Live ledger row with no git file.
+ *
+ * @param list<string>|null $ids
+ * @return list<string>
+ */
+function bakery_schema_files_reusing_live_ledger(?array $ids = null): array
+{
+    $ids = $ids ?? bakery_schema_migration_ids_from_dir();
+    $taken = array_fill_keys(bakery_schema_live_only_ledger_numbers(), true);
+    $bad = [];
+    foreach ($ids as $id) {
+        $number = (int)substr((string)$id, 0, 3);
+        if (isset($taken[$number])) {
+            $bad[] = (string)$id;
+        }
+    }
+    return $bad;
 }
 
 /** @param list<string>|null $ids */

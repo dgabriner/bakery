@@ -341,9 +341,22 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 114, 'next unused schema number is 114');
-$assert(bakery_schema_next_migration_id('demo_feature') === '114_demo_feature', 'next id is 114_ plus slug');
+$shippedGitIds = include $root . '/includes/schema_git_ids.php';
+sort($shippedGitIds, SORT_STRING);
+$assert($shippedGitIds === bakery_schema_migration_ids_from_dir(), 'shipped git ids match database/schema files');
+$assert(!in_array('114_user_112_role_probe', $shippedGitIds, true), '114_user_112_role_probe is not a git schema file');
+$assert(!in_array('115_user_112_sales_role', $shippedGitIds, true), '115_user_112_sales_role is not a git schema file');
+$assert(bakery_schema_live_only_ledger_numbers() === [114, 115], '114 and 115 are Live-only ledger numbers');
+$assert(bakery_schema_next_migration_number() === 116, 'next unused schema number is 116');
+$assert(bakery_schema_next_migration_id('demo_feature') === '116_demo_feature', 'next id is 116_ plus slug');
 $assert(bakery_schema_next_migration_number(['092_time_clock_overrides']) === 97, '093 through 096 stay reserved');
+$assert(bakery_schema_next_migration_number(['113_sales_role']) === 116, '114 and 115 stay reserved after 113');
+$assert(bakery_schema_files_reusing_live_ledger() === [], 'schema files do not reuse Live-only ledger numbers 114 and 115');
+$assert(
+    bakery_schema_files_reusing_live_ledger(['113_sales_role', '114_user_112_role_probe', '115_user_112_sales_role'])
+        === ['114_user_112_role_probe', '115_user_112_sales_role'],
+    'a new file cannot reuse 114 or 115'
+);
 
 $liveTimeClockLedger = ['083_time_clock_punches', '086_time_clock_overrides'];
 $assert(bakery_schema_migration_ledger_id('database/schema/086_ingredient_prices.sql') === '086_ingredient_prices', 'ledger id is the filename without .sql');

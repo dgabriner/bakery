@@ -19,6 +19,7 @@ bakery_ensure_actor_identity_schema($db);
 $page_title = bakery_t('page.users');
 $error = '';
 $success = '';
+$roleChangePreview = null;
 
 $roleLabels = bakery_assignable_role_labels();
 
@@ -53,6 +54,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $success = bakery_users_set_active($db, $id, 0, $reason);
         } elseif ($action === 'activate') {
             $success = bakery_users_set_active($db, (int)($_POST['id'] ?? 0), 1);
+        } elseif ($action === 'change_role_review') {
+            $roleChangePreview = bakery_users_role_change_preview(
+                $db,
+                (int)($_POST['id'] ?? 0),
+                (string)($_POST['role_slug'] ?? '')
+            );
+        } elseif ($action === 'change_role') {
+            $saved = bakery_users_change_role(
+                $db,
+                (int)($_POST['id'] ?? 0),
+                (string)($_POST['role_slug'] ?? '')
+            );
+            $success = !empty($saved['driver_cleared'])
+                ? bakery_t('users.change_role_saved_driver_cleared')
+                : bakery_t('users.change_role_saved');
         }
     } catch (Exception $e) {
         if ($action === 'reveal_code') {
@@ -149,6 +165,78 @@ require_once __DIR__ . '/includes/nav.php';
     <div class="users-alert success"><?php echo htmlspecialchars($success); ?></div>
   <?php endif; ?>
 
+  <?php
+  $changeRolePick = null;
+  if (!$roleChangePreview) {
+      $changeRoleId = (int)($_GET['change_role'] ?? 0);
+      if ($changeRoleId > 0) {
+          foreach ($users as $candidate) {
+              if ((int)$candidate['id'] === $changeRoleId) {
+                  $changeRolePick = $candidate;
+                  break;
+              }
+          }
+      }
+  }
+  ?>
+  <?php if ($roleChangePreview || $changeRolePick || (int)($_GET['change_role'] ?? 0) > 0): ?>
+    <div class="users-panel" style="margin-bottom: 1.5rem;">
+      <h2><?php bakery_te('users.change_role'); ?></h2>
+      <p class="lead"><?php bakery_te('users.change_role_only'); ?></p>
+      <p class="users-muted"><?php bakery_te('users.change_role_driver_rule'); ?></p>
+      <?php if ($roleChangePreview): ?>
+        <?php if (!empty($roleChangePreview['same'])): ?>
+          <p><?php bakery_te('users.change_role_same'); ?></p>
+          <p><a href="<?php echo htmlspecialchars(BASE_URL . 'users.php'); ?>"><?php bakery_te('users.change_role_cancel'); ?></a></p>
+        <?php else: ?>
+          <p><?php echo htmlspecialchars(bakery_t('users.change_role_confirm', [
+              'name' => (string)$roleChangePreview['display_name'],
+              'old_role' => (string)$roleChangePreview['old_role'],
+              'new_role' => (string)$roleChangePreview['new_role'],
+          ])); ?></p>
+          <?php if (!empty($roleChangePreview['driver_will_clear'])): ?>
+            <p><?php bakery_te('users.change_role_driver_will_clear'); ?></p>
+          <?php endif; ?>
+          <form method="post" class="users-form">
+            <?php echo bakery_csrf_field(); ?>
+            <input type="hidden" name="action" value="change_role">
+            <input type="hidden" name="id" value="<?php echo (int)$roleChangePreview['id']; ?>">
+            <input type="hidden" name="role_slug" value="<?php echo htmlspecialchars((string)$roleChangePreview['new_slug']); ?>">
+            <div class="actions">
+              <button type="submit"><?php bakery_te('users.change_role_confirm_button'); ?></button>
+              <a class="btn secondary" href="<?php echo htmlspecialchars(BASE_URL . 'users.php'); ?>"><?php bakery_te('users.change_role_cancel'); ?></a>
+            </div>
+          </form>
+        <?php endif; ?>
+      <?php elseif ($changeRolePick): ?>
+        <form method="post" class="users-form">
+          <?php echo bakery_csrf_field(); ?>
+          <input type="hidden" name="action" value="change_role_review">
+          <input type="hidden" name="id" value="<?php echo (int)$changeRolePick['id']; ?>">
+          <label for="change_role_slug"><?php bakery_te('users.change_role_pick'); ?></label>
+          <select id="change_role_slug" name="role_slug" required>
+            <?php foreach ($roles as $role):
+                if (!isset($roleLabels[$role['slug']])) {
+                    continue;
+                }
+            ?>
+              <option value="<?php echo htmlspecialchars($role['slug']); ?>"
+                <?php echo (string)$changeRolePick['role_slug'] === (string)$role['slug'] ? 'selected' : ''; ?>>
+                <?php echo htmlspecialchars(bakery_navigation_role_label($role['slug'])); ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+          <div class="actions">
+            <button type="submit"><?php bakery_te('users.change_role_review'); ?></button>
+            <a class="btn secondary" href="<?php echo htmlspecialchars(BASE_URL . 'users.php'); ?>"><?php bakery_te('users.change_role_cancel'); ?></a>
+          </div>
+        </form>
+      <?php else: ?>
+        <p class="users-muted"><?php bakery_te('users.change_role_missing'); ?></p>
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+
   <div class="users-panel" style="margin-bottom: 1.5rem;">
     <h2><?php bakery_te('users.inactive_title'); ?></h2>
     <p class="lead"><?php bakery_te('users.inactive_lead'); ?></p>
@@ -232,6 +320,7 @@ require_once __DIR__ . '/includes/nav.php';
               <td>
                 <div class="users-actions">
                   <a href="<?php echo htmlspecialchars(BASE_URL . 'users.php?edit=' . (int)$u['id']); ?>">Edit</a>
+                  <a href="<?php echo htmlspecialchars(BASE_URL . 'users.php?change_role=' . (int)$u['id']); ?>"><?php bakery_te('users.change_role'); ?></a>
                   <?php if ((int)$u['is_active'] === 1): ?>
                     <form method="post" style="display:inline" onsubmit="return confirm('Deactivate this user?');">
                       <?php echo bakery_csrf_field(); ?>

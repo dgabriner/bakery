@@ -282,3 +282,93 @@ function bakery_users_reveal_code(PDO $db, int $id): array
     bakery_audit_write($db, 'user', $id, 'reveal', 'login_code', null, BAKERY_AUDIT_CODE_REVEALED);
     return ['ok' => true, 'code' => (string)$existing['login_code']];
 }
+
+/**
+ * @return array{id:int,name:string,slug:string}
+ */
+function bakery_users_assignable_role(PDO $db, string $roleSlug): array
+{
+    $roleLabels = bakery_assignable_role_labels();
+    if (!isset($roleLabels[$roleSlug])) {
+        throw new Exception(bakery_t('users.change_role_invalid'));
+    }
+    $roleStmt = $db->prepare('SELECT id, name, slug FROM roles WHERE slug = ? LIMIT 1');
+    $roleStmt->execute([$roleSlug]);
+    $role = $roleStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$role) {
+        throw new Exception(bakery_t('users.change_role_invalid'));
+    }
+    return [
+        'id' => (int)$role['id'],
+        'name' => (string)$role['name'],
+        'slug' => (string)$role['slug'],
+    ];
+}
+
+/**
+ * Preview a role change without writing. The confirm step shows old_role and new_role.
+ * A non-driver role clears driver_id. Password, login code, email, name, and the active flag stay.
+ *
+ * @return array{
+ *   id:int,
+ *   display_name:string,
+ *   old_role:string,
+ *   new_role:string,
+ *   old_slug:string,
+ *   new_slug:string,
+ *   same:bool,
+ *   driver_will_clear:bool,
+ *   non_driver_role:bool
+ * }
+ */
+function bakery_users_role_change_preview(PDO $db, int $id, string $roleSlug): array
+{
+    $existing = bakery_users_load($db, $id);
+    if (!$existing) {
+        throw new Exception(bakery_t('users.change_role_missing'));
+    }
+    $role = bakery_users_assignable_role($db, $roleSlug);
+    $nonDriver = !bakery_is_driver_route_role($role['slug']);
+    return [
+        'id' => $id,
+        'display_name' => (string)$existing['display_name'],
+        'old_role' => (string)$existing['role_name'],
+        'new_role' => $role['name'],
+        'old_slug' => (string)$existing['role_slug'],
+        'new_slug' => $role['slug'],
+        'same' => (int)$existing['role_id'] === $role['id'],
+        'driver_will_clear' => $nonDriver && (int)($existing['driver_id'] ?? 0) > 0,
+        'non_driver_role' => $nonDriver,
+    ];
+}
+
+/**
+ * Change one user's role. Updates users.role_id only.
+ * A non-driver role also clears driver_id, the same rule as the full staff save.
+ * Password, login code, email, name, and the active flag are not written.
+ * The audit row matches the staff save: entity user, action update, field role.
+ *
+ * @return array{id:int,old_role:string,new_role:string,driver_cleared:bool}
+ */
+function bakery_users_change_role(PDO $db, int $id, string $roleSlug): array
+{
+    $preview = bakery_users_role_change_preview($db, $id, $roleSlug);
+    if ($preview['same']) {
+        throw new Exception(bakery_t('users.change_role_same'));
+    }
+    $role = bakery_users_assignable_role($db, $roleSlug);
+    if ($preview['non_driver_role']) {
+        $stmt = $db->prepare('UPDATE users SET role_id = ?, driver_id = NULL WHERE id = ?');
+        $stmt->execute([$role['id'], $id]);
+    } else {
+        $stmt = $db->prepare('UPDATE users SET role_id = ? WHERE id = ?');
+        $stmt->execute([$role['id'], $id]);
+    }
+    bakery_audit_write($db, 'user', $id, 'update', 'role', $preview['old_role'], $preview['new_role']);
+    return [
+        'id' => $id,
+        'old_role' => $preview['old_role'],
+        'new_role' => $preview['new_role'],
+        'driver_cleared' => $preview['driver_will_clear'],
+    ];
+}

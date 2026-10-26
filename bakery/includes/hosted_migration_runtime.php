@@ -261,6 +261,98 @@ function bakery_hosted_migration_sql_safe(string $sql): array
     return [true, 'Additive, cross-version schema change.'];
 }
 
+function bakery_hosted_migration_git_schema_dir(): string
+{
+    return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'schema';
+}
+
+/** @return list<string> */
+function bakery_hosted_migration_shipped_git_ids(): array
+{
+    static $ids = null;
+    if ($ids !== null) {
+        return $ids;
+    }
+    $loaded = include __DIR__ . '/schema_git_ids.php';
+    $ids = [];
+    foreach (is_array($loaded) ? $loaded : [] as $id) {
+        $id = (string)$id;
+        if ($id !== '') {
+            $ids[] = $id;
+        }
+    }
+    return $ids;
+}
+
+/**
+ * True for ids such as 114_user_112_role_probe, 115_user_112_sales_role,
+ * and 900_user112_marker. A role change is a Staff page action.
+ */
+function bakery_hosted_migration_id_targets_one_user(string $id): bool
+{
+    return (bool)preg_match('/(?:^|_)user_?\d+(?:_|$)/i', $id)
+        || stripos($id, 'role_probe') !== false;
+}
+
+function bakery_hosted_migration_id_git_backed(string $id, ?string $schemaDir = null): bool
+{
+    if (!preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+        return false;
+    }
+    $schemaDir = $schemaDir ?? bakery_hosted_migration_git_schema_dir();
+    if (is_dir($schemaDir)) {
+        $files = glob($schemaDir . DIRECTORY_SEPARATOR . '[0-9][0-9][0-9]_*.sql') ?: [];
+        if ($files !== []) {
+            return is_file($schemaDir . DIRECTORY_SEPARATOR . $id . '.sql');
+        }
+    }
+    return in_array($id, bakery_hosted_migration_shipped_git_ids(), true);
+}
+
+/**
+ * Empty string means the id may be approved. Otherwise the message is the refusal.
+ * Live keeps 114 and 115 for ledger rows that are not in git.
+ */
+function bakery_hosted_migration_id_refusal(string $id, ?string $schemaDir = null, bool $requireGitFile = true): string
+{
+    if (!preg_match('/^\d{3}_[A-Za-z0-9_]+$/', $id)) {
+        return 'Refusing migration id ' . $id . '. It is not a database/schema file id.';
+    }
+    if (bakery_hosted_migration_id_targets_one_user($id)) {
+        return 'Refusing migration id ' . $id . '. It targets one user. Change a role on the Staff page. A migration must not change one user.';
+    }
+    $number = (int)substr($id, 0, 3);
+    if ($number === 114 || $number === 115) {
+        return 'Refusing migration id ' . $id . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. The next schema file starts at 116.';
+    }
+    if ($requireGitFile && !bakery_hosted_migration_id_git_backed($id, $schemaDir)) {
+        return 'Refusing migration id ' . $id . '. It is not backed by a file in database/schema/.';
+    }
+    return '';
+}
+
+/** Refuse SQL that changes one user's role or one user's row. */
+function bakery_hosted_migration_sql_user_refusal(string $sql): string
+{
+    $withoutComments = preg_replace('#/\*.*?\*/#s', '', $sql);
+    $withoutComments = preg_replace('/^\s*--.*$/m', '', (string)$withoutComments);
+    $statements = preg_split('/;\s*(?:\r?\n|$)/', (string)$withoutComments) ?: [];
+    foreach ($statements as $statement) {
+        $statement = trim((string)$statement);
+        if ($statement === '' || !preg_match('/^\s*update\s+`?users`?\b/i', $statement)) {
+            continue;
+        }
+        if (preg_match('/\brole_id\b/i', $statement)) {
+            return 'Refusing migration SQL that changes users.role_id. Change a role on the Staff page.';
+        }
+        if (preg_match('/\bwhere\b[^;]*\bid\s*=\s*\d+/i', $statement)
+            || preg_match('/\bwhere\b[^;]*\bid\s+in\s*\(\s*\d+/i', $statement)) {
+            return 'Refusing migration SQL that updates one user. Change that user on the Staff page.';
+        }
+    }
+    return '';
+}
+
 /**
  * @param list<array{id:string,sql:string}> $jobs
  */
@@ -448,6 +540,14 @@ function bakery_hosted_migration_worker_main(string $configPath): int
                 : 'Validating the approved additive migration.',
         ];
         bakery_hosted_migration_write_json($statusPath, $status);
+        $schemaDir = bakery_hosted_migration_git_schema_dir();
+        $schemaPresent = is_dir($schemaDir) && (glob($schemaDir . DIRECTORY_SEPARATOR . '[0-9][0-9][0-9]_*.sql') ?: []) !== [];
+        foreach ($ids as $checkId) {
+            $idRefusal = bakery_hosted_migration_id_refusal($checkId, $schemaPresent ? $schemaDir : null, $schemaPresent);
+            if ($idRefusal !== '') {
+                throw new RuntimeException($idRefusal);
+            }
+        }
         if (!is_dir($workRoot) && !mkdir($workRoot, 0700, true) && !is_dir($workRoot)) throw new RuntimeException('Cannot create migration work directory.');
         $activeWork = $workRoot . '/' . $release;
         if (!mkdir($activeWork, 0700, true) && !is_dir($activeWork)) throw new RuntimeException('Cannot create migration release directory.');
@@ -459,6 +559,10 @@ function bakery_hosted_migration_worker_main(string $configPath): int
         $sql = (string)file_get_contents($sqlPath);
         [$safe, $classification] = bakery_hosted_migration_sql_safe($sql);
         if (!$safe) throw new RuntimeException($classification);
+        $userSqlRefusal = bakery_hosted_migration_sql_user_refusal($sql);
+        if ($userSqlRefusal !== '') {
+            throw new RuntimeException($userSqlRefusal);
+        }
 
         $dbConfig = bakery_hosted_migration_database_config(bakery_hosted_migration_env_file((string)$config['DB_ENV']));
         $pdo = new PDO('mysql:host=' . $dbConfig['host'] . ';port=' . $dbConfig['port'] . ';dbname=bakerysf;charset=utf8mb4',
