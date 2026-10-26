@@ -210,7 +210,7 @@ $homeFollow = bakery_sales_home_followups($db, $today);
 sales_role_assert($homeFollow['overdue'] !== [] || $homeFollow['today'] !== [], 'Sales Home lists due follow-ups');
 
 $port = 8098;
-$cmd = 'php -S 127.0.0.1:' . $port . ' -t ' . escapeshellarg($root);
+$cmd = 'exec ' . escapeshellarg(PHP_BINARY) . ' -S 127.0.0.1:' . $port . ' -t ' . escapeshellarg($root);
 $spec = [
     0 => ['pipe', 'r'],
     1 => ['file', '/tmp/sales-role-server.log', 'w'],
