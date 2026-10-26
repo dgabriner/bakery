@@ -48,7 +48,7 @@ Staging Manager shows a **Staging → Live** board with one Next step. Database 
 
 Live caches the schema report for a few minutes so Staging is not blocked on a full `INFORMATION_SCHEMA` scan every click. Staging also keeps a short cache after a successful read.
 
-New `database/schema/NNN_*.sql` files take the next unused number (`php scripts/next_schema_migration.php --name=slug`). Do not reuse 010, 021, 025, 061, 062, or 065 — competing agents already collided there. Do not rename applied files; Live already recorded those ids. Historical pairs stay; 068+ must be unique.
+New `database/schema/NNN_*.sql` files take the next unused number (`php scripts/next_schema_migration.php --name=slug`). Do not reuse 010, 021, 025, 061, 062, or 065. Competing agents already collided there. 114 and 115 are taken by Live-only ledger rows that are not in git (`114_user_112_role_probe`, `115_user_112_sales_role`). The next file starts at 116. Do not rename applied files; Live already recorded those ids. Historical pairs stay; 068+ must be unique. Do not change one user's role with a migration. Role changes go through the Staff page.
 
 MariaDB DDL is not generally reversible as a transaction. If a migration fails partway through, the worker stops and reports it; it never “fixes” the situation by restoring or importing an entire production database. The recovery path is a reviewed forward migration, using the verified backup only if a separately authorized disaster restore is genuinely needed.
 

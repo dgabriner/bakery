@@ -1162,6 +1162,15 @@ try {
     require_once $root . '/includes/hosted_migration_runtime.php';
     require_once $root . '/includes/schema_migration_numbers.php';
     $duplicatePrefixes = bakery_schema_unexpected_duplicate_prefixes();
+    $liveLedgerReuse = bakery_schema_files_reusing_live_ledger(
+        bakery_schema_migration_ids_from_dir($root . '/database/schema')
+    );
+    if ($liveLedgerReuse !== []) {
+        throw new RuntimeException(
+            'Schema files reuse a Live-only ledger number. 114 and 115 are taken by rows that are not in git. Collisions: '
+            . implode(', ', $liveLedgerReuse)
+        );
+    }
     if ($duplicatePrefixes !== []) {
         $parts = [];
         foreach ($duplicatePrefixes as $prefix => $ids) {
@@ -1178,6 +1187,15 @@ try {
         if ($number < 50 || bakery_migration_applied($db, $file)) {
             continue;
         }
+        if (in_array($number, bakery_schema_live_only_ledger_numbers(), true)) {
+            throw new RuntimeException(
+                'Refusing migration ' . $file . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. The next schema file starts at 116.'
+            );
+        }
+        $idRefusal = bakery_hosted_migration_id_refusal($file, $root . '/database/schema', true);
+        if ($idRefusal !== '') {
+            throw new RuntimeException($idRefusal);
+        }
         if ($file === '051_live_ops_catchup'
             && bakery_schema_table_exists($db, 'agent_bugs')
             && bakery_column_exists($db, 'driver_load_items', 'wasted_quantity')) {
@@ -1187,6 +1205,10 @@ try {
             continue;
         }
         $migrationSql = (string)file_get_contents($migrationPath);
+        $userSqlRefusal = bakery_hosted_migration_sql_user_refusal($migrationSql);
+        if ($userSqlRefusal !== '') {
+            throw new RuntimeException('Refusing migration ' . $file . '. ' . $userSqlRefusal);
+        }
         if (($supersededBy = bakery_hosted_migration_superseded_by($migrationSql)) !== null) {
             echo "Recording migration {$file} (superseded by {$supersededBy})...\n";
             bakery_mark_migration($db, $file);

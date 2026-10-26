@@ -132,5 +132,40 @@ $assert(strpos($approvalSource, 'The selected migration is not the first remaini
 $assert(strpos($manager, 'bakery_staging_live_relax_067_kind_stop') !== false, 'Manager reopens 067 when kind is the only type clash');
 $assert(strpos($manager, 'bakery_hosted_migration_approve($fallbackFile)') !== false, 'Manager can queue the shown safe file if older approve still throws');
 
+$assert(bakery_hosted_migration_id_refusal('113_sales_role') === '', '113_sales_role is backed by database/schema');
+$probeRefusal = bakery_hosted_migration_id_refusal('114_user_112_role_probe');
+$assert(strpos($probeRefusal, 'one user') !== false, '114_user_112_role_probe is refused as one user');
+$salesRoleRefusal = bakery_hosted_migration_id_refusal('115_user_112_sales_role');
+$assert(strpos($salesRoleRefusal, 'one user') !== false, '115_user_112_sales_role is refused as one user');
+$markerRefusal = bakery_hosted_migration_id_refusal('900_user112_marker');
+$assert(strpos($markerRefusal, 'one user') !== false, '900_user112_marker is refused as one user');
+$missingRefusal = bakery_hosted_migration_id_refusal('116_not_in_git');
+$assert(strpos($missingRefusal, 'database/schema') !== false, 'an id with no schema file is refused');
+$numberRefusal = bakery_hosted_migration_id_refusal('114_add_column');
+$assert(strpos($numberRefusal, '114 and 115') !== false, '114 is refused even without a user id in the name');
+$keptNumber = bakery_hosted_migration_id_refusal('115_add_column');
+$assert(strpos($keptNumber, '114 and 115') !== false, '115 is refused even without a user id in the name');
+
+$tempSchema = sys_get_temp_dir() . '/bakery-schema-guard-' . getmypid();
+@mkdir($tempSchema, 0700, true);
+file_put_contents($tempSchema . '/116_user_4_role_probe.sql', "UPDATE users SET role_id = 1 WHERE id = 4;\n");
+$filedProbe = bakery_hosted_migration_id_refusal('116_user_4_role_probe', $tempSchema, true);
+$assert(strpos($filedProbe, 'one user') !== false, 'a schema file that names one user is still refused');
+@unlink($tempSchema . '/116_user_4_role_probe.sql');
+@rmdir($tempSchema);
+
+$roleSql = "UPDATE users SET role_id = 4 WHERE id = 112;\n";
+$assert(strpos(bakery_hosted_migration_sql_user_refusal($roleSql), 'users.role_id') !== false, 'SQL that sets users.role_id is refused');
+$oneUserSql = "UPDATE users SET is_active = 0 WHERE id = 112;\n";
+$assert(strpos(bakery_hosted_migration_sql_user_refusal($oneUserSql), 'one user') !== false, 'SQL that updates one user by id is refused');
+$actorSql = (string)file_get_contents($root . '/database/schema/100_actor_identity.sql');
+$assert(bakery_hosted_migration_sql_user_refusal($actorSql) === '', '100 actor backfill is not a one-user role change');
+$salesSql = (string)file_get_contents($root . '/database/schema/113_sales_role.sql');
+$assert(bakery_hosted_migration_sql_user_refusal($salesSql) === '', '113 sales role seed does not change one user');
+$assert(strpos($runtime, 'bakery_hosted_migration_id_refusal') !== false, 'worker refuses migration ids before apply');
+$assert(strpos($runtime, 'bakery_hosted_migration_sql_user_refusal') !== false, 'worker refuses one-user SQL before apply');
+$assert(strpos($approvalSource, 'bakery_hosted_migration_id_refusal') !== false, 'approval refuses migration ids that are not git schema files');
+$assert(strpos($runner, 'bakery_schema_files_reusing_live_ledger') !== false, 'migration runner rejects files that reuse Live ledger numbers');
+
 echo "{$failed} failed" . PHP_EOL;
 exit($failed === 0 ? 0 : 1);
