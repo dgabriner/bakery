@@ -590,6 +590,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_phase4_auto_deploy_tests.php',
                 'tests/run_deploy_surface_tests.php',
                 'tests/run_staging_env_tests.php',
+                'tests/run_sftp_preflight_tests.php',
                 'tests/run_hosted_promotion_tests.php',
                 'tests/run_files_live_only_tests.php',
                 'tests/run_client_cache_tests.php',
