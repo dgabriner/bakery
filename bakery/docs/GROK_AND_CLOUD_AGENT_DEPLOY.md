@@ -144,6 +144,7 @@ Safe / expected for cloud agents:
 ```text
 git status / git diff / git commit / git push -u origin HEAD
 python3 -m pip install --user paramiko
+python3 scripts/cloud_agent_stage.py --diagnose
 python3 scripts/cloud_agent_stage.py --check-target
 python3 scripts/cloud_agent_stage.py --files FILE… --migration database/schema/NNN_slug.sql --migrate-hosted --smoke
 python3 scripts/cloud_agent_stage.py --queue-live --migration-id NNN_slug.sql
@@ -153,6 +154,8 @@ php tests/run_<suite>_tests.php
 bash scripts/run_test_gate.sh [--files=a.php,b.php | --suites=run_x_tests | --changed-since=origin/main]
 bash scripts/cloud_agent_install.sh          # re-provision PHP/MariaDB/bakerysf_test if the VM lacks them
 ```
+
+`python3 scripts/cloud_agent_stage.py --diagnose` checks the SFTP login before any upload, migration, or `--queue-live` work. It prints the host, user, remote root, target, password length, whether that password has leading or trailing whitespace or a newline, and the auth methods the server allows. It does not print the password. `scripts/sftp_upload.py --diagnose` runs the same check. A failed login exits before the build.
 
 Do **not** run:
 
