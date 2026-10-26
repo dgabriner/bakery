@@ -8,6 +8,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/order_reprice.php';
+require_once __DIR__ . '/daily_order_skip.php';
 
 function bakery_order_line_no_charge_ready(PDO $db): bool
 {
@@ -638,6 +639,36 @@ function bakery_daily_orders_action_set_no_charge(PDO $db, array $input, ?array 
     ];
 }
 
+function bakery_daily_orders_action_skip_dated_day(PDO $db, array $input, ?array $user = null): array
+{
+    return bakery_daily_order_skip(
+        $db,
+        (int)($input['order_id'] ?? 0),
+        (string)($input['date'] ?? ''),
+        $user
+    );
+}
+
+function bakery_daily_orders_action_undo_skip_dated_day(PDO $db, array $input, ?array $user = null): array
+{
+    return bakery_daily_order_undo_skip(
+        $db,
+        (int)($input['order_id'] ?? 0),
+        (string)($input['date'] ?? ''),
+        $user
+    );
+}
+
+function bakery_daily_orders_action_skip_unassigned(PDO $db, array $input, ?array $user = null): array
+{
+    return bakery_daily_order_skip_unassigned(
+        $db,
+        (string)($input['date'] ?? ''),
+        bakery_daily_order_skip_id_list($input['order_ids'] ?? ''),
+        $user
+    );
+}
+
 function bakery_daily_orders_dispatch(PDO $db, array $input, ?array $user = null): array
 {
     $action = (string)($input['action'] ?? '');
@@ -672,6 +703,12 @@ function bakery_daily_orders_dispatch(PDO $db, array $input, ?array $user = null
             return bakery_daily_orders_action_remove_order($db, $input, $user);
         case 'clear_day':
             return bakery_daily_orders_action_clear_day($db, $input, $user);
+        case 'skip_dated_day':
+            return bakery_daily_orders_action_skip_dated_day($db, $input, $user);
+        case 'undo_skip_dated_day':
+            return bakery_daily_orders_action_undo_skip_dated_day($db, $input, $user);
+        case 'skip_unassigned_stops':
+            return bakery_daily_orders_action_skip_unassigned($db, $input, $user);
         default:
             throw new Exception('Unknown action');
     }

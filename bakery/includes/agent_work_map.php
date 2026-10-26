@@ -680,6 +680,8 @@ function bakery_agent_work_map_core(): array
                 'includes/demand_review.php',
                 'includes/demand_confirmation.php',
                 'includes/daily_order_generation.php',
+                'includes/daily_order_skip.php',
+                'includes/daily_orders_actions.php',
                 'database/schema/097_standing_fill_blocked.sql',
                 'database/schema/105_dated_route_removal_log.sql',
                 'database/schema/106_dated_route_morning_checks.sql',
@@ -696,6 +698,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_operating_demand_tests.php',
                 'tests/run_demand_visit_compare_tests.php',
                 'tests/run_get_order_materialize_tests.php',
+                'tests/run_daily_order_skip_tests.php',
             ],
             'invariants' => [
                 'Dated beats standing per customer, never all-or-nothing per date',
