@@ -335,6 +335,32 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     <?php endif; ?>
   </div>
 </nav>
+<?php elseif ($navRole === 'sales'): ?>
+<nav class="bakery-nav bakery-nav--focused bakery-nav--sales" aria-label="<?php bakery_te('nav.sales_workspace_aria'); ?>">
+  <div class="bakery-nav__inner">
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'sales_home.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.sales_workspace'); ?></a>
+    <div class="bakery-nav__groups">
+      <?php foreach (bakery_sales_nav_items() as $salesItem): ?>
+        <?php
+          $salesHref = (string)($salesItem['href'] ?? '');
+          $salesPage = bakery_navigation_item_page_key($salesItem);
+          $salesActive = bakery_nav_is_active($salesItem, $currentPage);
+          $salesShortKey = 'nav.sales_short.' . $salesPage;
+          $salesShort = bakery_t($salesShortKey);
+          if ($salesShort === $salesShortKey) {
+              $salesShort = (string)($salesItem['label'] ?? '');
+          }
+        ?>
+      <a class="bakery-nav__direct <?php echo $salesActive ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . $salesHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $salesActive ? ' aria-current="page"' : ''; ?>>
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php echo htmlspecialchars((string)($salesItem['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php echo htmlspecialchars($salesShort, ENT_QUOTES, 'UTF-8'); ?></span>
+      </a>
+      <?php endforeach; ?>
+      <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
+      <?php echo $navLogoutForm; ?>
+    </div>
+  </div>
+</nav>
 <?php else: ?>
 <?php
   $navSections = bakery_navigation_sections_for_role($navRole);
@@ -365,6 +391,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       <span class="bakery-nav__label-full"><?php bakery_te('nav.billing_shortcut'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.billing_shortcut_short'); ?></span>
     </a>
+    <?php if ($navRole === 'administrator'): ?>
+    <a class="bakery-nav__staff-shortcut<?php echo $currentPage === 'users' ? ' bakery-nav__staff-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>users.php"<?php echo $currentPage === 'users' ? ' aria-current="page"' : ''; ?>>
+      <span class="bakery-nav__label-full"><?php bakery_te('nav.item.users'); ?></span>
+      <span class="bakery-nav__label-short"><?php bakery_te('nav.staff_short'); ?></span>
+    </a>
+    <?php endif; ?>
     <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
       <?php echo bakery_staff_alerts_nav_html(); ?>
     <?php endif; ?>

@@ -1,0 +1,133 @@
+.sales-home {
+  margin: 0 auto;
+  max-width: 44rem;
+  padding: 1rem 1rem 2.5rem;
+}
+
+.sales-home h1 {
+  font-size: 2rem;
+  margin: 0 0 0.35rem;
+}
+
+.sales-home__intro {
+  font-size: 1.15rem;
+  margin: 0 0 1rem;
+}
+
+.sales-home__search {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 1.25rem;
+}
+
+.sales-home__search label {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.sales-home__search input,
+.sales-home__search button,
+.sales-home__count,
+.sales-home__hits a {
+  min-height: 52px;
+}
+
+.sales-home__search input {
+  border: 2px solid var(--sf-border, #c5b8a5);
+  border-radius: 12px;
+  font-size: 1.15rem;
+  padding: 0.7rem 0.9rem;
+  width: 100%;
+}
+
+.sales-home__search button,
+.sales-home__count {
+  background: var(--sf-primary, #1f6c63);
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.sales-home__search button {
+  padding: 0.75rem 1rem;
+}
+
+.sales-home__counts {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 1.25rem;
+}
+
+.sales-home__count {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 96px;
+  padding: 0.8rem 0.5rem;
+}
+
+.sales-home__count-n {
+  font-size: 2.1rem;
+  line-height: 1;
+}
+
+.sales-home__count-l {
+  font-size: 1rem;
+  margin-top: 0.25rem;
+  text-align: center;
+}
+
+.sales-home h2 {
+  font-size: 1.35rem;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.sales-home__followups h2 span,
+.sales-home__hits a span {
+  font-weight: 600;
+}
+
+.sales-home__hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sales-home__hits a {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sf-border, #ddd);
+  border-radius: 12px;
+  color: inherit;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.55rem;
+  padding: 0.75rem 0.9rem;
+  text-decoration: none;
+}
+
+.sales-home__empty,
+.sales-home__more {
+  font-size: 1.05rem;
+}
+
+.sales-leads-duplicate {
+  background: #fff4d6;
+  border-radius: 10px;
+  display: inline-block;
+  font-weight: 700;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.55rem;
+}
+
+@media (min-width: 800px) {
+  .sales-home__counts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

@@ -79,7 +79,7 @@ function bakery_sales_leads_role_status(): int
     if (!is_array($user) || (int)($user['id'] ?? 0) <= 0) {
         return 401;
     }
-    if (!bakery_user_has_role(['administrator', 'manager'])) {
+    if (!bakery_user_has_role(bakery_sales_workspace_roles())) {
         return 403;
     }
     return 200;
@@ -1413,10 +1413,28 @@ function bakery_sales_leads_list(PDO $db, array $filters = []): array
     $where = [];
     $params = [];
     $stage = (string)($filters['stage'] ?? '');
+    $stages = [];
+    foreach ((array)($filters['stages'] ?? []) as $oneStage) {
+        $oneStage = (string)$oneStage;
+        if (in_array($oneStage, bakery_sales_leads_stages(), true) && !in_array($oneStage, $stages, true)) {
+            $stages[] = $oneStage;
+        }
+    }
     if ($stage !== '' && in_array($stage, bakery_sales_leads_stages(), true)) {
-        $where[] = 'l.stage = ?';
-        $params[] = $stage;
+        if ($stages === [] || in_array($stage, $stages, true)) {
+            $where[] = 'l.stage = ?';
+            $params[] = $stage;
+        }
+    } elseif ($stages !== []) {
+        $where[] = 'l.stage IN (' . implode(',', array_fill(0, count($stages), '?')) . ')';
+        foreach ($stages as $oneStage) {
+            $params[] = $oneStage;
+        }
     } elseif ((string)($filters['show_lost'] ?? '') !== '1') {
+        $where[] = "(l.stage IS NULL OR l.stage <> 'Lost')";
+    }
+    if ((string)($filters['followups'] ?? '') === '1') {
+        $where[] = 'l.next_action_date IS NOT NULL';
         $where[] = "(l.stage IS NULL OR l.stage <> 'Lost')";
     }
     $priority = strtoupper(trim((string)($filters['priority'] ?? '')));
@@ -1569,4 +1587,363 @@ function bakery_sales_leads_export_csv(array $rows): string
     $csv = stream_get_contents($handle);
     fclose($handle);
     return $csv === false ? '' : $csv;
+}
+
+/**
+ * Sales list views. Follow-ups is a date bucket, not a stage list.
+ *
+ * @return list<string>
+ */
+function bakery_sales_leads_view_names(): array
+{
+    return ['leads', 'prospects', 'followups', 'won'];
+}
+
+/**
+ * @return list<string>
+ */
+function bakery_sales_leads_view_stages(string $view): array
+{
+    $map = [
+        'leads' => ['New', 'Researched'],
+        'prospects' => ['Contacted', 'Sampling', 'Proposal'],
+        'won' => ['Won'],
+    ];
+    return $map[$view] ?? [];
+}
+
+function bakery_sales_leads_can_merge(): bool
+{
+    return bakery_user_has_role(['administrator', 'manager']);
+}
+
+/**
+ * Sales may edit open leads. Won, Lost, and the Won view stay read only.
+ *
+ * @param array<string, mixed> $post
+ */
+function bakery_sales_leads_sales_write_blocked(PDO $db, array $post, string $view): bool
+{
+    if (!bakery_user_is_sales()) {
+        return false;
+    }
+    if ($view === 'won' || (string)($post['action'] ?? '') === 'merge') {
+        return true;
+    }
+    if ((string)($post['stage'] ?? '') === 'Lost') {
+        return true;
+    }
+    $id = (int)($post['internal_id'] ?? 0);
+    if ($id <= 0) {
+        return false;
+    }
+    $lead = bakery_sales_leads_find($db, (string)$id);
+    if (!is_array($lead)) {
+        return false;
+    }
+    $stage = (string)($lead['stage'] ?? '');
+    return $stage === 'Won' || $stage === 'Lost';
+}
+
+function bakery_sales_leads_normalize_match_text(?string $value): string
+{
+    $value = strtolower(trim((string)$value));
+    $value = preg_replace('/[^a-z0-9]+/', ' ', $value) ?? '';
+    $value = preg_replace('/\s+/', ' ', $value) ?? '';
+    return trim($value);
+}
+
+/**
+ * Last 10 digits from the phone column and from contact_channel.
+ *
+ * @param array<string, mixed> $row
+ * @return list<string>
+ */
+function bakery_sales_leads_phone_keys(array $row): array
+{
+    $keys = [];
+    foreach ([(string)($row['phone'] ?? ''), (string)($row['contact_channel'] ?? '')] as $raw) {
+        $parsed = bakery_sales_leads_parse_phone($raw);
+        $digits = preg_replace('/\D/', '', $parsed !== null ? $parsed : $raw) ?? '';
+        if (strlen($digits) >= 10) {
+            $keys[substr($digits, -10)] = true;
+        }
+    }
+    return array_keys($keys);
+}
+
+/**
+ * Likely duplicate: same normalized name, and the same address or the same phone.
+ * Empty name, empty address, and empty phone never match.
+ *
+ * @return array<int, list<array{id:int,external_id:string,customer_name:string}>>
+ */
+function bakery_sales_leads_duplicate_index(PDO $db): array
+{
+    $rows = $db->query(
+        'SELECT id, external_id, customer_name, address, phone, contact_channel FROM leads'
+    )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $prepared = [];
+    foreach ($rows as $row) {
+        $name = bakery_sales_leads_normalize_match_text((string)($row['customer_name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $prepared[] = [
+            'id' => (int)$row['id'],
+            'external_id' => trim((string)($row['external_id'] ?? '')),
+            'customer_name' => (string)($row['customer_name'] ?? ''),
+            'name' => $name,
+            'address' => bakery_sales_leads_normalize_match_text((string)($row['address'] ?? '')),
+            'phones' => bakery_sales_leads_phone_keys($row),
+        ];
+    }
+    $byName = [];
+    foreach ($prepared as $item) {
+        $byName[$item['name']][] = $item;
+    }
+    $index = [];
+    foreach ($byName as $group) {
+        $count = count($group);
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $left = $group[$i];
+                $right = $group[$j];
+                $addressMatch = $left['address'] !== '' && $left['address'] === $right['address'];
+                $phoneMatch = false;
+                foreach ($left['phones'] as $phone) {
+                    if ($phone !== '' && in_array($phone, $right['phones'], true)) {
+                        $phoneMatch = true;
+                        break;
+                    }
+                }
+                if (!$addressMatch && !$phoneMatch) {
+                    continue;
+                }
+                $index[$left['id']][] = [
+                    'id' => $right['id'],
+                    'external_id' => $right['external_id'],
+                    'customer_name' => $right['customer_name'],
+                ];
+                $index[$right['id']][] = [
+                    'id' => $left['id'],
+                    'external_id' => $left['external_id'],
+                    'customer_name' => $left['customer_name'],
+                ];
+            }
+        }
+    }
+    return $index;
+}
+
+/**
+ * Keep one lead. Notes, activity, and earlier contacts from both stay on it.
+ *
+ * @return array{ok:bool,error?:string,keep_id?:int,drop_id?:int}
+ */
+function bakery_sales_leads_merge(PDO $db, int $keepId, int $dropId, int $userId): array
+{
+    if (!bakery_sales_leads_can_merge()) {
+        return ['ok' => false, 'error' => 'forbidden'];
+    }
+    if ($keepId <= 0 || $dropId <= 0 || $keepId === $dropId) {
+        return ['ok' => false, 'error' => 'not_found'];
+    }
+    $matched = false;
+    foreach (bakery_sales_leads_duplicate_index($db)[$keepId] ?? [] as $other) {
+        if ((int)$other['id'] === $dropId) {
+            $matched = true;
+            break;
+        }
+    }
+    if (!$matched) {
+        return ['ok' => false, 'error' => 'not_duplicate'];
+    }
+
+    $copyIfEmpty = [
+        'contact_name', 'phone', 'email', 'address', 'lead_type', 'neighborhood',
+        'website', 'contact_channel', 'contact_verified', 'current_supplier',
+        'cuisine', 'fit_score', 'fit_reason', 'priority', 'next_action',
+        'next_action_date', 'route_fit', 'zone_id', 'source', 'source_url',
+        'external_id', 'customer_id', 'sample_daily_order_id',
+    ];
+
+    $db->beginTransaction();
+    try {
+        $stmt = $db->prepare('SELECT * FROM leads WHERE id IN (?, ?) FOR UPDATE');
+        $stmt->execute([$keepId, $dropId]);
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[(int)$row['id']] = $row;
+        }
+        if (!isset($rows[$keepId], $rows[$dropId])) {
+            $db->rollBack();
+            return ['ok' => false, 'error' => 'not_found'];
+        }
+        $keep = $rows[$keepId];
+        $drop = $rows[$dropId];
+        $dropLabel = trim((string)($drop['external_id'] ?? ''));
+        if ($dropLabel === '') {
+            $dropLabel = (string)$dropId;
+        }
+        $sets = [];
+        $params = [];
+        $blank = static function ($value): bool {
+            return $value === null || $value === '';
+        };
+        foreach ($copyIfEmpty as $column) {
+            if (!array_key_exists($column, $keep) || !array_key_exists($column, $drop)) {
+                continue;
+            }
+            if (!$blank($keep[$column]) || $blank($drop[$column])) {
+                continue;
+            }
+            $sets[] = $column . ' = ?';
+            $params[] = $drop[$column];
+        }
+        $keepNotes = trim((string)($keep['notes'] ?? ''));
+        $dropNotes = trim((string)($drop['notes'] ?? ''));
+        if ($dropNotes !== '' && $dropNotes !== $keepNotes) {
+            $sets[] = 'notes = ?';
+            $params[] = $keepNotes === '' ? $dropNotes : ($keepNotes . "\n" . $dropNotes);
+        }
+        if (in_array('external_id = ?', $sets, true)) {
+            $db->prepare('UPDATE leads SET external_id = NULL WHERE id = ?')->execute([$dropId]);
+        }
+        if ($sets !== []) {
+            $params[] = $keepId;
+            $db->prepare('UPDATE leads SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
+        }
+        if (function_exists('table_exists') && table_exists($db, 'lead_activity')) {
+            $db->prepare('UPDATE lead_activity SET lead_id = ? WHERE lead_id = ?')->execute([$keepId, $dropId]);
+        }
+        if (function_exists('table_exists') && table_exists($db, 'lead_contacts')) {
+            $db->prepare('UPDATE lead_contacts SET lead_id = ? WHERE lead_id = ?')->execute([$keepId, $dropId]);
+        }
+        bakery_sales_leads_log(
+            $db,
+            $keepId,
+            $userId,
+            'Merged lead ' . $dropLabel . ' into this lead.',
+            null,
+            null,
+            date('Y-m-d')
+        );
+        $db->prepare('DELETE FROM leads WHERE id = ?')->execute([$dropId]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        return ['ok' => false, 'error' => 'save_failed'];
+    }
+
+    return ['ok' => true, 'keep_id' => $keepId, 'drop_id' => $dropId];
+}
+
+function bakery_sales_leads_followup_bucket(array $row, string $today): string
+{
+    $date = substr((string)($row['next_action_date'] ?? ''), 0, 10);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+        return '';
+    }
+    if ($date < $today) {
+        return 'overdue';
+    }
+    if ($date === $today) {
+        return 'today';
+    }
+    return 'upcoming';
+}
+
+/**
+ * @return array<string, int>
+ */
+function bakery_sales_home_counts(PDO $db): array
+{
+    $counts = [
+        'New' => 0,
+        'Researched' => 0,
+        'Contacted' => 0,
+        'Sampling' => 0,
+        'Proposal' => 0,
+        'Won' => 0,
+    ];
+    $rows = $db->query('SELECT stage, COUNT(*) AS n FROM leads GROUP BY stage')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($rows as $row) {
+        $stage = (string)($row['stage'] ?? '');
+        if (array_key_exists($stage, $counts)) {
+            $counts[$stage] = (int)$row['n'];
+        }
+    }
+    return $counts;
+}
+
+/**
+ * @return array{overdue:list<array<string,mixed>>,today:list<array<string,mixed>>}
+ */
+function bakery_sales_home_followups(PDO $db, string $today): array
+{
+    $buckets = ['overdue' => [], 'today' => []];
+    $stmt = $db->prepare(
+        'SELECT id, external_id, customer_name, next_action, next_action_date, stage
+         FROM leads
+         WHERE next_action_date IS NOT NULL
+           AND next_action_date <= ?
+           AND (stage IS NULL OR stage <> \'Lost\')
+         ORDER BY next_action_date ASC, customer_name ASC, id ASC
+         LIMIT 40'
+    );
+    $stmt->execute([$today]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+        $bucket = bakery_sales_leads_followup_bucket($row, $today);
+        if ($bucket === 'overdue' || $bucket === 'today') {
+            $buckets[$bucket][] = $row;
+        }
+    }
+    return $buckets;
+}
+
+/**
+ * @return array{leads:list<array<string,mixed>>,customers:list<array<string,mixed>>}
+ */
+function bakery_sales_home_search(PDO $db, string $q): array
+{
+    $q = trim($q);
+    $empty = ['leads' => [], 'customers' => []];
+    if ($q === '') {
+        return $empty;
+    }
+    $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+    $leadStmt = $db->prepare(
+        'SELECT id, external_id, customer_name, address, phone, neighborhood, stage
+         FROM leads
+         WHERE (stage IS NULL OR stage <> \'Lost\')
+           AND (
+                customer_name LIKE ? ESCAPE \'\\\\\'
+             OR address LIKE ? ESCAPE \'\\\\\'
+             OR phone LIKE ? ESCAPE \'\\\\\'
+             OR neighborhood LIKE ? ESCAPE \'\\\\\'
+             OR contact_channel LIKE ? ESCAPE \'\\\\\'
+             OR external_id LIKE ? ESCAPE \'\\\\\'
+           )
+         ORDER BY customer_name ASC, id ASC
+         LIMIT 12'
+    );
+    $leadStmt->execute([$like, $like, $like, $like, $like, $like]);
+    $customerStmt = $db->prepare(
+        'SELECT id, name, phone, address, zone
+         FROM customers
+         WHERE name LIKE ? ESCAPE \'\\\\\'
+            OR phone LIKE ? ESCAPE \'\\\\\'
+            OR address LIKE ? ESCAPE \'\\\\\'
+            OR CAST(id AS CHAR) = ?
+         ORDER BY name ASC, id ASC
+         LIMIT 12'
+    );
+    $customerStmt->execute([$like, $like, $like, $q]);
+    return [
+        'leads' => $leadStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        'customers' => $customerStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+    ];
 }

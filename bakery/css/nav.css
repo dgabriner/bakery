@@ -68,7 +68,8 @@
 }
 
 .bakery-nav__route-shortcut,
-.bakery-nav__billing-shortcut {
+.bakery-nav__billing-shortcut,
+.bakery-nav__staff-shortcut {
   background: var(--sf-accent);
   border: 1px solid var(--sf-accent-hover);
   border-radius: 999px;
@@ -109,7 +110,10 @@
 .bakery-nav__route-shortcut:focus-visible,
 .bakery-nav__billing-shortcut:hover,
 .bakery-nav__billing-shortcut:focus-visible,
-.bakery-nav__billing-shortcut--active {
+.bakery-nav__billing-shortcut--active,
+.bakery-nav__staff-shortcut:hover,
+.bakery-nav__staff-shortcut:focus-visible,
+.bakery-nav__staff-shortcut--active {
   background: var(--sf-accent-hover);
   outline: none;
 }
@@ -836,7 +840,8 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     font-size: 0.8rem;
     min-height: var(--sf-touch-min);
     padding: var(--sf-space-2) 0.65rem;
@@ -876,12 +881,14 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut .bakery-nav__label-full,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-full {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-full,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut .bakery-nav__label-full {
     display: none;
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut .bakery-nav__label-short,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-short {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-short,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut .bakery-nav__label-short {
     display: inline;
   }
 
@@ -1176,7 +1183,8 @@
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__manager-shortcut,
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     display: none;
   }
 
@@ -1459,7 +1467,8 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     font-size: 0.78rem;
     padding: var(--sf-space-2) 9px;
   }
@@ -1567,4 +1576,42 @@
 .auth-bar .bakery-lang-switch--inline .bakery-lang-switch__btn--active {
   background: #fff;
   color: var(--sf-text, #1c2a26);
+}
+
+.bakery-nav--sales .bakery-nav__groups {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bakery-nav--sales .bakery-nav__direct {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  min-height: 48px;
+  padding: 0.55rem 0.85rem;
+}
+
+.bakery-nav--sales .bakery-nav__label-full {
+  display: inline;
+}
+
+.bakery-nav--sales .bakery-nav__label-short {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  body.workspace-sales {
+    padding-bottom: 1.5rem;
+  }
+
+  .bakery-nav--sales {
+    border-bottom: 1px solid var(--sf-nav-border);
+    border-top: 0;
+    bottom: auto;
+    box-shadow: none;
+    position: sticky;
+    top: 0;
+  }
 }
