@@ -219,7 +219,7 @@ if (!function_exists('bakery_zones_export_rows')) {
 
 if (!function_exists('bakery_zones_export_csv')) {
     /**
-     * Manager session only. No bearer token and no server secret.
+     * Administrator, manager, or sales session. No bearer token and no server secret.
      *
      * @return array{status:int,body:string}
      */
@@ -229,7 +229,10 @@ if (!function_exists('bakery_zones_export_csv')) {
         if (!is_array($user) || (int)($user['id'] ?? 0) <= 0) {
             return ['status' => 401, 'body' => ''];
         }
-        if (!function_exists('bakery_user_has_role') || !bakery_user_has_role(['administrator', 'manager'])) {
+        $allowed = function_exists('bakery_sales_workspace_roles')
+            ? bakery_sales_workspace_roles()
+            : ['administrator', 'manager'];
+        if (!function_exists('bakery_user_has_role') || !bakery_user_has_role($allowed)) {
             return ['status' => 403, 'body' => ''];
         }
         $handle = fopen('php://temp', 'r+');

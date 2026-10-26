@@ -7,7 +7,7 @@ function Get-BakeryDeployRootFiles {
         'staging-robots.txt',
         'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
-        'zones.php', 'leads.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
+        'zones.php', 'leads.php', 'sales_home.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
         'products.php', 'catalog_gaps.php', 'cost_margin.php', 'product_photos.php', 'cashier_add_product.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
         'daily_orders.php', 'daily_orders_api.php', 'zazie_weekly_sheet.php', 'standing_orders.php', 'standing_orders_manager.php', 'standing_orders_manager_api.php', 'special_orders.php', 'orders.php',
         'bread_distribution.php', 'product_distribution.php',

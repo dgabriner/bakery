@@ -139,7 +139,7 @@ require_once __DIR__ . '/includes/nav.php';
 </style>
 
 <div class="users-page">
-  <h1>User Management</h1>
+  <h1><?php bakery_te('page.users'); ?></h1>
   <p class="lead">Login types, names, and 4-digit codes for bakery staff.</p>
 
   <?php if ($error): ?>
@@ -279,7 +279,7 @@ require_once __DIR__ . '/includes/nav.php';
           ?>
             <option value="<?php echo htmlspecialchars($role['slug']); ?>"
               <?php echo $selectedRole === $role['slug'] ? 'selected' : ''; ?>>
-              <?php echo htmlspecialchars($role['name']); ?>
+              <?php echo htmlspecialchars(bakery_navigation_role_label($role['slug'])); ?>
             </option>
           <?php endforeach; ?>
         </select>

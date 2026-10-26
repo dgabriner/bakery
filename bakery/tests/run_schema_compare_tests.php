@@ -341,8 +341,8 @@ $postedOnly = bakery_hosted_migration_queue_from_board([
 $assert(($postedOnly[0]['file'] ?? '') === '067_bread_education_offerings_v2.sql', 'a remaining safe posted file still queues when older compare says Stop');
 
 $assert(bakery_schema_unexpected_duplicate_prefixes() === [], 'only historical 010/021/025/062/073 prefix pairs exist');
-$assert(bakery_schema_next_migration_number() === 113, 'next unused schema number is 113');
-$assert(bakery_schema_next_migration_id('demo_feature') === '113_demo_feature', 'next id is 113_ plus slug');
+$assert(bakery_schema_next_migration_number() === 114, 'next unused schema number is 114');
+$assert(bakery_schema_next_migration_id('demo_feature') === '114_demo_feature', 'next id is 114_ plus slug');
 $assert(bakery_schema_next_migration_number(['092_time_clock_overrides']) === 97, '093 through 096 stay reserved');
 
 $liveTimeClockLedger = ['083_time_clock_punches', '086_time_clock_overrides'];

@@ -1194,7 +1194,9 @@ function bakery_agent_work_map_core(): array
             'aliases' => ['cursor-agent', 'anonymous-agent', 'admin', 'broken-windows'],
             'files' => [
                 'leads.php',
+                'sales_home.php',
                 'sales_leads_api.php',
+                'database/schema/113_sales_role.sql',
                 'includes/sales_leads.php',
                 'database/schema/110_sales_leads.sql',
                 'database/schema/111_sales_lead_customer_neighborhood.sql',
@@ -1207,6 +1209,7 @@ function bakery_agent_work_map_core(): array
             ],
             'tests' => [
                 'tests/run_sales_leads_tests.php',
+                'tests/run_sales_role_tests.php',
                 'tests/run_i18n_tests.php',
                 'tests/run_integrity_tests.php',
             ],

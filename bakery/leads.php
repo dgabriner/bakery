@@ -1,6 +1,6 @@
 <?php
 /**
- * Sales Leads. Managers and administrators only.
+ * Sales Leads. Administrators, managers, and sales.
  * List, edit, activity log, and CSV import / export live on this page.
  */
 define('ACCESS_ALLOWED', true);
@@ -12,6 +12,7 @@ bakery_sales_leads_require_access();
 
 $actor = bakery_current_user();
 $actorId = (int)($actor['id'] ?? 0);
+$salesUser = bakery_user_is_sales();
 $ready = isset($db) && $db instanceof PDO && bakery_sales_leads_ready($db);
 $notice = '';
 $error = '';
@@ -23,7 +24,42 @@ if (!$ready) {
     $error = bakery_t('leads.schema_missing');
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
-    if ($action === 'save') {
+    $postedView = (string)($_GET['view'] ?? '');
+    if (!in_array($postedView, bakery_sales_leads_view_names(), true)) {
+        $postedView = '';
+    }
+    if ($action === 'merge') {
+        if (!bakery_sales_leads_can_merge()) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo bakery_t('leads.sales_forbidden_won') . "\n";
+            exit;
+        }
+        $merged = bakery_sales_leads_merge(
+            $db,
+            (int)($_POST['keep_id'] ?? 0),
+            (int)($_POST['drop_id'] ?? 0),
+            $actorId
+        );
+        if (!empty($merged['ok'])) {
+            $savedLead = bakery_sales_leads_find($db, (string)(int)$merged['keep_id']);
+            $target = $savedLead && trim((string)($savedLead['external_id'] ?? '')) !== ''
+                ? (string)$savedLead['external_id']
+                : (string)(int)$merged['keep_id'];
+            $query = ['lead' => $target, 'merged' => 1];
+            if ($postedView !== '') {
+                $query['view'] = $postedView;
+            }
+            header('Location: ' . BASE_URL . 'leads.php?' . http_build_query($query));
+            exit;
+        }
+        $error = bakery_sales_leads_error_text((string)($merged['error'] ?? 'save_failed'));
+    } elseif ($salesUser && bakery_sales_leads_sales_write_blocked($db, $_POST, $postedView)) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo bakery_t('leads.sales_forbidden_won') . "\n";
+        exit;
+    } elseif ($action === 'save') {
         $saved = bakery_sales_leads_save($db, $_POST, $actorId);
         if (!empty($saved['ok'])) {
             $target = (string)($saved['external_id'] !== '' ? $saved['external_id'] : $saved['id']);
@@ -148,6 +184,8 @@ if (isset($_GET['saved'])) {
     $notice = bakery_t('leads.converted_saved');
 } elseif (isset($_GET['sampled'])) {
     $notice = bakery_t('leads.sample_saved');
+} elseif (isset($_GET['merged'])) {
+    $notice = bakery_t('leads.merged');
 } elseif (isset($_GET['imported'])) {
     $notice = bakery_t('leads.imported', [
         'new' => (string)(int)($_GET['new'] ?? 0),
@@ -157,12 +195,10 @@ if (isset($_GET['saved'])) {
     ]);
 }
 
-$filters = [
-    'stage' => (string)($_GET['stage'] ?? ''),
-    'priority' => (string)($_GET['priority'] ?? ''),
-    'zone' => (string)($_GET['zone'] ?? ''),
-    'show_lost' => (string)($_GET['show_lost'] ?? '') === '1' ? '1' : '',
-];
+$view = (string)($_GET['view'] ?? '');
+if (!in_array($view, bakery_sales_leads_view_names(), true)) {
+    $view = '';
+}
 $zones = $ready ? bakery_sales_leads_zones($db) : [];
 $editing = $ready && array_key_exists('lead', $_GET);
 $leadKey = $editing ? (string)$_GET['lead'] : '';
@@ -170,6 +206,41 @@ $lead = ($editing && $leadKey !== 'new') ? bakery_sales_leads_find($db, $leadKey
 if ($editing && $leadKey !== 'new' && !$lead && $error === '') {
     $error = bakery_sales_leads_error_text('not_found');
     $editing = false;
+}
+if ($salesUser && $ready && !$editing && $view === '') {
+    if ((string)($_GET['export'] ?? '') === 'csv') {
+        $view = 'leads';
+    } else {
+        header('Location: ' . BASE_URL . 'leads.php?view=leads');
+        exit;
+    }
+}
+if ($salesUser && is_array($lead) && (string)($lead['stage'] ?? '') === 'Lost') {
+    header('Location: ' . BASE_URL . 'sales_home.php');
+    exit;
+}
+if ($salesUser && $view === 'won' && $leadKey === 'new') {
+    header('Location: ' . BASE_URL . 'leads.php?view=won');
+    exit;
+}
+
+$filters = [
+    'stage' => '',
+    'priority' => (string)($_GET['priority'] ?? ''),
+    'zone' => (string)($_GET['zone'] ?? ''),
+    'show_lost' => '',
+];
+if ($view === 'followups') {
+    $filters['followups'] = '1';
+} elseif ($view !== '') {
+    $filters['stages'] = bakery_sales_leads_view_stages($view);
+    $requestedStage = (string)($_GET['stage'] ?? '');
+    if (in_array($requestedStage, $filters['stages'], true)) {
+        $filters['stage'] = $requestedStage;
+    }
+} elseif (!$salesUser) {
+    $filters['stage'] = (string)($_GET['stage'] ?? '');
+    $filters['show_lost'] = (string)($_GET['show_lost'] ?? '') === '1' ? '1' : '';
 }
 
 if ($ready && isset($_GET['export']) && (string)$_GET['export'] === 'csv' && !$editing) {
@@ -182,7 +253,25 @@ if ($ready && isset($_GET['export']) && (string)$_GET['export'] === 'csv' && !$e
     exit;
 }
 
-$page_title = bakery_t('page.leads');
+$viewTitleKeys = [
+    'leads' => 'leads.view_leads',
+    'prospects' => 'leads.view_prospects',
+    'followups' => 'leads.view_followups',
+    'won' => 'leads.view_won',
+];
+$viewHelpKeys = [
+    'leads' => 'leads.view_leads_help',
+    'prospects' => 'leads.view_prospects_help',
+    'followups' => 'leads.view_followups_help',
+    'won' => 'leads.view_won_help',
+];
+$duplicateIndex = $ready ? bakery_sales_leads_duplicate_index($db) : [];
+$recordWonReadOnly = $salesUser && is_array($lead) && (string)($lead['stage'] ?? '') === 'Won';
+$showWriterTools = !$salesUser || in_array($view, ['leads', 'prospects'], true);
+$canMerge = bakery_sales_leads_can_merge();
+$duplicateOthers = (is_array($lead) && isset($duplicateIndex[(int)$lead['id']])) ? $duplicateIndex[(int)$lead['id']] : [];
+$page_title = isset($viewTitleKeys[$view]) ? bakery_t($viewTitleKeys[$view]) : bakery_t('page.leads');
+$pageHelp = isset($viewHelpKeys[$view]) ? bakery_t($viewHelpKeys[$view]) : bakery_t('leads.subtitle');
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/nav.php';
 
@@ -272,6 +361,7 @@ if ($convertOpen && $convertDuplicateId <= 0 && $ready) {
 
 $exportQuery = http_build_query(array_filter([
     'export' => 'csv',
+    'view' => $view,
     'stage' => $filters['stage'],
     'priority' => $filters['priority'],
     'zone' => $filters['zone'],
@@ -282,8 +372,8 @@ $exportQuery = http_build_query(array_filter([
 ?>
 <div class="container sales-leads">
     <div class="page-header">
-        <h1><?php echo bakery_sales_leads_h(bakery_t('page.leads')); ?></h1>
-        <p><?php echo bakery_sales_leads_h(bakery_t('leads.subtitle')); ?></p>
+        <h1><?php echo bakery_sales_leads_h($page_title); ?></h1>
+        <p><?php echo bakery_sales_leads_h($pageHelp); ?></p>
     </div>
 
     <?php if ($notice !== ''): ?>
@@ -294,7 +384,36 @@ $exportQuery = http_build_query(array_filter([
     <?php endif; ?>
 
     <?php if ($ready && $editing): ?>
-        <p><a class="btn btn-secondary" href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php"><?php echo bakery_sales_leads_h(bakery_t('leads.back')); ?></a></p>
+        <p><a class="btn btn-secondary" href="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php' . ($view !== '' ? '?view=' . rawurlencode($view) : '')); ?>"><?php echo bakery_sales_leads_h(bakery_t('leads.back')); ?></a></p>
+        <?php if ($duplicateOthers !== []): ?>
+            <p class="sales-leads-duplicate" role="status"><?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_flag')); ?>
+                <?php foreach ($duplicateOthers as $other): ?>
+                    <?php
+                    $otherId = trim((string)($other['external_id'] ?? ''));
+                    if ($otherId === '') {
+                        $otherId = (string)(int)$other['id'];
+                    }
+                    $otherHref = BASE_URL . 'leads.php?lead=' . rawurlencode($otherId) . ($view !== '' ? '&view=' . rawurlencode($view) : '');
+                    ?>
+                    <a href="<?php echo bakery_sales_leads_h($otherHref); ?>"><?php echo bakery_sales_leads_h($otherId); ?></a>
+                <?php endforeach; ?>
+            </p>
+            <?php if ($canMerge): ?>
+                <?php foreach ($duplicateOthers as $other): ?>
+                    <form method="post" class="sales-leads-actions" action="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php?lead=' . rawurlencode($leadKey) . ($view !== '' ? '&view=' . rawurlencode($view) : '')); ?>">
+                        <?php echo bakery_csrf_field(); ?>
+                        <input type="hidden" name="action" value="merge">
+                        <input type="hidden" name="keep_id" value="<?php echo (int)$lead['id']; ?>">
+                        <input type="hidden" name="drop_id" value="<?php echo (int)$other['id']; ?>">
+                        <button type="submit" class="btn btn-secondary"><?php echo bakery_sales_leads_h(bakery_t('leads.merge')); ?> <?php echo bakery_sales_leads_h(trim((string)($other['external_id'] ?? '')) !== '' ? (string)$other['external_id'] : (string)(int)$other['id']); ?></button>
+                    </form>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($recordWonReadOnly): ?>
+            <p class="sales-leads-banner"><?php echo bakery_sales_leads_h(bakery_t('leads.won_readonly')); ?></p>
+        <?php endif; ?>
+        <?php if (!$recordWonReadOnly): ?>
         <h2><?php echo bakery_sales_leads_h($lead ? bakery_t('leads.edit_title') : bakery_t('leads.new_title')); ?></h2>
         <?php if ($lead): ?>
             <?php
@@ -491,6 +610,7 @@ $exportQuery = http_build_query(array_filter([
         <?php elseif ($lead && !empty($lead['sample_daily_order_id'])): ?>
             <p><?php echo bakery_sales_leads_h(bakery_t('leads.sample_order', ['id' => (string)(int)$lead['sample_daily_order_id']])); ?></p>
         <?php endif; ?>
+        <?php endif; ?>
 
         <?php if ($lead): ?>
             <?php $activity = bakery_sales_leads_activity($db, (int)$lead['id']); ?>
@@ -540,6 +660,7 @@ $exportQuery = http_build_query(array_filter([
                     </table>
                 </div>
             <?php endif; ?>
+            <?php if (!$recordWonReadOnly): ?>
             <form method="post" class="sales-leads-form" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?lead=<?php echo bakery_sales_leads_h($leadKey); ?>">
                 <?php echo bakery_csrf_field(); ?>
                 <input type="hidden" name="action" value="add_note">
@@ -554,6 +675,7 @@ $exportQuery = http_build_query(array_filter([
                     <button type="submit" class="btn btn-secondary"><?php echo bakery_sales_leads_h(bakery_t('leads.activity_add')); ?></button>
                 </div>
             </form>
+            <?php endif; ?>
 
             <?php $contacts = bakery_sales_leads_contacts($db, (int)$lead['id']); ?>
             <?php if ($contacts !== []): ?>
@@ -581,12 +703,22 @@ $exportQuery = http_build_query(array_filter([
             <?php endif; ?>
         <?php endif; ?>
     <?php elseif ($ready): ?>
+        <?php if ($showWriterTools): ?>
         <div class="sales-leads-actions">
-            <a class="btn btn-primary" href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?lead=new"><?php echo bakery_sales_leads_h(bakery_t('leads.add')); ?></a>
+            <a class="btn btn-primary" href="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php?lead=new' . ($view !== '' ? '&view=' . rawurlencode($view) : '')); ?>"><?php echo bakery_sales_leads_h(bakery_t('leads.add')); ?></a>
             <a class="btn btn-secondary" href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?<?php echo bakery_sales_leads_h($exportQuery); ?>"><?php echo bakery_sales_leads_h(bakery_t('leads.export')); ?></a>
         </div>
+        <?php else: ?>
+        <div class="sales-leads-actions">
+            <a class="btn btn-secondary" href="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php?<?php echo bakery_sales_leads_h($exportQuery); ?>"><?php echo bakery_sales_leads_h(bakery_t('leads.export')); ?></a>
+        </div>
+        <?php endif; ?>
 
         <form method="get" class="sales-leads-filters" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php">
+            <?php if ($view !== ''): ?>
+                <input type="hidden" name="view" value="<?php echo bakery_sales_leads_h($view); ?>">
+            <?php endif; ?>
+            <?php if (!$salesUser && $view === ''): ?>
             <label><?php echo bakery_sales_leads_h(bakery_t('leads.filter_stage')); ?>
                 <select name="stage">
                     <option value=""><?php echo bakery_sales_leads_h(bakery_t('common.all')); ?></option>
@@ -595,6 +727,7 @@ $exportQuery = http_build_query(array_filter([
                     <?php endforeach; ?>
                 </select>
             </label>
+            <?php endif; ?>
             <label><?php echo bakery_sales_leads_h(bakery_t('leads.filter_priority')); ?>
                 <select name="priority">
                     <option value=""><?php echo bakery_sales_leads_h(bakery_t('common.all')); ?></option>
@@ -612,15 +745,70 @@ $exportQuery = http_build_query(array_filter([
                     <?php endforeach; ?>
                 </select>
             </label>
+            <?php if (!$salesUser && $view === ''): ?>
             <label><?php echo bakery_sales_leads_h(bakery_t('leads.show_lost')); ?>
                 <input type="checkbox" name="show_lost" value="1" <?php echo $filters['show_lost'] === '1' ? 'checked' : ''; ?>>
             </label>
+            <?php endif; ?>
             <button type="submit" class="btn btn-secondary"><?php echo bakery_sales_leads_h(bakery_t('leads.filter_apply')); ?></button>
         </form>
 
-        <?php $leads = bakery_sales_leads_list($db, $filters); ?>
+        <?php
+        $leads = bakery_sales_leads_list($db, $filters);
+        $followupGroups = ['overdue' => [], 'today' => [], 'upcoming' => []];
+        if ($view === 'followups') {
+            $followupToday = date('Y-m-d');
+            foreach ($leads as $followupRow) {
+                $bucket = bakery_sales_leads_followup_bucket($followupRow, $followupToday);
+                if (isset($followupGroups[$bucket])) {
+                    $followupGroups[$bucket][] = $followupRow;
+                }
+            }
+        }
+        ?>
         <?php if ($leads === []): ?>
             <p><?php echo bakery_sales_leads_h(bakery_t('leads.empty')); ?></p>
+        <?php elseif ($view === 'followups'): ?>
+            <?php foreach (['overdue' => 'leads.followups_overdue', 'today' => 'leads.followups_today', 'upcoming' => 'leads.followups_upcoming'] as $bucket => $bucketKey): ?>
+                <h2><?php echo bakery_sales_leads_h(bakery_t($bucketKey)); ?> (<?php echo count($followupGroups[$bucket]); ?>)</h2>
+                <?php if ($followupGroups[$bucket] === []): ?>
+                    <p><?php echo bakery_sales_leads_h(bakery_t('leads.empty')); ?></p>
+                <?php else: ?>
+                    <div class="sales-leads-table-wrap">
+                        <table class="sales-leads-table">
+                            <thead>
+                                <tr>
+                                    <th><?php echo bakery_sales_leads_h(bakery_t('leads.field_name')); ?></th>
+                                    <th><?php echo bakery_sales_leads_h(bakery_t('leads.field_stage')); ?></th>
+                                    <th><?php echo bakery_sales_leads_h(bakery_t('leads.field_next_action')); ?></th>
+                                    <th><?php echo bakery_sales_leads_h(bakery_t('leads.field_next_action_date')); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($followupGroups[$bucket] as $item): ?>
+                                <?php
+                                $publicId = trim((string)($item['external_id'] ?? ''));
+                                if ($publicId === '') {
+                                    $publicId = (string)$item['id'];
+                                }
+                                $href = BASE_URL . 'leads.php?lead=' . rawurlencode($publicId) . '&view=followups';
+                                ?>
+                                <tr>
+                                    <td><a href="<?php echo bakery_sales_leads_h($href); ?>"><?php echo bakery_sales_leads_h((string)$item['customer_name']); ?></a>
+                                        <?php if (!empty($duplicateIndex[(int)$item['id']])): ?>
+                                            <strong class="sales-leads-duplicate"><?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_flag')); ?></strong>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo bakery_sales_leads_h(bakery_t('leads.stage.' . (string)($item['stage'] ?? ''))); ?></td>
+                                    <td><?php echo bakery_sales_leads_h((string)($item['next_action'] ?? '')); ?></td>
+                                    <td><?php echo bakery_sales_leads_h((string)($item['next_action_date'] ?? '')); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            <?php endforeach; ?>
         <?php else: ?>
             <div class="sales-leads-table-wrap">
                 <table class="sales-leads-table">
@@ -643,7 +831,7 @@ $exportQuery = http_build_query(array_filter([
                         if ($publicId === '') {
                             $publicId = (string)$item['id'];
                         }
-                        $href = BASE_URL . 'leads.php?lead=' . rawurlencode($publicId);
+                        $href = BASE_URL . 'leads.php?lead=' . rawurlencode($publicId) . ($view !== '' ? '&view=' . rawurlencode($view) : '');
                         $zoneLabel = trim((string)($item['zone_name'] ?? ''));
                         if ($zoneLabel === '') {
                             $zoneLabel = trim((string)($item['route_fit'] ?? ''));
@@ -651,7 +839,11 @@ $exportQuery = http_build_query(array_filter([
                         ?>
                         <tr>
                             <td><a href="<?php echo bakery_sales_leads_h($href); ?>"><?php echo bakery_sales_leads_h($publicId); ?></a></td>
-                            <td><?php echo bakery_sales_leads_h((string)$item['customer_name']); ?></td>
+                            <td><?php echo bakery_sales_leads_h((string)$item['customer_name']); ?>
+                                <?php if (!empty($duplicateIndex[(int)$item['id']])): ?>
+                                    <strong class="sales-leads-duplicate"><?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_flag')); ?></strong>
+                                <?php endif; ?>
+                            </td>
                             <td><?php echo bakery_sales_leads_h((string)($item['priority'] ?? '')); ?></td>
                             <td><?php
                                 $stageName = (string)($item['stage'] ?? '');
@@ -671,6 +863,7 @@ $exportQuery = http_build_query(array_filter([
             </div>
         <?php endif; ?>
 
+        <?php if ($showWriterTools): ?>
         <h2><?php echo bakery_sales_leads_h(bakery_t('leads.import')); ?></h2>
         <p><?php echo bakery_sales_leads_h(bakery_t('leads.import_help')); ?></p>
         <form method="post" enctype="multipart/form-data" action="<?php echo bakery_sales_leads_h(BASE_URL); ?>leads.php">
@@ -727,6 +920,7 @@ $exportQuery = http_build_query(array_filter([
                     </tbody>
                 </table>
             </div>
+        <?php endif; ?>
         <?php endif; ?>
     <?php endif; ?>
 </div>

@@ -4,6 +4,8 @@ require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/zones_catalog.php';
 
+$salesReadOnly = function_exists('bakery_user_is_sales') && bakery_user_is_sales();
+
 if (isset($db) && $db instanceof PDO
     && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET'
     && (string)($_GET['export'] ?? '') === 'csv'
@@ -28,6 +30,12 @@ $page_title = bakery_t('page.zones');
 
 // Handle AJAX requests for zone operations
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ($salesReadOnly) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'error' => bakery_t('zones.sales_forbidden')]);
+        exit;
+    }
     try {
         switch ($_POST['action']) {
             case 'create':
@@ -489,7 +497,11 @@ require_once 'includes/nav.php';
     <!-- Page Header -->
     <div class="page-header">
         <h1>🗺️ Delivery Zones Management</h1>
+        <?php if ($salesReadOnly): ?>
+        <p><?php echo htmlspecialchars(bakery_t('zones.sales_readonly'), ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php else: ?>
         <p>Create and manage delivery zones for customer assignment</p>
+        <?php endif; ?>
         <p><?php echo htmlspecialchars(bakery_t('zones.export_help'), ENT_QUOTES, 'UTF-8'); ?></p>
     </div>
     
@@ -500,9 +512,11 @@ require_once 'includes/nav.php';
         </div>
         <div>
             <a class="btn btn-secondary" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>zones.php?export=csv"><?php echo htmlspecialchars(bakery_t('zones.export'), ENT_QUOTES, 'UTF-8'); ?></a>
+            <?php if (!$salesReadOnly): ?>
             <button type="button" class="btn btn-primary" onclick="openCreateModal()">
                 ➕ Add New Zone
             </button>
+            <?php endif; ?>
         </div>
     </div>
     
@@ -510,10 +524,12 @@ require_once 'includes/nav.php';
     <?php if (empty($zones)): ?>
         <div class="empty-state">
             <h3>No zones found</h3>
+            <?php if (!$salesReadOnly): ?>
             <p>Get started by creating your first delivery zone.</p>
             <button type="button" class="btn btn-primary" onclick="openCreateModal()">
                 ➕ Create First Zone
             </button>
+            <?php endif; ?>
         </div>
     <?php else: ?>
         <div class="zones-grid">
@@ -521,6 +537,7 @@ require_once 'includes/nav.php';
                 <div class="zone-card" data-zone-id="<?php echo $zone['id']; ?>">
                     <div class="zone-header" style="background-color: <?php echo htmlspecialchars($zone['color']); ?>">
                         <span><?php echo htmlspecialchars($zone['name']); ?></span>
+                        <?php if (!$salesReadOnly): ?>
                         <div class="zone-actions">
                             <button type="button" class="btn btn-sm btn-secondary" onclick="openEditModal(<?php echo $zone['id']; ?>, '<?php echo htmlspecialchars($zone['name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($zone['description'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($zone['color']); ?>')">
                                 ✏️ Edit
@@ -529,6 +546,7 @@ require_once 'includes/nav.php';
                                 🗑️ Delete
                             </button>
                         </div>
+                        <?php endif; ?>
                     </div>
                     <div class="zone-content">
                         <div class="zone-description">
@@ -550,6 +568,7 @@ require_once 'includes/nav.php';
     <?php endif; ?>
 </div>
 
+<?php if (!$salesReadOnly): ?>
 <!-- Create/Edit Zone Modal -->
 <div id="zoneModal" class="modal">
     <div class="modal-content">
@@ -584,6 +603,7 @@ require_once 'includes/nav.php';
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Message Bar -->
 <div id="messageBar" class="message-bar" style="display: none;">

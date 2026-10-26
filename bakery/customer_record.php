@@ -9,6 +9,8 @@ require_once __DIR__ . '/includes/operational_exceptions.php';
 require_once __DIR__ . '/includes/billing_aging.php';
 require_once __DIR__ . '/includes/sales_leads.php';
 
+$salesLookup = function_exists('bakery_user_is_sales') && bakery_user_is_sales();
+
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
@@ -398,8 +400,11 @@ require_once __DIR__ . '/includes/nav.php';
         <p class="cr-subtitle">Who they are, what they normally get, what’s scheduled, and where to jump next.</p>
     </div>
 
-    <?php if (!empty($_GET['created'])): ?>
+    <?php if (!empty($_GET['created']) && !$salesLookup): ?>
     <div class="cr-success">Customer created. Review the record below, then use the jump links for standing orders, pricing, or schedule.</div>
+    <?php endif; ?>
+    <?php if ($salesLookup): ?>
+    <p class="cr-sales-readonly" data-sales-readonly="1"><?php echo htmlspecialchars(bakery_t('customer_record.sales_readonly')); ?></p>
     <?php endif; ?>
 
     <form class="cr-toolbar" method="get" action="customer_record.php" id="crToolbar">
@@ -457,10 +462,12 @@ require_once __DIR__ . '/includes/nav.php';
         $zoneEnc = rawurlencode($cust['zone'] ?? '');
         $recordUrl = bakery_customer_record_url($customerId, $selectedDate);
         $hubBalance = null;
-        try {
-            $hubBalance = bakery_billing_customer_balance($db, $customerId);
-        } catch (Throwable $e) {
-            error_log('customer_record balance chip: ' . $e->getMessage());
+        if (!$salesLookup) {
+            try {
+                $hubBalance = bakery_billing_customer_balance($db, $customerId);
+            } catch (Throwable $e) {
+                error_log('customer_record balance chip: ' . $e->getMessage());
+            }
         }
     ?>
 
@@ -512,6 +519,7 @@ require_once __DIR__ . '/includes/nav.php';
                     <span class="label">Delivery window</span>
                     <span class="value"><?php echo $deliverWindow !== '' ? htmlspecialchars($deliverWindow) : '-'; ?></span>
                 </div>
+                <?php if (!$salesLookup): ?>
                 <div class="cr-meta-item">
                     <span class="label">Pricing tier</span>
                     <span class="value"><?php echo htmlspecialchars(ucfirst($cust['pricing_tier'] ?? 'retail')); ?></span>
@@ -541,7 +549,9 @@ require_once __DIR__ . '/includes/nav.php';
                         </a>
                     </span>
                 </div>
+                <?php endif; ?>
             </div>
+            <?php if (!$salesLookup): ?>
             <div class="cr-actions">
                 <a class="cr-btn cr-btn-secondary" href="customers.php?q=<?php echo $customerNameEnc; ?>&amp;highlight=<?php echo $customerId; ?>">Edit contact details</a>
                 <a class="cr-btn cr-btn-secondary" href="standing_orders_manager.php?customer_id=<?php echo $customerId; ?>">Standing orders</a>
@@ -553,6 +563,7 @@ require_once __DIR__ . '/includes/nav.php';
                 <a class="cr-btn cr-btn-ghost" href="customer_overview.php">Zone overview</a>
                 <a class="cr-btn cr-btn-ghost" href="map.php">Map / coordinates</a>
             </div>
+            <?php endif; ?>
         </div>
 
         <?php
@@ -610,11 +621,19 @@ require_once __DIR__ . '/includes/nav.php';
         </div>
         <?php endif; ?>
 
-        <?php if ($record['hints']): ?>
+        <?php
+        $recordHints = $record['hints'];
+        if ($salesLookup) {
+            $recordHints = array_values(array_filter($recordHints, static function ($hint): bool {
+                return strpos((string)($hint['message'] ?? ''), '$') === false;
+            }));
+        }
+        ?>
+        <?php if ($recordHints): ?>
         <div class="cr-card" style="margin-bottom:0;">
             <h2>Operational notes</h2>
             <ul class="cr-hints">
-                <?php foreach ($record['hints'] as $hint): ?>
+                <?php foreach ($recordHints as $hint): ?>
                 <li class="cr-hint-<?php echo htmlspecialchars($hint['level']); ?>">
                     <?php echo htmlspecialchars($hint['message']); ?>
                 </li>
@@ -624,6 +643,7 @@ require_once __DIR__ . '/includes/nav.php';
         <?php endif; ?>
     </div>
 
+    <?php if (!$salesLookup): ?>
     <nav class="cr-jump" aria-label="Customer workflows">
         <div class="cr-jump-label">Jump to workflow</div>
         <a class="cr-btn cr-btn-primary" href="daily_orders.php?date=<?php echo htmlspecialchars($selectedDate); ?>&amp;customer=<?php echo $customerNameEnc; ?>&amp;view=edit">Today’s / selected orders</a>
@@ -635,6 +655,7 @@ require_once __DIR__ . '/includes/nav.php';
         <a class="cr-btn cr-btn-secondary" href="service_issues.php?status=all&amp;customer_id=<?php echo $customerId; ?>">Service issues</a>
         <a class="cr-btn cr-btn-ghost" href="operational_timeline.php?context=customer&amp;customer_id=<?php echo $customerId; ?>">Timeline</a>
     </nav>
+    <?php endif; ?>
 
     <div class="cr-card">
  <h2>Normal schedule. Standing orders by weekday</h2>
@@ -676,22 +697,28 @@ require_once __DIR__ . '/includes/nav.php';
             </div>
             <?php endforeach; ?>
         </div>
+        <?php if (!$salesLookup): ?>
         <div class="cr-actions">
             <a class="cr-btn cr-btn-ghost" href="standing_orders_manager.php?customer_id=<?php echo $customerId; ?>">Open standing orders editor</a>
             <a class="cr-btn cr-btn-ghost" href="customer_routes.php">View customer routes</a>
             <a class="cr-btn cr-btn-ghost" href="standing_routes.php">Edit standing routes</a>
             <a class="cr-btn cr-btn-ghost" href="customer_schedule.php?customer_id=<?php echo $customerId; ?>">Delivery schedule</a>
         </div>
+        <?php endif; ?>
     </div>
 
     <?php
     $relatedSituations = [];
+    if (!$salesLookup) {
     try {
         $relatedSituations = bakery_ops_customer_related_situations($db, $customerId, $selectedDate, $pageReturnKey);
     } catch (Throwable $e) {
         error_log('customer_record situations: ' . $e->getMessage());
     }
-    echo bakery_ops_render_customer_related_strip($relatedSituations, $selectedDate);
+    }
+    if (!$salesLookup) {
+        echo bakery_ops_render_customer_related_strip($relatedSituations, $selectedDate);
+    }
     ?>
 
     <div class="cr-card">
@@ -849,6 +876,7 @@ require_once __DIR__ . '/includes/nav.php';
             </div>
         </div>
 
+        <?php if (!$salesLookup): ?>
         <div class="cr-actions">
             <a class="cr-btn cr-btn-primary"
                href="daily_orders.php?date=<?php echo htmlspecialchars($selectedDate); ?>&amp;customer=<?php echo $customerNameEnc; ?>&amp;view=edit">
@@ -876,9 +904,10 @@ require_once __DIR__ . '/includes/nav.php';
             </a>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
     </div>
 
-    <?php if ($customerId > 0 && bakery_operational_events_ready($db)): ?>
+    <?php if (!$salesLookup && $customerId > 0 && bakery_operational_events_ready($db)): ?>
     <?php
         $timelinePreview = bakery_operational_timeline_fetch($db, [
             'customer_id' => $customerId,
@@ -925,8 +954,10 @@ require_once __DIR__ . '/includes/nav.php';
                     <th>Status</th>
                     <th class="num">Ordered</th>
                     <th class="num">Delivered</th>
+                    <?php if (!$salesLookup): ?>
                     <th class="num">Amount</th>
                     <th></th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -951,6 +982,7 @@ require_once __DIR__ . '/includes/nav.php';
                             -
                         <?php endif; ?>
                     </td>
+                    <?php if (!$salesLookup): ?>
                     <td class="num">$<?php echo number_format($order['display_amount'], 2); ?></td>
                     <td>
                         <a class="cr-btn cr-btn-ghost" style="padding:4px 8px;font-size:0.78rem;"
@@ -964,10 +996,12 @@ require_once __DIR__ . '/includes/nav.php';
                         </a>
                         <?php endif; ?>
                     </td>
+                    <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if (!$salesLookup): ?>
         <div class="cr-actions">
             <a class="cr-btn cr-btn-ghost"
                href="billing_center.php?panel=customer&amp;customer_id=<?php echo $customerId; ?>&amp;start_date=<?php echo urlencode(date('Y-m-01')); ?>&amp;end_date=<?php echo urlencode(date('Y-m-d')); ?>">
@@ -979,6 +1013,7 @@ require_once __DIR__ . '/includes/nav.php';
             </a>
             <a class="cr-btn cr-btn-ghost" href="orders.php">Orders summary grid</a>
         </div>
+        <?php endif; ?>
         <?php else: ?>
         <p class="cr-empty">No daily orders on record for this customer yet.</p>
         <?php endif; ?>

@@ -15,8 +15,17 @@ require_once 'includes/customer_hub_create.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
+$salesReadOnly = function_exists('bakery_user_is_sales') && bakery_user_is_sales();
+
 // Set page title
 $page_title = bakery_t('page.customers');
+
+if ($salesReadOnly && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo bakery_t('customers.sales_forbidden') . "\n";
+    exit;
+}
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -187,17 +196,25 @@ foreach ([
 ] as $customersListKey) {
     $customersUi[$customersListKey] = bakery_t('customers_list.' . $customersListKey);
 }
+if ($salesReadOnly) {
+    unset($customersUi['balance'], $customersUi['price'], $customersUi['sort_price']);
+}
 
 $customerBalances = [];
-try {
-    $customerBalances = bakery_billing_customer_balances($db);
-} catch (Throwable $e) {
-    error_log('customers.php balance chips: ' . $e->getMessage());
+if (!$salesReadOnly) {
+    try {
+        $customerBalances = bakery_billing_customer_balances($db);
+    } catch (Throwable $e) {
+        error_log('customers.php balance chips: ' . $e->getMessage());
+    }
 }
 ?>
 
 <div class="container container--wide customers-page">
     <h1>👥 Customers Management</h1>
+    <?php if ($salesReadOnly): ?>
+        <p><?php echo htmlspecialchars(bakery_t('customers.sales_readonly'), ENT_QUOTES, 'UTF-8'); ?></p>
+    <?php endif; ?>
     
     <?php if (isset($error)): ?>
         <div class="error">
@@ -213,6 +230,7 @@ try {
 
     <!-- Action Bar -->
     <div class="action-bar">
+        <?php if (!$salesReadOnly): ?>
         <button class="btn-primary" onclick="showCustomerForm()">
             <i class="icon">➕</i> Add New Customer
         </button>
@@ -223,6 +241,7 @@ try {
             <i class="icon">✏️</i> <span id="editModeText">Enable Quick Edit</span>
         </button>
         <a class="btn-secondary" href="account_health.php"><?php echo htmlspecialchars(bakery_t('account_health.link'), ENT_QUOTES, 'UTF-8'); ?></a>
+        <?php endif; ?>
         <input type="search" id="customerSearch" class="customer-search"
                placeholder="Search by name, phone, email, zone, or address…"
                autocomplete="off"
@@ -237,10 +256,13 @@ try {
         <button type="button" class="customers-chip" data-filter="active" aria-pressed="false"><?php echo htmlspecialchars($customersUi['active'], ENT_QUOTES, 'UTF-8'); ?></button>
         <button type="button" class="customers-chip" data-filter="inactive" aria-pressed="false"><?php echo htmlspecialchars($customersUi['inactive'], ENT_QUOTES, 'UTF-8'); ?></button>
         <button type="button" class="customers-chip" data-filter="cod" aria-pressed="false"><?php echo htmlspecialchars($customersUi['cod'], ENT_QUOTES, 'UTF-8'); ?></button>
+        <?php if (!$salesReadOnly): ?>
         <button type="button" class="customers-chip" data-filter="balance" aria-pressed="false"><?php echo htmlspecialchars($customersUi['balance'], ENT_QUOTES, 'UTF-8'); ?></button>
+        <?php endif; ?>
     </div>
     <p id="customersListEmpty" class="customers-empty" hidden><?php echo htmlspecialchars($customersUi['empty'], ENT_QUOTES, 'UTF-8'); ?></p>
 
+    <?php if (!$salesReadOnly): ?>
     <!-- Add/Edit Customer Form (Hidden by default) -->
     <div id="customerForm" class="modal" style="display: none;">
         <div class="modal-content">
@@ -396,6 +418,7 @@ try {
             </form>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- Customers Table -->
     <div class="table-responsive customers-table-wrap">
@@ -412,8 +435,10 @@ try {
                     <th scope="col" class="customers-colhead" data-sort-key="zone" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="zone" aria-label="<?php echo htmlspecialchars($customersUi['sort_zone'], ENT_QUOTES, 'UTF-8'); ?>">🗺️ <?php echo htmlspecialchars($customersUi['zone'], ENT_QUOTES, 'UTF-8'); ?></button></th>
                     <th scope="col" class="customers-colhead" data-sort-key="deliver_by" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="deliver_by" aria-label="<?php echo htmlspecialchars($customersUi['sort_deliver_by'], ENT_QUOTES, 'UTF-8'); ?>">📅 <?php echo htmlspecialchars($customersUi['deliver_by'], ENT_QUOTES, 'UTF-8'); ?></button></th>
                     <th scope="col" class="customers-colhead" data-sort-key="deliver_after" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="deliver_after" aria-label="<?php echo htmlspecialchars($customersUi['sort_deliver_after'], ENT_QUOTES, 'UTF-8'); ?>">🕐 <?php echo htmlspecialchars($customersUi['deliver_after'], ENT_QUOTES, 'UTF-8'); ?></button></th>
+                    <?php if (!$salesReadOnly): ?>
                     <th scope="col" class="customers-colhead" data-sort-key="price" aria-sort="none"><button type="button" class="customers-sort" data-sort-key="price" aria-label="<?php echo htmlspecialchars($customersUi['sort_price'], ENT_QUOTES, 'UTF-8'); ?>">💰 <?php echo htmlspecialchars($customersUi['price'], ENT_QUOTES, 'UTF-8'); ?></button></th>
-                    <th scope="col"><?php echo htmlspecialchars($customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?></th>
+                    <?php endif; ?>
+                    <th scope="col"><?php echo htmlspecialchars($salesReadOnly ? bakery_t('customers.sales_view') : $customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?></th>
                 </tr>
             </thead>
             <tbody>
@@ -449,12 +474,12 @@ try {
                             ? ''
                             : number_format((float)$customer['default_pan_dulce_price'], 2, '.', '');
                 ?>
-                    <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>" data-active="<?php echo $isActive ? '1' : '0'; ?>" data-cod="<?php echo $isCod ? '1' : '0'; ?>" data-has-balance="<?php echo $hasBalance ? '1' : '0'; ?>">
-                        <td class="editable" data-field="name" data-label="<?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortName, ENT_QUOTES, 'UTF-8'); ?>"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
-                        <td class="editable" data-field="email" data-label="<?php echo htmlspecialchars($customersUi['email'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortEmail, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
-                        <td class="editable" data-field="phone" data-label="<?php echo htmlspecialchars($customersUi['phone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPhone, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
-                        <td class="editable" data-field="address" data-label="<?php echo htmlspecialchars($customersUi['address'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAddress, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>
-                        <td class="editable zone-field" data-field="zone" data-label="<?php echo htmlspecialchars($customersUi['zone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortZone, ENT_QUOTES, 'UTF-8'); ?>">
+                    <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>" data-active="<?php echo $isActive ? '1' : '0'; ?>" data-cod="<?php echo $isCod ? '1' : '0'; ?>" data-has-balance="<?php echo $salesReadOnly ? '0' : ($hasBalance ? '1' : '0'); ?>">
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="name" data-label="<?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortName, ENT_QUOTES, 'UTF-8'); ?>"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="email" data-label="<?php echo htmlspecialchars($customersUi['email'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortEmail, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="phone" data-label="<?php echo htmlspecialchars($customersUi['phone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPhone, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="address" data-label="<?php echo htmlspecialchars($customersUi['address'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAddress, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?> zone-field" data-field="zone" data-label="<?php echo htmlspecialchars($customersUi['zone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortZone, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php if ($customer['zone']): ?>
                                 <span class="zone-badge zone-<?php echo strtolower(str_replace([' ', '/'], ['-', '-'], $customer['zone'])); ?>">
                                     <?php echo htmlspecialchars($customer['zone']); ?>
@@ -463,30 +488,39 @@ try {
                                 <span class="text-muted">No zone</span>
                             <?php endif; ?>
                         </td>
-                        <td class="editable time-field" data-field="deliver_by" data-label="<?php echo htmlspecialchars($customersUi['deliver_by'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortBy, ENT_QUOTES, 'UTF-8'); ?>">
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?> time-field" data-field="deliver_by" data-label="<?php echo htmlspecialchars($customersUi['deliver_by'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortBy, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['deliver_by']) {
                                 $time = new DateTime($customer['deliver_by']);
                                 echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
-                                echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_by'] . '">';
+                                if (!$salesReadOnly) {
+                                    echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_by'] . '">';
+                                }
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
-                                echo '<input type="time" class="time-input" style="display:none;" value="">';
+                                if (!$salesReadOnly) {
+                                    echo '<input type="time" class="time-input" style="display:none;" value="">';
+                                }
                             }
                             ?>
                         </td>
-                        <td class="editable time-field" data-field="deliver_after" data-label="<?php echo htmlspecialchars($customersUi['deliver_after'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAfter, ENT_QUOTES, 'UTF-8'); ?>">
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?> time-field" data-field="deliver_after" data-label="<?php echo htmlspecialchars($customersUi['deliver_after'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAfter, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['deliver_after']) {
                                 $time = new DateTime($customer['deliver_after']);
                                 echo '<span class="time-display">' . htmlspecialchars(bakery_locale_time($time), ENT_QUOTES, 'UTF-8') . '</span>';
-                                echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_after'] . '">';
+                                if (!$salesReadOnly) {
+                                    echo '<input type="time" class="time-input" style="display:none;" value="' . $customer['deliver_after'] . '">';
+                                }
                             } else {
                                 echo '<span class="time-display text-muted">No constraint</span>';
-                                echo '<input type="time" class="time-input" style="display:none;" value="">';
+                                if (!$salesReadOnly) {
+                                    echo '<input type="time" class="time-input" style="display:none;" value="">';
+                                }
                             }
                             ?>
                         </td>
+                        <?php if (!$salesReadOnly): ?>
                         <td class="editable price-field" data-field="default_pan_dulce_price" data-label="<?php echo htmlspecialchars($customersUi['price'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPrice, ENT_QUOTES, 'UTF-8'); ?>">
                             <?php 
                             if ($customer['default_pan_dulce_price']) {
@@ -498,8 +532,10 @@ try {
                             }
                             ?>
                         </td>
-                        <td class="actions" data-label="<?php echo htmlspecialchars($customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?>">
-                            <a class="btn-icon" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" title="Open customer hub">👤</a>
+                        <?php endif; ?>
+                        <td class="actions" data-label="<?php echo htmlspecialchars($salesReadOnly ? bakery_t('customers.sales_view') : $customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <a class="btn-icon" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" title="<?php echo htmlspecialchars(bakery_t('customers.sales_view'), ENT_QUOTES, 'UTF-8'); ?>">👤</a>
+                            <?php if (!$salesReadOnly): ?>
                             <button class="btn-icon" onclick="editCustomer(<?php echo htmlspecialchars(json_encode($customer)); ?>)" title="Edit Customer">
                                 ✏️
                             </button>
@@ -509,6 +545,7 @@ try {
                             <button class="btn-icon" onclick="deleteCustomer(<?php echo $customer['id']; ?>, '<?php echo htmlspecialchars($customer['name'], ENT_QUOTES); ?>')" title="Delete Customer">
                                 🗑️
                             </button>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php
@@ -521,6 +558,7 @@ try {
         </table>
     </div>
 
+    <?php if (!$salesReadOnly): ?>
     <!-- Delete Confirmation Modal -->
     <div id="deleteModal" class="modal" style="display: none;">
         <div class="modal-content">
@@ -537,6 +575,7 @@ try {
             </form>
         </div>
     </div>
+    <?php endif; ?>
 
     <script>
         let editMode = false;

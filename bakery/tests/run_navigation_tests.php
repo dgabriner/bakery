@@ -132,7 +132,9 @@ $adminNav = navigation_test_render_nav('administrator', 'users');
 navigation_test_assert(strpos($adminNav, 'bakery-nav--ops') !== false, 'administrator navigation uses the operations mobile shell');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__billing-shortcut') !== false, 'administrator navigation includes a Billing Center shortcut');
 navigation_test_assert(strpos($adminNav, 'billing_center.php') !== false, 'administrator navigation links to Billing Center');
-navigation_test_assert(strpos($adminNav, 'User Management') !== false, 'administrator navigation still includes User Management');
+navigation_test_assert(strpos($adminNav, 'Staff') !== false, 'administrator navigation includes Staff');
+navigation_test_assert(strpos($adminNav, 'users.php') !== false, 'administrator navigation links Staff to users.php');
+navigation_test_assert(strpos($managerNav, 'users.php') === false, 'manager navigation omits Staff');
 navigation_test_assert(strpos($adminNav, 'Shop Photos') !== false, 'administrator navigation labels Shop Photos');
 navigation_test_assert(strpos($adminNav, 'nav.item.cashier_shop_photos') === false, 'administrator navigation does not show the Shop Photos translation key');
 navigation_test_assert(strpos($adminNav, 'call_headquarters.php') !== false, 'administrator navigation includes Call Headquarters');
@@ -173,6 +175,8 @@ navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket incl
 
 navigation_test_assert(function_exists('bakery_role_home'), 'role home helper exists');
 navigation_test_assert(bakery_role_home('cashier') === 'time_clock.php', 'cashier home is the time clock');
+navigation_test_assert(bakery_role_home('sales') === 'sales_home.php', 'sales home is Sales Home');
+navigation_test_assert(bakery_ops_index_bypass_home('sales') === 'sales_home.php', 'sales hitting the ops dashboard land on Sales Home');
 navigation_test_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
 navigation_test_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
 navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'time_clock.php', 'cashiers hitting the ops dashboard are sent to the time clock');

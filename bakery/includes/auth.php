@@ -2,7 +2,7 @@
 /**
  * Authentication, authorization, and CSRF (Checkpoint 0D).
  *
- * Roles: administrator, manager, driver, driver_assistant, baker, cashier (extensible via permissions tables).
+ * Roles: administrator, manager, driver, driver_assistant, baker, cashier, sales (extensible via permissions tables).
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -140,7 +140,34 @@ function bakery_assignable_role_labels(): array {
         'cashier' => 'Cashier',
         'driver' => 'Driver',
         'driver_assistant' => 'Driver Assistant',
+        'sales' => 'Sales',
     ];
+}
+
+/**
+ * Staff who may use the sales workspace (leads, zone CSV, customer reads).
+ * The navigation catalog still decides which scripts each role may open.
+ * The sales leads API token path does not use this list.
+ *
+ * @return list<string>
+ */
+function bakery_sales_workspace_roles(): array {
+    return ['administrator', 'manager', 'sales'];
+}
+
+function bakery_user_is_sales(): bool {
+    $user = bakery_current_user();
+    return is_array($user) && (string)($user['role_slug'] ?? '') === 'sales';
+}
+
+/**
+ * Scripts a sales user may open. Source of truth is the navigation catalog.
+ *
+ * @return list<string>
+ */
+function bakery_sales_page_scripts(): array {
+    require_once __DIR__ . '/navigation_catalog.php';
+    return bakery_navigation_scripts_for_role('sales');
 }
 
 /**
@@ -158,6 +185,8 @@ function bakery_role_home(string $role): string {
             return 'manager.php';
         case 'cashier':
             return 'time_clock.php';
+        case 'sales':
+            return 'sales_home.php';
         default:
             return 'index.php';
     }
@@ -172,7 +201,7 @@ function bakery_role_uses_dedicated_home(string $role): bool {
  * Drivers are allowed on index and redirected by the page itself.
  */
 function bakery_ops_index_bypass_home(string $role): ?string {
-    if ($role === 'cashier') {
+    if ($role === 'cashier' || $role === 'sales') {
         return bakery_role_home($role);
     }
     return null;
@@ -1106,6 +1135,10 @@ function bakery_require_login() {
 function bakery_require_role($roles) {
     bakery_require_login();
     if (!bakery_user_has_role($roles)) {
+        if (bakery_user_is_sales() && !is_ajax_request() && !bakery_wants_json()) {
+            header('Location: ' . BASE_URL . 'sales_home.php');
+            exit;
+        }
         http_response_code(403);
         if (is_ajax_request() || bakery_wants_json()) {
             header('Content-Type: application/json');
@@ -1139,6 +1172,17 @@ function bakery_enforce_request_security(PDO $db = null) {
 
     if (in_array($script, bakery_public_scripts(), true)) {
         return;
+    }
+
+    if (bakery_user_is_sales() && !in_array($script, bakery_sales_page_scripts(), true)) {
+        if (is_ajax_request() || bakery_wants_json()) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => 'Insufficient permissions']);
+            exit;
+        }
+        header('Location: ' . BASE_URL . 'sales_home.php');
+        exit;
     }
 
     $communityScripts = function_exists('bakery_sfb_community_scripts')

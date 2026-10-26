@@ -123,10 +123,10 @@ assert_true(strpos($hubCreatePage, 'INSERT INTO customers') !== false, 'shared c
 
 $leadRoles = bakery_navigation_roles_for_script('leads.php');
 sort($leadRoles);
-assert_eq(['administrator', 'manager'], $leadRoles, 'Sales Leads menu is managers and administrators only');
+assert_eq(['administrator', 'manager', 'sales'], $leadRoles, 'Sales Leads menu includes sales');
 $zoneRoles = bakery_navigation_roles_for_script('zones.php');
 sort($zoneRoles);
-assert_eq(['administrator', 'manager'], $zoneRoles, 'Delivery Zones menu is managers and administrators only');
+assert_eq(['administrator', 'manager', 'sales'], $zoneRoles, 'Delivery Zones menu includes sales');
 
 echo "\n=== Role gate ===\n";
 sales_leads_clear_session();
@@ -145,6 +145,8 @@ sales_leads_session('manager');
 assert_eq(200, bakery_sales_leads_role_status(), 'manager is allowed');
 sales_leads_session('administrator');
 assert_eq(200, bakery_sales_leads_role_status(), 'administrator is allowed');
+sales_leads_session('sales');
+assert_eq(200, bakery_sales_leads_role_status(), 'sales is allowed on the leads page');
 sales_leads_clear_session();
 
 sales_leads_cleanup($db);
@@ -554,6 +556,9 @@ assert_eq('', $guestZones['body'], 'denied zones CSV has an empty body');
 sales_leads_session('driver');
 $driverZones = bakery_zones_export_csv($db);
 assert_eq(403, $driverZones['status'], 'driver cannot download zones CSV');
+sales_leads_session('sales');
+$salesZones = bakery_zones_export_csv($db);
+assert_eq(200, $salesZones['status'], 'sales downloads zones CSV');
 sales_leads_session('manager');
 $zoneCsv = bakery_zones_export_csv($db);
 assert_eq(200, $zoneCsv['status'], 'manager downloads zones CSV');
@@ -615,6 +620,11 @@ unset($_SERVER['HTTP_AUTHORIZATION']);
 sales_leads_session('driver');
 $driverApi = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
 assert_eq(403, $driverApi['status'], 'driver session cannot read the token endpoint');
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer correct-token';
+sales_leads_session('sales');
+$salesApi = bakery_sales_leads_api_dispatch($db, 'GET', [], $_SERVER);
+assert_eq(403, $salesApi['status'], 'sales session cannot use the token endpoint');
+unset($_SERVER['HTTP_AUTHORIZATION']);
 sales_leads_clear_session();
 unset($_SERVER['HTTP_AUTHORIZATION'], $_ENV['SALES_LEADS_TOKEN'], $_SERVER['SALES_LEADS_TOKEN']);
 putenv('SALES_LEADS_TOKEN');
