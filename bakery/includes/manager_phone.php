@@ -772,6 +772,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
     </section>
   <?php endif; ?>
 
+  <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_health.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.route_health'); ?></a></p>
   <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_photo_journey.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.journey'); ?></a></p>
   <p class="manager-phone__cadence"><a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'driver_reports.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.driver_reports'); ?></a></p>
   <section class="manager-phone__drivers" aria-label="<?php bakery_te('manager_phone.driver_board'); ?>">

@@ -1429,6 +1429,7 @@ require_once 'includes/nav.php';
         <div class="manager-section__actions">
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_manager.php?date=<?php echo urlencode($selectedDate); ?>">Route manager</a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_summary.php?date=<?php echo urlencode($selectedDate); ?>">Route summary</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_health.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.route_health')); ?></a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_photo_journey.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.route_photo_journey')); ?></a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>driver_reports.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.driver_reports')); ?></a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_route.php?date=<?php echo urlencode($selectedDate); ?>">Daily route</a>
