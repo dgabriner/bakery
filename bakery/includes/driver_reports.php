@@ -11,6 +11,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/route_photo_journey.php';
+require_once __DIR__ . '/route_stop_proof.php';
 require_once __DIR__ . '/product_inventory.php';
 require_once __DIR__ . '/driver_assignments.php';
 
@@ -100,21 +101,7 @@ function bakery_driver_reports_day_minutes(): int
 
 function bakery_driver_reports_stop_mark(array $stop): string
 {
-    $photos = $stop['photos'] ?? [];
-    $hasPhoto = is_array($photos) && $photos !== [];
-    if (!$hasPhoto && (!empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']))) {
-        $hasPhoto = true;
-    }
-    if ($hasPhoto) {
-        return 'with_photo';
-    }
-    $status = (string)($stop['delivery_status'] ?? '');
-    $departure = bakery_driver_reports_time_or_null($stop['delivered_at'] ?? null);
-    $badge = (string)($stop['badge'] ?? '');
-    if ($status === 'delivered' || ($departure !== null && $badge !== 'arrived_open')) {
-        return 'delivered_no_photo';
-    }
-    return 'no_info';
+    return bakery_route_stop_photo_mark($stop);
 }
 
 function bakery_driver_reports_mark_key(string $mark): string
@@ -241,50 +228,7 @@ function bakery_driver_reports_stop_label(array $stop): string
  */
 function bakery_driver_reports_bulk_stamp_names(array $stops): array
 {
-    $stamped = [];
-    foreach ($stops as $stop) {
-        if (!is_array($stop)) {
-            continue;
-        }
-        if ((string)($stop['badge'] ?? '') === 'arrived_open') {
-            continue;
-        }
-        $at = bakery_driver_reports_time_or_null($stop['delivered_at'] ?? null);
-        if ($at === null) {
-            continue;
-        }
-        $stamped[] = [
-            'name' => (string)($stop['customer_name'] ?? ''),
-            'ts' => strtotime($at) ?: 0,
-        ];
-    }
-    usort($stamped, static function (array $a, array $b): int {
-        if ($a['ts'] !== $b['ts']) {
-            return $a['ts'] <=> $b['ts'];
-        }
-        return strcasecmp($a['name'], $b['name']);
-    });
-    $flagged = [];
-    $count = count($stamped);
-    for ($i = 0; $i < $count; $i++) {
-        $cluster = [$stamped[$i]];
-        for ($j = $i + 1; $j < $count; $j++) {
-            if (($stamped[$j]['ts'] - $stamped[$i]['ts']) <= 300) {
-                $cluster[] = $stamped[$j];
-                continue;
-            }
-            break;
-        }
-        if (count($cluster) < 3) {
-            continue;
-        }
-        foreach ($cluster as $row) {
-            if ($row['name'] !== '' && !in_array($row['name'], $flagged, true)) {
-                $flagged[] = $row['name'];
-            }
-        }
-    }
-    return $flagged;
+    return bakery_route_stop_bulk_stamp_names($stops);
 }
 
 /**

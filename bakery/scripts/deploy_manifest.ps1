@@ -26,7 +26,7 @@ function Get-BakeryDeployRootFiles {
         'customer_record.php', 'account_health.php',
         'square_webhook.php',
         'text_comms.php', 'text_comms_api.php', 'twilio_webhook.php', 'survey.php', 'text_media.php',
-        'route_closeout.php', 'route_analysis.php', 'route_photo_journey.php', 'driver_reports.php', 'driver_photo.php',
+        'route_closeout.php', 'route_analysis.php', 'route_photo_journey.php', 'route_health.php', 'driver_reports.php', 'driver_photo.php',
         'driver_load.php', 'driver_stops.php', 'driver_session_ping.php',
         'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php', 'audit_log.php', 'login_audit_api.php', 'client_error_api.php',
         'generate_invoice.php', 'oauth_callback.php',
