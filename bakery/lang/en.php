@@ -5588,7 +5588,7 @@ return [
     'leads.followups_today' => 'Today',
     'leads.followups_upcoming' => 'Upcoming',
     'leads.error.not_duplicate' => 'Those leads are not duplicates.',
-    // Zazie weekly sheet. Keep this block together, immediately before the ux catalog.
+    // Zazie weekly sheet. Keep this block together.
     'nav.item.zazie_weekly_sheet' => 'Zazie weekly sheet',
     'nav.item_desc.zazie_weekly_sheet' => 'Upload the Zazie weekly order file and apply it to dated orders.',
     'zazie_weekly.page_title' => 'Zazie weekly sheet',

@@ -1,11 +1,13 @@
-# Cron Kit — overnight jobs on DreamHost
+# Cron Kit: overnight jobs on DreamHost
 
-Three scripts are designed to run unattended on DreamHost. Page loads already fill the
-demand horizon lazily, so cron makes the system proactive instead of reactive.
+Three scripts are designed to run unattended on DreamHost. Page views do not
+create dated orders. After 3:00 AM America/Los_Angeles, a staff page sends one
+same-origin POST to `demand_self_heal.php` when today's sell day has no
+successful demand build. That POST is the backup when the cron file is missing.
 The dual survey does not open on a page view.
 
-**Owner installs the crontab on DreamHost.** Agents ship the runbook + in-app
-staleness check only — Staging and Live cron installs are not performed from GitHub.
+**Owner installs the crontab on DreamHost.** Agents ship the runbook and the
+in-app self-heal. Staging and Live cron installs are not performed from GitHub.
 
 ## Jobs
 
@@ -37,7 +39,7 @@ Log paths on the shell host:
 - `/home/dh_dp755h/cron_digest.log`
 - App stamps: `operational_events` row `cron_run` (the board reads this) and `bake/storage/cron/demand_scheduler.json`, `bake/storage/cron/staff_alert_digest.json`
 
-Both scripts refuse to run against local/test targets unless `--force` — on DreamHost they run as-is.
+Both scripts refuse to run against local/test targets unless `--force`. On DreamHost they run as-is.
 
 ## Verify after installing
 
@@ -60,9 +62,22 @@ Both scripts refuse to run against local/test targets unless `--force` — on Dr
 4. Digest delivery still also writes `operational_events.staff_alert_digest_sent` when email goes out;
    clean nights only write `cron_run` (that is still success).
 
+## If the 2:30 AM job did not record a run
+
+Staff page GETs do not create dated orders. After 3:00 AM America/Los_Angeles, a signed-in administrator, manager, driver, driver assistant, or sales user loads a staff page (Manager, Daily Run, Driver, route pages, Sales). The browser sends one same-origin POST to `demand_self_heal.php` with the CSRF token. That request runs the same horizon fill as `scripts/demand_scheduler.php`: dated orders from standing, pan carry-forward, and `bakery_route_load_rebuild`. It writes a `cron_run` row with `source=self_heal`. It does nothing when today's sell day already has a successful `demand_scheduler` run, including a run from this POST. It fills customers who have no dated order. It does not overwrite existing orders, one-time skips, or exceptions. A second request the same day is a no-op. The endpoint has no other action, and it does not send email or SMS.
+
+Live file promotion does not copy `scripts/`. The self-heal lives in `includes/daily_order_generation.php` and `demand_self_heal.php`, which do copy. The cron line is still the overnight path when the file is on the host and the panel runs it.
+
+Danny: open the DreamHost panel, Cron Jobs, for user `dh_dp755h`. The panel clock must be America/Los_Angeles. Confirm this line is present and unchanged:
+
+```cron
+30 2 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/demand_scheduler.php >> /home/dh_dp755h/cron_demand.log 2>&1
+```
+
+Then read `/home/dh_dp755h/cron_demand.log`. A missing script, `CLI only`, or `Configuration error: required database environment variables are not set` means the cron process never reached a database stamp. The self-heal covers the sell day after 3:00 AM PT once a staff page loads. Leave the cron line in place.
+
 ## Notes
 
-- Without cron, page loads keep filling demand lazily and the nav bell remains the fallback.
 - Test delivery without touching recipient lists: `--to=you@example.org`.
 - Both scripts exit 0 on success; non-zero exits mean misconfiguration and land in the cron log.
 - **Do not claim Staging/Live cron install from a GitHub-only agent run.**

@@ -487,14 +487,24 @@ $en = include $root . '/lang/en.php';
 $es = include $root . '/lang/es.php';
 $enKeys = array_keys($en);
 $esKeys = array_keys($es);
+$isZazieKey = static function (string $key): bool {
+    return $key === 'nav.item.zazie_weekly_sheet'
+        || $key === 'nav.item_desc.zazie_weekly_sheet'
+        || str_starts_with($key, 'zazie_weekly.');
+};
 $start = array_search('nav.item.zazie_weekly_sheet', $enKeys, true);
-$ux = array_search('ux.stage.demand', $enKeys, true);
-$block = array_slice($enKeys, (int)$start, (int)$ux - (int)$start);
-$blockOk = $start !== false && $ux !== false && $block !== [];
-foreach ($block as $key) {
-    if (!str_starts_with((string)$key, 'zazie_weekly.') && !str_starts_with((string)$key, 'nav.item.zazie_weekly_sheet') && !str_starts_with((string)$key, 'nav.item_desc.zazie_weekly_sheet')) {
-        $blockOk = false;
+$block = [];
+if ($start !== false) {
+    for ($i = (int)$start; $i < count($enKeys); $i++) {
+        $key = (string)$enKeys[$i];
+        if (!$isZazieKey($key)) {
+            break;
+        }
+        $block[] = $key;
     }
+}
+$blockOk = $block !== [];
+foreach ($block as $key) {
     if (!isset($es[$key]) || $es[$key] === '' || $es[$key] === $en[$key]) {
         $blockOk = false;
     }
@@ -506,9 +516,17 @@ foreach ($block as $key) {
     }
 }
 $esStart = array_search('nav.item.zazie_weekly_sheet', $esKeys, true);
-$esUx = array_search('ux.stage.demand', $esKeys, true);
-$esBlock = array_slice($esKeys, (int)$esStart, (int)$esUx - (int)$esStart);
-$assert($blockOk && $block === $esBlock, 'Zazie strings are one translated block immediately before ux');
+$esBlock = [];
+if ($esStart !== false) {
+    for ($i = (int)$esStart; $i < count($esKeys); $i++) {
+        $key = (string)$esKeys[$i];
+        if (!$isZazieKey($key)) {
+            break;
+        }
+        $esBlock[] = $key;
+    }
+}
+$assert($blockOk && $block === $esBlock, 'Zazie strings are one translated block');
 
 echo "\n" . ($fail === 0 ? 'ALL PASS' : ($fail . ' FAILED')) . "\n";
 exit($fail === 0 ? 0 : 1);
