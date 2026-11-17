@@ -41,7 +41,7 @@ to teach the next bakery the same quiet intelligence.
 2. **Packet, not encyclopedia.** `brief --json` names files, tests, and invariants. Read §4 of the product context only when the packet’s invariants say you are adjacent.
 3. **One mutation path.** Pages authorize, validate, call `includes/`, render. Chips on the screen where the decision happens.
 4. **Prove it on `bakerysf_test`.** `php tests/run_*.php` or `tests-for --files=`. Never PHPUnit. Never the nightly mirror.
-5. **Leave the ledger.** Eight §10 fields. Pin **Decided**. If you touched a file the map does not know, the handoff will say so — patch `includes/agent_work_map.php` in the same breath.
+5. **Leave the ledger.** Eight §10 fields. Pin **Decided**. The handoff reminder is manual: run `php scripts/agent_homebase.php nag-check` (or handoff) yourself before ending a session. Cursor does not post that reminder into chat. If you touched a file the map does not know, the handoff will say so — patch `includes/agent_work_map.php` in the same breath.
 
 ## Three local databases
 
@@ -60,6 +60,7 @@ php scripts/agent_homebase.php brief --agent=SLUG --json
 php scripts/agent_homebase.php tests-for --files="manager.php,lang/en.php" --json
 php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=SLUG --mission="one sentence"
+php scripts/agent_homebase.php nag-check
 php scripts/agent_homebase.php handoff --agent=SLUG --summary="1. ... 8. ..." --files="a.php,b.php"
 ```
 

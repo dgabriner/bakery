@@ -507,7 +507,6 @@ function bakery_agent_work_map_core(): array
                 'docs/AGENT_DEVELOPMENT_MANUAL.md',
                 'AGENTS.md',
                 '.cursor/hooks.json',
-                '.cursor/hooks/handoff-reminder.ps1',
                 '.cursor/hooks/session-brief.ps1',
                 '.cursor/hooks/session-brief.cmd',
                 '.cursor/skills/agent-homebase/SKILL.md',

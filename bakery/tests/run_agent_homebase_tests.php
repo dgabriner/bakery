@@ -124,7 +124,8 @@ assert_true(is_readable(dirname(__DIR__) . '/.cursor/skills/close-a-loop/SKILL.m
 assert_true(strpos(file_get_contents(dirname(__DIR__) . '/includes/test_target_guard.php'), 'function bakery_homebase_durable_connection') !== false, 'durable Homebase hop exists');
 $hooks = file_get_contents(dirname(__DIR__) . '/.cursor/hooks.json');
 assert_true($hooks !== false && strpos($hooks, 'session-brief.cmd') !== false, 'sessionStart injects craft brief');
-assert_true($hooks !== false && strpos($hooks, 'handoff-reminder.cmd') !== false, 'stop hook reminds agents to hand off');
+assert_true($hooks !== false && strpos($hooks, 'handoff-reminder') === false, 'stop hook does not auto-remind a Homebase handoff');
+assert_true(strpos($cli, "case 'nag-check':") !== false, 'CLI still exposes manual nag-check');
 $safetyRule = file_get_contents(dirname(__DIR__) . '/.cursor/rules/data-environment-safety.mdc');
 assert_true($safetyRule !== false && strpos($safetyRule, 'alwaysApply: false') !== false, 'data-safety rule is glob-scoped');
 assert_true(is_readable(dirname(__DIR__) . '/.cursor/rules/bakery-docs-trust.mdc'), 'doc-trust rule exists');
