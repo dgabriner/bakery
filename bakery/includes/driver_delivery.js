@@ -50,8 +50,77 @@
     completionMessage: '',
     stopFinished: false,
     sessionRefreshPromise: null,
-    scrollLockY: 0
+    scrollLockY: 0,
+    inline: false,
+    uploadPromise: null,
+    proofSkipReason: '',
+    proofState: ''
   };
+
+  var CAMERA_DENIED_KEY = 'bakeryDriverCameraDenied';
+  var CAMERA_TIP_KEY = 'bakeryDriverCameraTipSeen';
+  var CAMERA_DENIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+  function storageGet(key) {
+    try {
+      return window.localStorage ? window.localStorage.getItem(key) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function storageSet(key, value) {
+    try {
+      if (!window.localStorage) return;
+      if (value == null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, String(value));
+    } catch (err) {
+      // Private mode can refuse storage; the camera still works without it.
+    }
+  }
+
+  function dataSaverOn() {
+    return !!(window.DriverDataSaver && window.DriverDataSaver.active);
+  }
+
+  function photoCaps() {
+    return dataSaverOn() ? { maxDimension: 1024, quality: 0.65 } : { maxDimension: 1280, quality: 0.72 };
+  }
+
+  function isInAppWebview() {
+    var ua = navigator.userAgent || '';
+    return /FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\/|; wv\)/i.test(ua);
+  }
+
+  function isIosSafari() {
+    var ua = navigator.userAgent || '';
+    return /iPhone|iPad|iPod/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
+  }
+
+  function cameraDeniedRecently() {
+    var at = parseInt(storageGet(CAMERA_DENIED_KEY) || '0', 10);
+    return at > 0 && (Date.now() - at) < CAMERA_DENIED_TTL_MS;
+  }
+
+  function inlineCameraAvailable() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+      && window.isSecureContext !== false
+      && !isInAppWebview()
+      && !cameraDeniedRecently();
+  }
+
+  function isPhoneLayout() {
+    return window.matchMedia ? window.matchMedia('(max-width: 899px)').matches : window.innerWidth < 900;
+  }
+
+  function thumbUrl(photo) {
+    if (photo && photo.thumb_url) return String(photo.thumb_url);
+    var url = String((photo && photo.url) || '');
+    if (url.indexOf('driver_photo.php') !== -1 && url.indexOf('size=thumb') === -1) {
+      return url + (url.indexOf('?') === -1 ? '?' : '&') + 'size=thumb';
+    }
+    return url;
+  }
 
   var STEPS = ['photo', 'delivery', 'invoice'];
 
@@ -398,7 +467,7 @@
   }
 
   function syncPhotoModalViewportHeight() {
-    if (!usesCompactCapture()) return;
+    if (!usesCompactCapture() || state.inline) return;
     var modal = $('deliveryPhotoModal');
     if (!modal || !document.body.classList.contains('photo-mode-open')) return;
     var visible = window.innerHeight || 0;
@@ -413,7 +482,7 @@
   }
 
   function lockPhotoModalViewport() {
-    if (!usesCompactCapture()) return;
+    if (!usesCompactCapture() || state.inline) return;
     var modal = $('deliveryPhotoModal');
     if (!modal) return;
     if (!document.body.style.top) {
@@ -498,12 +567,19 @@
     }
   }
 
+  function showCameraTipOnce() {
+    var tip = $('deliveryCameraTip');
+    if (!tip) return;
+    tip.hidden = !(isIosSafari() && storageGet(CAMERA_TIP_KEY) !== '1');
+  }
+
   function beginPhotoCapture() {
     try {
-      if (usesCompactCapture()) {
+      if (!inlineCameraAvailable()) {
         useNativeCamera();
         return;
       }
+      showCameraTipOnce();
       var cameraPromise = startCamera();
       if (cameraPromise && typeof cameraPromise.catch === 'function') {
         cameraPromise.catch(function (err) {
@@ -521,8 +597,22 @@
     });
   }
 
+  function resumeAfterSavedArrival() {
+    if (!state.resumeIfPhotographed) return;
+    state.resumeIfPhotographed = false;
+    if (state.currentStep !== 'photo' || state.blob || state.uploading || state.preparing) return;
+    var arrival = null;
+    state.photos.forEach(function (photo) {
+      if (!arrival && String(photo.photo_type || '').toLowerCase() === 'before') arrival = photo;
+    });
+    if (!arrival) return;
+    stopCamera();
+    setProofState('saved', thumbUrl(arrival));
+    goToStep('delivery');
+  }
+
   function stopHasProofPhoto() {
-    return hasPhotoType('After') || hasPhotoType('Receipt');
+    return hasPhotoType('Before') || hasPhotoType('After') || hasPhotoType('Receipt');
   }
 
   function updatePhotoWorkflowUi(applySuggestedType) {
@@ -668,7 +758,7 @@
         primaryBtn.classList.remove('has-saved-photo');
       } else if (step === 'delivery') {
         primaryBtn.hidden = false;
-        primaryBtn.textContent = i18n('save_and_leave_photo');
+        primaryBtn.textContent = i18n('delivered');
         primaryBtn.classList.remove('has-saved-photo');
       }
       primaryBtn.disabled = state.submitting;
@@ -756,7 +846,7 @@
       video: {
         facingMode: { ideal: isLikelyMobile() ? 'environment' : 'user' },
         width: { ideal: 1280 },
-        height: { ideal: 720 }
+        height: { ideal: 960 }
       }
     };
 
@@ -775,7 +865,10 @@
       } catch (err2) {
         var msg = i18n('could_not_open_camera');
         if (err2 && err2.name === 'NotAllowedError') {
-          msg = i18n('camera_permission_denied');
+          storageSet(CAMERA_DENIED_KEY, String(Date.now()));
+          useNativeCamera();
+          setStatus(i18n('camera_permission_denied'), 'error');
+          return;
         } else if (
           location.protocol === 'http:' &&
           location.hostname !== 'localhost' &&
@@ -793,7 +886,7 @@
     var video = $('deliveryCameraVideo');
     var frame = $('deliveryCameraFrame');
     var activeModal = $('deliveryPhotoModal');
-    if (activeModal && activeModal.getAttribute('aria-hidden') === 'true') {
+    if ((activeModal && activeModal.getAttribute('aria-hidden') === 'true') || state.currentStep !== 'photo') {
       stopCamera();
       return;
     }
@@ -830,9 +923,16 @@
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    var caps = photoCaps();
+    var largest = Math.max(video.videoWidth, video.videoHeight);
+    var scale = largest > caps.maxDimension ? caps.maxDimension / largest : 1;
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    stopCamera();
+    storageSet(CAMERA_TIP_KEY, '1');
+    var tip = $('deliveryCameraTip');
+    if (tip) tip.hidden = true;
 
     canvas.toBlob(function (blob) {
       if (!blob) {
@@ -840,10 +940,55 @@
         return;
       }
       state.blob = blob;
-      showCapturedPreview(URL.createObjectURL(blob));
+      var objectUrl = URL.createObjectURL(blob);
+      showCapturedPreview(objectUrl);
+      startBackgroundUpload(blob, 'arrival-photo.jpg', objectUrl);
+    }, 'image/jpeg', caps.quality);
+  }
+
+  /**
+   * The arrival photo uploads while the driver checks the totals. Delivered
+   * waits on state.uploadPromise, so the stop never saves ahead of its photo.
+   */
+  function startBackgroundUpload(blob, filename, objectUrl) {
+    var guided = state.photoMode !== 'review' && !state.retakePhotoId && state.currentStep === 'photo';
+    if (guided) {
+      setProofState('uploading', objectUrl);
+      goToStep('delivery');
+    } else {
       setStatus(i18n('photo_captured_saving'), 'loading');
-      uploadBlob(blob, 'arrival-photo.jpg');
-    }, 'image/jpeg', 0.88);
+    }
+    state.uploadPromise = uploadBlob(blob, filename).finally(function () {
+      state.uploadPromise = null;
+    });
+    return state.uploadPromise;
+  }
+
+  function setProofState(kind, objectUrl) {
+    state.proofState = kind;
+    var box = $('deliveryInlineProof');
+    var thumb = $('deliveryInlineThumb');
+    var label = $('deliveryInlineProofLabel');
+    if (!box) return;
+    box.hidden = !kind;
+    box.setAttribute('data-proof-state', kind || '');
+    if (thumb) {
+      if (objectUrl) {
+        thumb.src = objectUrl;
+        thumb.hidden = false;
+      } else if (kind === 'skipped' || !kind) {
+        thumb.removeAttribute('src');
+        thumb.hidden = true;
+      }
+    }
+    if (label) {
+      var text = '';
+      if (kind === 'uploading') text = i18n('saving_photo');
+      else if (kind === 'saved') text = i18n('arrival_saved');
+      else if (kind === 'queued') text = i18n('outbox_queued');
+      else if (kind === 'skipped') text = i18n('no_photo_reason_' + state.proofSkipReason, i18n('no_photo'));
+      label.textContent = text;
+    }
   }
 
   function retakeCapture(options) {
@@ -851,7 +996,7 @@
     if (state.blob) {
       state.blob = null;
     }
-    if (usesCompactCapture()) {
+    if (!inlineCameraAvailable()) {
       useNativeCamera();
       if (options.message) {
         setStatus(options.message, options.kind || '');
@@ -956,8 +1101,8 @@
       .map(function (photo) {
         var type = escapeHtml(photo.photo_type || i18n('photo'));
         var time = escapeHtml(formatTime(photo.created_at));
-        var url = escapeHtml(photo.url || '');
-        var fallback = escapeHtml(photo.fallback_url || '');
+        var url = escapeHtml(thumbUrl(photo));
+        var fallback = escapeHtml(thumbUrl(photo) !== String(photo.url || '') ? (photo.url || '') : (photo.fallback_url || ''));
         var id = Number(photo.id);
         return (
           '<div class="existing-photo-item" data-photo-id="' +
@@ -1042,6 +1187,7 @@
       state.photos = data.photos || [];
       renderPhotos();
       updatePhotoWorkflowUi(true);
+      resumeAfterSavedArrival();
       if (state.photos.length > 0) {
         maybeEnableGpsTracking();
       }
@@ -1119,7 +1265,7 @@
       var lines = [];
       if (photo.created_at) lines.push(formatTime(photo.created_at));
       if (photo.notes) lines.push(photo.notes);
- meta.textContent = lines.join('\\n');
+      meta.textContent = lines.join('\n');
     }
     if (viewer) {
       viewer.style.display = 'flex';
@@ -1175,7 +1321,7 @@
     if (section && section.scrollIntoView && !usesCompactCapture()) {
       section.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    if (usesCompactCapture()) {
+    if (!inlineCameraAvailable()) {
       useNativeCamera();
       openNativeCameraPicker();
     } else {
@@ -1211,7 +1357,7 @@
     if (type.indexOf('image/') === 0) return true;
     // Some iPhone/Android picker versions omit File.type even for a real
     // camera image. The server still performs authoritative MIME validation.
- return /\\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
+    return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(String((file && file.name) || ''));
   }
 
   function canvasToJpeg(canvas, quality) {
@@ -1235,10 +1381,11 @@
 
     var width = image.naturalWidth || image.width || 0;
     var height = image.naturalHeight || image.height || 0;
-    var maxDimension = 1920;
+    var caps = photoCaps();
+    var maxDimension = caps.maxDimension;
     var largest = Math.max(width, height);
     var isSmallJpeg = /^image\/jpe?g$/i.test(file.type || '')
-      && file.size <= 1500 * 1024
+      && file.size <= 200 * 1024
       && largest > 0
       && largest <= maxDimension;
     if (isSmallJpeg) {
@@ -1259,8 +1406,8 @@
     context.fillStyle = '#fff';
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    var blob = await canvasToJpeg(canvas, 0.82);
- var baseName = (file.name || 'delivery-photo').replace(/\\.[^.]+$/, '');
+    var blob = await canvasToJpeg(canvas, caps.quality);
+    var baseName = (file.name || 'delivery-photo').replace(/\.[^.]+$/, '');
     return { blob: blob, filename: baseName + '.jpg' };
   }
 
@@ -1282,8 +1429,12 @@
     if (fill) fill.style.width = '35%';
 
     try {
-      await refreshRouteSession();
       var photoType = ($('deliveryPhotoType') && $('deliveryPhotoType').value) || 'Before';
+      var coordsAndSession = await Promise.all([
+        getCoords({ timeout: 1500, maximumAge: 120000 }),
+        refreshRouteSession()
+      ]);
+      var photoCoords = coordsAndSession[0] || {};
       var outbox = window.BakeryDriverOutbox;
       var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('photo') : '';
       var payload = {
@@ -1293,8 +1444,8 @@
         date: state.date,
         photo_type: photoType,
         notes: ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '',
-        latitude: '',
-        longitude: ''
+        latitude: photoCoords.latitude || '',
+        longitude: photoCoords.longitude || ''
       };
 
       if (fill) fill.style.width = '70%';
@@ -1363,6 +1514,12 @@
       if (!data.queued) {
         await loadPhotos();
       }
+      state.proofAccepted = true;
+      state.explicitProofSkip = false;
+      state.proofSkipReason = '';
+      if (state.proofState === 'uploading') {
+        setProofState(data.queued ? 'queued' : 'saved');
+      }
       if (state.photoMode === 'review') {
         state.photoReturnStep = null;
         setStatus(
@@ -1370,34 +1527,21 @@
           'success'
         );
         goToStep('invoice');
-      } else if (state.photoReturnStep === 'complete') {
-        var proofType = String(photoType || '').toLowerCase();
-        if (proofType !== 'after' && proofType !== 'receipt') {
-          setStatus(i18n('proof_photo_required', 'Take the after photo before this stop can be marked delivered.'), 'error');
-          return;
-        }
-        state.proofAccepted = true;
-        state.explicitProofSkip = false;
+      } else {
+        // The arrival photo is the proof. The totals step is next, or already showing.
         state.awaitingProof = false;
         state.photoReturnStep = null;
-        if (!state.confirmationSaved) {
-          setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
-          confirmDelivery(true);
-          return;
-        }
-        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
-        finishDeliveryUi(state.completionMessage || i18n('delivery_confirmed'));
-      } else if (photoType === 'Before') {
-        // Arrival proof is enough to move directly to quantity confirmation.
-        state.photoReturnStep = null;
-        setStatus(data.queued ? i18n('outbox_queued') : i18n('arrival_saved'), 'success');
-        goToStep('delivery');
-      } else {
-        // Extra photos outside the guided flow return to delivery confirmation.
-        setStatus(data.queued ? i18n('outbox_queued') : i18n('departure_saved'), 'success');
-        goToStep('delivery');
+        setStatus(data.queued ? i18n('outbox_queued') : (photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved')), 'success');
+        if (state.currentStep !== 'delivery') goToStep('delivery');
       }
     } catch (err) {
+      if (state.proofState === 'uploading') {
+        setProofState('');
+        state.proofAccepted = false;
+        goToStep('photo');
+        setStatus(err.message || i18n('upload_failed'), 'error');
+        return;
+      }
       retakeCapture({
         message: err.message || i18n('upload_failed'),
         kind: 'error'
@@ -1518,7 +1662,7 @@
       if (isSubmitting && state.currentStep === 'delivery') {
         primaryBtn.textContent = i18n('saving');
       } else if (state.currentStep === 'delivery') {
-        primaryBtn.textContent = i18n('save_and_leave_photo');
+        primaryBtn.textContent = i18n('delivered');
       }
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
@@ -1847,6 +1991,7 @@
   }
 
   function updateDeliveryPreview() {
+    updateTotalsLine();
     var piecesInput = $('deliveryPiecesInput');
     var creditsInput = $('deliveryCreditsInput');
     var totalEl = $('deliveryConfirmationTotal');
@@ -1928,13 +2073,30 @@
     state.pendingVarianceConfirm = null;
   }
 
-  function promptDeparturePhoto() {
-    if ($('deliveryPhotoType')) {
-      $('deliveryPhotoType').value = 'After';
-    }
-    updatePhotoWorkflowUi(false);
-    setStatus(i18n('take_departure_photo'), 'success');
-    goToStep('photo');
+  function showNoPhotoReasons(show) {
+    var panel = $('deliveryNoPhotoReasons');
+    if (panel) panel.hidden = !show;
+  }
+
+  function chooseNoPhotoReason(reason) {
+    if (state.submitting) return;
+    state.proofSkipReason = reason || 'other';
+    state.explicitProofSkip = true;
+    state.proofAccepted = false;
+    state.awaitingProof = false;
+    showNoPhotoReasons(false);
+    stopCamera();
+    setProofState('skipped');
+    goToStep('delivery');
+  }
+
+  function updateTotalsLine() {
+    var line = $('deliveryTotalsText');
+    if (!line) return;
+    var pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
+    var count = Number.isInteger(pieces) ? pieces : state.orderedPieces;
+    var key = state.orderedPieces > 0 && count === state.orderedPieces ? 'totals_as_ordered' : 'totals_delivering';
+    line.textContent = String(i18n(key, ':count pieces')).split(':count').join(String(count || 0));
   }
 
   function populateInvoicePreview() {
@@ -2211,15 +2373,24 @@
       syncPricePerPieceInputs(pricePerPiece);
     }
 
-    if (!state.proofAccepted && !stopHasProofPhoto()) {
-      state.awaitingProof = true;
-      state.photoReturnStep = 'complete';
+    setSubmitting(true);
+    if (state.uploadPromise) {
+      setStatus(i18n('saving_photo'), 'loading');
+      try {
+        await state.uploadPromise;
+      } catch (uploadErr) {
+        // uploadBlob reports its own failure and returns the driver to the camera.
+      }
+    }
+    if (!state.proofAccepted && !state.explicitProofSkip && !stopHasProofPhoto()) {
       setSubmitting(false);
-      promptDeparturePhoto();
+      state.awaitingProof = true;
+      if (state.currentStep !== 'photo') goToStep('photo');
+      showNoPhotoReasons(false);
+      setStatus(i18n('proof_photo_required'), 'error');
       return;
     }
 
-    setSubmitting(true);
     setStatus(i18n('saving_delivery'), 'loading');
 
     try {
@@ -2245,7 +2416,7 @@
         body += '&client_request_id=' + encodeURIComponent(requestId);
       }
       if (state.explicitProofSkip) {
-        body += '&proof_skip=1';
+        body += '&proof_skip=1&proof_skip_reason=' + encodeURIComponent(state.proofSkipReason || 'other');
       }
 
       var data = null;
@@ -2303,7 +2474,7 @@
         setSubmitting(false);
         return;
       }
- setStatus((err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry'), 'error');
+      setStatus((err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry'), 'error');
       setSubmitting(false);
     }
   }
@@ -2379,6 +2550,12 @@
     state.awaitingProof = false;
     state.completionMessage = '';
     state.stopFinished = false;
+    state.uploadPromise = null;
+    state.proofSkipReason = '';
+    setProofState('');
+    showNoPhotoReasons(false);
+    var adjustDetails = $('deliveryAdjustDetails');
+    if (adjustDetails) adjustDetails.open = false;
 
     var modal = $('deliveryPhotoModal');
     var confirm = $('deliveryPhotoAssignment');
@@ -2398,6 +2575,7 @@
     setPhotoMode(opts.photoMode);
     state.photoReturnStep = null;
     var startStep = opts.startStep || (opts.photoMode === 'review' ? 'invoice' : 'photo');
+    state.resumeIfPhotographed = !opts.startStep && opts.photoMode !== 'review';
     if (opts.photoMode !== 'review' && opts.startStep === 'delivery') {
       startStep = 'delivery';
     }
@@ -2423,12 +2601,29 @@
       throw new Error('delivery photo modal missing');
     }
     modal.classList.remove('is-closing', 'has-saved-photo', 'delivery-invoice-open', 'delivery-invoice-fullstep', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
+    var inlineHost = $('nowCaptureHost');
+    state.inline = !!inlineHost && isPhoneLayout() && opts.photoMode !== 'review';
+    if (state.inline) {
+      inlineHost.appendChild(modal);
+      inlineHost.hidden = false;
+      modal.classList.add('is-inline');
+      modal.setAttribute('aria-modal', 'false');
+      document.body.classList.add('now-capture-open');
+    } else {
+      modal.classList.remove('is-inline');
+      modal.setAttribute('aria-modal', 'true');
+    }
     modal.style.display = 'flex';
     modal.setAttribute('aria-hidden', 'false');
     var routeRoot = $('driverRouteRoot');
-    if (routeRoot) routeRoot.setAttribute('inert', '');
-    document.body.classList.add('photo-mode-open');
-    lockPhotoModalViewport();
+    if (state.inline) {
+      if (inlineHost.scrollIntoView) inlineHost.scrollIntoView({ block: 'start' });
+    } else {
+      if (routeRoot) routeRoot.setAttribute('inert', '');
+      document.body.classList.add('photo-mode-open');
+      lockPhotoModalViewport();
+    }
+    document.dispatchEvent(new CustomEvent('driver:capture-open'));
     requestAnimationFrame(function () {
       modal.classList.add('is-open');
       var closeButton = $('deliveryPhotoModalClose');
@@ -2476,16 +2671,25 @@
     setPhotoControlsBusy(false);
     setSubmitting(false);
     var modal = $('deliveryPhotoModal');
+    var wasInline = state.inline;
+    state.inline = false;
     if (modal) {
       modal.setAttribute('aria-hidden', 'true');
       modal.classList.remove('is-open');
       modal.classList.add('is-closing');
       state.closeTimer = setTimeout(function () {
         modal.style.display = 'none';
-        modal.classList.remove('is-closing', 'has-saved-photo');
+        modal.classList.remove('is-closing', 'has-saved-photo', 'is-inline');
+        if (wasInline) {
+          document.body.appendChild(modal);
+          var host = $('nowCaptureHost');
+          if (host) host.hidden = true;
+        }
         state.closeTimer = null;
-      }, 240);
+      }, wasInline ? 0 : 240);
     }
+    document.body.classList.remove('now-capture-open');
+    document.dispatchEvent(new CustomEvent('driver:capture-close'));
     var routeRoot = $('driverRouteRoot');
     if (routeRoot) routeRoot.removeAttribute('inert');
     document.body.classList.remove('photo-mode-open');
@@ -2541,7 +2745,8 @@
       state.preparing = false;
       setPhotoControlsBusy(false);
       setStatus(i18n('photo_selected_saving'), 'loading');
-      await uploadBlob(prepared.blob, prepared.filename || 'arrival-photo.jpg');
+      if (modal) modal.classList.remove('is-photo-uploading');
+      await startBackgroundUpload(prepared.blob, prepared.filename || 'arrival-photo.jpg', state.previewUrl);
     } catch (err) {
       state.preparing = false;
       setPhotoControlsBusy(false);
@@ -2585,7 +2790,7 @@
       date: btn.getAttribute('data-date') || '',
       assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
-      startStep: btn.getAttribute('data-start-step') || 'photo',
+      startStep: btn.getAttribute('data-start-step') || '',
       autoOpenCamera: false
       });
     } catch (err) {
@@ -2671,19 +2876,59 @@
     });
     function skipPhotoStep() {
       if (state.submitting) return;
-      if (state.photoReturnStep === 'complete' || state.awaitingProof) {
-        state.explicitProofSkip = true;
-        state.proofAccepted = true;
-        state.awaitingProof = false;
-        state.photoReturnStep = null;
-        confirmDelivery(true);
-        return;
-      }
-      goToStep('delivery');
+      showNoPhotoReasons(true);
     }
     $('deliveryWizardSkipBtn').addEventListener('click', skipPhotoStep);
     var skipInlineBtn = $('deliverySkipPhotoInlineBtn');
     if (skipInlineBtn) skipInlineBtn.addEventListener('click', skipPhotoStep);
+    var noPhotoPanel = $('deliveryNoPhotoReasons');
+    if (noPhotoPanel) {
+      noPhotoPanel.addEventListener('click', function (e) {
+        var chip = e.target.closest('[data-proof-skip-reason]');
+        if (chip) chooseNoPhotoReason(chip.getAttribute('data-proof-skip-reason'));
+        if (e.target.closest('[data-no-photo-cancel]')) showNoPhotoReasons(false);
+      });
+    }
+    var inlineRetake = $('deliveryInlineRetake');
+    if (inlineRetake) {
+      inlineRetake.addEventListener('click', function () {
+        if (state.submitting || state.uploading) return;
+        var saved = state.photos.filter(function (photo) {
+          return String(photo.photo_type || '').toLowerCase() === 'before';
+        });
+        state.retakePhotoId = saved.length ? Number(saved[saved.length - 1].id) : null;
+        state.explicitProofSkip = false;
+        state.proofSkipReason = '';
+        setProofState('');
+        if ($('deliveryPhotoType')) $('deliveryPhotoType').value = 'Before';
+        goToStep('photo');
+      });
+    }
+    var totalsAdjust = $('deliveryTotalsAdjust');
+    if (totalsAdjust) {
+      totalsAdjust.addEventListener('click', function () {
+        var details = $('deliveryAdjustDetails');
+        if (!details) return;
+        details.open = !details.open;
+        totalsAdjust.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+      });
+    }
+    var seeInvoice = $('deliverySeeInvoice');
+    if (seeInvoice) {
+      seeInvoice.addEventListener('click', function () {
+        if (state.submitting || !state.summaryReady) return;
+        if (!validateDeliveryInputs()) return;
+        populateInvoicePreview();
+      });
+    }
+    var cameraTip = $('deliveryCameraTip');
+    if (cameraTip) {
+      cameraTip.addEventListener('click', function (e) {
+        if (!e.target.closest('[data-dismiss-tip]')) return;
+        storageSet(CAMERA_TIP_KEY, '1');
+        cameraTip.hidden = true;
+      });
+    }
     document.querySelectorAll('.delivery-wizard-step').forEach(function (stepBtn) {
       stepBtn.addEventListener('click', function () {
         if (state.submitting || state.photoMode === 'review') return;
@@ -2789,7 +3034,7 @@
       if (frame && frame.scrollIntoView && !usesCompactCapture()) {
         frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-      if (usesCompactCapture()) {
+      if (!inlineCameraAvailable()) {
         useNativeCamera();
         openNativeCameraPicker();
       } else {
@@ -2839,7 +3084,14 @@
   window.DriverDelivery = {
     bindPhotoButtons: bindPhotoButtons,
     openModal: openModal,
-    closeModal: closeModal
+    closeModal: closeModal,
+    isOpen: function () {
+      var modal = $('deliveryPhotoModal');
+      return !!modal && modal.getAttribute('aria-hidden') === 'false';
+    },
+    isBusy: function () {
+      return !!(state.uploading || state.preparing || state.submitting);
+    }
   };
 
   if (document.readyState === 'loading') {

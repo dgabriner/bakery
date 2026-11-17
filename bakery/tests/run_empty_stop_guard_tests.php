@@ -439,7 +439,8 @@ $flagEvent = $db->prepare(
 $flagEvent->execute(['delivery_empty_flagged', $flagOrder]);
 $assert((int)$flagEvent->fetchColumn() >= 1, 'office flag is logged');
 
-$driverPage = (string)file_get_contents($root . '/driver.php');
+$driverPage = (string)file_get_contents($root . '/driver.php')
+    . (string)file_get_contents($root . '/includes/driver_route.js');
 $driverJs = (string)file_get_contents($root . '/includes/driver_delivery.js');
 $assert(strpos($driverPage, "status !== 'office_flag'") !== false, 'driver route skips an office-flagged stop');
 $assert(strpos($driverJs, 'state.orderEmpty') !== false, 'empty orders do not use the over-delivery count gate');

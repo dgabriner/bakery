@@ -210,12 +210,12 @@ function bakery_route_summary_status_key(string $status): string
 function bakery_route_summary_matches_filter(array $stop, string $filter): bool
 {
     $status = (string)($stop['delivery_status'] ?? 'pending');
-    $hasPod = !empty($stop['has_pod_photo']);
+    $hasProof = !empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']);
     switch ($filter) {
         case 'photos':
-            return $hasPod;
+            return $hasProof;
         case 'missing':
-            return !$hasPod && $status !== 'cancelled';
+            return !$hasProof && $status !== 'cancelled';
         case 'delivered':
             return $status === 'delivered';
         case 'pending':
@@ -306,14 +306,14 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
                 $stats['photo_count'] += count($photos);
                 $driverPhotos += count($photos);
             }
-            if ($status === 'delivered' && $hasPod) {
+            if ($status === 'delivered' && ($hasPod || $hasArrival)) {
                 $stats['with_photos']++;
             }
             if ($arrivalOnly) {
                 $stats['arrival_only']++;
                 $driverArrivalOnly++;
             }
-            if ($status !== 'cancelled' && !$hasPod) {
+            if ($status !== 'cancelled' && !$hasPod && !$hasArrival) {
                 $stats['missing_photos']++;
                 $driverMissing++;
             }

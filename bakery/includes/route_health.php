@@ -404,7 +404,7 @@ function bakery_route_health_load(PDO $db, string $from, string $to, ?DateTimeIm
         }
         $days[$key]['stops']++;
         $photos = $photosByStop[$customerId . '|' . $date] ?? [];
-        $hasAfter = bakery_route_stop_has_after_photo($photos);
+        $hasAfter = bakery_route_stop_has_proof_photo($photos);
         if ($status === 'delivered') {
             $days[$key]['delivered']++;
             if ($hasAfter) {

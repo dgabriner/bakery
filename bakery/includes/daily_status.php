@@ -361,8 +361,8 @@ function bakery_daily_status_stops(PDO $db, string $date): array
                 'driver_name' => $driverName,
                 'delivery_status' => $deliveryStatus,
                 'delivered_at' => bakery_daily_status_delivered_at($delivery),
-                'photo_present' => $podUrl !== '',
-                'photo_url' => $podUrl !== '' ? $podUrl : null,
+                'photo_present' => $podUrl !== '' || $arrivalUrl !== '',
+                'photo_url' => $podUrl !== '' ? $podUrl : ($arrivalUrl !== '' ? $arrivalUrl : null),
                 'pod_photo_present' => $podUrl !== '',
                 'arrival_photo_present' => $arrivalUrl !== '',
                 'arrival_photo_url' => $arrivalUrl !== '' ? $arrivalUrl : null,
@@ -389,7 +389,7 @@ function bakery_daily_status_photo_coverage(array $stops): array
             continue;
         }
         $delivered++;
-        if (!empty($stop['pod_photo_present'])) {
+        if (!empty($stop['pod_photo_present']) || !empty($stop['arrival_photo_present'])) {
             $withProof++;
         }
         if (!empty($stop['arrival_only'])) {

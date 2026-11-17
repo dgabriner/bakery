@@ -34,6 +34,21 @@
         Header set Pragma "no-cache"
         Header set Expires "0"
     </FilesMatch>
+    # A ?v= fingerprint changes on every deploy, so that exact URL never changes
+    # content. Phones on slow or capped plans keep it for a year. A bare URL
+    # without ?v= still revalidates.
+    <FilesMatch "\.(css|js|png|jpe?g|gif|svg|webp|woff2?)$">
+        <If "%{QUERY_STRING} =~ /(^|&)v=/">
+            Header set Cache-Control "public, max-age=31536000, immutable"
+        </If>
+        <Else>
+            Header set Cache-Control "public, no-cache"
+        </Else>
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json image/svg+xml
 </IfModule>
 
 # Staging must stay out of search indexes and AI crawl corpora.

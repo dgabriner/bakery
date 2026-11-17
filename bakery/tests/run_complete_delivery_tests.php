@@ -405,7 +405,8 @@ if ($hasUnallocated) {
 $recordPage = (string)file_get_contents($root . '/customer_record.php');
 $billingPanel = (string)file_get_contents($root . '/includes/billing_panel_invoices.php');
 $invoiceDoc = (string)file_get_contents($root . '/includes/invoice_document.php');
-$driverPage = (string)file_get_contents($root . '/driver.php');
+$driverPage = (string)file_get_contents($root . '/driver.php')
+    . (string)file_get_contents($root . '/includes/driver_route.js');
 $assert(strpos($recordPage, "bakery_t('billing.line_estimated')") !== false, 'Customer Record shows the estimated label');
 $assert(strpos($billingPanel, "bakery_t('billing.line_estimated')") !== false, 'Billing shows the estimated label');
 $assert(strpos($invoiceDoc, "bakery_t('billing.line_estimated')") !== false, 'invoice document shows the estimated label');

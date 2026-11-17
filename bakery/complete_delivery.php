@@ -19,6 +19,7 @@ require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/customer_notifications.php';
 require_once __DIR__ . '/includes/driver_assignments.php';
 require_once __DIR__ . '/includes/driver_route_prep.php';
+require_once __DIR__ . '/includes/driver_route_snapshot.php';
 require_once __DIR__ . '/includes/delivery_recovery.php';
 require_once __DIR__ . '/includes/delivery_skip.php';
 require_once __DIR__ . '/includes/customer_portal.php';
@@ -1340,7 +1341,7 @@ function bakery_confirm_delivery(
 
     return [
         'success' => true,
-        'message' => 'Delivery confirmed.',
+        'message' => bakery_t('driver.delivery_confirmed'),
         'delivered_pieces' => $deliveredPieces,
         'credits_taken_back' => $creditsTakenBack,
         'billable_pieces' => $billablePieces,
@@ -1488,7 +1489,8 @@ try {
             bakery_delivery_assert_proof_for_confirm(
                 $db,
                 $dailyOrderId,
-                (string)($_POST['proof_skip'] ?? '') === '1'
+                (string)($_POST['proof_skip'] ?? '') === '1',
+                (string)($_POST['proof_skip_reason'] ?? '')
             );
             if (isset($_POST['special_delivered']) && is_array($_POST['special_delivered'])) {
                 $specialQuantities = [];
@@ -1635,6 +1637,27 @@ try {
                     : 'Route updated.',
                 'stops' => $result['stops'],
                 'next_daily_order_id' => $result['next_daily_order_id'],
+            ]);
+            break;
+
+        case 'route_snapshot':
+            bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+            $driverId = (int)($_POST['driver_id'] ?? 0);
+            $deliveryDate = bakery_driver_validate_delivery_date(trim((string)($_POST['date'] ?? '')));
+            if ($driverId <= 0) {
+                throw new RuntimeException('Invalid driver_id');
+            }
+            bakery_assert_driver_identity($db, $driverId, $deliveryDate);
+            $snapshot = bakery_driver_route_snapshot($db, $driverId, $deliveryDate);
+            if (hash_equals($snapshot['hash'], (string)($_POST['hash'] ?? ''))) {
+                echo json_encode(['success' => true, 'unchanged' => true, 'hash' => $snapshot['hash']]);
+                break;
+            }
+            echo json_encode([
+                'success' => true,
+                'unchanged' => false,
+                'hash' => $snapshot['hash'],
+                'stops' => $snapshot['stops'],
             ]);
             break;
 

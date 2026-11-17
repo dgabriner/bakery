@@ -2,7 +2,7 @@
 /**
  * Shared stop proof for Route health and Driver reports.
  *
- * An After photo is delivery proof. A Before photo is arrival only.
+ * One arrival (Before) photo is delivery proof; an After photo is proof too.
  * The filename wins over the photo_type column, same as Route photo journey.
  */
 if (!defined('ACCESS_ALLOWED')) {
@@ -38,6 +38,23 @@ function bakery_route_stop_has_after_photo(array $photos): bool
     return false;
 }
 
+/**
+ * @param array<int, mixed> $photos
+ */
+function bakery_route_stop_has_proof_photo(array $photos): bool
+{
+    foreach ($photos as $photo) {
+        if (!is_array($photo)) {
+            continue;
+        }
+        $type = bakery_route_stop_photo_type($photo);
+        if (strcasecmp($type, 'After') === 0 || strcasecmp($type, 'Before') === 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function bakery_route_stop_time_or_null($value): ?string
 {
     $value = trim((string)$value);
@@ -51,8 +68,8 @@ function bakery_route_stop_time_or_null($value): ?string
 }
 
 /**
- * with_photo only when the stop has an After photo.
- * A Before photo, or a receipt, is not delivery proof.
+ * with_photo when the stop has an arrival (Before) or After photo.
+ * A receipt alone is not delivery proof here.
  *
  * @param array<string, mixed> $stop
  */
@@ -62,10 +79,10 @@ function bakery_route_stop_photo_mark(array $stop): string
     if (!is_array($photos)) {
         $photos = [];
     }
-    if (bakery_route_stop_has_after_photo($photos)) {
+    if (bakery_route_stop_has_proof_photo($photos)) {
         return 'with_photo';
     }
-    if ($photos === [] && !empty($stop['has_pod_photo']) && empty($stop['has_arrival_photo'])) {
+    if ($photos === [] && (!empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']))) {
         return 'with_photo';
     }
     $status = (string)($stop['delivery_status'] ?? '');

@@ -84,7 +84,7 @@ require_once 'includes/nav.php';
     <div><span><?php bakery_te('route_summary.stat_stops'); ?></span><strong><?php echo (int)$stats['stops']; ?></strong><small><?php echo (int)$stats['delivered']; ?> / <?php echo (int)$stats['stops']; ?> <?php bakery_te('route_summary.stat_delivered'); ?></small></div>
     <div><span><?php bakery_te('route_summary.stat_sold'); ?></span><strong><?php echo htmlspecialchars(bakery_route_summary_format_money((float)$stats['sold'])); ?></strong><small><?php echo (int)$stats['pieces']; ?> <?php bakery_te('route_summary.stat_pieces'); ?></small></div>
     <div><span><?php bakery_te('route_summary.stat_pod'); ?></span><strong><?php echo (int)$stats['pod_photo_count']; ?></strong><small><?php echo (int)$stats['with_photos']; ?> <?php bakery_te('route_summary.stops_with_proof'); ?></small></div>
-    <div<?php echo ((int)$stats['missing_photos'] > 0 || (int)$stats['arrival_only'] > 0) ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php if ((int)$stats['arrival_only'] > 0): ?><?php echo (int)$stats['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php else: ?><?php bakery_te('route_summary.missing_help'); ?><?php endif; ?></small></div>
+    <div<?php echo (int)$stats['missing_photos'] > 0 ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php if ((int)$stats['arrival_only'] > 0): ?><?php echo (int)$stats['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php else: ?><?php bakery_te('route_summary.missing_help'); ?><?php endif; ?></small></div>
   </section>
 
   <nav class="rs-filters" aria-label="<?php echo htmlspecialchars(bakery_t('route_summary.filter_label')); ?>">
@@ -94,7 +94,7 @@ require_once 'includes/nav.php';
   </nav>
 
   <?php if ((int)$stats['arrival_only'] > 0): ?>
-    <p class="rs-note rs-note--warn" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
+    <p class="rs-note" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
   <?php endif; ?>
 
   <?php if (!$day['photos_available']): ?>

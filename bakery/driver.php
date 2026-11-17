@@ -12,6 +12,7 @@ require_once 'includes/customer_account.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/pan_carry.php';
+require_once 'includes/driver_route_snapshot.php';
 
 bakery_customer_account_ensure_schema($db);
 
@@ -249,6 +250,52 @@ function bakery_driver_special_lines_for_stop(int $dailyOrderId, string $date): 
 }
 
 /**
+ * Product lines (name and quantity) for every stop on one driver's dated route,
+ * loaded in a single query so the Now card never fetches per stop.
+ *
+ * @return array<int, list<array{0:string,1:int}>>
+ */
+function bakery_driver_route_stop_lines(PDO $db, int $driverId, string $date): array
+{
+    $byOrder = [];
+    if ($driverId <= 0) {
+        return $byOrder;
+    }
+    $stmt = $db->prepare(
+        'SELECT doi.daily_order_id, p.name AS product_name, SUM(doi.quantity) AS quantity
+         FROM daily_order_items doi
+         INNER JOIN products p ON p.id = doi.product_id
+         INNER JOIN daily_orders do ON do.id = doi.daily_order_id
+         INNER JOIN daily_order_assignments doa ON doa.daily_order_id = do.id
+         WHERE doa.driver_id = ? AND do.order_date = ?
+         GROUP BY doi.daily_order_id, p.id, p.name
+         HAVING SUM(doi.quantity) > 0
+         ORDER BY doi.daily_order_id, p.name'
+    );
+    $stmt->execute([$driverId, $date]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $byOrder[(int)$row['daily_order_id']][] = [(string)$row['product_name'], (int)$row['quantity']];
+    }
+    return $byOrder;
+}
+
+/**
+ * Compact JSON of a stop's lines for the Now card: dated items, then special-order lines.
+ */
+function bakery_driver_stop_lines_json(array $stop, string $date): string
+{
+    $lines = is_array($stop['lines'] ?? null) ? $stop['lines'] : [];
+    foreach (bakery_driver_special_lines_for_stop((int)$stop['daily_order_id'], $date) as $special) {
+        $name = trim((string)($special['description'] ?? $special['product_name'] ?? ''));
+        $qty = (int)($special['quantity'] ?? 0);
+        if ($name !== '' && $qty > 0) {
+            $lines[] = [$name, $qty];
+        }
+    }
+    return (string)json_encode($lines, JSON_UNESCAPED_UNICODE);
+}
+
+/**
  * Render one driver route stop card for the active queue or history panel.
  */
 function bakery_render_driver_stop_item(
@@ -304,28 +351,15 @@ function bakery_render_driver_stop_item(
         data-lng="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>"
         data-maps-url="<?php echo htmlspecialchars($mapsHref, ENT_QUOTES, 'UTF-8'); ?>"
         data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+        data-lines="<?php echo htmlspecialchars(bakery_driver_stop_lines_json($stop, $selectedDate), ENT_QUOTES, 'UTF-8'); ?>"
         data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>">
         <div class="stop-item-main">
             <span class="stop-item-order">#<?php echo $stop['route_order'] ?: '&mdash;'; ?></span>
             <span class="stop-item-pick" aria-hidden="true"></span>
             <div class="stop-item-body">
                 <div class="stop-item-heading">
-                    <div class="stop-item-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, $routeUser); ?></div>
+                    <div class="stop-item-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, function_exists('bakery_current_user') ? bakery_current_user() : null); ?></div>
                     <?php if ($isNext && !$isPastList): ?><span class="stop-item-next-label"><?php bakery_te('driver.next_label'); ?></span><?php endif; ?>
-                    <?php if (!$isPastList && !$isDone): ?>
-                    <button type="button"
-                        class="stop-go-next"
-                        data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
-                        data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.go_next'); ?></button>
-                    <div class="stop-adjust-moves">
-                        <button type="button"
-                            class="stop-move-next"
-                            data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.move_next'); ?></button>
-                        <button type="button"
-                            class="stop-move-later"
-                            data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.move_later'); ?></button>
-                    </div>
-                    <?php endif; ?>
                 </div>
                 <div class="stop-item-address"><?php echo htmlspecialchars($stop['customer_address'] ?: bakery_t('driver.no_address_short')); ?></div>
                 <div class="stop-item-meta">
@@ -333,6 +367,7 @@ function bakery_render_driver_stop_item(
                     <?php if ($receivingHours !== ''): ?><span><?php echo htmlspecialchars($receivingHours); ?></span><?php endif; ?>
                     <?php if (!empty($stop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time']))); ?></span><?php endif; ?>
                     <?php if ((int)($stop['ordered_pieces'] ?? 0) > 0 && !$isDone): ?><span><?php echo number_format((int)$stop['ordered_pieces']); ?> <?php bakery_te('driver.pcs'); ?></span><?php endif; ?>
+                    <?php if (!$isDone): ?><span class="stop-item-leg" data-stop-leg hidden></span><?php endif; ?>
                 </div>
                 <?php
                 $specialStopLines = bakery_driver_special_lines_for_stop((int)$stop['daily_order_id'], $selectedDate);
@@ -344,15 +379,25 @@ function bakery_render_driver_stop_item(
             <span class="status-badge status-badge--<?php echo htmlspecialchars($statusClass); ?>"><?php echo htmlspecialchars(bakery_t('driver.status_' . $statusClass)); ?></span>
             <span class="driver-outbox-chip driver-outbox-chip--stop" data-outbox-chip hidden></span>
         </div>
-        <div class="contact-actions">
-            <?php if (!$isDone && $mapsHref): ?>
-            <a class="contact-link contact-link--address js-navigate-link"
-                href="<?php echo htmlspecialchars($mapsHref); ?>"
-                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-lat="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
-                data-lng="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>"
-                target="_blank" rel="noopener"><?php bakery_te('driver.navigate'); ?></a>
-            <?php endif; ?>
+        <?php if (!$isPastList && !$isDone): ?>
+        <div class="stop-row-actions">
+            <button type="button"
+                class="stop-go-next"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.make_next'); ?></button>
+            <div class="stop-adjust-moves">
+                <button type="button" class="stop-move-up" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.move_up'), ENT_QUOTES, 'UTF-8'); ?>">&#9650;</button>
+                <button type="button" class="stop-move-down" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.move_down'), ENT_QUOTES, 'UTF-8'); ?>">&#9660;</button>
+            </div>
+            <button type="button"
+                class="stop-problem-btn"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.stop_problem_aria', ['name' => $stop['customer_name']]), ENT_QUOTES, 'UTF-8'); ?>">&#8943;</button>
+        </div>
+        <?php endif; ?>
+        <div class="contact-actions"<?php echo $isDone ? '' : ' hidden'; ?>>
             <?php if ($isDone && $status === 'delivered'): ?>
             <button type="button"
                 class="contact-link photo-complete-btn"
@@ -364,34 +409,6 @@ function bakery_render_driver_stop_item(
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.view_invoice_photos'); ?></button>
-            <?php elseif (!$isDone): ?>
-            <button type="button"
-                class="contact-link photo-complete-btn"
-                data-photo-mode="capture"
-                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
-                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
-                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
-                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
-                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
-                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.photo'); ?></button>
-            <button type="button"
-                class="contact-link stop-orders-btn"
-                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.store_orders'); ?></button>
-            <?php endif; ?>
-            <?php if (!$isDone && $status !== 'failed' && $phoneHref): ?>
-            <a class="contact-link contact-link--phone" href="<?php echo htmlspecialchars($phoneHref); ?>"><?php bakery_te('driver.call'); ?></a>
-            <?php endif; ?>
-            <?php if (!$isDone && $status !== 'failed'): ?>
-            <button type="button"
-                class="contact-link contact-link--skip skip-stop-btn"
-                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
-                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.skip_stop'); ?></button>
-            <button type="button"
-                class="contact-link fail-stop-btn"
-                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
-                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
-                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
             <?php endif; ?>
             <?php if ($isDone && $status === 'cancelled'): ?>
             <button type="button"
@@ -399,10 +416,6 @@ function bakery_render_driver_stop_item(
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.unskip_stop'); ?></button>
             <?php endif; ?>
-        </div>
-        <div class="order-details-container" style="display: none;">
-            <div class="order-details-loading"><?php bakery_te('driver.loading_order_details'); ?></div>
-            <div class="order-details-content" style="display: none;"></div>
         </div>
     </article>
     <?php
@@ -435,7 +448,7 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
         <div class="route-prep-stop-top">
             <span class="route-prep-stop-num" aria-hidden="true"><?php echo (int)$stop['route_order'] ?: ($index + 1); ?></span>
             <div class="route-prep-stop-body">
-                <strong class="route-prep-stop-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, $routeUser); ?></strong>
+                <strong class="route-prep-stop-name"><?php echo htmlspecialchars($stop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($stop, $selectedDate, function_exists('bakery_current_user') ? bakery_current_user() : null); ?></strong>
                 <p class="route-prep-stop-address"><?php echo htmlspecialchars($stop['customer_address'] ?: bakery_t('driver.no_address_short')); ?></p>
                 <p class="route-prep-stop-meta">
                     <?php if (!empty($stop['zone'])): ?><span><?php echo htmlspecialchars($stop['zone']); ?></span><?php endif; ?>
@@ -519,6 +532,7 @@ if ($selectedDriverId > 0 && $driver) {
 
         $stmt->execute([$selectedDriverId, $selectedDate]);
         $results = $stmt->fetchAll();
+        $routeLinesByOrder = bakery_driver_route_stop_lines($db, (int)$selectedDriverId, $selectedDate);
         $officeFlaggedOrders = function_exists('bakery_delivery_empty_flagged_order_ids')
             ? bakery_delivery_empty_flagged_order_ids($db, $selectedDate)
             : [];
@@ -554,6 +568,7 @@ if ($selectedDriverId > 0 && $driver) {
                 'assignment_id' => (int)($row['assignment_id'] ?? 0),
                 'total_amount' => $row['total_amount'],
                 'ordered_pieces' => (int)($row['ordered_pieces'] ?? 0),
+                'lines' => $routeLinesByOrder[(int)$row['daily_order_id']] ?? [],
                 'order_notes' => trim((string)($row['order_notes'] ?? '')),
                 'assignment_notes' => trim((string)($row['assignment_notes'] ?? '')),
                 'driver_id' => $row['driver_id'],
@@ -630,6 +645,8 @@ $page_title = $driver
     ? bakery_t($routePrepMode ? 'page.driver_prep' : 'page.driver_route', ['name' => $driver['name']])
     : bakery_t('page.driver');
 $mapsReady = defined('MAPS_ENABLED') && MAPS_ENABLED && defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== '';
+// Samsung Internet and Chrome auto-dark recolor the map, photo, and status chips.
+$pageColorScheme = 'light';
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
@@ -640,11 +657,33 @@ $progressPct = $totalStops > 0 ? round(($driverCompletedStops / $totalStops) * 1
 <link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/driver.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
+<script src="<?php echo bakery_asset_href('includes/driver_route.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_offline_outbox.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_delivery.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_map.js'); ?>" defer></script>
 <script src="<?php echo bakery_asset_href('includes/driver_route_prep.js'); ?>" defer></script>
 <script>
+window.DriverDataSaver = (function () {
+    var key = 'bakeryDriverDataSaver';
+    var pref = null;
+    try { pref = window.localStorage.getItem(key); } catch (e) {}
+    var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    var auto = !!(conn && (conn.saveData || /^(slow-2g|2g|3g)$/.test(String(conn.effectiveType || ''))));
+    var active = pref === 'on' ? true : (pref === 'off' ? false : auto);
+    document.documentElement.classList.toggle('driver-data-saver', active);
+    return {
+        active: active,
+        auto: auto,
+        pref: pref === 'on' || pref === 'off' ? pref : 'auto',
+        set: function (mode) {
+            try {
+                if (mode === 'on' || mode === 'off') window.localStorage.setItem(key, mode);
+                else window.localStorage.removeItem(key);
+            } catch (e) {}
+            window.location.reload();
+        }
+    };
+})();
 document.body.classList.add('driver-workflow-page');
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
@@ -691,7 +730,6 @@ document.body.classList.add('driver-route-prep');
             <div class="route-identity">
                 <span class="route-live-dot" aria-hidden="true"></span>
                 <div class="route-driver-label"><?php echo htmlspecialchars($driver['name']); ?></div>
-                <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
             </div>
             <?php if (!$isAuthenticatedDriver): ?>
             <a class="route-change-link" href="?change_driver=1&amp;date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('driver.change_driver'); ?></a>
@@ -704,6 +742,20 @@ document.body.classList.add('driver-route-prep');
         </div>
         <?php endif; ?>
     </header>
+
+    <div class="now-strip" id="nowStrip">
+        <button type="button" class="now-strip-date" id="nowStripDate" aria-controls="routeDateDisclosure" aria-expanded="false" aria-label="<?php echo htmlspecialchars(bakery_t('nav.choose_route_date'), ENT_QUOTES, 'UTF-8'); ?>">
+            <span class="now-strip-date-kind"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
+            <strong><?php echo htmlspecialchars($selectedDateObject->format('M j'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </button>
+        <span class="now-strip-progress" id="nowStripProgress" aria-live="polite"<?php echo $totalStops > 0 ? '' : ' hidden'; ?>><?php echo (int)$driverCompletedStops; ?>/<?php echo (int)$totalStops; ?></span>
+        <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
+        <button type="button" class="now-strip-refresh" id="nowStripRefresh" hidden><?php bakery_te('driver.route_changed_refresh'); ?></button>
+        <div class="now-strip-views" role="group" aria-label="<?php echo htmlspecialchars(bakery_t('driver.view_switch_aria'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo $routePrepMode ? ' hidden' : ''; ?>>
+            <button type="button" class="now-strip-view" data-route-view-target="now" aria-pressed="true"><?php bakery_te('driver.view_now'); ?></button>
+            <button type="button" class="now-strip-view" data-route-view-target="route" aria-pressed="false"><?php bakery_te('driver.view_route'); ?></button>
+        </div>
+    </div>
 
     <nav class="route-day-nav route-day-nav--<?php echo htmlspecialchars($routeDateKind, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.route_day_nav_aria'), ENT_QUOTES, 'UTF-8'); ?>">
         <a class="route-day-nav-arrow route-day-nav-prev js-day-link"
@@ -854,6 +906,9 @@ document.body.classList.add('driver-route-prep');
                 <p class="route-map-fallback"><?php bakery_te('driver.map_unavailable'); ?></p>
                 <?php endif; ?>
             </div>
+            <?php if ($mapsReady): ?>
+            <button type="button" class="route-map-load" id="routeMapLoad" hidden><?php bakery_te('driver.show_map'); ?></button>
+            <?php endif; ?>
             <p class="route-map-unmapped" id="routeMapUnmapped" hidden></p>
             <div class="route-map-sheet" id="routeMapSheet" hidden>
                 <div class="route-map-sheet-top">
@@ -972,6 +1027,7 @@ document.body.classList.add('driver-route-prep');
         </div>
         <?php endif; ?>
     </section>
+    <div class="now-capture-host" id="nowCaptureHost" hidden></div>
 
     <section class="route-done-banner" id="routeDoneBanner" <?php echo $nextStop ? 'hidden' : ''; ?>>
         <h2><?php bakery_te('driver.route_complete'); ?></h2>
@@ -1047,12 +1103,16 @@ document.body.classList.add('driver-route-prep');
                     class="route-adjust-toggle"
                     id="routeAdjustToggle"
                     aria-pressed="false"
-                    <?php echo $remainingStops > 1 ? '' : 'hidden'; ?>><?php bakery_te('driver.adjust_route'); ?></button>
+                    <?php echo $remainingStops > 1 ? '' : 'hidden'; ?>><?php bakery_te('driver.reorder'); ?></button>
+                <?php if ($mapsReady): ?>
+                <button type="button" class="route-suggest-btn" id="routeSuggestBtn" <?php echo $remainingStops >= 3 ? '' : 'hidden'; ?>><?php bakery_te('driver.suggest_order'); ?></button>
+                <?php endif; ?>
                 <span class="stop-list-count"><strong id="queueCount"><?php echo (int)$remainingStops; ?></strong> <?php bakery_te('driver.remaining'); ?></span>
             </div>
         </div>
         <p class="stop-list-helper" id="stopListHint"><?php bakery_te('driver.stop_list_hint'); ?></p>
         <p class="stop-list-helper stop-list-adjust-hint"><?php bakery_te('driver.adjust_hint'); ?></p>
+        <div class="route-suggest-preview" id="routeSuggestPreview" role="status" aria-live="polite" hidden></div>
         <div class="stop-list" id="stopList">
             <?php
             foreach ($orderedStops as $stop):
@@ -1229,6 +1289,19 @@ document.body.classList.add('driver-route-prep');
                         <input type="file" id="deliveryFileInput" accept="image/*" capture="environment" hidden>
                         <input type="file" id="deliveryGalleryInput" accept="image/*" hidden>
                     </div>
+                    <p class="delivery-camera-tip" id="deliveryCameraTip" hidden>
+                        <span><?php bakery_te('driver.camera_tip_ios'); ?></span>
+                        <button type="button" class="delivery-camera-tip-close" data-dismiss-tip><?php bakery_te('driver.camera_tip_ok'); ?></button>
+                    </p>
+                    <div class="delivery-no-photo" id="deliveryNoPhotoReasons" hidden>
+                        <p class="delivery-no-photo-title"><?php bakery_te('driver.no_photo_why'); ?></p>
+                        <div class="delivery-no-photo-chips">
+                            <button type="button" class="delivery-no-photo-chip" data-proof-skip-reason="camera_broken"><?php bakery_te('driver.no_photo_reason_camera_broken'); ?></button>
+                            <button type="button" class="delivery-no-photo-chip" data-proof-skip-reason="customer_declined"><?php bakery_te('driver.no_photo_reason_customer_declined'); ?></button>
+                            <button type="button" class="delivery-no-photo-chip" data-proof-skip-reason="no_safe_spot"><?php bakery_te('driver.no_photo_reason_no_safe_spot'); ?></button>
+                        </div>
+                        <button type="button" class="delivery-no-photo-cancel" data-no-photo-cancel><?php bakery_te('driver.no_photo_take_one'); ?></button>
+                    </div>
                     <textarea id="deliveryPhotoNotes" rows="2" placeholder="<?php echo htmlspecialchars(bakery_t('driver.photo_note_placeholder'), ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo_notes')); ?>"></textarea>
                     <div class="photo-upload-progress" id="deliveryPhotoProgress">
                         <div class="photo-upload-progress-bar"><div class="photo-upload-progress-fill" id="deliveryPhotoProgressFill"></div></div>
@@ -1247,6 +1320,16 @@ document.body.classList.add('driver-route-prep');
             </div>
 
             <div class="delivery-step-panel" id="deliveryStepDelivery" data-step-panel="delivery" hidden>
+                <div class="delivery-inline-proof" id="deliveryInlineProof" data-proof-state="" hidden>
+                    <img id="deliveryInlineThumb" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
+                    <span class="delivery-inline-proof-label" id="deliveryInlineProofLabel" aria-live="polite"></span>
+                    <button type="button" class="delivery-inline-retake" id="deliveryInlineRetake"><?php bakery_te('driver.retake'); ?></button>
+                </div>
+                <p class="delivery-totals-line" id="deliveryTotalsLine">
+                    <span id="deliveryTotalsText"></span>
+                    <button type="button" class="delivery-totals-adjust" id="deliveryTotalsAdjust" aria-controls="deliveryAdjustDetails" aria-expanded="false"><?php bakery_te('driver.adjust'); ?></button>
+                    <button type="button" class="delivery-see-invoice" id="deliverySeeInvoice"><?php bakery_te('driver.see_invoice'); ?></button>
+                </p>
                 <section class="delivery-confirmation" id="deliveryConfirmation" aria-label="<?php echo htmlspecialchars(bakery_t('driver.confirm_delivery_quantities')); ?>">
                     <div class="delivery-confirmation-heading">
                         <div><strong><?php bakery_te('driver.confirm_delivery'); ?></strong><span id="deliveryConfirmationHint"><?php bakery_te('driver.confirm_delivery_hint'); ?></span></div>
@@ -1349,7 +1432,7 @@ document.body.classList.add('driver-route-prep');
                 <button type="button" class="btn btn-outline delivery-wizard-back" id="deliveryWizardBackBtn" hidden><?php bakery_te('driver.back'); ?></button>
                 <button type="button" class="btn btn-outline delivery-wizard-skip" id="deliveryWizardSkipBtn"><?php bakery_te('driver.skip_photo'); ?></button>
                 <button type="button" class="btn btn-outline fail-stop-btn" id="deliveryWizardFailBtn"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
-                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.save_and_leave_photo'); ?></button>
+                <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.delivered'); ?></button>
             </div>
 
             <div class="delivery-invoice-footer-actions" id="deliveryInvoiceFooterActions" hidden>
@@ -1404,9 +1487,15 @@ document.body.classList.add('driver-route-prep');
 <div id="failStopModal" class="exception-desk-modal" hidden aria-hidden="true" role="dialog" aria-labelledby="failStopModalTitle">
     <div class="exception-desk-modal__backdrop" id="failStopModalBackdrop"></div>
     <div class="exception-desk-modal__content exception-desk exception-desk--driver">
-        <h2 id="failStopModalTitle"><?php bakery_te('exception_desk.cant_deliver'); ?></h2>
+        <h2 id="failStopModalTitle"><?php bakery_te('driver.problem_title'); ?></h2>
         <p class="exception-desk__who" id="failStopModalCustomer"></p>
-        <p class="exception-desk__detail"><?php bakery_te('exception_desk.driver_prompt'); ?></p>
+        <div class="problem-sheet-actions" id="problemSheetActions">
+            <button type="button" class="problem-chip" data-problem-action="not_on_route"><?php bakery_te('driver.problem_not_on_route'); ?></button>
+            <button type="button" class="problem-chip" data-problem-action="different_amount"><?php bakery_te('driver.problem_different_amount'); ?></button>
+            <button type="button" class="problem-chip" data-problem-action="empty_order"><?php bakery_te('driver.problem_empty_order'); ?></button>
+        </div>
+        <p class="problem-sheet-error" id="problemSheetError" hidden role="alert"></p>
+        <p class="exception-desk__detail"><?php bakery_te('driver.problem_cant_deliver_prompt'); ?></p>
         <form id="failStopForm">
             <?php echo bakery_exception_desk_csrf(); ?>
             <input type="hidden" name="action" value="report_failed_stop">
@@ -1455,7 +1544,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'delivery_invoice' => bakery_t('driver.delivery_invoice'),
     'continue_to_delivery' => bakery_t('driver.continue_to_delivery'),
     'directions' => bakery_t('driver.directions'),
-    'arrival_saved' => bakery_t('driver.photo_saved_add_departure'),
+    'arrival_saved' => bakery_t('driver.arrival_photo_saved'),
     'continue' => bakery_t('driver.continue'),
     'review_invoice' => bakery_t('driver.review_invoice'),
     'save_delivery' => bakery_t('driver.save_delivery'),
@@ -1506,6 +1595,10 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'prep_on_other' => bakery_t('driver.prep_on_other'),
     'prep_pieces' => bakery_t('driver.prep_pieces', ['count' => '__COUNT__']),
     'prep_saving' => bakery_t('driver.prep_saving'),
+    'prep_stops' => bakery_t('driver.prep_stops', ['count' => '__COUNT__']),
+    'prep_move_up' => bakery_t('driver.prep_move_up'),
+    'prep_move_down' => bakery_t('driver.prep_move_down'),
+    'prep_remove' => bakery_t('driver.prep_remove'),
     'route_map' => bakery_t('driver.route_map'),
     'map_me' => bakery_t('driver.map_me'),
     'map_follow' => bakery_t('driver.map_follow'),
@@ -1680,1502 +1773,50 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'past_stops' => bakery_t('driver.past_stops'),
     'total_prefix' => bakery_t('driver.total_prefix'),
     'cash_collected_prefix' => bakery_t('driver.cash_collected_prefix'),
+    'delivered' => bakery_t('driver.delivered'),
+    'saving_photo' => bakery_t('driver.saving_photo'),
+    'no_photo' => bakery_t('driver.no_photo'),
+    'no_photo_reason_camera_broken' => bakery_t('driver.no_photo_reason_camera_broken'),
+    'no_photo_reason_customer_declined' => bakery_t('driver.no_photo_reason_customer_declined'),
+    'no_photo_reason_no_safe_spot' => bakery_t('driver.no_photo_reason_no_safe_spot'),
+    'totals_as_ordered' => bakery_t('driver.totals_as_ordered', ['count' => ':count']),
+    'totals_delivering' => bakery_t('driver.totals_delivering', ['count' => ':count']),
+    'im_here' => bakery_t('driver.im_here'),
+    'problem' => bakery_t('driver.problem'),
+    'view_now' => bakery_t('driver.view_now'),
+    'view_route' => bakery_t('driver.view_route'),
+    'make_next' => bakery_t('driver.make_next'),
+    'move_up' => bakery_t('driver.move_up'),
+    'move_down' => bakery_t('driver.move_down'),
+    'stop_problem_aria' => bakery_t('driver.stop_problem_aria'),
+    'lines_more' => bakery_t('driver.lines_more', ['count' => ':count']),
+    'done_row' => bakery_t('driver.done_row', ['count' => ':count']),
+    'reorder' => bakery_t('driver.reorder'),
+    'suggest_order' => bakery_t('driver.suggest_order'),
+    'suggest_preview' => bakery_t('driver.suggest_preview', ['moves' => ':moves', 'minutes' => ':minutes']),
+    'suggest_no_gain' => bakery_t('driver.suggest_no_gain'),
+    'suggest_window_flag' => bakery_t('driver.suggest_window_flag', ['names' => ':names']),
+    'suggest_accept' => bakery_t('driver.suggest_accept'),
+    'suggest_dismiss' => bakery_t('driver.suggest_dismiss'),
+    'suggest_failed' => bakery_t('driver.suggest_failed'),
+    'load_van' => bakery_t('driver.load_van'),
+    'load_van_done' => bakery_t('driver.load_van_done'),
+    'not_on_route_reason' => bakery_t('driver.problem_not_on_route_reason'),
+    'route_updated' => bakery_t('driver.route_updated'),
+    'data_saver_on' => bakery_t('driver.data_saver_on'),
+    'data_saver_off' => bakery_t('driver.data_saver_off'),
+    'maps_app_google' => bakery_t('driver.maps_app_google'),
+    'maps_app_apple' => bakery_t('driver.maps_app_apple'),
 ], JSON_UNESCAPED_UNICODE); ?>;
-(function () {
-    var di = window.__DRIVER_PAGE_I18N__ || {};
-    function mapsDirectionsUrl(address, lat, lng) {
-        var q = '';
-        var nlat = Number(lat);
-        var nlng = Number(lng);
-        if (Number.isFinite(nlat) && Number.isFinite(nlng)
-            && nlat >= -90 && nlat <= 90
-            && nlng >= -180 && nlng <= 180
-            && !(nlat === 0 && nlng === 0)) {
-            q = encodeURIComponent(nlat + ',' + nlng);
-        } else if (address) {
-            q = encodeURIComponent(address);
-        }
-        if (!q) return '';
-        var ua = navigator.userAgent || '';
-        if (/iPhone|iPad|iPod/i.test(ua)) {
-            return 'https://maps.apple.com/?daddr=' + q + '&dirflg=d';
-        }
-        return 'https://www.google.com/maps/dir/?api=1&destination=' + q + '&travelmode=driving';
-    }
-
-    function applyNavigateLinks(root) {
-        (root || document).querySelectorAll('.js-navigate-link[data-address]').forEach(function (link) {
-            var url = mapsDirectionsUrl(
-                link.getAttribute('data-address') || '',
-                link.getAttribute('data-lat'),
-                link.getAttribute('data-lng')
-            );
-            if (url) link.setAttribute('href', url);
-        });
-    }
-
-    function phoneHref(phone) {
-        var digits = String(phone || '').replace(/\D+/g, '');
-        return digits ? 'tel:' + digits : '';
-    }
-
-    function escapeHtml(str) {
-        return String(str || '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
-
-    function openStopDeliveryFromEl(stop, opts) {
-        opts = opts || {};
-        if (document.body.classList.contains('route-adjust-open')) {
-            return false;
-        }
-        if (!stop || !window.DriverDelivery || typeof window.DriverDelivery.openModal !== 'function') {
-            return false;
-        }
-        var status = stop.getAttribute('data-status') || '';
-        if (status === 'cancelled') {
-            return false;
-        }
-        var photoBtn = stop.querySelector('.photo-complete-btn');
-        var root = document.getElementById('driverRouteRoot');
-        var dailyOrderId = parseInt(stop.getAttribute('data-daily-order-id') || '0', 10);
-        if (!dailyOrderId) {
-            return false;
-        }
-        window.DriverDelivery.openModal({
-            driverId: parseInt(
-                (photoBtn && photoBtn.getAttribute('data-driver-id')) ||
-                (root && root.getAttribute('data-driver-id')) ||
-                '0',
-                10
-            ),
-            driverName:
-                (photoBtn && photoBtn.getAttribute('data-driver-name')) ||
-                (root && root.getAttribute('data-driver-name')) ||
-                '',
-            customerId: parseInt(stop.getAttribute('data-customer-id') || '0', 10),
-            dailyOrderId: dailyOrderId,
-            customerName: stop.getAttribute('data-customer-name') || '',
-            address: stop.getAttribute('data-address') || '',
-            date:
-                (photoBtn && photoBtn.getAttribute('data-date')) ||
-                (root && root.getAttribute('data-date')) ||
-                '',
-            photoMode:
-                (photoBtn && photoBtn.getAttribute('data-photo-mode')) ||
-                (status === 'delivered' ? 'review' : 'capture'),
-            expandOrders: !!opts.expandOrders,
-            autoOpenCamera: !!opts.autoOpenCamera
-        });
-        return true;
-    }
-
-    function tryOpenStopFromUrl() {
-        var params = new URLSearchParams(window.location.search);
-        if (params.get('open_stop') !== '1') {
-            return;
-        }
-        var orderId = parseInt(params.get('daily_order_id') || '0', 10);
-        if (!orderId) {
-            return;
-        }
-        var expandOrders = params.get('view_orders') === '1';
-        var stop = document.querySelector('.stop-item[data-daily-order-id="' + orderId + '"]');
-        if (!stop || !openStopDeliveryFromEl(stop, { expandOrders: expandOrders })) {
-            return;
-        }
-        params.delete('open_stop');
-        params.delete('view_orders');
-        params.delete('daily_order_id');
-        var qs = params.toString();
-        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
-    }
-
-    function loadOrderDetails(container, dailyOrderId) {
-        var loadingDiv = container.querySelector('.order-details-loading');
-        var contentDiv = container.querySelector('.order-details-content');
-        if (container.style.display === 'block') {
-            container.style.display = 'none';
-            return;
-        }
-        container.style.display = 'block';
-        if (loadingDiv) loadingDiv.style.display = 'block';
-        if (contentDiv) {
-            contentDiv.style.display = 'none';
-            contentDiv.innerHTML = '';
-        }
-
-        fetch('get_customer_order_details.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'daily_order_id=' + encodeURIComponent(String(dailyOrderId || 0))
-        })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (loadingDiv) loadingDiv.style.display = 'none';
-                if (!contentDiv) return;
-                contentDiv.style.display = 'block';
-                if (!data || !data.success) {
-                    var err = (data && (data.error || data.message)) || di.order_details_error;
-                    contentDiv.innerHTML = '<div class="no-products">Error: ' + escapeHtml(err) + '</div>';
-                    return;
-                }
-                if (data.html) {
-                    contentDiv.innerHTML = data.html;
-                    return;
-                }
-                displayInlineOrderDetails(contentDiv, data.products || []);
-            })
-            .catch(function () {
-                if (loadingDiv) loadingDiv.style.display = 'none';
-                if (contentDiv) {
-                    contentDiv.style.display = 'block';
-                    contentDiv.innerHTML = '<div class="no-products">' + escapeHtml(di.order_details_load_error) + '</div>';
-                }
-            });
-    }
-
-    function displayInlineOrderDetails(container, products) {
-        if (!products || !products.length) {
-            container.innerHTML = '<div class="no-products">' + escapeHtml(di.no_products_found) + '</div>';
-            return;
-        }
-        var html = '<div class="product-groups">';
-        products.forEach(function (product) {
-            var totalPrice = product.line_total
-                ? parseFloat(product.line_total).toFixed(2)
-                : (product.quantity * product.unit_price).toFixed(2);
-            html +=
-                '<div class="product-item">' +
-                '<div class="product-details">' +
-                '<div class="product-name">' + escapeHtml(product.product_name || di.unknown_product) + '</div>' +
-                '<div class="product-meta">' +
-                escapeHtml(product.product_line || product.product_line_name || di.other) +
-                ' · ' +
-                escapeHtml(product.dough_type || product.dough_type_name || di.standard) +
-                '</div></div>' +
-                '<div class="product-info">' +
-                '<span class="quantity">×' + escapeHtml(String(product.quantity || 0)) + '</span>' +
-                '<span class="total-price">$' + totalPrice + '</span>' +
-                '</div></div>';
-        });
-        html += '</div>';
-        container.innerHTML = html;
-    }
-
-    function getActiveStops() {
-        return Array.prototype.slice.call(document.querySelectorAll('#stopList .stop-item')).filter(function (el) {
-            var status = el.getAttribute('data-status') || '';
-            return status !== 'delivered' && status !== 'cancelled' && status !== 'failed' && status !== 'office_flag';
-        });
-    }
-
-    function renderNextStop(stopEl) {
-        var card = document.getElementById('nextStopCard');
-        var done = document.getElementById('routeDoneBanner');
-        var stickyDock = document.getElementById('routeStickyDock');
-        var stickyInner = document.getElementById('routeStickyDockInner');
-        if (!card) return;
-
-        if (!stopEl) {
-            card.hidden = true;
-            card.innerHTML = '';
-            if (done) done.hidden = false;
-            if (stickyDock) {
-                stickyDock.hidden = true;
-                stickyDock.setAttribute('aria-hidden', 'true');
-            }
-            if (stickyInner) stickyInner.innerHTML = '';
-            document.body.classList.remove('route-has-sticky-dock');
-            return;
-        }
-        if (done) done.hidden = true;
-        card.hidden = false;
-
-        var name = stopEl.getAttribute('data-customer-name') || '';
-        var address = stopEl.getAttribute('data-address') || '';
-        var phone = stopEl.getAttribute('data-phone') || '';
-        var zone = stopEl.getAttribute('data-zone') || '';
-        var routeOrder = stopEl.getAttribute('data-route-order') || '';
-        var orderedPieces = stopEl.getAttribute('data-ordered-pieces') || '0';
-        var stopNotes = stopEl.getAttribute('data-stop-notes') || '';
-        var receivingHours = stopEl.getAttribute('data-receiving-hours') || '';
-        var scheduledTime = stopEl.getAttribute('data-scheduled-time') || '';
-        var status = stopEl.getAttribute('data-status') || 'pending';
-        var customerId = stopEl.getAttribute('data-customer-id') || '0';
-        var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
-        var root = document.getElementById('driverRouteRoot');
-        var driverId = root ? root.getAttribute('data-driver-id') : '0';
-        var driverName = root ? root.getAttribute('data-driver-name') || '' : '';
-        var date = root ? root.getAttribute('data-date') : '';
-        var stopLat = stopEl.getAttribute('data-lat') || '';
-        var stopLng = stopEl.getAttribute('data-lng') || '';
-        var maps = mapsDirectionsUrl(address, stopLat, stopLng);
-        var tel = phoneHref(phone);
-        var statusLabel = di['status_' + status] || status;
-
-        var metaParts = [];
-        if (zone) metaParts.push('<span>' + escapeHtml(zone) + '</span>');
-        if (receivingHours) metaParts.push('<span>' + escapeHtml(receivingHours) + '</span>');
-        if (scheduledTime) metaParts.push('<span>' + escapeHtml(scheduledTime) + '</span>');
-        if (parseInt(orderedPieces, 10) > 0) {
-            metaParts.push('<span>' + di.pieces_ordered.replace('__COUNT__', escapeHtml(orderedPieces)) + '</span>');
-        }
-
-        var assignmentId = stopEl.getAttribute('data-assignment-id') || '0';
-        var canAdjust = getActiveStops().length > 1;
-        var actions =
-            '<div class="next-stop-actions-primary">' +
-            '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' +
-            ' data-driver-id="' +
-            escapeHtml(driverId) +
-            '" data-driver-name="' +
-            escapeHtml(driverName) +
-            '" data-customer-id="' +
-            escapeHtml(customerId) +
-            '" data-daily-order-id="' +
-            escapeHtml(dailyOrderId) +
-            '" data-assignment-id="' +
-            escapeHtml(assignmentId) +
-            '" data-customer-name="' +
-            escapeHtml(name) +
-            '" data-address="' +
-            escapeHtml(address) +
-            '" data-date="' +
-            escapeHtml(date) +
-            '">' + escapeHtml(di.arrival_photo) + '</button>' +
-            (maps
-                ? '<a class="route-btn route-btn--navigate js-navigate-link" href="' +
-                  maps +
-                  '" data-address="' +
-                  escapeHtml(address) +
-                  '" data-lat="' +
-                  escapeHtml(stopLat) +
-                  '" data-lng="' +
-                  escapeHtml(stopLng) +
-                  '" target="_blank" rel="noopener">' + escapeHtml(di.directions) + '</a>'
-                : '') +
-            '</div>' +
-            '<details class="next-stop-more"><summary class="next-stop-more-toggle">' +
-            escapeHtml(di.more_actions || 'More') +
-            '</summary><div class="next-stop-more-body">' +
-            (tel ? '<a class="route-btn route-btn--call" href="' + tel + '">' + escapeHtml(di.call_store) + '</a>' : '') +
-            '<button type="button" class="route-btn route-btn--skip skip-stop-btn"' +
-            ' data-daily-order-id="' +
-            escapeHtml(dailyOrderId) +
-            '" data-customer-name="' +
-            escapeHtml(name) +
-            '">' + escapeHtml(di.skip_stop) + '</button>' +
-            '<button type="button" class="route-btn fail-stop-btn"' +
-            ' data-daily-order-id="' + escapeHtml(dailyOrderId) +
-            '" data-assignment-id="' + escapeHtml(assignmentId) +
-            '" data-customer-name="' + escapeHtml(name) +
-            '">' + escapeHtml(di.cant_deliver || 'Need HQ to recover') + '</button>' +
-            (canAdjust
-                ? '<button type="button" class="route-btn route-btn--adjust change-next-btn">' + escapeHtml(di.adjust_route) + '</button>'
-                : '') +
-            '</div></details>';
-        card.innerHTML =
-            '<p class="next-stop-eyebrow"><span>' + escapeHtml(di.next_stop) +
-            (routeOrder ? ' · #' + escapeHtml(routeOrder) : '') +
-            '</span>' +
-            (canAdjust
-                ? '<button type="button" class="change-next-btn" id="changeNextStopBtn">' + escapeHtml(di.change_next) + '</button>'
-                : '') +
-            '</p>' +
-            '<div class="next-stop-heading-row">' +
-            '<h2 class="next-stop-store">' +
-            escapeHtml(name) +
-            '</h2>' +
-            '<span class="status-badge status-badge--' +
-            escapeHtml(status) +
-            '" id="nextStopStatus">' +
-            escapeHtml(statusLabel) +
-            '</span></div>' +
-            '<p class="next-stop-address">' +
-            escapeHtml(address || di.no_address) +
-            '</p>' +
-            (tel
-                ? '<a class="next-stop-phone" href="' +
-                  tel +
-                  '">' +
-                  escapeHtml(phone) +
-                  '</a>'
-                : '') +
-            (metaParts.length
-                ? '<div class="next-stop-meta" id="nextStopMeta">' + metaParts.join('') + '</div>'
-                : '') +
-            (stopNotes
-                ? '<div class="next-stop-notes" id="nextStopNotes"><strong>' + escapeHtml(di.delivery_notes) + '</strong><p>' +
-                  escapeHtml(stopNotes).replace(/\n/g, '<br>') +
-                  '</p></div>'
-                : '') +
-            '<div class="next-stop-actions">' +
-            actions +
-            '</div>' +
-            '<button type="button" class="next-stop-details-toggle" data-daily-order-id="' +
-            escapeHtml(dailyOrderId) +
-            '" data-customer-id="' +
-            escapeHtml(customerId) +
-            '">' + escapeHtml(di.what_delivering) + '</button>' +
-            '<div class="order-details-container next-stop-order-details" style="display:none;">' +
-            '<div class="order-details-loading">' + escapeHtml(di.loading_order) + '</div>' +
-            '<div class="order-details-content" style="display:none;"></div></div>';
-
-        applyNavigateLinks(card);
-        if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
-            window.DriverDelivery.bindPhotoButtons(card);
-        }
-        bindSkipStopButtons(card);
-        bindFailStopButtons(card);
-
-        if (stickyDock && stickyInner) {
-            stickyDock.hidden = false;
-            stickyDock.setAttribute('aria-hidden', 'false');
-            stickyInner.innerHTML =
-                '<button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn"' +
-                ' data-driver-id="' +
-                escapeHtml(driverId) +
-                '" data-driver-name="' +
-                escapeHtml(driverName) +
-                '" data-customer-id="' +
-                escapeHtml(customerId) +
-                '" data-daily-order-id="' +
-                escapeHtml(dailyOrderId) +
-                '" data-customer-name="' +
-                escapeHtml(name) +
-                '" data-address="' +
-                escapeHtml(address) +
-                '" data-date="' +
-                escapeHtml(date) +
-                '">' + escapeHtml(di.arrival_photo) + '</button>' +
-                (maps
-                    ? '<a class="route-sticky-btn route-sticky-btn--nav js-navigate-link" href="' +
-                      maps +
-                      '" data-address="' +
-                      escapeHtml(address) +
-                      '" data-lat="' +
-                      escapeHtml(stopLat) +
-                      '" data-lng="' +
-                      escapeHtml(stopLng) +
-                      '" target="_blank" rel="noopener">' + escapeHtml(di.directions) + '</a>'
-                    : '');
-            applyNavigateLinks(stickyInner);
-            if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
-                window.DriverDelivery.bindPhotoButtons(stickyInner);
-            }
-            document.body.classList.add('route-has-sticky-dock');
-        }
-    }
-
-    function showSuccessToast(message) {
-        var toast = document.getElementById('routeSuccessToast');
-        if (!toast) return;
-        toast.textContent = message || di.delivery_saved;
-        toast.hidden = false;
-        toast.classList.add('is-visible');
-        clearTimeout(showSuccessToast._timer);
-        showSuccessToast._timer = setTimeout(function () {
-            toast.classList.remove('is-visible');
-            toast.hidden = true;
-        }, 4200);
-    }
-
-    function routeOrderValue(stopEl) {
-        var raw = stopEl ? stopEl.getAttribute('data-route-order') || '' : '';
-        var num = parseInt(String(raw), 10);
-        return isNaN(num) ? Number.MAX_SAFE_INTEGER : num;
-    }
-
-    function sortStopsByRouteOrder(listEl) {
-        if (!listEl) return;
-        var items = Array.prototype.slice.call(listEl.querySelectorAll('.stop-item'));
-        items.sort(function (a, b) {
-            return routeOrderValue(a) - routeOrderValue(b);
-        });
-        items.forEach(function (el) {
-            listEl.appendChild(el);
-        });
-    }
-
-    function findRouteStop(dailyOrderId) {
-        var selector = '.stop-item[data-daily-order-id="' + String(dailyOrderId) + '"]';
-        return document.querySelector('#pastStopsList ' + selector)
-            || document.querySelector('#stopList ' + selector);
-    }
-
-    function moveStopToPastList(stopEl) {
-        var pastList = document.getElementById('pastStopsList');
-        if (!stopEl || !pastList) return;
-        stopEl.classList.remove('stop-item--next', 'stop-item--upcoming');
-        stopEl.classList.add('stop-item--past');
-        pastList.appendChild(stopEl);
-        sortStopsByRouteOrder(pastList);
-    }
-
-    function moveStopToActiveList(stopEl) {
-        var activeList = document.getElementById('stopList');
-        if (!stopEl || !activeList) return;
-        stopEl.classList.remove('stop-item--past', 'stop-item--skipped');
-        activeList.appendChild(stopEl);
-        sortStopsByRouteOrder(activeList);
-    }
-
-    function rebuildStopContactActions(stopEl) {
-        var actions = stopEl.querySelector('.contact-actions');
-        if (!actions) return;
-        var status = stopEl.getAttribute('data-status') || 'pending';
-        var isDone = status === 'delivered' || status === 'cancelled' || status === 'failed';
-        var address = stopEl.getAttribute('data-address') || '';
-        var phone = stopEl.getAttribute('data-phone') || '';
-        var name = stopEl.getAttribute('data-customer-name') || '';
-        var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
-        var customerId = stopEl.getAttribute('data-customer-id') || '0';
-        var root = document.getElementById('driverRouteRoot');
-        var driverId = root ? root.getAttribute('data-driver-id') || '0' : '0';
-        var driverName = root ? root.getAttribute('data-driver-name') || '' : '';
-        var date = root ? root.getAttribute('data-date') || '' : '';
-        var stopLat = stopEl.getAttribute('data-lat') || '';
-        var stopLng = stopEl.getAttribute('data-lng') || '';
-        var maps = mapsDirectionsUrl(address, stopLat, stopLng);
-        var tel = phoneHref(phone);
-        var html = '';
-
-        if (!isDone && maps) {
-            html += '<a class="contact-link contact-link--address js-navigate-link" href="' + maps +
-                '" data-address="' + escapeHtml(address) +
-                '" data-lat="' + escapeHtml(stopLat) +
-                '" data-lng="' + escapeHtml(stopLng) +
-                '" target="_blank" rel="noopener">' + escapeHtml(di.navigate) + '</a>';
-        }
-        if (status === 'delivered') {
-            html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
-                ' data-driver-id="' + escapeHtml(driverId) + '"' +
-                ' data-driver-name="' + escapeHtml(driverName) + '"' +
-                ' data-customer-id="' + escapeHtml(customerId) + '"' +
-                ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '"' +
-                ' data-customer-name="' + escapeHtml(name) + '"' +
-                ' data-address="' + escapeHtml(address) + '"' +
-                ' data-date="' + escapeHtml(date) + '">' +
-                escapeHtml(di.view_invoice_photos) + '</button>';
-        } else if (!isDone) {
-            html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="capture"' +
-                ' data-driver-id="' + escapeHtml(driverId) + '"' +
-                ' data-driver-name="' + escapeHtml(driverName) + '"' +
-                ' data-customer-id="' + escapeHtml(customerId) + '"' +
-                ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '"' +
-                ' data-customer-name="' + escapeHtml(name) + '"' +
-                ' data-address="' + escapeHtml(address) + '"' +
-                ' data-date="' + escapeHtml(date) + '">' +
-                escapeHtml(di.photo) + '</button>';
-            html += '<button type="button" class="contact-link stop-orders-btn"' +
-                ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '">' +
-                escapeHtml(di.store_orders) + '</button>';
-        }
-        if (!isDone && tel) {
-            html += '<a class="contact-link contact-link--phone" href="' + tel + '">' + escapeHtml(di.call) + '</a>';
-        }
-        if (!isDone) {
-            html += '<button type="button" class="contact-link contact-link--skip skip-stop-btn"' +
-                ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '"' +
-                ' data-customer-name="' + escapeHtml(name) + '">' +
-                escapeHtml(di.skip_stop) + '</button>';
-            if (status !== 'failed') {
-                html += '<button type="button" class="contact-link fail-stop-btn"' +
-                    ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '"' +
-                    ' data-customer-name="' + escapeHtml(name) + '">' +
-                    escapeHtml(di.cant_deliver || 'Report failed stop') + '</button>';
-            }
-        }
-        if (status === 'cancelled') {
-            stopEl.classList.add('stop-item--skipped');
-            html += '<button type="button" class="contact-link contact-link--unskip unskip-stop-btn"' +
-                ' data-daily-order-id="' + escapeHtml(dailyOrderId) + '"' +
-                ' data-customer-name="' + escapeHtml(name) + '">' +
-                escapeHtml(di.unskip_stop) + '</button>';
-        } else {
-            stopEl.classList.remove('stop-item--skipped');
-        }
-
-        actions.innerHTML = html;
-        applyNavigateLinks(actions);
-        if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
-            window.DriverDelivery.bindPhotoButtons(actions);
-        }
-        bindSkipStopButtons(actions);
-        bindUnskipStopButtons(actions);
-        bindFailStopButtons(actions);
-    }
-
-    function updateStopStatusBadge(stopEl, status) {
-        var badge = stopEl.querySelector('.status-badge');
-        if (!badge) return;
-        var statusLabel = status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-        if (status === 'cancelled' && di.status_cancelled) statusLabel = di.status_cancelled;
-        if (status === 'delivered' && di.status_delivered) statusLabel = di.status_delivered;
-        if (status === 'office_flag' && di.status_office_flag) statusLabel = di.status_office_flag;
-        badge.textContent = statusLabel;
-        badge.className = 'status-badge status-badge--' + status;
-    }
-
-    function getPastStops() {
-        var pastList = document.getElementById('pastStopsList');
-        if (!pastList) return [];
-        return Array.prototype.slice.call(pastList.querySelectorAll('.stop-item'));
-    }
-
-    var routeAdjust = { open: false, picked: [], snapshot: [], saving: false };
-
-    function formatDoneCount(done, total) {
-        var template = di.done_count || ':done / :total done';
-        return String(template).split(':done').join(String(done)).split(':total').join(String(total));
-    }
-
-    function refreshRouteUi() {
-        var list = document.getElementById('stopList');
-        if (!list) return;
-
-        sortStopsByRouteOrder(list);
-        var pastList = document.getElementById('pastStopsList');
-        if (pastList) sortStopsByRouteOrder(pastList);
-
-        var items = Array.prototype.slice.call(list.querySelectorAll('.stop-item'));
-        var nextAssigned = false;
-        items.forEach(function (el) {
-            var status = el.getAttribute('data-status') || '';
-            el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
-            if (status === 'delivered' || status === 'cancelled' || status === 'failed' || status === 'office_flag') {
-                moveStopToPastList(el);
-                return;
-            }
-            if (!nextAssigned) {
-                el.classList.add('stop-item--next');
-                nextAssigned = true;
-            } else {
-                el.classList.add('stop-item--upcoming');
-            }
-        });
-
-        var past = getPastStops();
-        var active = getActiveStops();
-        renderNextStop(active[0] || null);
-
-        var root = document.getElementById('driverRouteRoot');
-        var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
-        var completed = past.length;
-        if (root) root.setAttribute('data-completed', String(completed));
-        var text = document.getElementById('routeProgressText');
-        var fill = document.getElementById('routeProgressFill');
-        var doneLabel = formatDoneCount(completed, total);
-        if (text) text.textContent = doneLabel;
-        if (fill && total > 0) fill.style.width = Math.round((completed / total) * 100) + '%';
-        var mobileText = document.getElementById('routeMobileProgressText');
-        var mobileFill = document.getElementById('routeMobileProgressFill');
-        if (mobileText) mobileText.textContent = doneLabel;
-        if (mobileFill && total > 0) mobileFill.style.width = Math.round((completed / total) * 100) + '%';
-        var progressPercent = document.getElementById('routeProgressPercent');
-        var progressRing = document.querySelector('.route-progress-ring');
-        var completedCount = document.getElementById('routeCompletedCount');
-        var remainingCount = document.getElementById('routeRemainingCount');
-        var totalCount = document.getElementById('routeTotalCount');
-        var pastCount = document.getElementById('routePastCount');
-        var queueCount = document.getElementById('queueCount');
-        var percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-        if (progressPercent) progressPercent.textContent = percent + '%';
-        if (progressRing) progressRing.style.setProperty('--route-progress', percent + '%');
-        if (completedCount) completedCount.textContent = completed;
-        if (remainingCount) remainingCount.textContent = active.length;
-        if (totalCount) totalCount.textContent = total;
-        if (pastCount) pastCount.textContent = past.length;
-        if (queueCount) queueCount.textContent = active.length;
-
-        var pastDetails = document.getElementById('pastStopsDetails');
-        var completedButton = document.getElementById('routeCompletedButton');
-        if (pastDetails) {
-            var summary = pastDetails.querySelector('summary');
-            if (summary) summary.innerHTML = '<span>' + escapeHtml(di.past_stops) + '</span><span class="past-stops-summary-count">' + past.length + '</span>';
-            pastDetails.hidden = past.length === 0;
-        }
-        if (completedButton) completedButton.disabled = past.length === 0;
-        var pastButton = document.getElementById('routePastStopsButton');
-        if (pastButton) pastButton.disabled = past.length === 0;
-        var canAdjust = active.length > 1;
-        var toggle = document.getElementById('routeAdjustToggle');
-        if (toggle) toggle.hidden = !canAdjust;
-        document.querySelectorAll('.stop-go-next, .change-next-btn').forEach(function (btn) {
-            btn.hidden = !canAdjust;
-        });
-        if (!canAdjust && routeAdjust.open) {
-            routeAdjust.open = false;
-            routeAdjust.picked = [];
-            routeAdjust.snapshot = [];
-            setRouteAdjustOpen(false);
-        }
-        if (window.DriverRouteMap && typeof window.DriverRouteMap.refresh === 'function') {
-            window.DriverRouteMap.refresh();
-        }
-    }
-
-    function remainingAdjustIds() {
-        var picked = routeAdjust.picked.slice();
-        var rest = [];
-        var source = routeAdjust.snapshot.length
-            ? routeAdjust.snapshot
-            : getActiveStops().map(function (el) {
-                return { id: el.getAttribute('data-daily-order-id') || '' };
-            });
-        source.forEach(function (row) {
-            var id = parseInt(String(row.id || 0), 10);
-            if (id > 0 && picked.indexOf(id) === -1) {
-                rest.push(id);
-            }
-        });
-        return picked.concat(rest);
-    }
-
-    function paintAdjustOrder() {
-        var list = document.getElementById('stopList');
-        if (!list) return;
-        var ids = remainingAdjustIds();
-        ids.forEach(function (id) {
-            var el = list.querySelector('.stop-item[data-daily-order-id="' + String(id) + '"]');
-            if (el) list.appendChild(el);
-        });
-        ids.forEach(function (id, index) {
-            var el = list.querySelector('.stop-item[data-daily-order-id="' + String(id) + '"]');
-            if (!el) return;
-            var pick = el.querySelector('.stop-item-pick');
-            if (pick) pick.textContent = String(index + 1);
-            el.classList.toggle('is-adjust-picked', routeAdjust.picked.indexOf(id) !== -1);
-            el.classList.toggle('is-adjust-next', index === 0);
-        });
-        if (window.DriverRouteMap && typeof window.DriverRouteMap.refresh === 'function') {
-            window.DriverRouteMap.refresh();
-        }
-    }
-
-    function setRouteAdjustOpen(open) {
-        routeAdjust.open = !!open;
-        document.body.classList.toggle('route-adjust-open', routeAdjust.open);
-        var dock = document.getElementById('routeAdjustDock');
-        if (dock) dock.hidden = !routeAdjust.open;
-        var toggle = document.getElementById('routeAdjustToggle');
-        if (toggle) {
-            toggle.setAttribute('aria-pressed', routeAdjust.open ? 'true' : 'false');
-            toggle.textContent = routeAdjust.open ? (di.cancel || 'Cancel') : (di.adjust_route || 'Adjust');
-        }
-    }
-
-    function openRouteAdjust() {
-        var active = getActiveStops();
-        if (active.length < 2) return;
-        routeAdjust.picked = [];
-        routeAdjust.snapshot = active.map(function (el) {
-            return {
-                id: el.getAttribute('data-daily-order-id') || '',
-                order: el.getAttribute('data-route-order') || ''
-            };
-        });
-        setRouteAdjustOpen(true);
-        paintAdjustOrder();
-        var section = document.querySelector('.stop-list-section');
-        if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    function closeRouteAdjust(restore) {
-        if (!routeAdjust.open && !restore) {
-            setRouteAdjustOpen(false);
-            return;
-        }
-        if (restore && routeAdjust.snapshot.length) {
-            routeAdjust.snapshot.forEach(function (row) {
-                var el = findRouteStop(row.id);
-                if (!el) return;
-                el.setAttribute('data-route-order', row.order);
-                var badge = el.querySelector('.stop-item-order');
- if (badge) badge.textContent = row.order ? '#' + row.order : '#-';
-            });
-            routeAdjust.open = false;
-            refreshRouteUi();
-        }
-        routeAdjust.picked = [];
-        routeAdjust.snapshot = [];
-        getActiveStops().forEach(function (el) {
-            el.classList.remove('is-adjust-picked', 'is-adjust-next');
-            var pick = el.querySelector('.stop-item-pick');
-            if (pick) pick.textContent = '';
-        });
-        setRouteAdjustOpen(false);
-    }
-
-    function tapStopForAdjust(stopEl) {
-        var id = parseInt(stopEl.getAttribute('data-daily-order-id') || '0', 10);
-        if (id <= 0) return;
-        var idx = routeAdjust.picked.indexOf(id);
-        if (idx !== -1) {
-            routeAdjust.picked.splice(idx, 1);
-        } else {
-            routeAdjust.picked.push(id);
-        }
-        paintAdjustOrder();
-    }
-
-    function moveStopInAdjust(dailyOrderId, where) {
-        var id = parseInt(String(dailyOrderId || 0), 10);
-        if (id <= 0) return;
-        var ids = remainingAdjustIds().filter(function (item) { return item !== id; });
-        if (where === 'later') {
-            ids.push(id);
-        } else {
-            ids.unshift(id);
-        }
-        routeAdjust.picked = ids;
-        paintAdjustOrder();
-    }
-
-    function applyRouteOrders(stops) {
-        (stops || []).forEach(function (row) {
-            var el = findRouteStop(row.daily_order_id);
-            if (!el) return;
-            el.setAttribute('data-route-order', String(row.route_order));
-            var badge = el.querySelector('.stop-item-order');
-            if (badge) badge.textContent = '#' + row.route_order;
-        });
-    }
-
-    async function submitRouteOrder(orderIds) {
-        var root = document.getElementById('driverRouteRoot');
-        if (!root) throw new Error(di.route_order_error);
-        var body = 'action=reorder_route'
-            + '&driver_id=' + encodeURIComponent(root.getAttribute('data-driver-id') || '0')
-            + '&date=' + encodeURIComponent(root.getAttribute('data-date') || '')
-            + '&order_ids=' + encodeURIComponent((orderIds || []).join(','));
-        var response = await fetch('complete_delivery.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body
-        });
-        var data = null;
-        try {
-            data = await response.json();
-        } catch (parseErr) {
-            throw new Error(di.route_order_error);
-        }
-        if (!response.ok || !data || !data.success) {
-            throw new Error((data && (data.error || data.message)) || di.route_order_error);
-        }
-        applyRouteOrders(data.stops || []);
-        refreshRouteUi();
-        showSuccessToast(data.message || di.route_order_saved);
-        return data;
-    }
-
-    async function goNextNow(dailyOrderId) {
-        var id = parseInt(String(dailyOrderId || 0), 10);
-        if (id <= 0) return;
-        var rest = getActiveStops().map(function (el) {
-            return parseInt(el.getAttribute('data-daily-order-id') || '0', 10);
-        }).filter(function (item) { return item > 0 && item !== id; });
-        rest.unshift(id);
-        await submitRouteOrder(rest);
-    }
-
-    async function saveRouteAdjust() {
-        if (routeAdjust.saving) return;
-        routeAdjust.saving = true;
-        var saveBtn = document.getElementById('routeAdjustSave');
-        if (saveBtn) {
-            saveBtn.disabled = true;
-            saveBtn.setAttribute('aria-busy', 'true');
-        }
-        try {
-            await submitRouteOrder(remainingAdjustIds());
-            closeRouteAdjust(false);
-        } catch (err) {
-            alert(err.message || di.route_order_error);
-        } finally {
-            routeAdjust.saving = false;
-            if (saveBtn) {
-                saveBtn.disabled = false;
-                saveBtn.removeAttribute('aria-busy');
-            }
-        }
-    }
-
-    window.DriverRoute = {
-        mapsDirectionsUrl: mapsDirectionsUrl,
-        showSuccessToast: showSuccessToast,
-        goNext: goNextNow,
-        isAdjustOpen: function () { return !!routeAdjust.open; },
-        tapAdjustStop: function (dailyOrderId) {
-            var stop = findRouteStop(dailyOrderId);
-            if (stop) tapStopForAdjust(stop);
-        },
-        openStop: function (dailyOrderId, opts) {
-            return openStopDeliveryFromEl(findRouteStop(dailyOrderId), opts || {});
-        },
-        afterOfficeFlag: function (dailyOrderId, message) {
-            var stop = findRouteStop(dailyOrderId);
-            if (stop) {
-                stop.setAttribute('data-status', 'office_flag');
-                updateStopStatusBadge(stop, 'office_flag');
-                rebuildStopContactActions(stop);
-                moveStopToPastList(stop);
-            }
-            refreshRouteUi();
-            showSuccessToast(message || di.empty_order_flagged);
-        },
-        afterDeliveryComplete: function (dailyOrderId, message) {
-            var stop = findRouteStop(dailyOrderId);
-            if (stop) {
-                stop.setAttribute('data-status', 'delivered');
-                updateStopStatusBadge(stop, 'delivered');
-                rebuildStopContactActions(stop);
-                moveStopToPastList(stop);
-            }
-            refreshRouteUi();
-            showSuccessToast(message || di.delivery_saved_next);
-        },
-        afterStopSkipped: function (dailyOrderId, message) {
-            if (document.getElementById('routePrepRoot')) {
-                showSuccessToast(message || di.skip_success);
-                window.setTimeout(function () { window.location.reload(); }, 350);
-                return;
-            }
-            var stop = findRouteStop(dailyOrderId);
-            if (stop) {
-                stop.setAttribute('data-status', 'cancelled');
-                updateStopStatusBadge(stop, 'cancelled');
-                rebuildStopContactActions(stop);
-                moveStopToPastList(stop);
-            }
-            refreshRouteUi();
-            showSuccessToast(message || di.skip_success);
-        },
-        afterStopUnskipped: function (dailyOrderId, message) {
-            if (document.getElementById('routePrepRoot')) {
-                showSuccessToast(message || di.unskip_success);
-                window.setTimeout(function () { window.location.reload(); }, 350);
-                return;
-            }
-            var stop = findRouteStop(dailyOrderId);
-            if (!stop) {
-                showSuccessToast(message || di.unskip_success);
-                window.location.reload();
-                return;
-            }
-            stop.setAttribute('data-status', 'pending');
-            updateStopStatusBadge(stop, 'pending');
-            rebuildStopContactActions(stop);
-            moveStopToActiveList(stop);
-            refreshRouteUi();
-            showSuccessToast(message || di.unskip_success);
-            setTimeout(function () {
-                stop.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }, 80);
-        },
-        afterStopFailed: function (dailyOrderId, message) {
-            var stop = findRouteStop(dailyOrderId);
-            if (stop) {
-                stop.setAttribute('data-status', 'failed');
-                updateStopStatusBadge(stop, 'failed');
-                rebuildStopContactActions(stop);
-                moveStopToPastList(stop);
-            }
-            refreshRouteUi();
-            showSuccessToast(message || di.fail_success);
-        }
-    };
-
-    var skipModalState = { dailyOrderId: 0, submitting: false };
-
-    function openSkipStopModal(dailyOrderId, customerName) {
-        var modal = document.getElementById('skipStopModal');
-        var customerEl = document.getElementById('skipStopModalCustomer');
-        var reasonInput = document.getElementById('skipStopReasonInput');
-        var errorEl = document.getElementById('skipStopError');
-        if (!modal) return;
-        skipModalState.dailyOrderId = parseInt(String(dailyOrderId || 0), 10);
-        skipModalState.submitting = false;
-        if (customerEl) customerEl.textContent = customerName || '';
-        if (reasonInput) {
-            reasonInput.value = '';
-            reasonInput.classList.remove('is-invalid');
-        }
-        if (errorEl) {
-            errorEl.hidden = true;
-            errorEl.textContent = '';
-        }
-        var confirmBtn = document.getElementById('skipStopConfirmBtn');
-        if (confirmBtn) {
-            confirmBtn.disabled = false;
-            confirmBtn.removeAttribute('aria-busy');
-        }
-        modal.hidden = false;
-        modal.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('skip-stop-modal-open');
-        if (reasonInput) reasonInput.focus();
-    }
-
-    function closeSkipStopModal() {
-        var modal = document.getElementById('skipStopModal');
-        if (!modal) return;
-        modal.hidden = true;
-        modal.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('skip-stop-modal-open');
-        skipModalState.dailyOrderId = 0;
-        skipModalState.submitting = false;
-    }
-
-    async function submitSkipStop() {
-        if (skipModalState.submitting) return;
-        var reasonInput = document.getElementById('skipStopReasonInput');
-        var errorEl = document.getElementById('skipStopError');
-        var confirmBtn = document.getElementById('skipStopConfirmBtn');
-        var reason = reasonInput ? String(reasonInput.value || '').trim() : '';
-        if (!reason) {
-            if (reasonInput) reasonInput.classList.add('is-invalid');
-            if (errorEl) {
-                errorEl.textContent = di.skip_reason_required;
-                errorEl.hidden = false;
-            }
-            if (reasonInput) reasonInput.focus();
-            return;
-        }
-        skipModalState.submitting = true;
-        if (confirmBtn) {
-            confirmBtn.disabled = true;
-            confirmBtn.setAttribute('aria-busy', 'true');
-        }
-        if (errorEl) errorEl.hidden = true;
-        try {
-            var body = 'action=skip_stop&daily_order_id=' + encodeURIComponent(String(skipModalState.dailyOrderId)) +
-                '&reason=' + encodeURIComponent(reason);
-            var response = await fetch('complete_delivery.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body
-            });
-            var data = await response.json();
-            if (!data || !data.success) {
-                throw new Error((data && (data.error || data.message)) || di.skip_error);
-            }
-            var skippedOrderId = skipModalState.dailyOrderId;
-            closeSkipStopModal();
-            window.DriverRoute.afterStopSkipped(skippedOrderId, data.message);
-        } catch (err) {
-            skipModalState.submitting = false;
-            if (confirmBtn) {
-                confirmBtn.disabled = false;
-                confirmBtn.removeAttribute('aria-busy');
-            }
-            if (errorEl) {
-                errorEl.textContent = err.message || di.skip_error;
-                errorEl.hidden = false;
-            }
-        }
-    }
-
-    function bindUnskipStopButtons(root) {
-        (root || document).querySelectorAll('.unskip-stop-btn').forEach(function (btn) {
-            if (btn.getAttribute('data-unskip-bound') === '1') return;
-            btn.setAttribute('data-unskip-bound', '1');
-            btn.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                submitUnskipStop(
-                    btn.getAttribute('data-daily-order-id'),
-                    btn.getAttribute('data-customer-name') || ''
-                );
-            });
-        });
-    }
-
-    async function submitUnskipStop(dailyOrderId, customerName) {
-        var orderId = parseInt(String(dailyOrderId || 0), 10);
-        if (!orderId) return;
-        var label = customerName ? '"' + customerName + '"' : di.this_stop;
-        if (!confirm(di.confirm_restore.replace(':label', label))) return;
-
-        try {
-            var body = 'action=unskip_stop&daily_order_id=' + encodeURIComponent(String(orderId));
-            var response = await fetch('complete_delivery.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body
-            });
-            var data = null;
-            try {
-                data = await response.json();
-            } catch (parseErr) {
-                throw new Error(di.unskip_error);
-            }
-            if (!response.ok || !data || !data.success) {
-                throw new Error((data && (data.error || data.message)) || di.unskip_error);
-            }
-            window.DriverRoute.afterStopUnskipped(orderId, data.message);
-        } catch (err) {
-            alert(err.message || di.unskip_error);
-        }
-    }
-
-    function bindFailStopButtons(root) {
-        (root || document).querySelectorAll('.fail-stop-btn').forEach(function (btn) {
-            if (btn.getAttribute('data-fail-bound') === '1') return;
-            btn.setAttribute('data-fail-bound', '1');
-            btn.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                var orderId = btn.getAttribute('data-daily-order-id');
-                var assignmentId = btn.getAttribute('data-assignment-id') || '';
-                var customerName = btn.getAttribute('data-customer-name') || '';
-                if (btn.id === 'deliveryWizardFailBtn') {
-                    var modal = document.getElementById('deliveryPhotoModal');
-                    if (modal) {
-                        orderId = modal.getAttribute('data-daily-order-id') || orderId;
-                        assignmentId = modal.getAttribute('data-assignment-id') || assignmentId;
-                        customerName = modal.getAttribute('data-customer-name') || customerName;
-                    }
-                }
-                openFailStopModal(orderId, assignmentId, customerName);
-            });
-        });
-    }
-
-    var failModalState = { dailyOrderId: 0, assignmentId: 0, customerName: '', submitting: false };
-
-    function failHqReasonLabel() {
-        var form = document.getElementById('failStopForm');
-        var checked = form ? form.querySelector('input[name="reason_code"]:checked') : null;
-        if (!checked) return '';
-        var chip = checked.closest('label');
-        var span = chip ? chip.querySelector('span') : null;
-        return (span ? span.textContent : checked.value || '').trim();
-    }
-
-    function updateFailHqLinks() {
-        var wrap = document.getElementById('failStopHqLinks');
-        if (!wrap) return;
-        var phone = wrap.getAttribute('data-hq-phone') || '+14155091210';
-        var digits = phone.replace(/\D+/g, '');
-        var store = failModalState.customerName || '';
-        var orderId = String(failModalState.dailyOrderId || '');
-        var reason = failHqReasonLabel();
-        var message = (di.hq_message || "Can't deliver: :store, order #:id, :reason")
-            .replace(':store', store)
-            .replace(':id', orderId)
-            .replace(':reason', reason);
-        var encoded = encodeURIComponent(message);
-        var callLink = document.getElementById('failStopCallLink');
-        var smsLink = document.getElementById('failStopSmsLink');
-        var waLink = document.getElementById('failStopWaLink');
-        if (callLink) callLink.setAttribute('href', 'tel:' + phone);
-        if (smsLink) smsLink.setAttribute('href', 'sms:' + phone + '?body=' + encoded);
-        if (waLink) waLink.setAttribute('href', 'https://wa.me/' + digits + '?text=' + encoded);
-    }
-
-    function openFailStopModal(dailyOrderId, assignmentId, customerName) {
-        var modal = document.getElementById('failStopModal');
-        if (!modal) return;
-        failModalState.dailyOrderId = parseInt(String(dailyOrderId || 0), 10);
-        failModalState.assignmentId = parseInt(String(assignmentId || 0), 10);
-        failModalState.customerName = customerName || '';
-        failModalState.submitting = false;
-        var customerEl = document.getElementById('failStopModalCustomer');
-        var orderInput = document.getElementById('failStopOrderId');
-        var assignmentInput = document.getElementById('failStopAssignmentId');
-        var noteInput = document.getElementById('failStopNote');
-        var errorEl = document.getElementById('failStopError');
-        if (customerEl) customerEl.textContent = customerName || '';
-        if (orderInput) orderInput.value = String(failModalState.dailyOrderId);
-        if (assignmentInput) assignmentInput.value = String(failModalState.assignmentId);
-        if (noteInput) noteInput.value = '';
-        if (errorEl) {
-            errorEl.hidden = true;
-            errorEl.textContent = '';
-        }
-        modal.hidden = false;
-        modal.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('fail-stop-modal-open');
-        updateFailHqLinks();
-        var form = document.getElementById('failStopForm');
-        if (form && form.getAttribute('data-hq-bound') !== '1') {
-            form.setAttribute('data-hq-bound', '1');
-            form.addEventListener('change', function (event) {
-                if (event.target && event.target.name === 'reason_code') {
-                    updateFailHqLinks();
-                }
-            });
-        }
-    }
-
-    function closeFailStopModal() {
-        var modal = document.getElementById('failStopModal');
-        if (!modal) return;
-        modal.hidden = true;
-        modal.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('fail-stop-modal-open');
-        failModalState.submitting = false;
-    }
-
-    async function submitFailStop() {
-        if (failModalState.submitting) return;
-        var form = document.getElementById('failStopForm');
-        var errorEl = document.getElementById('failStopError');
-        var confirmBtn = document.getElementById('failStopConfirmBtn');
-        if (!form) return;
-        var reason = '';
-        var checked = form.querySelector('input[name="reason_code"]:checked');
-        if (checked) reason = String(checked.value || '');
-        var note = String((document.getElementById('failStopNote') || {}).value || '').trim();
-        if (reason === 'other' && !note) {
-            if (errorEl) {
-                errorEl.textContent = di.fail_other_note;
-                errorEl.hidden = false;
-            }
-            return;
-        }
-        failModalState.submitting = true;
-        if (confirmBtn) confirmBtn.disabled = true;
-        try {
-            var body = new URLSearchParams();
-            body.set('action', 'report_failed_stop');
-            body.set('daily_order_id', String(failModalState.dailyOrderId));
-            body.set('assignment_id', String(failModalState.assignmentId));
-            body.set('reason_code', reason);
-            body.set('manager_note', note);
-            var csrf = document.querySelector('meta[name="csrf-token"]');
-            if (csrf && csrf.getAttribute('content')) {
-                body.set('csrf_token', csrf.getAttribute('content'));
-            }
-            var response = await fetch('complete_delivery.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body.toString()
-            });
-            var data = await response.json();
-            if (!data || !data.success) {
-                throw new Error((data && (data.error || data.message)) || di.fail_error);
-            }
-            closeFailStopModal();
-            if (window.DriverRoute && window.DriverRoute.afterStopFailed) {
-                window.DriverRoute.afterStopFailed(failModalState.dailyOrderId, data.message);
-            } else {
-                window.location.reload();
-            }
-        } catch (err) {
-            failModalState.submitting = false;
-            if (confirmBtn) confirmBtn.disabled = false;
-            if (errorEl) {
-                errorEl.textContent = err.message || di.fail_error;
-                errorEl.hidden = false;
-            }
-        }
-    }
-
-    function bindSkipStopButtons(root) {
-        (root || document).querySelectorAll('.skip-stop-btn').forEach(function (btn) {
-            if (btn.getAttribute('data-skip-bound') === '1') return;
-            btn.setAttribute('data-skip-bound', '1');
-            btn.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                openSkipStopModal(
-                    btn.getAttribute('data-daily-order-id'),
-                    btn.getAttribute('data-customer-name')
-                );
-            });
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', function () {
-        applyNavigateLinks(document);
-        refreshRouteUi();
-        bindSkipStopButtons(document);
-        bindUnskipStopButtons(document);
-        bindFailStopButtons(document);
-        tryOpenStopFromUrl();
-
-        var skipCancelBtn = document.getElementById('skipStopCancelBtn');
-        var skipConfirmBtn = document.getElementById('skipStopConfirmBtn');
-        var skipBackdrop = document.getElementById('skipStopModalBackdrop');
-        var skipReasonInput = document.getElementById('skipStopReasonInput');
-        if (skipCancelBtn) skipCancelBtn.addEventListener('click', closeSkipStopModal);
-        if (skipBackdrop) skipBackdrop.addEventListener('click', closeSkipStopModal);
-        if (skipConfirmBtn) skipConfirmBtn.addEventListener('click', submitSkipStop);
-        if (skipReasonInput) {
-            skipReasonInput.addEventListener('input', function () {
-                skipReasonInput.classList.remove('is-invalid');
-                var errorEl = document.getElementById('skipStopError');
-                if (errorEl) errorEl.hidden = true;
-            });
-        }
-        var failCancelBtn = document.getElementById('failStopCancelBtn');
-        var failBackdrop = document.getElementById('failStopModalBackdrop');
-        var failForm = document.getElementById('failStopForm');
-        if (failCancelBtn) failCancelBtn.addEventListener('click', closeFailStopModal);
-        if (failBackdrop) failBackdrop.addEventListener('click', closeFailStopModal);
-        if (failForm) failForm.addEventListener('submit', function (event) {
-            event.preventDefault();
-            submitFailStop();
-        });
-        document.addEventListener('keydown', function (event) {
-            var skipModal = document.getElementById('skipStopModal');
-            var failModal = document.getElementById('failStopModal');
-            if (event.key === 'Escape' && skipModal && !skipModal.hidden) {
-                closeSkipStopModal();
-            }
-            if (event.key === 'Escape' && failModal && !failModal.hidden) {
-                closeFailStopModal();
-            }
-        });
-
-        var dayStrip = document.querySelector('.route-day-strip');
-        var selectedDay = dayStrip && dayStrip.querySelector('.route-day-chip.is-selected');
-        if (selectedDay && selectedDay.scrollIntoView) {
-            selectedDay.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
-        }
-
-        var dateDisclosure = document.getElementById('routeDateDisclosure');
-        var dateNavToggle = document.getElementById('routeDateNavToggle');
-        var dateNavOpen = document.getElementById('routeDayNavOpen');
-        var dateBackdrop = document.getElementById('routeDateBackdrop');
-        var dateOpenKey = 'driver-route-date-open';
-
-        function syncRouteDateChrome() {
-            var isOpen = !!(dateDisclosure && dateDisclosure.open);
-            document.body.classList.toggle('route-date-sheet-open', isOpen);
-            if (dateNavToggle) {
-                dateNavToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-                dateNavToggle.classList.toggle('bakery-nav__direct--active', isOpen);
-            }
-            if (dateNavOpen) {
-                dateNavOpen.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-            }
-            if (dateBackdrop) {
-                dateBackdrop.hidden = !isOpen;
-            }
-            try {
-                window.sessionStorage.setItem(dateOpenKey, isOpen ? '1' : '0');
-            } catch (err) { /* ignore */ }
-            if (isOpen && selectedDay && selectedDay.scrollIntoView) {
-                selectedDay.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
-            }
-        }
-
-        if (dateDisclosure) {
-            try {
-                if (window.sessionStorage.getItem(dateOpenKey) === '1') {
-                    dateDisclosure.open = true;
-                }
-            } catch (err) { /* ignore */ }
-            dateDisclosure.addEventListener('toggle', syncRouteDateChrome);
-            syncRouteDateChrome();
-        }
-
-        if (dateNavToggle && dateDisclosure) {
-            dateNavToggle.addEventListener('click', function () {
-                dateDisclosure.open = !dateDisclosure.open;
-            });
-        }
-        if (dateNavOpen && dateDisclosure) {
-            dateNavOpen.addEventListener('click', function () {
-                dateDisclosure.open = !dateDisclosure.open;
-            });
-        }
-        if (dateBackdrop && dateDisclosure) {
-            dateBackdrop.addEventListener('click', function () {
-                dateDisclosure.open = false;
-            });
-        }
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape' && dateDisclosure && dateDisclosure.open) {
-                dateDisclosure.open = false;
-            }
-        });
-
-        var dateInput = document.getElementById('routeDateInput');
-        if (dateInput) {
-            dateInput.addEventListener('change', function () {
-                if (!dateInput.value) return;
-                document.body.classList.add('route-day-loading');
-                window.location.assign(
-                    '?driver_id=' + encodeURIComponent(dateInput.getAttribute('data-driver-id') || '0') +
-                    '&date=' + encodeURIComponent(dateInput.value)
-                );
-            });
-        }
-
-        document.querySelectorAll('.js-day-link').forEach(function (link) {
-            link.addEventListener('click', function (event) {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-                var href = link.href;
-                document.body.classList.add('route-day-loading');
-                var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                setTimeout(function () { window.location.assign(href); }, reduceMotion ? 0 : 110);
-            });
-        });
-
-        var touchStart = null;
-        var routeSurface = document.getElementById('driverRouteRoot');
-        if (routeSurface) {
-            routeSurface.addEventListener('touchstart', function (event) {
-                if (document.body.classList.contains('photo-mode-open')) return;
-                if (event.target.closest('a, button, input, select, textarea, summary, .route-day-strip, .route-day-nav, .route-date-disclosure, .route-date-dock, .route-date-backdrop, .order-details-container')) return;
-                var touch = event.changedTouches && event.changedTouches[0];
-                if (touch) touchStart = { x: touch.clientX, y: touch.clientY };
-            }, { passive: true });
-            routeSurface.addEventListener('touchend', function (event) {
-                if (!touchStart) return;
-                if (document.body.classList.contains('route-adjust-open')) {
-                    touchStart = null;
-                    return;
-                }
-                var touch = event.changedTouches && event.changedTouches[0];
-                if (!touch) return;
-                var dx = touch.clientX - touchStart.x;
-                var dy = touch.clientY - touchStart.y;
-                touchStart = null;
-                if (Math.abs(dx) < 90 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-                document.body.classList.add('route-day-loading');
-                var targetDate = dx < 0 ? <?php echo json_encode($nextDate); ?> : <?php echo json_encode($previousDate); ?>;
-                window.location.assign(<?php echo json_encode(bakery_driver_route_day_url((int)$selectedDriverId, '')); ?> + encodeURIComponent(targetDate));
-            }, { passive: true });
-        }
-
-        var root = document.getElementById('driverRouteRoot');
-        var selectedId = root && root.getAttribute('data-driver-id');
-        if (selectedId && parseInt(selectedId, 10) > 0) {
-            try {
-                localStorage.setItem('tracking_driver_id', String(selectedId));
-            } catch (err) { /* ignore */ }
-        }
-
-        var pastDetails = document.getElementById('pastStopsDetails');
-        function openPastHistory(button) {
-            if (!pastDetails || button.disabled) return;
-            pastDetails.hidden = false;
-            pastDetails.open = true;
-            setTimeout(function () {
-                var target = document.querySelector('#pastStopsList .stop-item') || pastDetails;
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 50);
-        }
-        var completedButton = document.getElementById('routeCompletedButton');
-        var pastButton = document.getElementById('routePastStopsButton');
-        if (completedButton) completedButton.addEventListener('click', function () { openPastHistory(completedButton); });
-        if (pastButton) pastButton.addEventListener('click', function () { openPastHistory(pastButton); });
-
-        document.addEventListener('click', function (e) {
-            var adjustToggle = e.target.closest('#routeAdjustToggle');
-            if (adjustToggle) {
-                e.preventDefault();
-                if (routeAdjust.open) {
-                    closeRouteAdjust(true);
-                } else {
-                    openRouteAdjust();
-                }
-                return;
-            }
-            var changeNext = e.target.closest('.change-next-btn');
-            if (changeNext) {
-                e.preventDefault();
-                openRouteAdjust();
-                return;
-            }
-            var cancelAdjust = e.target.closest('#routeAdjustCancel');
-            if (cancelAdjust) {
-                e.preventDefault();
-                closeRouteAdjust(true);
-                return;
-            }
-            var saveAdjust = e.target.closest('#routeAdjustSave');
-            if (saveAdjust) {
-                e.preventDefault();
-                saveRouteAdjust();
-                return;
-            }
-            var goNextBtn = e.target.closest('.stop-go-next');
-            if (goNextBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                goNextNow(goNextBtn.getAttribute('data-daily-order-id')).catch(function (err) {
-                    alert(err.message || di.route_order_error);
-                });
-                return;
-            }
-            var moveNextBtn = e.target.closest('.stop-move-next');
-            if (moveNextBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                moveStopInAdjust(moveNextBtn.getAttribute('data-daily-order-id'), 'next');
-                return;
-            }
-            var moveLaterBtn = e.target.closest('.stop-move-later');
-            if (moveLaterBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                moveStopInAdjust(moveLaterBtn.getAttribute('data-daily-order-id'), 'later');
-                return;
-            }
-
-            var detailsBtn = e.target.closest('.next-stop-details-toggle');
-            if (detailsBtn) {
-                e.preventDefault();
-                var wrap = detailsBtn.parentElement.querySelector('.order-details-container');
-                var nextCard = document.getElementById('nextStopCard');
-                var orderId =
-                    (detailsBtn.getAttribute('data-daily-order-id') ||
-                        (nextCard &&
-                            nextCard.querySelector('.photo-complete-btn') &&
-                            nextCard.querySelector('.photo-complete-btn').getAttribute('data-daily-order-id')) ||
-                        '0');
-                if (wrap) loadOrderDetails(wrap, orderId);
-                return;
-            }
-
-            var stopOrdersBtn = e.target.closest('.stop-orders-btn');
-            if (stopOrdersBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                var stopForOrders = stopOrdersBtn.closest('.stop-item, .route-prep-stop');
-                var ordersWrap = stopForOrders && stopForOrders.querySelector('.order-details-container');
-                var stopOrderId =
-                    stopOrdersBtn.getAttribute('data-daily-order-id') ||
-                    (stopForOrders && stopForOrders.getAttribute('data-daily-order-id')) ||
-                    '0';
-                if (ordersWrap) loadOrderDetails(ordersWrap, stopOrderId);
-                return;
-            }
-
-            var stop = e.target.closest('.stop-item');
-            if (!stop) return;
-            if (e.target.closest('.contact-actions, a, button, input, select, textarea, label')) {
-                return;
-            }
-            if (document.body.classList.contains('route-adjust-open')) {
-                if (stop.closest('#stopList')) {
-                    e.preventDefault();
-                    tapStopForAdjust(stop);
-                }
-                return;
-            }
-
-            if (openStopDeliveryFromEl(stop, { autoOpenCamera: false })) {
-                return;
-            }
-
-            var container = stop.querySelector('.order-details-container');
-            if (container) {
-                loadOrderDetails(container, stop.getAttribute('data-daily-order-id'));
-            }
-        });
-    });
-})();
+window.__DRIVER_ROUTE_BOOT__ = <?php echo json_encode([
+    'nextDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$nextDate),
+    'previousDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$previousDate),
+    'isToday' => $selectedDate === $todayDate,
+    'prepMode' => !empty($routePrepMode),
+    'snapshotHash' => ($selectedDriverId > 0 && !empty($driver) && $totalStops > 0)
+        ? bakery_driver_route_snapshot($db, (int)$selectedDriverId, $selectedDate)['hash']
+        : '',
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 </script>
 <?php if (!empty($mapsReady) && $selectedDriverId > 0 && $driver && empty($showSelector) && $totalStops > 0): ?>
 <script>
@@ -3185,8 +1826,32 @@ window.bakeryInitDriverRouteMap = window.bakeryInitDriverRouteMap || function ()
         window.DriverRouteMap.init();
     }
 };
+(function () {
+    var src = <?php echo json_encode(GOOGLE_MAPS_JS_API_URL . '?key=' . rawurlencode((string)GOOGLE_MAPS_API_KEY) . '&callback=bakeryInitDriverRouteMap', JSON_UNESCAPED_SLASHES); ?>;
+    var loadButton = document.getElementById('routeMapLoad');
+    var injected = false;
+    function loadMap() {
+        if (injected) return;
+        injected = true;
+        if (loadButton) loadButton.hidden = true;
+        document.documentElement.classList.remove('driver-map-deferred');
+        var tag = document.createElement('script');
+        tag.async = true;
+        tag.src = src;
+        document.head.appendChild(tag);
+    }
+    window.bakeryLoadDriverMap = loadMap;
+    if (window.DriverDataSaver && window.DriverDataSaver.active) {
+        document.documentElement.classList.add('driver-map-deferred');
+        if (loadButton) {
+            loadButton.hidden = false;
+            loadButton.addEventListener('click', loadMap);
+        }
+    } else {
+        loadMap();
+    }
+})();
 </script>
-<script async src="<?php echo htmlspecialchars(GOOGLE_MAPS_JS_API_URL, ENT_QUOTES, 'UTF-8'); ?>?key=<?php echo htmlspecialchars(GOOGLE_MAPS_API_KEY, ENT_QUOTES, 'UTF-8'); ?>&callback=bakeryInitDriverRouteMap"></script>
 <?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>

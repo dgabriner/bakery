@@ -444,8 +444,7 @@ require_once 'includes/nav.php';
 .closeout-stop-delivery{grid-column:2;color:var(--muted);font-size:.85rem}
 .closeout-stop-photo{grid-column:3;grid-row:1 / span 2;justify-self:end;padding:3px 8px;border-radius:999px;font-size:.78rem;font-weight:800;background:#eef1ef;color:#5a675f}
 .closeout-stop--pod .closeout-stop-photo{background:#e7f6ea;color:var(--ok)}
-.closeout-stop--arrival_only{border-color:#efd7a8}
-.closeout-stop--arrival_only .closeout-stop-photo{background:#fff6e5;color:var(--warn)}
+.closeout-stop--arrival_only .closeout-stop-photo{background:#eef7f0;color:#1f6637}
 @media(max-width:820px){
     .closeout-heading{flex-direction:column}
     .closeout-heading-actions .btn{width:100%;text-align:center}

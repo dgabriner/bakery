@@ -1395,7 +1395,7 @@ function bakery_delivery_manager_review_load(PDO $db, string $from, string $to):
         }
         $bucket = bakery_delivery_manager_review_stop_bucket(bakery_route_health_stop_status($stop));
         $photos = bakery_delivery_manager_review_photos_for_stop($photosByStop[$customerId . '|' . $date] ?? [], $driverId);
-        $hasAfter = $bucket === 'delivered' && bakery_route_stop_has_after_photo($photos);
+        $hasAfter = $bucket === 'delivered' && bakery_route_stop_has_proof_photo($photos);
         $photoUrl = bakery_delivery_manager_review_photo_url($photos);
         $arrival = bakery_delivery_manager_review_arrival($photos);
         $closedAt = bakery_route_health_closed_at($date, $stop);
