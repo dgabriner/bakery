@@ -23,6 +23,7 @@ require_once $root . '/includes/demand_confirmation.php';
 require_once $root . '/includes/production_plan.php';
 require_once $root . '/includes/product_inventory.php';
 require_once $root . '/includes/daily_run.php';
+require_once $root . '/includes/pack_list.php';
 require_once $root . '/includes/billing.php';
 require_once $root . '/includes/cron_run.php';
 require_once $root . '/complete_delivery.php';
@@ -69,6 +70,16 @@ function dr_metric(array $stage, string $label)
         }
     }
     return null;
+}
+
+function dr_cc_stage(array $cc, string $key): array
+{
+    foreach (($cc['stages'] ?? []) as $stage) {
+        if (($stage['key'] ?? '') === $key) {
+            return $stage;
+        }
+    }
+    return [];
 }
 
 function dr_blocker_types(array $run): array
@@ -241,6 +252,7 @@ $dates = [
     'closed' => dr_nth_sunday(3),
     'exact' => dr_nth_sunday(4),
     'drivers' => dr_nth_sunday(5),
+    'short' => dr_nth_sunday(6),
 ];
 $createdCustomerIds = [];
 
@@ -407,6 +419,38 @@ try {
     }
     assert_true(!empty($beforeClose['operational_complete']), 'surplus-stock operating day is complete before closeout');
     assert_true(empty($beforeClose['is_closed']), 'complete day is not closed until the manager closes it');
+
+    // Dashboard Pack stage: calm while stock covers demand, and it reports packed progress.
+    $ccCovered = bakery_dashboard_command_center($db, $dates['closed']);
+    $ccPackCovered = dr_cc_stage($ccCovered, 'pack');
+    assert_eq('ok', (string)($ccPackCovered['state'] ?? ''), 'dashboard Pack stays calm when finished goods cover demand');
+    $packLinesCovered = (int)($ccPackCovered['metrics']['item_lines']['value'] ?? 0);
+    assert_true($packLinesCovered > 0, 'dashboard Pack counts the dated order lines');
+    assert_eq(0, (int)($ccPackCovered['metrics']['packed_lines']['value'] ?? -1), 'dashboard Pack reports zero packed lines before anyone packs');
+    assert_true(
+        strpos((string)($ccPackCovered['summary'] ?? ''), ' packed') === false,
+        'dashboard Pack summary does not mention progress before packing starts'
+    );
+    $coveredLines = bakery_operating_demand_lines($db, $dates['closed']);
+    $firstKey = '';
+    foreach ($coveredLines as $coveredLine) {
+        if ((int)($coveredLine['customer_id'] ?? 0) > 0 && (int)($coveredLine['product_id'] ?? 0) > 0 && (int)($coveredLine['quantity'] ?? 0) > 0) {
+            $firstKey = bakery_pack_line_key((int)$coveredLine['customer_id'], (int)$coveredLine['product_id']);
+            break;
+        }
+    }
+    if ($firstKey !== '' && bakery_pack_progress_ready($db)) {
+        bakery_pack_set_checked($db, $dates['closed'], $firstKey, true, null);
+        $ccAfterPack = bakery_dashboard_command_center($db, $dates['closed']);
+        $ccPackAfter = dr_cc_stage($ccAfterPack, 'pack');
+        assert_eq(1, (int)($ccPackAfter['metrics']['packed_lines']['value'] ?? -1), 'dashboard Pack counts the line that was just packed');
+        assert_true(
+            strpos((string)($ccPackAfter['summary'] ?? ''), '1 of ' . $packLinesCovered . ' packed') !== false,
+            'dashboard Pack summary shows X of Y packed once packing starts'
+        );
+        assert_eq('ok', (string)($ccPackAfter['state'] ?? ''), 'dashboard Pack stays calm while packing is under way');
+        $db->prepare('DELETE FROM pack_progress WHERE pack_date = ?')->execute([$dates['closed']]);
+    }
     assert_eq(0, count(array_filter($beforeClose['blockers'], static function ($b) {
         return in_array(($b['severity'] ?? ''), ['critical', 'warning'], true);
     })), 'complete day has no critical or warning blockers');
@@ -440,6 +484,18 @@ try {
                 'includes/daily_run.php pack stock check compares available+loaded to demand after route closeout has delivered the goods'
             );
             assert_true($packShort, 'exact-stock refusal is the finished-goods shortfall');
+            $exactPackStage = dr_stage($exactPrepared['run'], 'pack');
+            $ccExact = bakery_dashboard_command_center($db, $dates['exact']);
+            assert_true(
+                ((dr_cc_stage($ccExact, 'pack')['state'] ?? '') === 'attention')
+                    === (($exactPackStage['ui_state'] ?? '') === 'needs_attention'),
+                'dashboard Pack follows the same shortfall rule as the Daily Run Pack stage'
+            );
+            assert_eq('attention', (string)(dr_cc_stage($ccExact, 'pack')['state'] ?? ''), 'dashboard Pack needs attention when finished goods fall short');
+            assert_true(
+                strpos((string)(dr_cc_stage($ccExact, 'pack')['summary'] ?? ''), 'short on finished goods') !== false,
+                'dashboard Pack summary names the finished-goods shortfall'
+            );
         } else {
             bakery_daily_run_close_day($db, $dates['exact'], null, 'exact close');
             $exactClosed = bakery_daily_run_build($db, $dates['exact']);
@@ -451,6 +507,25 @@ try {
         $GLOBALS['TEST_FAIL']++;
     }
     unset($exactError);
+
+    // Finished goods at zero against real dated demand: Pack needs attention on both screens.
+    $shortDate = $dates['short'];
+    bakery_ensure_daily_orders_for_date($db, $shortDate, ['record_event' => false, 'assign_routes' => true]);
+    $shortRequired = bakery_daily_run_required_products($db, $shortDate, bakery_standing_day_from_date($shortDate));
+    foreach (array_keys($shortRequired['by_product']) as $shortProductId) {
+        bakery_inventory_set_finished_on_hand($db, $shortDate, (int)$shortProductId, 0, 'dashboard pack shortfall regression');
+    }
+    assert_true($shortRequired['by_product'] !== [], 'shortfall date has required products');
+    $shortRun = bakery_daily_run_build($db, $shortDate);
+    $shortPackStage = dr_stage($shortRun, 'pack');
+    $ccShort = bakery_dashboard_command_center($db, $shortDate);
+    $ccShortPack = dr_cc_stage($ccShort, 'pack');
+    assert_eq('needs_attention', (string)($shortPackStage['ui_state'] ?? ''), 'Daily Run Pack needs attention when finished goods are at zero');
+    assert_eq('attention', (string)($ccShortPack['state'] ?? ''), 'dashboard Pack needs attention when finished goods are at zero');
+    assert_true(
+        strpos((string)($ccShortPack['summary'] ?? ''), 'short on finished goods') !== false,
+        'dashboard Pack summary names the finished-goods shortfall'
+    );
 } catch (Throwable $e) {
     echo 'FAIL  uncaught ' . $e->getMessage() . "\n";
     echo $e->getTraceAsString() . "\n";
@@ -484,6 +559,30 @@ try {
         $db->exec("DELETE FROM customers WHERE id IN ({$in})");
     }
 }
+
+// The progress hero (what to do next) comes before any conditional alert or route block.
+$drPageSrc = (string)file_get_contents($root . '/daily_run.php');
+$drHeroPos = strpos($drPageSrc, 'class="dr-hero"');
+assert_true($drHeroPos !== false, 'Daily Run renders the progress hero');
+foreach ([
+    '$routedZeroCount = ',
+    'bakery_route_day_flags_html(',
+    'class="dr-restore-standing"',
+    'class="dr-route-losses"',
+    'class="dr-unrouted-standing"',
+    'bakery_render_demand_cadence_strip(',
+] as $drLaterBlock) {
+    $laterPos = strpos($drPageSrc, $drLaterBlock);
+    assert_true(
+        $drHeroPos !== false && $laterPos !== false && $drHeroPos < $laterPos,
+        'Daily Run hero comes before ' . $drLaterBlock
+    );
+}
+$drDocs = (string)file_get_contents($root . '/BAKERY_PRODUCT_CONTEXT.md');
+assert_true(
+    strpos($drDocs, '7 working stages') !== false && strpos($drDocs, '"x of 7"') !== false,
+    'product context explains that the Daily Run ring counts 7 stages and closeout is step 8'
+);
 
 $known = count($GLOBALS['TEST_KNOWN']);
 echo "\n{$GLOBALS['TEST_PASS']} passed, {$GLOBALS['TEST_FAIL']} failed, {$known} known\n";

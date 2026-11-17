@@ -77,6 +77,31 @@ try {
     $assert(strpos($page, 'id="bp-mix-overview"') !== false, 'bake sheet includes the all-mixes overview');
     $assert(strpos($page, 'details class="bp-line"') !== false, 'each mix can collapse on the bake sheet');
     $assert(strpos($page, 'bakery_production_echo_formula_items') !== false, 'mix overview reuses the scaled ingredient list');
+    $bakerNoteAt = strpos($page, 'bp-plan-note--uncommitted" role="status"');
+    $assert($bakerNoteAt !== false, 'a baker sees a visible uncommitted note instead of a collapsed one');
+    $assert(
+        $bakerNoteAt !== false && strpos(substr($page, max(0, $bakerNoteAt - 40), 90), '<details') === false,
+        'the baker uncommitted note is not inside a details toggle'
+    );
+    $assert(
+        strpos($page, 'production.baker_uncommitted_summary') !== false
+            && strpos($page, 'production.uncommitted_banner_baker') !== false,
+        'the baker uncommitted note carries the summary and the ask'
+    );
+    $assert(
+        strpos($page, 'data-baker-delivery-day="1"') !== false && strpos($page, 'production.baker_delivery_day') !== false,
+        'a baker sees which delivery day the sheet is for'
+    );
+    $confirmEn = require $root . '/lang/en.php';
+    $confirmEs = require $root . '/lang/es.php';
+    foreach (['production.baker_delivery_day', 'production.baker_delivery_day_plain'] as $dayKey) {
+        $assert(isset($confirmEn[$dayKey], $confirmEs[$dayKey]) && $confirmEn[$dayKey] !== $confirmEs[$dayKey], "i18n {$dayKey} exists in en and es");
+    }
+    $assert(
+        strpos((string)$confirmEs['production.baker_delivery_day'], ':when') !== false
+            && strpos((string)$confirmEn['production.baker_delivery_day'], ':when') !== false,
+        'delivery day line keeps its :when placeholder in both languages'
+    );
 
     bakery_inventory_record_production($db, $date, $productId, 4, 'confirm test first', 0);
     $assert($producedOf() === 4, 'first batch of 4 is recorded');

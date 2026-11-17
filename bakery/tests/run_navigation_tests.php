@@ -204,6 +204,21 @@ $headerSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/header.php'
 navigation_test_assert(strpos($headerSrc, 'workspace-cashier') !== false, 'header treats cashier as a focused workspace');
 $navCss = (string)file_get_contents(dirname(__DIR__) . '/css/nav.css');
 navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups') !== false, 'nav.css lays out the cashier focused bar');
+$phoneNavCss = (string)(preg_split('/@media \(max-width: 720px\) \{\s*body\.workspace-driver,/', $navCss)[1] ?? '');
+navigation_test_assert(
+    strpos($phoneNavCss, '--sf-manager-bell-reserve: 56px') !== false
+        && preg_match('/body\.workspace-manager \{[^}]*padding-bottom:\s*calc\(92px \+ var\(--sf-manager-bell-reserve\)/s', $phoneNavCss) === 1,
+    'nav.css reserves bottom space for the manager alert bell on phones'
+);
+navigation_test_assert(
+    preg_match('/body\.workspace-manager\.driver-workflow-page \.route-sticky-dock,\s*body\.workspace-manager\.driver-workflow-page \.route-adjust-dock \{[^}]*bottom:\s*calc\(var\(--sf-manager-bar-h\) \+ var\(--sf-manager-bell-reserve\)\)/s', $phoneNavCss) === 1,
+    'nav.css lifts the view-as-driver docks above the manager bar and bell'
+);
+$managerPhoneCss = (string)file_get_contents(dirname(__DIR__) . '/css/manager_phone.css');
+navigation_test_assert(
+    preg_match('/body\.workspace-manager \{[^}]*padding-bottom:\s*calc\(92px \+ var\(--sf-manager-bell-reserve, 56px\)/s', $managerPhoneCss) === 1,
+    'manager_phone.css keeps the bell reserve instead of overriding it back to 92px'
+);
 
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
