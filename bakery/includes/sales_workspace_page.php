@@ -116,7 +116,7 @@ $salesText = static function (string $value): string {
                 <h2><?php echo $salesText(bakery_t('leads.activity')); ?></h2>
                 <ul class="sales-home__hits">
                     <?php foreach ($activity as $entry): ?>
-                        <?php $noteText = trim((string)($entry['note'] ?? '')); ?>
+                        <?php $noteText = bakery_sales_leads_localize_note((string)($entry['note'] ?? '')); ?>
                         <?php if ($noteText === '' && trim((string)($entry['stage_to'] ?? '')) === ''): ?>
                             <?php continue; ?>
                         <?php endif; ?>

@@ -135,6 +135,14 @@ $prodSrc = (string)file_get_contents($root . '/production.php');
 $assert(strpos($dashSrc, 'bakery_fill_demand_horizon(') === false, 'dashboard view does not fill the horizon');
 $assert(strpos($dashSrc, 'build_from_standing') !== false, 'dashboard offers Build from standing');
 $assert(strpos($dashSrc, 'bakery_render_demand_cadence_strip') !== false, 'dashboard shows cadence strip');
+$assert(
+    preg_match('/if \(\$selectedDate >= \$today\):\s*\?>\s*<\?php bakery_render_demand_cadence_strip\(/', $dashSrc) === 1,
+    'dashboard hides the cadence strip on past dates'
+);
+$assert(
+    preg_match('/if \(\$selectedDate >= \$today\):\s*\?>\s*<\?php bakery_render_demand_cadence_strip\(/', $runSrc) === 1,
+    'Daily Run hides the cadence strip on past dates'
+);
 $assert(strpos($runSrc, 'bakery_fill_demand_horizon(') === false, 'Daily Run view does not fill the horizon');
 $assert(strpos($runSrc, 'build_from_standing') !== false, 'Daily Run offers Build from standing');
 $assert(strpos($ordersSrc, 'bakery_fill_demand_horizon(') === false, 'Daily Orders view does not fill the horizon');

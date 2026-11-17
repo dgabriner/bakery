@@ -243,7 +243,9 @@ require_once 'includes/nav.php';
             </section>
         <?php endif; ?>
 
-        <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
+        <?php if ($selectedDate >= $today): ?>
+            <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
+        <?php endif; ?>
 
         <section class="dr-hero" aria-label="<?php bakery_te('daily_run.progress_aria'); ?>">
             <div class="dr-progress-ring">

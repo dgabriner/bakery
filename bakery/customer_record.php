@@ -96,6 +96,16 @@ require_once __DIR__ . '/includes/nav.php';
     letter-spacing: 0.03em;
 }
 .cr-toolbar select,
+.cr-date-hint {
+    margin: 6px 0 0;
+    font-size: 0.82rem;
+    color: #4a5568;
+}
+.cr-date-hint a {
+    margin-left: 8px;
+    font-weight: 700;
+    color: #2b6cb0;
+}
 .cr-toolbar input[type="date"] {
     min-width: 200px;
     padding: 8px 10px;
@@ -429,6 +439,32 @@ require_once __DIR__ . '/includes/nav.php';
             <label for="date">Delivery date</label>
             <input type="date" name="date" id="date" value="<?php echo htmlspecialchars($selectedDate); ?>"
                    onchange="if (document.getElementById('customer_id').value) this.form.submit();">
+            <?php
+            $crToday = date('Y-m-d');
+            $crTomorrow = date('Y-m-d', strtotime('+1 day'));
+            $crWhenKey = $selectedDate === $crToday
+                ? 'today.when.today'
+                : ($selectedDate === $crTomorrow ? 'today.when.tomorrow' : ($selectedDate < $crToday ? 'today.when.past' : ''));
+            $crDayNames = function_exists('bakery_day_names') ? bakery_day_names() : [];
+            $crDayName = (string)($crDayNames[(int)$dateObj->format('N')] ?? $dateObj->format('l'));
+            $crDayLabel = $crDayName . ', ' . (function_exists('bakery_localized_month_day') ? bakery_localized_month_day($dateObj) : $dateObj->format('M j'));
+            $crJump = static function (string $date) use ($customerId): string {
+                return $customerId > 0
+                    ? bakery_customer_record_url($customerId, $date)
+                    : 'customer_record.php?' . http_build_query(['date' => $date]);
+            };
+            ?>
+            <p class="cr-date-hint" data-cr-date-hint="1">
+                <?php echo htmlspecialchars($crWhenKey !== ''
+                    ? bakery_t('customer_record.date_hint', ['day' => $crDayLabel, 'when' => bakery_t($crWhenKey)])
+                    : bakery_t('customer_record.date_hint_plain', ['day' => $crDayLabel]), ENT_QUOTES, 'UTF-8'); ?>
+                <?php if ($selectedDate !== $crToday): ?>
+                    <a href="<?php echo htmlspecialchars($crJump($crToday), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('common.today'); ?></a>
+                <?php endif; ?>
+                <?php if ($selectedDate !== $crTomorrow): ?>
+                    <a href="<?php echo htmlspecialchars($crJump($crTomorrow), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('common.tomorrow'); ?></a>
+                <?php endif; ?>
+            </p>
         </div>
         <?php if ($customerId > 0): ?>
         <button type="submit" class="cr-btn cr-btn-primary">Refresh</button>

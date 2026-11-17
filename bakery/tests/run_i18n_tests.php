@@ -264,4 +264,46 @@ i18n_assert(
         && strpos(bakery_t('env.staging'), "\u{2014}") === false
 );
 
+// The language switch marks exactly one button as the current language.
+$_SERVER['REQUEST_URI'] = '/manager.php';
+foreach (['en', 'es'] as $switchLocale) {
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    bakery_set_locale($switchLocale, false);
+    $langSwitchVariant = 'nav';
+    ob_start();
+    include $root . '/includes/language_switch.php';
+    $switchHtml = (string)ob_get_clean();
+    i18n_assert("Language switch ($switchLocale) marks one current button", substr_count($switchHtml, 'aria-current=') === 1);
+    i18n_assert("Language switch ($switchLocale) never writes aria-current=false", strpos($switchHtml, 'aria-current="false"') === false);
+    i18n_assert(
+        "Language switch ($switchLocale) marks the $switchLocale button",
+        preg_match('/<a[^>]*\slang="' . $switchLocale . '"[^>]*aria-current="true"/', $switchHtml) === 1
+    );
+    i18n_assert(
+        "Language switch ($switchLocale) styles one active button",
+        substr_count($switchHtml, 'bakery-lang-switch__btn--active') === 1
+    );
+}
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('en', false);
+
+// Customer record names the delivery date it opened on, in both languages.
+$crEn = bakery_load_lang_catalog('en');
+$crEs = bakery_load_lang_catalog('es');
+foreach (['customer_record.date_hint', 'customer_record.date_hint_plain', 'leads.activity_merged'] as $crKey) {
+    i18n_assert("Key $crKey exists in en and es", isset($crEn[$crKey], $crEs[$crKey]) && $crEn[$crKey] !== $crEs[$crKey]);
+}
+i18n_assert(
+    'Customer record date hint keeps its :day and :when placeholders',
+    strpos($crEn['customer_record.date_hint'], ':day') !== false && strpos($crEn['customer_record.date_hint'], ':when') !== false
+        && strpos($crEs['customer_record.date_hint'], ':day') !== false && strpos($crEs['customer_record.date_hint'], ':when') !== false
+);
+$crSource = (string)file_get_contents($root . '/customer_record.php');
+i18n_assert(
+    'Customer record shows the date hint with Today and Tomorrow jumps',
+    strpos($crSource, 'data-cr-date-hint="1"') !== false
+        && strpos($crSource, "bakery_te('common.today')") !== false
+        && strpos($crSource, "bakery_te('common.tomorrow')") !== false
+);
+
 exit($failures > 0 ? 1 : 0);
