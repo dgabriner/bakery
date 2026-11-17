@@ -5,9 +5,9 @@
  *
  * Inactive customers never generate orders. Dated quantity changes are
  * preserved unless overwrite mode is explicitly requested.
- * Page views must not call the fillers. The cron and an explicit manager
- * Build from standing action are the writers. An order with
- * standing_fill_blocked stays empty unless overwrite is requested.
+ * Page views must not call the fillers. The cron, the staff self-heal POST,
+ * and an explicit manager Build from standing action are the writers.
+ * An order with standing_fill_blocked stays empty unless overwrite is requested.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -17,6 +17,7 @@ require_once __DIR__ . '/common_functions.php';
 require_once __DIR__ . '/customer_portal.php';
 require_once __DIR__ . '/customer_order_mutations.php';
 require_once __DIR__ . '/operational_timeline.php';
+require_once __DIR__ . '/cron_run.php';
 
 /**
  * Next free dated position for one standing stop.
@@ -1326,4 +1327,208 @@ function bakery_demand_scheduler_assert_cli(PDO $db, bool $force = false): void
     if ($name !== 'bakerysf') {
         throw new RuntimeException('Demand scheduler cron requires database bakerysf, got ' . $name . '.');
     }
+}
+
+/**
+ * 3:00 AM America/Los_Angeles is the first moment a missed 2:30 AM build may run.
+ */
+function bakery_demand_self_heal_window_open(DateTimeImmutable $now): bool
+{
+    $pt = $now->setTimezone(bakery_cron_timezone());
+    return $pt >= $pt->setTime(3, 0, 0);
+}
+
+function bakery_demand_self_heal_sell_day(DateTimeImmutable $now): string
+{
+    return $now->setTimezone(bakery_cron_timezone())->format('Y-m-d');
+}
+
+function bakery_demand_self_heal_recorded(PDO $db, string $sellDay): bool
+{
+    $success = bakery_cron_last_successful_run('demand_scheduler', $db);
+    if (!$success) {
+        return false;
+    }
+    $last = trim((string)($success['last_run_at'] ?? ''));
+    if ($last === '') {
+        return false;
+    }
+    try {
+        $day = (new DateTimeImmutable($last))->setTimezone(bakery_cron_timezone())->format('Y-m-d');
+    } catch (Throwable $e) {
+        return false;
+    }
+    return $day === $sellDay;
+}
+
+/**
+ * @return array{ok:bool,ran:bool,reason:string,source:string,sell_day:string,orders_created:int}
+ */
+function bakery_demand_self_heal_result(bool $ran, string $reason, string $sellDay, int $ordersCreated = 0): array
+{
+    return [
+        'ok' => true,
+        'ran' => $ran,
+        'reason' => $reason,
+        'source' => 'self_heal',
+        'sell_day' => $sellDay,
+        'orders_created' => $ordersCreated,
+    ];
+}
+
+function bakery_demand_self_heal_acquire(PDO $db): bool
+{
+    try {
+        $got = $db->query("SELECT GET_LOCK('bakery_demand_self_heal', 2)")->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('demand self heal lock: ' . $e->getMessage());
+        return false;
+    }
+    return (string)$got === '1';
+}
+
+function bakery_demand_self_heal_release(PDO $db): void
+{
+    try {
+        $db->query("SELECT RELEASE_LOCK('bakery_demand_self_heal')");
+    } catch (Throwable $e) {
+        error_log('demand self heal unlock: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Same horizon fill as scripts/demand_scheduler.php, for one sell day.
+ * Fills customers with no dated order. Does not overwrite dated edits,
+ * one-time skips, or closed days. A second call on a sell day that already
+ * has a successful demand_scheduler cron_run is a no-op.
+ *
+ * pan_carry.php requires this file, so it is loaded only when a build runs.
+ *
+ * @return array{ok:bool,ran:bool,reason:string,source:string,sell_day:string,orders_created:int}
+ */
+function bakery_demand_self_heal_if_stale(PDO $db, ?DateTimeImmutable $now = null): array
+{
+    $now = $now ?? bakery_cron_now();
+    $sellDay = bakery_demand_self_heal_sell_day($now);
+    if (!bakery_demand_self_heal_window_open($now)) {
+        return bakery_demand_self_heal_result(false, 'before_window', $sellDay);
+    }
+    if (bakery_demand_self_heal_recorded($db, $sellDay)) {
+        return bakery_demand_self_heal_result(false, 'already_built', $sellDay);
+    }
+    if (!bakery_demand_self_heal_acquire($db)) {
+        return bakery_demand_self_heal_result(false, 'locked', $sellDay);
+    }
+    try {
+        if (bakery_demand_self_heal_recorded($db, $sellDay)) {
+            return bakery_demand_self_heal_result(false, 'already_built', $sellDay);
+        }
+        require_once __DIR__ . '/pan_carry.php';
+        $result = bakery_ensure_daily_orders_horizon($db, $sellDay, [
+            'record_event' => true,
+            'assign_routes' => true,
+            'skip_if_closed' => true,
+        ]);
+        $carry = ['carried' => 0, 'deduped' => 0, 'restored' => 0, 'skipped' => 0];
+        foreach (bakery_pan_carry_forward_recent($db, $sellDay) as $dayCounts) {
+            if (!is_array($dayCounts)) {
+                continue;
+            }
+            foreach ($carry as $key => $value) {
+                $carry[$key] = $value + (int)($dayCounts[$key] ?? 0);
+            }
+        }
+        $routeStats = bakery_route_load_rebuild($db);
+        $ordersCreated = (int)($result['orders_created'] ?? 0);
+        bakery_cron_record_run($db, 'demand_scheduler', 'ok', [
+            'source' => 'self_heal',
+            'from_date' => $result['from_date'] ?? null,
+            'through_date' => $result['through_date'] ?? null,
+            'ran_count' => (int)($result['ran_count'] ?? 0),
+            'orders_created' => $ordersCreated,
+            'carried' => (int)$carry['carried'],
+            'restored' => (int)$carry['restored'],
+            'route_service_stats' => (int)($routeStats['service'] ?? 0),
+            'route_drive_stats' => (int)($routeStats['drive'] ?? 0),
+        ], $now);
+        return bakery_demand_self_heal_result(true, '', $sellDay, $ordersCreated);
+    } catch (Throwable $e) {
+        try {
+            bakery_cron_record_run($db, 'demand_scheduler', 'failed', [
+                'source' => 'self_heal',
+                'error' => substr($e->getMessage(), 0, 200),
+            ], $now);
+        } catch (Throwable $inner) {
+            error_log('demand self heal failed stamp: ' . $inner->getMessage());
+        }
+        throw $e;
+    } finally {
+        bakery_demand_self_heal_release($db);
+    }
+}
+
+/**
+ * HTTP entry for demand_self_heal.php. GET never writes. POST builds or no-ops.
+ *
+ * @return array{status:int,body:array{ok:bool,ran:bool,reason:string,source:string,sell_day:string,orders_created:int}}
+ */
+function bakery_demand_self_heal_dispatch(PDO $db, ?DateTimeImmutable $now = null): array
+{
+    $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if ($method !== 'POST') {
+        return [
+            'status' => 405,
+            'body' => bakery_demand_self_heal_result(false, 'method', ''),
+        ];
+    }
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    $role = is_array($user) ? (string)($user['role_slug'] ?? '') : '';
+    if (!is_array($user) || !in_array($role, bakery_demand_self_heal_roles(), true)) {
+        return [
+            'status' => 403,
+            'body' => bakery_demand_self_heal_result(false, 'role', ''),
+        ];
+    }
+    return [
+        'status' => 200,
+        'body' => bakery_demand_self_heal_if_stale($db, $now),
+    ];
+}
+
+/**
+ * Same-origin POST beacon. Printed only for a staff role after 3:00 AM PT.
+ * The page GET does not write. csrf.js attaches the token to fetch.
+ */
+function bakery_demand_self_heal_render_beacon(?DateTimeImmutable $now = null): void
+{
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    $role = is_array($user) ? (string)($user['role_slug'] ?? '') : '';
+    if (!in_array($role, bakery_demand_self_heal_roles(), true)) {
+        return;
+    }
+    $now = $now ?? bakery_cron_now();
+    if (!bakery_demand_self_heal_window_open($now)) {
+        return;
+    }
+    $endpoint = json_encode(
+        (defined('BASE_URL') ? BASE_URL : '/') . 'demand_self_heal.php',
+        JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+    );
+    echo '<script>
+document.addEventListener("DOMContentLoaded", function () {
+  if (!window.fetch) return;
+  fetch(' . $endpoint . ', {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Accept": "application/json", "Content-Type": "application/json" },
+    body: "{}",
+    keepalive: true
+  }).then(function (response) {
+    return response.json();
+  }).then(function (body) {
+    if (!body || body.ran !== true) return;
+    window.location.reload();
+  }).catch(function () {});
+});
+</script>' . "\n";
 }

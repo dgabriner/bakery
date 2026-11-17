@@ -48,6 +48,12 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <meta name="login-audit-session" content="<?php echo (int)bakery_login_audit_current_id(); ?>">
     <script src="<?php echo bakery_asset_href('includes/csrf.js'); ?>"></script>
     <?php endif; ?>
+    <?php
+    if ($authUser && in_array((string)$authRoleSlug, ['administrator', 'manager', 'driver', 'driver_assistant', 'sales'], true)) {
+        require_once __DIR__ . '/daily_order_generation.php';
+        bakery_demand_self_heal_render_beacon();
+    }
+    ?>
     <title><?php echo isset($page_title) ? $page_title . ' - ' : ''; ?><?php echo SITE_NAME; ?></title>
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/tokens.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/base.css'); ?>">

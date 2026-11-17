@@ -535,7 +535,8 @@ function bakery_route_restore_done_message(array $storeLabels, string $driverNam
 }
 
 /**
- * Standing stops that are not on that driver's dated route.
+ * Standing stops with no dated assignment yet.
+ * A stop already routed to this driver or any other driver is not listed.
  *
  * @return list<array{
  *   driver_id:int,
@@ -587,7 +588,7 @@ function bakery_route_missing_standing_by_driver(PDO $db, string $date): array
         if ($driverId <= 0 || $customerId <= 0) {
             continue;
         }
-        if (($assignedDriverByCustomer[$customerId] ?? 0) === $driverId) {
+        if ((int)($assignedDriverByCustomer[$customerId] ?? 0) > 0) {
             continue;
         }
         if (!isset($groups[$driverId])) {

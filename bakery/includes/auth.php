@@ -172,6 +172,16 @@ function bakery_sales_page_scripts(): array {
 }
 
 /**
+ * Roles that may POST demand_self_heal.php. Sales stays off the page list.
+ * The endpoint has no other action.
+ *
+ * @return list<string>
+ */
+function bakery_demand_self_heal_roles(): array {
+    return ['administrator', 'manager', 'driver', 'driver_assistant', 'sales'];
+}
+
+/**
  * Landing page after login for each staff role.
  * Administrators keep the requested URL (usually the ops dashboard).
  */
@@ -1172,6 +1182,17 @@ function bakery_enforce_request_security(PDO $db = null) {
     }
 
     if (in_array($script, bakery_public_scripts(), true)) {
+        return;
+    }
+
+    // Sales may not open this URL. A POST is the only self-heal action.
+    // GET falls through and redirects sales home, which writes nothing.
+    if ($script === 'demand_self_heal.php'
+        && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST'
+    ) {
+        bakery_require_login();
+        bakery_require_role(bakery_demand_self_heal_roles());
+        bakery_require_csrf();
         return;
     }
 

@@ -149,7 +149,7 @@ sales_role_assert(in_array($dropId, $keepOthers, true), 'same name and address f
 sales_role_assert(!in_array($blankId, $keepOthers, true), 'empty address and phone do not match');
 $phoneOthers = array_column($index[$phoneId] ?? [], 'id');
 sales_role_assert($phoneOthers === [], 'same name with a different address and phone is not a duplicate of the address pair');
-$insert->execute(['3rd Cousin', 'Eve', '415-555-0199', '400 Far Street', 'Phone twin', 'new', 'Contacted', $marker . '-E', '', 'Visit', '2026-10-31']);
+$insert->execute(['3rd Cousin', 'Eve', '415-555-0199', '400 Far Street', 'Phone twin', 'new', 'Contacted', $marker . '-E', '', 'Visit', date('Y-m-d', strtotime('+14 days'))]);
 $phoneTwin = (int)$db->lastInsertId();
 $index = bakery_sales_leads_duplicate_index($db);
 sales_role_assert(in_array($phoneTwin, array_column($index[$phoneId] ?? [], 'id'), true), 'same name and phone flags a duplicate');
