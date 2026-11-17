@@ -893,6 +893,9 @@ function bakery_agent_work_map_core(): array
                 'route_health.php',
                 'css/route_health.css',
                 'includes/route_health.php',
+                'delivery_manager_review.php',
+                'css/delivery_manager_review.css',
+                'includes/delivery_manager_review.php',
                 'includes/route_stop_proof.php',
                 'docs/ROUTE_HEALTH.md',
                 'driver_reports.php',
@@ -916,6 +919,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_route_photo_journey_tests.php',
                 'tests/run_driver_reports_tests.php',
                 'tests/run_route_health_tests.php',
+                'tests/run_delivery_manager_review_tests.php',
                 'tests/run_route_manager_pickup_tests.php',
             ],
             'invariants' => [

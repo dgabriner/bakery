@@ -77,6 +77,7 @@ function bakery_admin_workspace_mode_pages(string $mode): array
             'route_manager.php',
             'route_summary.php',
             'route_health.php',
+            'delivery_manager_review.php',
             'route_photo_journey.php',
             'driver_reports.php',
             'route_closeout.php',
