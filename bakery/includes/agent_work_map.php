@@ -689,10 +689,12 @@ function bakery_agent_work_map_core(): array
                 'product_distribution.php',
                 'scripts/demand_scheduler.php',
                 'includes/cron_run.php',
+                'demand_self_heal.php',
             ],
             'tests' => [
                 'tests/run_tomorrow_confirmed_tests.php',
                 'tests/run_demand_scheduler_tests.php',
+                'tests/run_demand_self_heal_tests.php',
                 'tests/run_route_load_carry_tests.php',
                 'tests/run_route_integrity_tests.php',
                 'tests/run_operating_demand_tests.php',
