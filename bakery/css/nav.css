@@ -40,6 +40,50 @@
   color: #ffe7b0;
 }
 
+.bakery-nav__mode {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+}
+
+.bakery-nav__mode-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: #f4fbf9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.1;
+  min-height: 36px;
+  padding: 0.3rem 0.7rem;
+}
+
+.bakery-nav__mode-btn:hover,
+.bakery-nav__mode-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  outline: none;
+}
+
+.bakery-nav__mode-btn--active,
+.bakery-nav__mode-btn--active:hover,
+.bakery-nav__mode-btn--active:focus-visible {
+  background: #fff;
+  color: #143532;
+}
+
+.bakery-nav__mode .bakery-nav__label-short {
+  display: none;
+}
+
 .bakery-nav__menu-toggle {
   align-items: center;
   background: rgba(255, 255, 255, 0.1);
@@ -824,6 +868,19 @@
     min-height: 52px;
     overflow: hidden;
     padding: var(--sf-space-2) var(--sf-space-3);
+  }
+
+  .bakery-nav__mode .bakery-nav__label-full {
+    display: none;
+  }
+
+  .bakery-nav__mode .bakery-nav__label-short {
+    display: inline;
+  }
+
+  .bakery-nav__mode-btn {
+    min-height: var(--sf-touch-min);
+    padding: 0.3rem 0.55rem;
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__brand-full {

@@ -9,6 +9,10 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/navigation_catalog.php';
+require_once __DIR__ . '/admin_workspace_mode.php';
+if (is_file(__DIR__ . '/sandbox.php')) {
+    require_once __DIR__ . '/sandbox.php';
+}
 require_once __DIR__ . '/staff_alerts.php';
 require_once __DIR__ . '/time_clock.php';
 require_once __DIR__ . '/kitchen_segments.php';
@@ -320,6 +324,9 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
           <a class="bakery-nav__more-link<?php echo $currentPage === 'survey' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.survey_route'); ?></a>
+          <?php if (function_exists('bakery_sandbox_home_for_user') && bakery_sandbox_home_for_user($navUser)): ?>
+          <a class="bakery-nav__more-link<?php echo $currentPage === 'sandbox' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'sandbox.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'sandbox' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.item.sandbox'); ?></a>
+          <?php endif; ?>
           <?php foreach ($navManagerToolGroups as $group): ?>
             <p class="bakery-nav__more-group"><?php echo htmlspecialchars((string)$group['label'], ENT_QUOTES, 'UTF-8'); ?></p>
             <?php foreach ($group['items'] as $item): ?>
@@ -365,6 +372,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
 <?php else: ?>
 <?php
   $navSections = bakery_navigation_sections_for_role($navRole);
+  $navAdminMode = 'full';
+  if ($navRole === 'administrator') {
+      $navAdminMode = bakery_admin_workspace_mode();
+      $navSections = bakery_admin_workspace_filter_sections($navSections, $navAdminMode);
+  }
+  $navBrandHref = BASE_URL . ($navRole === 'administrator' ? bakery_admin_workspace_mode_home($navAdminMode) : 'index.php');
   $navDisplayName = htmlspecialchars((string)($navUser['display_name'] ?? bakery_t('common.staff')), ENT_QUOTES, 'UTF-8');
   $navRoleLabel = htmlspecialchars(function_exists('bakery_navigation_role_label') ? bakery_navigation_role_label($navRole) : $navRole, ENT_QUOTES, 'UTF-8');
   $navSelectedDriverName = function_exists('bakery_get_selected_driver_name') ? bakery_get_selected_driver_name() : '';
@@ -376,10 +389,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
 ?>
 <nav class="bakery-nav bakery-nav--ops" data-drawer-breakpoint="1180" aria-label="<?php bakery_te('nav.ops_workspace_aria'); ?>">
   <div class="bakery-nav__inner">
-    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>index.php">
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars($navBrandHref, ENT_QUOTES, 'UTF-8'); ?>">
       <span class="bakery-nav__brand-full"><?php bakery_te('nav.brand_full'); ?></span>
       <span class="bakery-nav__brand-short"><?php bakery_te('nav.brand_short'); ?></span>
     </a>
+    <?php if ($navRole === 'administrator') { echo bakery_admin_workspace_mode_switch_html(); } ?>
+    <?php if ($navAdminMode === 'full'): ?>
     <a class="bakery-nav__manager-shortcut<?php echo $currentPage === 'manager' ? ' bakery-nav__manager-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>manager.php"<?php echo $currentPage === 'manager' ? ' aria-current="page"' : ''; ?>>
       <span class="bakery-nav__label-full"><?php bakery_te('nav.manager_mode'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.manager_mode_short'); ?></span>
@@ -401,6 +416,15 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
       <?php echo bakery_staff_alerts_nav_html(); ?>
     <?php endif; ?>
+    <?php else: ?>
+    <?php foreach (bakery_admin_workspace_mode_shortcuts($navAdminMode) as $navModeShortcut): ?>
+    <?php $navModeShortcutActive = $currentPage === $navModeShortcut['page']; ?>
+    <a class="bakery-nav__route-shortcut<?php echo $navModeShortcutActive ? ' bakery-nav__route-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . $navModeShortcut['href'], ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navModeShortcutActive ? ' aria-current="page"' : ''; ?>>
+      <span class="bakery-nav__label-full"><?php echo htmlspecialchars($navModeShortcut['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="bakery-nav__label-short"><?php echo htmlspecialchars($navModeShortcut['short'], ENT_QUOTES, 'UTF-8'); ?></span>
+    </a>
+    <?php endforeach; ?>
+    <?php endif; ?>
     <button class="bakery-nav__menu-toggle" type="button" aria-controls="bakeryWorkspaceMenu" aria-expanded="false">
       <span class="bakery-nav__menu-toggle-icon" aria-hidden="true">&#9776;</span>
       <span class="bakery-nav__menu-toggle-open"><?php bakery_te('common.menu'); ?></span>
@@ -411,6 +435,9 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <div class="bakery-nav__account-meta">
           <span class="bakery-nav__account-name"><?php echo $navDisplayName; ?></span>
           <span class="bakery-nav__account-role"><?php echo $navRoleLabel; ?><?php
+            if ($navRole === 'administrator' && $navAdminMode !== 'full') {
+                echo ' · ' . htmlspecialchars(bakery_t('mode.' . $navAdminMode), ENT_QUOTES, 'UTF-8');
+            }
             if ($navSelectedDriverId > 0) {
                 echo ' · ' . htmlspecialchars(bakery_t('role.driving_as_nav', ['name' => $navSelectedDriverName !== '' ? $navSelectedDriverName : ('#' . $navSelectedDriverId)]), ENT_QUOTES, 'UTF-8');
             }

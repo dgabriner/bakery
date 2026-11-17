@@ -10,6 +10,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/login_audit.php';
 require_once __DIR__ . '/navigation_catalog.php';
+require_once __DIR__ . '/admin_workspace_mode.php';
 
 // Bakery work often spans invoicing, dispatch, and a later photo at the next stop.
 // Keep a signed-in session through that operational window instead of making a
@@ -1233,6 +1234,9 @@ function bakery_enforce_request_security(PDO $db = null) {
     }
 
     bakery_require_login();
+    bakery_admin_workspace_mode_consume_post();
+    bakery_admin_workspace_mode_restore();
+    bakery_admin_workspace_mode_enforce($script);
 
     $currentRole = (string)(bakery_current_user()['role_slug'] ?? '');
     $indexHome = bakery_ops_index_bypass_home($currentRole);

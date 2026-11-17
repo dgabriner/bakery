@@ -35,11 +35,12 @@ function navigation_test_group_keys($role) {
 if (!defined('BASE_URL')) {
     define('BASE_URL', '/');
 }
-function navigation_test_render_nav($role, $page = 'index') {
+function navigation_test_render_nav($role, $page = 'index', $mode = 'full') {
     $_SESSION = [
         'user_id' => 999,
         'user_role_slug' => $role,
         'user_display_name' => 'Navigation Test',
+        'admin_workspace_mode' => $mode,
     ];
     $_SERVER['PHP_SELF'] = '/' . $page . '.php';
     ob_start();
@@ -318,5 +319,37 @@ $moduleGuideSrc = file_get_contents($rootDir . '/module_guide.php');
 navigation_test_assert(strpos($moduleGuideSrc, 'Mix Today') !== false, 'module guide baker blurb includes Mix Today');
 $accessGuideSrc = file_get_contents($rootDir . '/docs/MODULE_ACCESS_GUIDE.md');
 navigation_test_assert(strpos($accessGuideSrc, 'Mix Today') !== false, 'MODULE_ACCESS_GUIDE documents Mix Today for bakers');
+
+navigation_test_assert(bakery_admin_workspace_mode_allows('full', 'billing_center.php'), 'full admin mode keeps every screen');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'route_manager.php'), 'driver manager mode keeps the route board');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'driver_assignment.php'), 'driver manager mode keeps route planning');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'complete_delivery.php'), 'driver manager mode keeps delivery confirmation');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('driver', 'billing_center.php'), 'driver manager mode strips billing');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('driver', 'production_center.php'), 'driver manager mode strips the bake hub');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'standing_orders_manager.php'), 'production manager mode keeps standing orders');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'daily_orders.php'), 'production manager mode keeps daily orders');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'production_center.php'), 'production manager mode keeps the bake hub');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('production', 'route_manager.php'), 'production manager mode strips the route board');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('production', 'billing_center.php'), 'production manager mode strips billing');
+navigation_test_assert(bakery_admin_workspace_mode_home('driver') === 'route_manager.php', 'driver manager mode opens on the route board');
+navigation_test_assert(bakery_admin_workspace_mode_home('production') === 'standing_orders_manager.php', 'production manager mode opens on standing orders');
+
+$driverModeNav = navigation_test_render_nav('administrator', 'route_manager', 'driver');
+navigation_test_assert(strpos($driverModeNav, 'name="bakery_admin_mode"') !== false, 'administrator navigation can switch workspace mode');
+navigation_test_assert(strpos($driverModeNav, 'value="driver"') !== false, 'driver manager mode is one of the switches');
+navigation_test_assert(strpos($driverModeNav, 'billing_center.php') === false, 'driver manager navigation hides billing');
+navigation_test_assert(strpos($driverModeNav, 'production_center.php') === false, 'driver manager navigation hides the bake hub');
+navigation_test_assert(strpos($driverModeNav, 'route_manager.php') !== false, 'driver manager navigation keeps the route board');
+navigation_test_assert(strpos($driverModeNav, 'text_comms.php"') === false, 'driver manager navigation drops the full text center');
+navigation_test_assert(strpos($driverModeNav, 'text_comms.php?view=surveys') !== false, 'driver manager navigation keeps Survey Center');
+
+$productionModeNav = navigation_test_render_nav('administrator', 'standing_orders_manager', 'production');
+navigation_test_assert(strpos($productionModeNav, 'standing_orders_manager.php') !== false, 'production manager navigation keeps standing orders');
+navigation_test_assert(strpos($productionModeNav, 'daily_orders.php') !== false, 'production manager navigation keeps daily orders');
+navigation_test_assert(strpos($productionModeNav, 'route_manager.php') === false, 'production manager navigation hides the route board');
+navigation_test_assert(strpos($productionModeNav, 'users.php') === false, 'production manager navigation hides staff admin');
+
+$managerWithMode = navigation_test_render_nav('manager', 'manager', 'driver');
+navigation_test_assert(strpos($managerWithMode, 'name="bakery_admin_mode"') === false, 'manager navigation does not offer admin workspace modes');
 
 exit($failed === 0 ? 0 : 1);
