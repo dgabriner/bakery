@@ -17,6 +17,9 @@ require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/dashboard_command_center.php';
 require_once $root . '/includes/operational_exceptions.php';
+require_once $root . '/includes/daily_status.php';
+require_once $root . '/includes/manager_mode.php';
+require_once $root . '/includes/i18n.php';
 
 if (!IS_LOCAL) {
     fwrite(STDERR, "Refusing: exception connection tests must run with APP_ENV=local\n");
@@ -132,6 +135,153 @@ $assert(
         && strpos($loadSrc, 'driver_load.today_still_open') !== false,
     'Driver Pickup Loads names the stuck load and warns when Daily Run is a different day'
 );
+
+// ---- Exception text localization (title_key / detail_key / action_key) ----
+$localizedFields = static function (int $count): array {
+    return [
+        'type' => 'delivery_failed',
+        'category' => 'delivery',
+        'severity' => 'critical',
+        'title' => 'Failed deliveries',
+        'title_key' => 'ops.ex.delivery_failed.title',
+        'detail' => $count . ' stop' . ($count === 1 ? '' : 's') . ' marked failed.',
+        'detail_key' => ['ops.ex.delivery_failed.detail_one', 'ops.ex.delivery_failed.detail_many'],
+        'count' => $count,
+        'action' => 'Open failed-stop recovery',
+        'action_key' => 'ops.act.open_failed_recovery',
+    ];
+};
+
+$setLocale = static function (string $locale): void {
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    bakery_set_locale($locale, false);
+};
+
+$setLocale('es');
+$esMany = bakery_ops_exception($localizedFields(2));
+$esOne = bakery_ops_exception($localizedFields(1));
+$assert($esMany['title'] === 'Entregas fallidas', 'exception title is Spanish under es');
+$assert($esMany['detail'] === '2 paradas marcadas como fallidas.', 'exception detail uses the plural Spanish string');
+$assert($esOne['detail'] === '1 parada marcada como fallida.', 'exception detail uses the singular Spanish string for count 1');
+$assert($esMany['action'] === 'Abrir recuperación de paradas fallidas', 'exception action is Spanish under es');
+$assert(
+    $esMany['title_en'] === 'Failed deliveries'
+        && $esMany['detail_en'] === '2 stops marked failed.'
+        && $esMany['action_en'] === 'Open failed-stop recovery',
+    'English text is preserved in *_en fields'
+);
+
+$esAgain = bakery_ops_enrich_exceptions([$esMany], $date, 'manager');
+$assert(
+    ($esAgain[0]['title'] ?? '') === 'Entregas fallidas'
+        && ($esAgain[0]['title_en'] ?? '') === 'Failed deliveries'
+        && ($esAgain[0]['detail'] ?? '') === '2 paradas marcadas como fallidas.',
+    'enrich re-processing keeps the localized text and the English originals'
+);
+
+$publicBlocker = bakery_daily_status_public_blocker($esMany);
+$assert(
+    $publicBlocker['title'] === 'Failed deliveries'
+        && $publicBlocker['detail'] === '2 stops marked failed.'
+        && $publicBlocker['action'] === 'Open failed-stop recovery',
+    'public daily status blocker stays English when the viewer is Spanish'
+);
+
+$esBlockers = bakery_ops_exceptions_to_blockers([$esMany]);
+$assert(
+    ($esBlockers[0]['title_en'] ?? '') === 'Failed deliveries',
+    'blockers carry the English title for the audit log and public JSON'
+);
+
+$identityEs = bakery_manager_exception_key($esMany, $date);
+$setLocale('en');
+$enMany = bakery_ops_exception($localizedFields(2));
+$assert($enMany['title'] === 'Failed deliveries' && $enMany['detail'] === '2 stops marked failed.', 'exception text is English under en');
+$assert(
+    bakery_manager_exception_key($enMany, $date) === $identityEs,
+    'exception identity key does not change with the viewer language'
+);
+
+$fallback = bakery_ops_exception([
+    'type' => 'delivery_failed',
+    'title' => 'Plain English title',
+    'title_key' => 'ops.ex.this_key_does_not_exist.title',
+    'detail' => 'Plain English detail',
+    'detail_key' => 'ops.ex.this_key_does_not_exist.detail',
+]);
+$assert(
+    $fallback['title'] === 'Plain English title' && $fallback['detail'] === 'Plain English detail',
+    'a missing catalog key falls back to the English text'
+);
+
+$loadDriver = bakery_ops_exception([
+    'type' => 'load_incomplete',
+    'category' => 'load',
+    'title' => 'Incomplete driver pickup loads',
+    'title_key' => 'ops.ex.load_incomplete.title',
+    'detail' => 'Ana has assigned order units with no matching pickup saved.',
+    'detail_key' => 'ops.ex.load_incomplete.detail_driver',
+    'detail_params' => ['driver' => 'Ana'],
+]);
+$setLocale('es');
+$loadDriverEs = bakery_ops_exception([
+    'type' => 'load_incomplete',
+    'category' => 'load',
+    'title' => 'Incomplete driver pickup loads',
+    'title_key' => 'ops.ex.load_incomplete.title',
+    'detail' => 'Ana has assigned order units with no matching pickup saved.',
+    'detail_key' => 'ops.ex.load_incomplete.detail_driver',
+    'detail_params' => ['driver' => 'Ana'],
+]);
+$assert(
+    strpos($loadDriver['detail'], 'Ana') === 0 && strpos($loadDriverEs['detail'], 'Ana tiene') === 0,
+    'detail_params placeholders are filled in both languages'
+);
+$setLocale('en');
+
+// Every ops.ex / ops.act / ops.ia key the code references exists in both catalogs with matching placeholders.
+$enCatalog = bakery_load_lang_catalog('en');
+$esCatalog = bakery_load_lang_catalog('es');
+$referencedKeys = [];
+foreach (['includes/dashboard_command_center.php', 'includes/daily_run.php', 'includes/operational_exceptions.php'] as $rel) {
+    $src = (string)file_get_contents($root . '/' . $rel);
+    if (preg_match_all("/'(ops\\.(?:ex|act|ia)\\.[a-z0-9_.]+)'/", $src, $m)) {
+        foreach ($m[1] as $k) {
+            $referencedKeys[$k] = true;
+        }
+    }
+}
+$assert(count($referencedKeys) > 50, 'exception keys are referenced from the exception builders (' . count($referencedKeys) . ')');
+$missingEn = [];
+$missingEs = [];
+$placeholderDrift = [];
+$esSameAsEn = [];
+foreach (array_keys($referencedKeys) as $k) {
+    if (!isset($enCatalog[$k])) {
+        $missingEn[] = $k;
+    }
+    if (!isset($esCatalog[$k])) {
+        $missingEs[] = $k;
+    }
+    if (isset($enCatalog[$k], $esCatalog[$k])) {
+        preg_match_all('/:[a-z_]+/', (string)$enCatalog[$k], $a);
+        preg_match_all('/:[a-z_]+/', (string)$esCatalog[$k], $b);
+        $ta = array_unique($a[0]);
+        $tb = array_unique($b[0]);
+        sort($ta);
+        sort($tb);
+        if ($ta !== $tb) {
+            $placeholderDrift[] = $k;
+        }
+        if ((string)$enCatalog[$k] === (string)$esCatalog[$k]) {
+            $esSameAsEn[] = $k;
+        }
+    }
+}
+$assert($missingEn === [], 'every referenced exception key exists in en.php' . ($missingEn ? ' (missing: ' . implode(', ', $missingEn) . ')' : ''));
+$assert($missingEs === [], 'every referenced exception key exists in es.php' . ($missingEs ? ' (missing: ' . implode(', ', $missingEs) . ')' : ''));
+$assert($placeholderDrift === [], 'en/es placeholders match for exception keys' . ($placeholderDrift ? ' (drift: ' . implode(', ', $placeholderDrift) . ')' : ''));
+$assert($esSameAsEn === [], 'es exception text is translated, not copied from en' . ($esSameAsEn ? ' (same: ' . implode(', ', $esSameAsEn) . ')' : ''));
 
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail === 0 ? 0 : 1);

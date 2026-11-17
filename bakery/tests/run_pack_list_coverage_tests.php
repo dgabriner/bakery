@@ -212,6 +212,41 @@ try {
     assert_true(isset($pageProducts[$productB]), 'pack list product view includes product B');
     assert_eq((int)$ordered[$productB], (int)$pageProducts[$productB]['total'], 'pack list product B total equals ordered units');
 
+    // Live review wave 1: first line, confirm, and quiet pack-all before a plan is committed.
+    $commitsReady = bakery_production_plan_commits_ready($db);
+    if ($commitsReady) {
+        $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date = ?')->execute([$date]);
+        $uncommittedPage = pack_coverage_capture($date);
+        assert_true(
+            strpos($uncommittedPage['html'], 'class="pack-plan-note"') !== false,
+            'uncommitted date shows the plan-not-committed first line'
+        );
+        assert_true(
+            strpos($uncommittedPage['html'], bakery_t('pack_list.plan_not_committed')) !== false,
+            'plan-not-committed first line uses the localized text'
+        );
+    }
+    $packAllForm = '';
+    if (preg_match('/<form method="post" class="pack-all-form"[^>]*>(?:(?!<\/form>).)*name="action" value="pack_all"/s', $page['html'], $packAllMatch)) {
+        $packAllForm = $packAllMatch[0];
+    }
+    assert_true($packAllForm !== '', 'pack list renders a pack-all form with unpacked lines');
+    assert_true(strpos($packAllForm, 'onsubmit="return confirm(') !== false, 'pack-all form asks for confirmation');
+    assert_true(
+        strpos($page['html'], 'class="pack-btn pack-btn--primary">' . bakery_t('pack_list.pack_all')) === false,
+        'pack-all is not the primary button'
+    );
+    if ($commitsReady) {
+        $db->prepare('INSERT INTO production_plan_commits (delivery_date, committed_at, committed_by_user_id, products_count, units_count) VALUES (?, NOW(), NULL, 0, 0)')
+            ->execute([$date]);
+        $committedPage = pack_coverage_capture($date);
+        assert_true(
+            strpos($committedPage['html'], 'class="pack-plan-note"') === false,
+            'committed date drops the plan-not-committed first line'
+        );
+        $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date = ?')->execute([$date]);
+    }
+
     $northLines = 0;
     $southLines = 0;
     foreach ($pageProducts[$productA]['customers'] as $customerLine) {
@@ -288,6 +323,9 @@ try {
     $GLOBALS['TEST_FAIL']++;
 } finally {
     try {
+        if (bakery_production_plan_commits_ready($db)) {
+            $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date = ?')->execute([$date]);
+        }
         pack_coverage_wipe($db, $date, $customerIds, $createdProductIds);
     } catch (Throwable $e) {
         fwrite(STDERR, 'pack cleanup failed: ' . $e->getMessage() . "\n");

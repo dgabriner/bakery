@@ -77,6 +77,92 @@ $driftNext = bakery_manager_phone_next_action([
 manager_phone_assert($driftNext['key'] === 'drift', 'post-release demand change points back to the plan');
 manager_phone_assert((int)$driftNext['count'] === 3, 'drift next step carries the change count');
 manager_phone_assert(strpos($driftNext['href'], 'production_center.php?date=2099-08-07') !== false, 'drift action keeps the selected date');
+$noOrdersNext = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 0,
+    'dailyOrders' => 0,
+    'plan_committed' => false,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 0],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+    'pending' => 0,
+    'inTransit' => 0,
+]);
+manager_phone_assert($noOrdersNext['key'] === 'no_orders', 'a date with no dated orders and no commit asks for orders before a plan release');
+manager_phone_assert(
+    strpos($noOrdersNext['href'], 'daily_orders.php') !== false && strpos($noOrdersNext['href'], '2099-08-07') !== false,
+    'no-orders action opens Daily Orders for that date'
+);
+$ordersPresentNext = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 0,
+    'dailyOrders' => 4,
+    'plan_committed' => false,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 9],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+    'pending' => 0,
+    'inTransit' => 0,
+]);
+manager_phone_assert($ordersPresentNext['key'] === 'release', 'with dated orders present the uncommitted plan still asks for release');
+$noOrdersCommitted = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 0,
+    'dailyOrders' => 0,
+    'plan_committed' => true,
+    'plan_drift' => 0,
+    'productionSummary' => ['remaining' => 0],
+    'packingSummary' => ['required_lines' => 0, 'checked_lines' => 0],
+    'pending' => 0,
+    'inTransit' => 0,
+]);
+manager_phone_assert($noOrdersCommitted['key'] !== 'no_orders', 'a committed date never shows the no-orders step');
+$noOrdersUnassigned = bakery_manager_phone_next_action([
+    'date' => '2099-08-07',
+    'failed' => 0,
+    'unassigned' => 2,
+    'dailyOrders' => 0,
+    'plan_committed' => false,
+    'productionSummary' => ['remaining' => 0],
+]);
+manager_phone_assert($noOrdersUnassigned['key'] === 'unassigned', 'driverless stops still come before the no-orders step');
+
+$chipDateLabel = bakery_manager_phone_date_label('2099-08-07', true);
+$chipDemand = bakery_manager_phone_uncommitted_chip(['required_units' => 12, 'source' => 'demand', 'committed' => false], '2099-08-07');
+manager_phone_assert(
+    strpos($chipDemand, $chipDateLabel) !== false && strpos($chipDemand, '12') !== false,
+    'uncommitted chip names the delivery date and the units the bake sheet follows'
+);
+$chipEmpty = bakery_manager_phone_uncommitted_chip(['required_units' => 0, 'source' => 'demand', 'committed' => false], '2099-08-07');
+manager_phone_assert(
+    strpos($chipEmpty, $chipDateLabel) !== false && strpos($chipEmpty, 'nothing to bake') !== false,
+    'uncommitted chip with no orders says there is nothing to bake for that date'
+);
+manager_phone_assert(
+    bakery_manager_phone_uncommitted_chip(null, '2099-08-07') === bakery_t('manager_phone.plan_not_committed'),
+    'uncommitted chip falls back to the plain label when the bake source is unavailable'
+);
+$_SESSION['locale'] = 'es';
+bakery_reset_locale_cache();
+$chipDemandEs = bakery_manager_phone_uncommitted_chip(['required_units' => 12], '2099-08-07');
+$chipEmptyEs = bakery_manager_phone_uncommitted_chip(['required_units' => 0], '2099-08-07');
+manager_phone_assert(
+    strpos($chipDemandEs, 'Sin compromiso') === 0 && strpos($chipDemandEs, '12 por hacer') !== false,
+    'uncommitted chip is Spanish under es'
+);
+manager_phone_assert(strpos($chipEmptyEs, 'nada que hornear') !== false, 'empty uncommitted chip is Spanish under es');
+$_SESSION['locale'] = 'en';
+bakery_reset_locale_cache();
+$phoneSrc = (string)file_get_contents($root . '/includes/manager_phone.php');
+manager_phone_assert(
+    strpos($phoneSrc, 'bakery_production_produce_targets_by_product') !== false
+        && strpos($phoneSrc, 'bakery_manager_phone_uncommitted_chip($bakeSource, $date)') !== false,
+    'kitchen chip is fed by the bake-source helper for the selected date'
+);
+manager_phone_assert(strpos($phoneSrc, 'manager_phone.bake_nothing_ordered') !== false, 'kitchen does not claim production is covered when nothing was ordered');
 manager_phone_assert(bakery_manager_phone_view('routes') === 'routes', 'routes view is accepted');
 manager_phone_assert(bakery_manager_phone_view('nope') === 'today', 'unknown view falls back to today');
 manager_phone_assert(bakery_manager_phone_sheet('qty') === 'qty', 'qty sheet is accepted');
@@ -237,6 +323,10 @@ $requiredKeys = [
     'manager_phone.bucket_still_out',
     'manager_phone.plan_committed_at',
     'manager_phone.plan_not_committed',
+    'manager_phone.plan_not_committed_demand',
+    'manager_phone.plan_not_committed_empty',
+    'manager_phone.bake_nothing_ordered',
+    'manager_phone.next_no_orders',
     'manager_phone.plan_drift_count',
     'manager_phone.close_route',
     'manager_phone.confirm_close_route',
@@ -288,7 +378,14 @@ manager_phone_assert(
 manager_phone_assert(strpos($esMorning, 'AM') === false && strpos($esAfternoon, 'PM') === false, 'Spanish mission times are not English AM/PM');
 $_SESSION['locale'] = 'en';
 bakery_reset_locale_cache();
-foreach (['manager_phone.do_not_interrupt', 'manager_phone.plan_not_committed'] as $dashKey) {
+foreach ([
+    'manager_phone.do_not_interrupt',
+    'manager_phone.plan_not_committed',
+    'manager_phone.plan_not_committed_demand',
+    'manager_phone.plan_not_committed_empty',
+    'manager_phone.bake_nothing_ordered',
+    'manager_phone.next_no_orders',
+] as $dashKey) {
     manager_phone_assert(
         strpos((string)$en[$dashKey], "\u{2014}") === false
             && strpos((string)$en[$dashKey], "\u{2013}") === false

@@ -252,12 +252,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'severity' => 'critical',
                     'category' => 'demand',
                     'title' => 'Standing customers missing daily orders',
+                    'title_key' => 'ops.ex.demand_missing_daily.title',
                     'detail' => $missingDailyCustomers . ' customer'
                         . ($missingDailyCustomers === 1 ? '' : 's')
                         . ' have standing demand for this weekday but no dated daily order.',
+                    'detail_key' => ['ops.ex.demand_missing_daily.detail_one', 'ops.ex.demand_missing_daily.detail_many'],
                     'count' => $missingDailyCustomers,
                     'href' => bakery_ops_link_daily_orders($date, ['review' => 'missing']),
                     'action' => 'Review missing orders',
+                    'action_key' => 'ops.act.review_missing_orders',
                 ]);
             } elseif ($dailyOrderCount === 0 && $standingLines > 0) {
                 $demand['state'] = 'attention';
@@ -267,12 +270,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'severity' => 'warning',
                     'category' => 'demand',
                     'title' => 'No daily orders for this date',
+                    'title_key' => 'ops.ex.demand_no_orders.title',
                     'detail' => 'There are ' . $standingLines . ' standing order line'
                         . ($standingLines === 1 ? '' : 's')
                         . ' for this weekday, but no dated daily orders yet.',
+                    'detail_key' => ['ops.ex.demand_no_orders.detail_one', 'ops.ex.demand_no_orders.detail_many'],
                     'count' => $standingLines,
                     'href' => bakery_ops_link_daily_orders($date, ['review' => 'differences']),
                     'action' => 'Generate or review Daily Orders',
+                    'action_key' => 'ops.act.generate_or_review_orders',
                 ]);
             } elseif ($dailyOrderCount === 0 && ($standingLines === 0 || $standingLines === null)) {
                 $demand['state'] = 'empty';
@@ -293,10 +299,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'severity' => 'critical',
             'category' => 'demand',
             'title' => 'Demand data unavailable',
+            'title_key' => 'ops.ex.demand_unavailable.title',
             'detail' => $sectionErrors['demand'],
             'count' => null,
             'href' => $links['daily_orders'],
             'action' => 'Open Daily Orders',
+            'action_key' => 'ops.act.open_daily_orders',
             'resolution' => 'module',
         ]);
     }
@@ -406,12 +414,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'severity' => 'critical',
                     'category' => 'production',
                     'title' => 'Finished-goods shortfall',
+                    'title_key' => 'ops.ex.fg_shortfall.title',
                     'detail' => $shortProducts . ' product'
                         . ($shortProducts === 1 ? '' : 's')
                         . ' have less on-hand or already-delivered stock than committed demand.',
+                    'detail_key' => ['ops.ex.fg_shortfall.detail_one', 'ops.ex.fg_shortfall.detail_many'],
                     'count' => $shortProducts,
                     'href' => bakery_ops_link_inventory($date, ['attention' => 'shortfall']),
                     'action' => 'Open Finished Goods',
+                    'action_key' => 'ops.act.open_finished_goods',
                 ]);
             }
         } elseif (!$inventoryReady) {
@@ -450,12 +461,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'severity' => 'warning',
                     'category' => 'production',
                     'title' => 'Production plan below demand',
+                    'title_key' => 'ops.ex.plan_short.title',
                     'detail' => $planShortProducts . ' saved production target'
                         . ($planShortProducts === 1 ? '' : 's')
                         . ' are below committed demand for this date.',
+                    'detail_key' => ['ops.ex.plan_short.detail_one', 'ops.ex.plan_short.detail_many'],
                     'count' => $planShortProducts,
                     'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date]),
                     'action' => 'Open Production Center',
+                    'action_key' => 'ops.act.open_production_center',
                 ]);
             }
 
@@ -469,7 +483,9 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                             'category' => 'production',
                             'stage' => 'production_plan',
                             'title' => 'Production plan not committed',
+                            'title_key' => 'ops.ex.plan_uncommitted.title',
                             'detail' => 'Saved targets are a draft. Commit the plan so Daily Production bakes those numbers.',
+                            'detail_key' => 'ops.ex.plan_uncommitted.detail',
                             'href' => bakery_ops_link_production_center($weekStart, ['date' => $date]),
                             'action' => bakery_t('daily_run.commit_plan'),
                             'inline_action' => [
@@ -486,9 +502,11 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                             'category' => 'production',
                             'stage' => 'production_plan',
                             'title' => 'Demand changed after production plan commit',
+                            'title_key' => 'ops.ex.plan_drift.title',
                             'detail' => $driftCount . ' demand-affecting change'
                                 . ($driftCount === 1 ? '' : 's')
                                 . ' recorded after commit. The bake sheet still uses the committed plan.',
+                            'detail_key' => ['ops.ex.plan_drift.detail_one', 'ops.ex.plan_drift.detail_many'],
                             'count' => $driftCount,
                             'href' => bakery_ops_link_production_center($weekStart, ['attention' => '1', 'date' => $date]),
                             'action' => bakery_t('daily_run.commit_plan_again'),
@@ -546,10 +564,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'severity' => 'critical',
             'category' => 'production',
             'title' => 'Production / pack data unavailable',
+            'title_key' => 'ops.ex.production_unavailable.title',
             'detail' => $msg,
             'count' => null,
             'href' => $links['production'],
             'action' => 'Open Daily Production',
+            'action_key' => 'ops.act.open_daily_production',
             'resolution' => 'module',
         ]);
     }
@@ -609,11 +629,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                 $detail = $incomplete . ' driver'
                     . ($incomplete === 1 ? '' : 's')
                     . ' have assigned order units that are missing or under-loaded.';
+                $detailKey = ['ops.ex.load_incomplete.detail_one', 'ops.ex.load_incomplete.detail_many'];
+                $detailParams = [];
                 if ($focusName !== '') {
                     $detail = $focusName
                         . ' has assigned order units with no matching pickup saved. '
                         . 'Open Driver Pickup Loads for this operating date, set pickup quantities '
                         . '(Fill to need is fine even when production is empty), and Save pickup.';
+                    $detailKey = 'ops.ex.load_incomplete.detail_driver';
+                    $detailParams = ['driver' => $focusName];
                 }
                 $exceptions[] = bakery_ops_exception([
                     'type' => 'load_incomplete',
@@ -621,10 +645,14 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'load',
                     'stage' => 'dispatch',
                     'title' => 'Incomplete driver pickup loads',
+                    'title_key' => 'ops.ex.load_incomplete.title',
                     'detail' => $detail,
+                    'detail_key' => $detailKey,
+                    'detail_params' => $detailParams,
                     'count' => $incomplete,
                     'href' => bakery_ops_link_driver_load($date, $loadParams),
                     'action' => 'Open Driver Pickup Loads',
+                    'action_key' => 'ops.act.open_driver_pickup_loads',
                 ]);
             } else {
                 $load['state'] = 'ok';
@@ -645,12 +673,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                         'category' => 'delivery',
                         'stage' => 'deliver',
                         'title' => 'Routes not closed out',
+                        'title_key' => 'ops.ex.route_unreconciled.title',
                         'detail' => $routesOpen . ' driver route'
                             . ($routesOpen === 1 ? '' : 's')
                             . ' still need loaded vs delivered vs returned vs waste reconciliation.',
+                        'detail_key' => ['ops.ex.route_unreconciled.detail_one', 'ops.ex.route_unreconciled.detail_many'],
                         'count' => $routesOpen,
                         'href' => bakery_ops_link_route_closeout($date, ['attention' => 'open']),
                         'action' => 'Open Route Closeout',
+                        'action_key' => 'ops.act.open_route_closeout',
                     ]);
                 }
             }
@@ -665,10 +696,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'severity' => 'critical',
             'category' => 'load',
             'title' => 'Load data unavailable',
+            'title_key' => 'ops.ex.load_unavailable.title',
             'detail' => $sectionErrors['load'],
             'count' => null,
             'href' => $links['driver_load'],
             'action' => 'Open Driver Pickup Loads',
+            'action_key' => 'ops.act.open_driver_pickup_loads',
             'resolution' => 'module',
         ]);
     }
@@ -765,16 +798,22 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'delivery',
                     'stage' => 'dispatch',
                     'title' => 'Orders with no driver assignment',
+                    'title_key' => 'ops.ex.delivery_unassigned.title',
                     'detail' => $unassigned . ' daily order'
                         . ($unassigned === 1 ? '' : 's')
                         . ' have no driver assignment for this date.',
+                    'detail_key' => ['ops.ex.delivery_unassigned.detail_one', 'ops.ex.delivery_unassigned.detail_many'],
                     'count' => $unassigned,
                     'href' => bakery_ops_link_driver_assignment($date, ['filter' => 'unassigned']),
                     'action' => 'Assign drivers',
+                    'action_key' => 'ops.act.assign_drivers',
                     'inline_action' => [
                         'action' => 'assign_from_standing',
-                        'label' => 'Build routes from standing',
-                        'confirm' => 'Build this date from the standing route? Existing dated assignments for this date will be replaced.',
+                        'label' => bakery_ops_label('ops.ia.assign_from_standing', 'Build routes from standing'),
+                        'confirm' => bakery_ops_label(
+                            'ops.ia.assign_from_standing_confirm',
+                            'Build this date from the standing route? Existing dated assignments for this date will be replaced.'
+                        ),
                     ],
                 ]);
             }
@@ -825,10 +864,13 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'delivery',
                     'stage' => 'deliver',
                     'title' => 'Failed deliveries',
+                    'title_key' => 'ops.ex.delivery_failed.title',
                     'detail' => $failed . ' stop' . ($failed === 1 ? '' : 's') . ' marked failed.',
+                    'detail_key' => ['ops.ex.delivery_failed.detail_one', 'ops.ex.delivery_failed.detail_many'],
                     'count' => $failed,
                     'href' => bakery_ops_link_manager($date, ['attention' => 'failed', 'fragment' => 'failed-stop-recovery']),
                     'action' => 'Open failed-stop recovery',
+                    'action_key' => 'ops.act.open_failed_recovery',
                 ]);
             }
             if ($qtyVariance !== null && $qtyVariance > 0) {
@@ -838,11 +880,14 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'delivery',
                     'stage' => 'deliver',
                     'title' => 'Ordered vs delivered quantity differences',
+                    'title_key' => 'ops.ex.delivery_qty_variance.title',
                     'detail' => $qtyVariance . ' line' . ($qtyVariance === 1 ? '' : 's')
                         . ' have a delivered quantity different from the ordered quantity.',
+                    'detail_key' => ['ops.ex.delivery_qty_variance.detail_one', 'ops.ex.delivery_qty_variance.detail_many'],
                     'count' => $qtyVariance,
                     'href' => bakery_ops_link_billing($date, ['attention' => 'needs_attention', 'delivered_only' => '1']),
                     'action' => 'Review in Billing Center',
+                    'action_key' => 'ops.act.review_in_billing',
                 ]);
             }
 
@@ -891,10 +936,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'severity' => 'critical',
             'category' => 'delivery',
             'title' => 'Delivery data unavailable',
+            'title_key' => 'ops.ex.delivery_unavailable.title',
             'detail' => $sectionErrors['delivery'],
             'count' => null,
             'href' => $links['driver_assignment'],
             'action' => 'Open Driver Assignment',
+            'action_key' => 'ops.act.open_driver_assignment',
             'resolution' => 'module',
         ]);
     }
@@ -962,11 +1009,14 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'invoice',
                     'stage' => 'invoice',
                     'title' => 'Delivered work not invoiced',
+                    'title_key' => 'ops.ex.invoice_uninvoiced.title',
                     'detail' => $uninvoiced . ' order' . ($uninvoiced === 1 ? '' : 's')
                         . ' are marked delivered but not invoiced.',
+                    'detail_key' => ['ops.ex.invoice_uninvoiced.detail_one', 'ops.ex.invoice_uninvoiced.detail_many'],
                     'count' => $uninvoiced,
                     'href' => bakery_ops_link_billing($date, ['status' => 'delivered', 'attention' => 'needs_attention']),
                     'action' => 'Open Billing Center',
+                    'action_key' => 'ops.act.open_billing_center',
                 ]);
             }
             if ($unconfirmed !== null && $unconfirmed > 0) {
@@ -976,12 +1026,15 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'category' => 'invoice',
                     'stage' => 'deliver',
                     'title' => 'Deliveries missing invoice confirmation',
+                    'title_key' => 'ops.ex.invoice_unconfirmed.title',
                     'detail' => $unconfirmed . ' delivered stop'
                         . ($unconfirmed === 1 ? '' : 's')
                         . ' still lack a delivery confirmation / invoice snapshot.',
+                    'detail_key' => ['ops.ex.invoice_unconfirmed.detail_one', 'ops.ex.invoice_unconfirmed.detail_many'],
                     'count' => $unconfirmed,
                     'href' => bakery_ops_link_billing($date, ['attention' => 'needs_attention']),
                     'action' => 'Open Billing Center',
+                    'action_key' => 'ops.act.open_billing_center',
                 ]);
             }
 
@@ -1010,10 +1063,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             'severity' => 'critical',
             'category' => 'invoice',
             'title' => 'Invoice data unavailable',
+            'title_key' => 'ops.ex.invoice_unavailable.title',
             'detail' => $sectionErrors['invoice'],
             'count' => null,
             'href' => $links['invoice'],
             'action' => 'Open Billing Center',
+            'action_key' => 'ops.act.open_billing_center',
             'resolution' => 'module',
         ]);
     }
@@ -1031,10 +1086,13 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
                     'severity' => 'warning',
                     'category' => 'service',
                     'title' => 'Customer delivery issues',
+                    'title_key' => 'ops.ex.service_open_issues.title',
                     'detail' => $openIssues . ' open issue(s) awaiting review',
+                    'detail_key' => ['ops.ex.service_open_issues.detail_one', 'ops.ex.service_open_issues.detail_many'],
                     'count' => $openIssues,
                     'href' => bakery_ops_link_service_issues(['status' => 'open']),
                     'action' => 'Review issues',
+                    'action_key' => 'ops.act.review_issues',
                 ]);
             }
         }
