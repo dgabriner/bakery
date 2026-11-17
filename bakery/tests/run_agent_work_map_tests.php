@@ -78,7 +78,7 @@ map_assert('tests-for hits manager-phone', in_array('manager-phone', $suggest['m
 map_assert('tests-for includes i18n', in_array('tests/run_i18n_tests.php', $suggest['tests'], true));
 map_assert('lang files are not map holes', $suggest['unmapped_files'] === []);
 
-$craft = bakery_agent_work_map_suggest('css/agent_homebase.css,AGENTS.md,.cursor/hooks.json,.cursor/hooks/handoff-reminder.ps1,.cursor/hooks/session-brief.ps1,.cursor/skills/agent-homebase/SKILL.md');
+$craft = bakery_agent_work_map_suggest('css/agent_homebase.css,AGENTS.md,.cursor/hooks.json,.cursor/hooks/session-brief.ps1,.cursor/skills/agent-homebase/SKILL.md');
 map_assert('craft files map to agent-os', in_array('agent-os', $craft['missions'], true));
 map_assert('craft files are not map holes', $craft['unmapped_files'] === []);
 

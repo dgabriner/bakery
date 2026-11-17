@@ -11,8 +11,11 @@ php scripts/agent_homebase.php brief --agent=YOUR-MISSION --json
 php scripts/agent_homebase.php tests-for --files="a.php,b.php" --json
 php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="..."
+php scripts/agent_homebase.php nag-check
 php scripts/agent_homebase.php handoff --agent=YOUR-MISSION --summary="1. ... 8. ..." --files="..."
 ```
+
+The handoff reminder is manual. Run `php scripts/agent_homebase.php nag-check` (or handoff) yourself before ending a session. Cursor does not post that reminder into chat.
 
 The CLI hops onto `bakerysf_stage_local` (durable ledger). Tests use `bakerysf_test` (wiped by the test gate). Never write craft to the nightly mirror.
 

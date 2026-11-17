@@ -178,7 +178,7 @@ function bakery_agent_work_map_suggest($files): array
 }
 
 /**
- * Open-session check for the stop hook. Fail-open: empty array on any error.
+ * Manual open-session check for `nag-check`. Fail-open: empty array on any error.
  *
  * @return array{open_count:int,should_remind:bool,followup:?string,database:?string}
  */
