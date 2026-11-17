@@ -1,204 +1,803 @@
 .delivery-review {
-  max-width: 76rem;
+  --dr-ink: #3b2a1d;
+  --dr-muted: #6d5a48;
+  --dr-accent: #7c2d12;
+  --dr-line: #e8dccb;
+  --dr-soft: #f7f2ea;
+  --dr-good: #1f7a4d;
+  --dr-good-bg: #2e8b57;
+  --dr-warn: #8a5300;
+  --dr-warn-bg: #f2b84b;
+  --dr-bad: #b42318;
+  --dr-bad-bg: #c0392b;
+  max-width: 88rem;
   margin: 0 auto;
   padding: 1rem 1rem 2.5rem;
-  color: #3b2a1d;
+  color: var(--dr-ink);
 }
 
 .delivery-review h1,
 .delivery-review h2,
 .delivery-review h3 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.4rem;
 }
 
 .delivery-review h1 {
   font-size: 1.6rem;
 }
 
-.delivery-review p,
-.delivery-review__note,
-.delivery-review__empty {
+.delivery-review h2 {
+  font-size: 1.2rem;
+}
+
+.delivery-review h3 {
+  font-size: 1rem;
+  margin-top: 1rem;
+}
+
+.delivery-review p {
   margin: 0.25rem 0 0.75rem;
 }
 
-.delivery-review__note,
-.delivery-review__empty {
-  color: #6d5a48;
+.delivery-review a {
+  color: var(--dr-accent);
+  font-weight: 700;
 }
 
-.delivery-review__reading {
-  padding: 0.75rem 0.9rem;
-  border-radius: 0.6rem;
-  background: #f4efe8;
+.delivery-review__sub,
+.delivery-review__note,
+.delivery-review__empty,
+.delivery-review__muted,
+.delivery-review__under {
+  color: var(--dr-muted);
+}
+
+.delivery-review__note {
+  font-size: 0.88rem;
+}
+
+.delivery-review__under {
+  display: block;
+  font-size: 0.82rem;
+}
+
+.delivery-review__muted {
+  font-weight: 400;
+}
+
+/* Header and range */
+
+.delivery-review__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.delivery-review__sub {
+  margin: 0;
+}
+
+.delivery-review__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: flex-end;
+}
+
+.delivery-review__presets,
+.delivery-review__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.delivery-review__chips {
+  margin: 0.25rem 0 1rem;
 }
 
 .delivery-review__range {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: end;
-  margin: 0.5rem 0 1rem;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin: 0;
+}
+
+.delivery-review__toolbar {
+  margin: 0.5rem 0 0.75rem;
 }
 
 .delivery-review__range label {
   display: grid;
-  gap: 0.25rem;
+  gap: 0.15rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  flex: 1 1 12rem;
+  color: var(--dr-muted);
+}
+
+.delivery-review__toolbar label:first-of-type {
+  flex: 1 1 14rem;
+  max-width: 24rem;
 }
 
 .delivery-review__range input,
+.delivery-review__range select {
+  min-height: 44px;
+  width: 100%;
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--dr-line);
+  border-radius: 0.5rem;
+  background: #fff;
+  color: var(--dr-ink);
+}
+
 .delivery-review .sf-btn,
 .delivery-review__tab,
 .delivery-review__chip {
   min-height: 44px;
 }
 
-.delivery-review__range input {
-  width: 100%;
-  font: inherit;
-  font-size: 1rem;
-  padding: 0.35rem 0.5rem;
-}
-
-.delivery-review__tabs,
-.delivery-review__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0.5rem 0 1rem;
-}
-
-.delivery-review__tab,
-.delivery-review__chip,
-.delivery-review__card {
-  text-decoration: none;
-  color: inherit;
-}
-
-.delivery-review__tab,
 .delivery-review__chip {
   display: inline-flex;
   align-items: center;
-  padding: 0.35rem 0.8rem;
-  border: 1px solid #e8dccb;
+  gap: 0.4rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--dr-line);
   border-radius: 999px;
   background: #fff;
+  text-decoration: none;
+  font-weight: 600;
 }
 
-.delivery-review__tab.is-active,
-.delivery-review__chip.is-active {
-  background: #3b2a1d;
+.delivery-review a.delivery-review__chip {
+  color: var(--dr-ink);
+  font-weight: 600;
+}
+
+.delivery-review a.delivery-review__chip.is-active {
+  background: var(--dr-ink);
+  border-color: var(--dr-ink);
   color: #fff;
-  border-color: #3b2a1d;
 }
 
-.delivery-review__stats {
+.delivery-review__count {
+  display: inline-block;
+  min-width: 1.5rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: #efe6d8;
+  color: var(--dr-ink);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.is-active > .delivery-review__count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* Headline numbers */
+
+.delivery-review__kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+  gap: 0.6rem;
   margin: 0 0 0.75rem;
   padding: 0;
   list-style: none;
 }
 
-.delivery-review__stats li {
-  background: #f7f4ef;
-  border-radius: 0.6rem;
-  padding: 0.65rem 0.75rem;
-}
-
-.delivery-review__stats strong {
-  display: block;
-  font-size: 1.35rem;
-}
-
-.delivery-review__section {
-  margin: 1.25rem 0 0;
-  padding-top: 0.75rem;
-  border-top: 1px solid #e8dccb;
-}
-
-.delivery-review__cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 0.75rem;
-}
-
-.delivery-review__card {
-  display: block;
-  border: 1px solid #e8dccb;
-  border-radius: 0.75rem;
-  padding: 0.85rem;
+.delivery-review__kpi {
+  border: 1px solid var(--dr-line);
+  border-top: 4px solid #cbbba4;
+  border-radius: 0.7rem;
   background: #fff;
 }
 
-.delivery-review__card.is-attention {
-  background: #fde8e8;
+.delivery-review__kpi.is-good {
+  border-top-color: var(--dr-good-bg);
 }
 
-.delivery-review__card.is-current {
-  border-color: #7c2d12;
-  box-shadow: inset 0 0 0 1px #7c2d12;
+.delivery-review__kpi.is-warn {
+  border-top-color: var(--dr-warn-bg);
 }
 
-.delivery-review__card ul {
-  margin: 0.4rem 0 0;
-  padding-left: 1.1rem;
+.delivery-review__kpi.is-bad {
+  border-top-color: var(--dr-bad-bg);
 }
 
-.delivery-review__card p {
-  margin: 0.2rem 0;
+.delivery-review .delivery-review__kpi a {
+  display: grid;
+  gap: 0.1rem;
+  height: 100%;
+  padding: 0.65rem 0.8rem 0.7rem;
+  color: var(--dr-ink);
+  font-weight: 400;
+  text-decoration: none;
 }
 
-.delivery-review tr.is-problem {
-  background: #fde8e8;
+.delivery-review__kpi a:hover,
+.delivery-review__kpi a:focus-visible {
+  background: var(--dr-soft);
 }
 
-.delivery-review tr.is-current {
-  outline: 2px solid #7c2d12;
+.delivery-review__kpi-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--dr-muted);
 }
 
-.delivery-review a {
-  color: #7c2d12;
+.delivery-review__kpi-value {
+  font-size: 1.9rem;
+  line-height: 1.1;
+}
+
+.delivery-review__kpi.is-bad .delivery-review__kpi-value {
+  color: var(--dr-bad);
+}
+
+.delivery-review__kpi-sub {
+  font-size: 0.86rem;
+}
+
+.delivery-review__kpi-prior {
+  font-size: 0.8rem;
+  color: var(--dr-muted);
+}
+
+.delivery-review__trend {
+  margin-right: 0.3rem;
+  font-size: 0.7rem;
+}
+
+.delivery-review__trend.is-good {
+  color: var(--dr-good);
+}
+
+.delivery-review__trend.is-bad {
+  color: var(--dr-bad);
+}
+
+/* What stands out */
+
+.delivery-review__findings,
+.delivery-review__panel,
+.delivery-review__day {
+  border: 1px solid var(--dr-line);
+  border-radius: 0.7rem;
+  background: #fff;
+}
+
+.delivery-review__findings {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+}
+
+.delivery-review__findings summary,
+.delivery-review__help summary,
+.delivery-review__day summary {
+  cursor: pointer;
+}
+
+.delivery-review__findings summary {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.delivery-review__findings ul {
+  margin: 0.5rem 0 0.2rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.delivery-review__findings li {
+  position: relative;
+  padding: 0.15rem 0 0.15rem 1.3rem;
+}
+
+.delivery-review__findings li::before {
+  content: "";
+  position: absolute;
+  left: 0.15rem;
+  top: 0.6rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #b9a78f;
+}
+
+.delivery-review__findings li.is-danger::before {
+  background: var(--dr-bad-bg);
+}
+
+.delivery-review__findings li.is-warning::before {
+  background: var(--dr-warn-bg);
+}
+
+.delivery-review__findings li.is-success::before {
+  background: var(--dr-good-bg);
+}
+
+.delivery-review .delivery-review__findings a {
+  color: var(--dr-ink);
+  font-weight: 500;
+  text-decoration-color: #cbbba4;
+  text-underline-offset: 0.18em;
+}
+
+.delivery-review .delivery-review__findings li.is-danger a {
   font-weight: 700;
 }
 
-.delivery-review__tab.is-active,
-.delivery-review__chip.is-active {
-  color: #fff;
+/* Tabs */
+
+.delivery-review__tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0 0 0.25rem;
+  border-bottom: 2px solid var(--dr-line);
 }
+
+.delivery-review a.delivery-review__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 1rem;
+  margin-bottom: -2px;
+  border-bottom: 3px solid transparent;
+  color: var(--dr-muted);
+  font-size: 1.05rem;
+  text-decoration: none;
+}
+
+.delivery-review a.delivery-review__tab.is-active {
+  border-bottom-color: var(--dr-accent);
+  color: var(--dr-ink);
+}
+
+.delivery-review__tab.is-active > .delivery-review__count {
+  background: var(--dr-accent);
+}
+
+.delivery-review__section {
+  margin: 1.1rem 0 0;
+}
+
+/* Tables */
 
 .delivery-review .sf-table-wrap {
   overflow-x: auto;
 }
 
-.delivery-review__thumb {
-  width: 4.5rem;
-  height: 4.5rem;
-  object-fit: cover;
-  border-radius: 0.4rem;
-  background: #f4efe8;
-  display: block;
+.delivery-review__table th {
+  font-size: 0.8rem;
+  line-height: 1.25;
+  vertical-align: bottom;
 }
 
-.delivery-review__photo-note,
-.delivery-review__flag {
-  display: inline-block;
-  margin-top: 0.25rem;
-  font-size: 0.85rem;
+.delivery-review__table th,
+.delivery-review__table td {
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
+}
+
+.delivery-review__table th.is-wide {
+  white-space: nowrap;
+}
+
+.delivery-review__table td {
+  vertical-align: middle;
+}
+
+.delivery-review__table .is-num {
+  text-align: right;
+}
+
+.delivery-review__th-sub {
+  display: block;
+  font-weight: 400;
+  color: var(--dr-muted);
+}
+
+.delivery-review__name {
+  font-size: 1rem;
+}
+
+.delivery-review__table tr.is-current {
+  background: #fbf1e1;
+}
+
+.delivery-review__table tr.is-problem td:first-child {
+  box-shadow: inset 4px 0 0 var(--dr-bad-bg);
+}
+
+.delivery-review__table tr.is-gap td:first-child {
+  box-shadow: inset 4px 0 0 var(--dr-warn-bg);
+}
+
+.delivery-review__table tr.is-quiet td {
+  color: var(--dr-muted);
+}
+
+.delivery-review__num.is-bad {
+  color: var(--dr-bad);
+}
+
+.delivery-review__num.is-warn {
+  color: var(--dr-warn);
   font-weight: 700;
 }
 
-.delivery-review__store {
-  margin: 0.5rem 0 1rem;
-  padding: 0.9rem;
-  border: 1px solid #e8dccb;
-  border-radius: 0.75rem;
-  background: #fff;
+.delivery-review__rate {
+  display: grid;
+  grid-template-columns: auto minmax(3rem, 6rem);
+  column-gap: 0.45rem;
+  align-items: center;
+  min-width: 7.5rem;
 }
 
-.delivery-review td a + a,
-.delivery-review__store p a + a {
+.delivery-review__rate .delivery-review__muted {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+}
+
+.delivery-review__bar {
+  display: block;
+  width: 100%;
+  height: 0.45rem;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.delivery-review__bar-track {
+  fill: #ece2d3;
+}
+
+.delivery-review__bar-fill {
+  fill: #b9a78f;
+}
+
+.delivery-review__bar.is-good .delivery-review__bar-fill {
+  fill: var(--dr-good-bg);
+}
+
+.delivery-review__bar.is-warn .delivery-review__bar-fill {
+  fill: var(--dr-warn-bg);
+}
+
+.delivery-review__bar.is-bad .delivery-review__bar-fill {
+  fill: var(--dr-bad-bg);
+}
+
+.delivery-review__links a + a,
+.delivery-review td > a + a {
   margin-left: 0.6rem;
+}
+
+/* Day by day squares */
+
+.delivery-review__strip {
+  display: inline-flex;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.delivery-review__cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.delivery-review__strip .delivery-review__cell.is-monday:not(:first-child) {
+  margin-left: 0.35rem;
+}
+
+.delivery-review .delivery-review__cell.is-clean {
+  background: var(--dr-good-bg);
+  color: #fff;
+}
+
+.delivery-review .delivery-review__cell.is-photo_gap {
+  background: var(--dr-warn-bg);
+  color: var(--dr-ink);
+}
+
+.delivery-review .delivery-review__cell.is-problem {
+  background: var(--dr-bad-bg);
+  color: #fff;
+}
+
+.delivery-review .delivery-review__cell.is-cancelled {
+  background: #d9d2c7;
+  color: #5b4a3a;
+}
+
+.delivery-review .delivery-review__cell.is-not_out {
+  background: #fff;
+  border: 1px dashed #b39b7c;
+  color: #a08a6c;
+}
+
+.delivery-review .delivery-review__cell.is-covered {
+  background: #e7eef7;
+  border-color: #c3d3e8;
+  color: #3b5b85;
+}
+
+.delivery-review .delivery-review__cell.is-paused {
+  background: #f1ece4;
+  color: #a08a6c;
+}
+
+.delivery-review__cell.is-idle {
+  border-color: #f1e9dd;
+}
+
+.delivery-review a.delivery-review__cell:hover,
+.delivery-review a.delivery-review__cell:focus-visible {
+  outline: 2px solid var(--dr-accent);
+  outline-offset: 1px;
+}
+
+.delivery-review__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.6rem 0 0.25rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.84rem;
+  color: var(--dr-muted);
+}
+
+.delivery-review__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Driver and store panels */
+
+.delivery-review__panel {
+  padding: 0.9rem 1rem 1rem;
+}
+
+.delivery-review__store {
+  margin: 0 0 1rem;
+}
+
+.delivery-review__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.delivery-review__panel-head h2,
+.delivery-review__panel-head h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.delivery-review__reading {
+  margin: 0.5rem 0;
+  font-size: 1.02rem;
+}
+
+.delivery-review__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.45rem;
+  margin: 0.6rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delivery-review__facts li {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.55rem;
+  background: var(--dr-soft);
+}
+
+.delivery-review__facts span,
+.delivery-review__facts em {
+  font-size: 0.8rem;
+  font-style: normal;
+  color: var(--dr-muted);
+}
+
+.delivery-review__facts strong {
+  font-size: 1.3rem;
+  line-height: 1.15;
+}
+
+.delivery-review__facts li.is-bad strong {
+  color: var(--dr-bad);
+}
+
+.delivery-review__facts li.is-warn strong {
+  color: var(--dr-warn);
+}
+
+.delivery-review__lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  margin: 0.5rem 0 0.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.delivery-review__lines li {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--dr-line);
+  border-radius: 999px;
+  font-size: 0.88rem;
+}
+
+.delivery-review__pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.5rem 1.25rem;
+  margin: 0.6rem 0;
+}
+
+.delivery-review__pairs dt {
+  font-size: 0.8rem;
+  color: var(--dr-muted);
+}
+
+.delivery-review__pairs dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Each day of one driver */
+
+.delivery-review__day {
+  margin: 0.4rem 0;
+  border-left: 5px solid #d9cdb9;
+}
+
+.delivery-review__day.is-clean {
+  border-left-color: var(--dr-good-bg);
+}
+
+.delivery-review__day.is-photo_gap {
+  border-left-color: var(--dr-warn-bg);
+}
+
+.delivery-review__day.is-problem {
+  border-left-color: var(--dr-bad-bg);
+}
+
+.delivery-review__day.is-covered {
+  border-left-color: #a9c0df;
+}
+
+.delivery-review__day summary,
+.delivery-review__day.is-flat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.45rem 0.8rem;
+}
+
+.delivery-review__day.is-flat {
+  background: var(--dr-soft);
+  color: var(--dr-muted);
+  font-size: 0.92rem;
+}
+
+.delivery-review__day[open] summary {
+  border-bottom: 1px solid var(--dr-line);
+}
+
+.delivery-review__day-date {
+  flex: 0 0 6.5rem;
+  font-weight: 700;
+}
+
+.delivery-review__day-facts {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 0.15rem 1rem;
+  font-size: 0.92rem;
+}
+
+p.delivery-review__day-facts {
+  color: var(--dr-muted);
+}
+
+.delivery-review__day-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.delivery-review__day-body {
+  padding: 0.6rem 0.8rem 0.8rem;
+}
+
+.delivery-review__thumb {
+  display: block;
+  width: 3.75rem;
+  height: 3.75rem;
+  object-fit: cover;
+  border-radius: 0.4rem;
+  background: var(--dr-soft);
+}
+
+.delivery-review__photo-note {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--dr-warn);
+}
+
+.delivery-review td .sf-badge + .sf-badge {
+  margin-left: 0.25rem;
+}
+
+/* How to read this */
+
+.delivery-review__help {
+  margin: 1.5rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--dr-line);
+  font-size: 0.9rem;
+  color: var(--dr-muted);
+}
+
+.delivery-review__help summary {
+  font-weight: 700;
+}
+
+.delivery-review__help ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .delivery-review__table .is-num {
+    text-align: left;
+  }
+
+  .delivery-review__day-date {
+    flex-basis: 100%;
+  }
+
+  .delivery-review__strip {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .delivery-review__kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
 }

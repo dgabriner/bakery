@@ -90,6 +90,156 @@ $href = bakery_delivery_manager_review_href([
 ]);
 $assert(strpos($href, 'view=customers') !== false && strpos($href, 'driver=') === false && strpos($href, 'filter=') === false, 'the store link keeps the search and drops the driver and the all filter');
 
+echo "\n=== Finding your way around ===\n";
+$assert(bakery_delivery_manager_review_parse_filter('unassigned') === 'unassigned', 'order with no driver is a filter');
+$assert(bakery_delivery_manager_review_parse_filter('on_track') === 'on_track', 'on track is a filter');
+$assert(bakery_delivery_manager_review_parse_sort('gap') === 'gap', 'biggest shortfall is a sort');
+$assert(bakery_delivery_manager_review_parse_sort('price') === 'attention', 'an unknown sort puts what needs a look first');
+$assert(bakery_delivery_manager_review_parse_day('2099-11-03') === '2099-11-03' && bakery_delivery_manager_review_parse_day('tuesday') === '', 'a day link only takes a real date');
+$dayHref = bakery_delivery_manager_review_href(['view' => 'drivers', 'from' => '2099-11-01', 'to' => '2099-11-14', 'driver' => 4, 'day' => '2099-11-03', 'sort' => 'name']);
+$assert(strpos($dayHref, 'driver=4') !== false && strpos($dayHref, 'day=2099-11-03') !== false && strpos($dayHref, 'sort=') === false, 'a driver link can open one day and drops the store sort');
+$noDriverDay = bakery_delivery_manager_review_href(['view' => 'drivers', 'from' => '2099-11-01', 'to' => '2099-11-14', 'day' => '2099-11-03']);
+$assert(strpos($noDriverDay, 'day=') === false, 'a day without a driver is dropped');
+$sortHref = bakery_delivery_manager_review_href(['view' => 'customers', 'from' => '2099-11-01', 'to' => '2099-11-14', 'sort' => 'last', 'filter' => 'unassigned']);
+$assert(strpos($sortHref, 'sort=last') !== false && strpos($sortHref, 'filter=unassigned') !== false, 'a store link keeps its sort and filter');
+
+$presets = bakery_delivery_manager_review_presets('2099-11-14');
+$assert(array_column($presets, 'days') === [7, 14, 28], 'quick ranges are 7, 14, and 28 days');
+$assert($presets[0]['from'] === '2099-11-08' && $presets[0]['to'] === '2099-11-14', 'the 7 day range ends today and counts today');
+$assert($presets[1]['from'] === '2099-11-01', 'the 14 day range matches the default range');
+$before = bakery_delivery_manager_review_previous_range('2099-11-01', '2099-11-14');
+$assert($before === ['from' => '2099-10-18', 'to' => '2099-10-31', 'days' => 14], 'the period before is the same length and ends the day before');
+$assert(bakery_delivery_manager_review_previous_range('nope', '2099-11-14')['days'] === 0, 'a bad range has no period before');
+
+echo "\n=== Numbers and day states ===\n";
+$assert(bakery_delivery_manager_review_percent(150, 169) === 89, 'a rate rounds to a whole percent');
+$assert(bakery_delivery_manager_review_percent(0, 0) === null, 'a rate with nothing to count is blank, not zero');
+$assert(bakery_delivery_manager_review_usual_clock(['2099-11-02 09:00:00', '2099-11-03 10:00:00', '2099-11-04 14:00:00']) === '10:00', 'the usual time is the middle one, so one late day does not move it');
+$assert(bakery_delivery_manager_review_usual_clock(['2099-11-02 09:00:00', '2099-11-03 10:04:00']) === '09:32', 'two days meet in the middle');
+$assert(bakery_delivery_manager_review_usual_clock([null, '', 'nope']) === null, 'no times means no usual time');
+
+$dayBase = ['standing_stops' => 0, 'paused_stops' => 0, 'unrouted_stops' => 0, 'covered_stops' => 0, 'stops' => 0, 'delivered' => 0, 'delivered_with_after' => 0, 'open' => 0, 'failed' => 0];
+$assert(bakery_delivery_manager_review_day_state(['stops' => 5, 'delivered' => 5, 'delivered_with_after' => 5] + $dayBase) === 'clean', 'every stop delivered with an After photo is a clean day');
+$assert(bakery_delivery_manager_review_day_state(['stops' => 5, 'delivered' => 5, 'delivered_with_after' => 4] + $dayBase) === 'photo_gap', 'a delivered stop with no After photo marks the day');
+$assert(bakery_delivery_manager_review_day_state(['stops' => 5, 'delivered' => 4, 'delivered_with_after' => 3, 'open' => 1] + $dayBase) === 'problem', 'an open stop outranks a missing photo');
+$assert(bakery_delivery_manager_review_day_state(['stops' => 2, 'delivered' => 1, 'delivered_with_after' => 1, 'failed' => 1] + $dayBase) === 'problem', 'a failed stop is a problem day');
+$assert(bakery_delivery_manager_review_day_state(['standing_stops' => 6, 'unrouted_stops' => 6] + $dayBase) === 'not_out', 'standing stops nobody ran is a day not put on a route');
+$assert(bakery_delivery_manager_review_day_state(['standing_stops' => 6, 'covered_stops' => 6] + $dayBase) === 'covered', 'standing stops another driver ran is a covered day');
+$assert(bakery_delivery_manager_review_day_state(['standing_stops' => 2, 'paused_stops' => 2] + $dayBase) === 'idle', 'a day where every standing stop was paused calls for nothing');
+$assert(bakery_delivery_manager_review_day_state($dayBase) === 'idle', 'a day with nothing is idle');
+
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'delivered', 'has_after' => true]) === 'clean', 'a delivered visit with an After photo is clean');
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'delivered', 'has_after' => false]) === 'photo_gap', 'a delivered visit with no After photo is a photo gap');
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'unassigned']) === 'problem', 'an order with no driver is a problem');
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'cancelled']) === 'cancelled', 'a cancelled visit is neither clean nor a problem');
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'paused']) === 'paused', 'a paused visit is explained');
+$assert(bakery_delivery_manager_review_visit_state(['status' => 'not_routed']) === 'not_out', 'a standing visit nobody routed is not out');
+$strip = bakery_delivery_manager_review_customer_strip([
+    'visits' => [
+        ['date' => '2099-11-02', 'status' => 'delivered', 'has_after' => true],
+        ['date' => '2099-11-02', 'status' => 'open', 'has_after' => false],
+        ['date' => '2099-11-04', 'status' => 'paused'],
+    ],
+], ['2099-11-02', '2099-11-03', '2099-11-04']);
+$assert(array_column($strip, 'state') === ['problem', 'idle', 'paused'], 'the store strip shows the worst thing each day and leaves empty days empty');
+$manyDates = [];
+for ($i = 0; $i < 40; $i++) {
+    $manyDates[] = (new DateTimeImmutable('2099-10-01'))->modify('+' . $i . ' days')->format('Y-m-d');
+}
+$stripDates = bakery_delivery_manager_review_strip_dates($manyDates);
+$assert(count($stripDates) === BAKERY_DELIVERY_MANAGER_REVIEW_STRIP_DAYS && end($stripDates) === end($manyDates), 'a long range keeps the most recent days in the strip');
+
+echo "\n=== One label per store ===\n";
+$label = static fn(array $row): string => bakery_delivery_manager_review_customer_status($row)['key'];
+$assert($label(['expected' => 2, 'routed' => 2, 'delivered' => 2, 'unassigned' => 1]) === 'delivery_review.state_unassigned', 'an order with no driver is the first thing a store is labeled with');
+$assert(empty(bakery_delivery_manager_review_customer_flags(['expected' => 2, 'routed' => 2, 'delivered' => 2, 'unassigned' => 1])['on_track']), 'a store with an order that got no driver is not on track');
+$assert($label($missed) === 'delivery_review.state_missed', 'open or failed comes before fewer than standing');
+$assert($label($quiet) === 'delivery_review.state_quiet', 'a store never routed says so');
+$assert($label($short) === 'delivery_review.state_short', 'a short store says fewer than standing');
+$assert($label(['expected' => 2, 'routed' => 2, 'delivered' => 2, 'missing_after' => 1]) === 'delivery_review.state_missing_after', 'a full delivery with a missing photo is labeled for the photo');
+$assert($label($onTrack) === 'delivery_review.state_off_driver', 'a full delivery by another driver is labeled different driver');
+$assert($label(['expected' => 2, 'routed' => 2, 'delivered' => 2]) === 'delivery_review.state_on_track', 'a full delivery is on track');
+$allPaused = ['expected' => 0, 'routed' => 0, 'delivered' => 0, 'paused' => 2];
+$assert($label($allPaused) === 'delivery_review.state_paused', 'a store paused all window is paused, not short');
+$assert(bakery_delivery_manager_review_customer_reading($allPaused)['key'] === 'delivery_review.reading_paused', 'the paused store reads as paused');
+$assert(bakery_delivery_manager_review_customer_reading(['expected' => 0, 'routed' => 0, 'unassigned' => 1])['key'] === 'delivery_review.reading_unassigned', 'an order with no driver and nothing else reads as never given to a driver');
+
+$sortRows = [
+    ['name' => 'Bravo', 'expected' => 4, 'routed' => 4, 'delivered' => 4, 'last_delivered' => '2099-11-10'],
+    ['name' => 'Alpha', 'expected' => 4, 'routed' => 1, 'delivered' => 1, 'last_delivered' => '2099-11-03'],
+    ['name' => 'Charlie', 'expected' => 2, 'routed' => 2, 'delivered' => 1, 'open' => 1, 'last_delivered' => '2099-11-12'],
+    ['name' => 'Delta', 'expected' => 2, 'routed' => 0, 'delivered' => 0, 'last_delivered' => null],
+];
+$names = static fn(string $sort): array => array_column(bakery_delivery_manager_review_sort_customers($sortRows, $sort), 'name');
+$assert($names('attention') === ['Charlie', 'Delta', 'Alpha', 'Bravo'], 'the default order is open stops, then never routed, then short, then on track');
+$assert($names('name') === ['Alpha', 'Bravo', 'Charlie', 'Delta'], 'stores sort by name');
+$assert($names('gap') === ['Alpha', 'Delta', 'Charlie', 'Bravo'], 'biggest shortfall comes first');
+$assert($names('last') === ['Delta', 'Alpha', 'Bravo', 'Charlie'], 'a store with no delivery comes before the oldest delivery');
+
+echo "\n=== What stands out ===\n";
+$clearReport = bakery_delivery_manager_review_blank('2099-11-01', '2099-11-14');
+$clear = bakery_delivery_manager_review_insights($clearReport, '2099-11-14');
+$assert(count($clear) === 1 && $clear[0]['key'] === 'delivery_review.insight_clear' && $clear[0]['tone'] === 'success', 'a clean window says nothing needs a look');
+$busy = $clearReport;
+$busy['clock_ready'] = true;
+$busy['close_ready'] = true;
+$busy['totals']['unassigned'] = 2;
+$busy['totals']['unrouted'] = 5;
+$busy['totals']['unrouted_customers'] = 3;
+$busy['totals']['expected'] = 20;
+$busy['needs'] = [
+    ['driver_id' => 1, 'driver_name' => 'Ada', 'date' => '2099-11-03', 'reason' => 'open'],
+    ['driver_id' => 1, 'driver_name' => 'Ada', 'date' => '2099-11-05', 'reason' => 'open'],
+    ['driver_id' => 1, 'driver_name' => 'Ada', 'date' => '2099-11-14', 'reason' => 'open'],
+    ['driver_id' => 2, 'driver_name' => 'Bo', 'date' => '2099-11-06', 'reason' => 'failed'],
+    ['driver_id' => 2, 'driver_name' => 'Bo', 'date' => '2099-11-06', 'reason' => 'missing_after'],
+    ['driver_id' => 2, 'driver_name' => 'Bo', 'date' => '2099-11-07', 'reason' => 'missing_after'],
+    ['driver_id' => 1, 'driver_name' => 'Ada', 'date' => '2099-11-07', 'reason' => 'missing_after'],
+];
+$busy['drivers'] = [
+    ['driver_id' => 1, 'driver_name' => 'Ada', 'bulk_days' => 0, 'clocked_days' => 3, 'unclocked_days' => 0, 'closed_days' => 0, 'unclosed_days' => 3, 'repeat' => []],
+    ['driver_id' => 2, 'driver_name' => 'Bo', 'bulk_days' => 2, 'clocked_days' => 0, 'unclocked_days' => 4, 'closed_days' => 0, 'unclosed_days' => 4, 'repeat' => [['customer_name' => 'Corner Cafe', 'times' => 3]]],
+];
+$found = [];
+foreach (bakery_delivery_manager_review_insights($busy, '2099-11-14') as $row) {
+    $found[$row['key']] = $row;
+}
+$stale = $found['delivery_review.insight_stale_open'] ?? null;
+$assert(is_array($stale) && (int)$stale['params']['count'] === 2 && $stale['tone'] === 'danger', 'open stops from earlier days are counted apart from today');
+$assert(is_array($stale) && strpos((string)$stale['params']['date'], 'Nov 3') !== false, 'the oldest open day is named');
+$assert((int)($found['delivery_review.insight_open_today']['params']['count'] ?? 0) === 1, 'a stop open today is its own calmer line');
+$assert((int)($found['delivery_review.insight_failed']['params']['count'] ?? 0) === 1, 'failed stops are counted');
+$assert((int)($found['delivery_review.insight_unassigned']['params']['count'] ?? 0) === 2 && strpos((string)$found['delivery_review.insight_unassigned']['href'], 'filter=unassigned') !== false, 'orders with no driver link to those stores');
+$photo = $found['delivery_review.insight_missing_after'] ?? null;
+$assert(is_array($photo) && (int)$photo['params']['count'] === 3 && $photo['params']['driver'] === 'Bo' && (int)$photo['params']['most'] === 2, 'missing After photos name the driver with the most');
+$assert(is_array($photo) && strpos((string)$photo['href'], 'driver=2') !== false, 'that line opens that driver');
+$assert(strpos((string)($found['delivery_review.insight_repeat']['params']['stores'] ?? ''), 'Corner Cafe') !== false, 'a store left open again and again is named');
+$assert(($found['delivery_review.insight_bulk']['params']['drivers'] ?? '') === 'Bo 2', 'batch closes name the driver and the days');
+$assert(($found['delivery_review.insight_unclocked']['params']['drivers'] ?? '') === 'Bo 4', 'days driven with no clock-in name the driver');
+$assert(!isset($found['delivery_review.insight_unclosed']), 'route close is not raised when nobody closed a route in the window');
+$gap = $found['delivery_review.insight_standing_gap'] ?? null;
+$assert(is_array($gap) && (int)$gap['params']['count'] === 5 && (int)$gap['params']['expected'] === 20 && (int)$gap['params']['stores'] === 3, 'standing visits not routed are counted with the stores they touch');
+$assert(!isset($found['delivery_review.insight_clear']), 'the all clear line is gone when something stands out');
+$tones = array_column(bakery_delivery_manager_review_insights($busy, '2099-11-14'), 'tone');
+$assert($tones[0] === 'danger' && end($tones) !== 'danger', 'the most urgent findings come first');
+$quietClock = $busy;
+$quietClock['drivers'][0]['clocked_days'] = 0;
+$quietKeys = array_column(bakery_delivery_manager_review_insights($quietClock, '2099-11-14'), 'key');
+$assert(!in_array('delivery_review.insight_unclocked', $quietKeys, true), 'clock-in is not raised when no driver clocked in at all');
+
+$sum = bakery_delivery_manager_review_summary([
+    'totals' => ['routed' => 20, 'cancelled' => 2, 'delivered' => 15, 'with_after' => 12, 'open' => 2, 'failed' => 1, 'unassigned' => 1, 'expected' => 30, 'standing_routed' => 18],
+    'needs' => [
+        ['reason' => 'open', 'date' => '2099-11-03'],
+        ['reason' => 'open', 'date' => '2099-11-14'],
+        ['reason' => 'failed', 'date' => '2099-11-03'],
+    ],
+], '2099-11-14');
+$assert($sum['due'] === 18 && $sum['delivered_rate'] === 83, 'the delivered rate leaves cancelled stops out');
+$assert($sum['after_rate'] === 80, 'the After photo rate is out of delivered stops');
+$assert($sum['problem'] === 3 && $sum['stale_open'] === 1, 'open and failed are counted together, and old open stops apart');
+$assert($sum['standing_rate'] === 60, 'standing visits routed is out of visits called for');
+
 echo "\n=== Page is read only and gated ===\n";
 $pageAccess = [
     'logged out' => [null, 302],
@@ -214,6 +364,8 @@ try {
         'BulkC' => $makeCustomer('BulkC', 1, ''),
         'QuietBo' => $makeCustomer('QuietBo', 1, ''),
         'Inactive' => $makeCustomer('Inactive', 0, ''),
+        'NoDriver' => $makeCustomer('NoDriver', 1, ''),
+        'Paused' => $makeCustomer('Paused', 1, ''),
     ];
 
     $insertDriver = $db->prepare('INSERT INTO drivers (name) VALUES (?)');
@@ -223,7 +375,9 @@ try {
     $boId = (int)$db->lastInsertId();
     $insertDriver->execute([$prefix . ' Cal']);
     $calId = (int)$db->lastInsertId();
-    $created['drivers'] = [$adaId, $boId, $calId];
+    $insertDriver->execute([$prefix . ' Dee']);
+    $deeId = (int)$db->lastInsertId();
+    $created['drivers'] = [$adaId, $boId, $calId, $deeId];
 
     $insertOrder = $db->prepare(
         'INSERT INTO daily_orders (customer_id, order_date, status, total_amount, delivery_confirmed_at) VALUES (?, ?, ?, 0, ?)'
@@ -262,6 +416,24 @@ try {
     $addStop($ids['Off'], $calId, $d1, 'delivered', '11:00:00', '');
     $addStop($ids['Off'], $calId, $d2, 'delivered', '11:10:00', '');
 
+    // Orders that never got a driver. Only one of the three is waiting for one.
+    $productId = (int)$db->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
+    $assert($productId > 0, 'a product exists on bakerysf_test');
+    $insertItem = $db->prepare(
+        'INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, 6, 1, 6)'
+    );
+    $addLooseOrder = static function (int $customerId, string $date, string $status, bool $withProduct) use ($db, $insertOrder, $insertItem, $productId, &$created): void {
+        $insertOrder->execute([$customerId, $date, $status, null]);
+        $orderId = (int)$db->lastInsertId();
+        $created['orders'][] = $orderId;
+        if ($withProduct) {
+            $insertItem->execute([$orderId, $productId]);
+        }
+    };
+    $addLooseOrder($ids['NoDriver'], $d1, 'pending', true);
+    $addLooseOrder($ids['Quiet'], $d1, 'pending', false);
+    $addLooseOrder($ids['Extra'], $d2, 'delivered', true);
+
     $insertPhoto = $db->prepare(
         'INSERT INTO driver_photos (driver_id, customer_id, delivery_date, filename, original_filename, file_path, file_size, mime_type, photo_type)
          VALUES (?, ?, ?, ?, ?, ?, 20, \'image/jpeg\', ?)'
@@ -292,6 +464,19 @@ try {
     }
     $insertStanding->execute([$weekday, $adaId, $ids['Inactive'], $standingOrder]);
     $insertStanding->execute([$weekday, $boId, $ids['QuietBo'], 1]);
+    $insertStanding->execute([$weekday, $deeId, $ids['NoDriver'], 1]);
+    $insertStanding->execute([$weekday, $deeId, $ids['Paused'], 2]);
+
+    // One standing day paused for the week, the other skipped for the date.
+    $pauseReady = table_exists($db, 'standing_order_pauses') && table_exists($db, 'customer_delivery_skips');
+    if ($pauseReady) {
+        $d1Day = new DateTimeImmutable($d1);
+        $weekStart = $d1Day->modify('-' . ((int)$d1Day->format('N') - 1) . ' days')->format('Y-m-d');
+        $db->prepare('INSERT INTO standing_order_pauses (customer_id, week_start, note) VALUES (?, ?, ?)')
+            ->execute([$ids['Paused'], $weekStart, 'delivery review test']);
+        $db->prepare('INSERT INTO customer_delivery_skips (customer_id, skip_date, note) VALUES (?, ?, ?)')
+            ->execute([$ids['Paused'], $d2, 'delivery review test']);
+    }
 
     $roleId = (int)$db->query("SELECT id FROM roles WHERE slug = 'driver' LIMIT 1")->fetchColumn();
     $assert($roleId > 0, 'driver role exists on bakerysf_test');
@@ -414,7 +599,85 @@ try {
     $assert(in_array('failed', $needByCustomer[$ids['Failed']] ?? [], true), 'a failed stop needs a look');
     $assert(!isset($needByCustomer[$ids['OnTrack']]), 'a delivered After photo does not need a look');
     $assert(!isset($needByCustomer[$ids['Cancel']]), 'a cancelled stop is not listed as open or failed');
+
+    echo "\n=== Orders with no driver, pauses, and coverage ===\n";
+    $noDriverRow = $customers[$ids['NoDriver']];
+    $noDriverStatuses = [];
+    foreach ($noDriverRow['visits'] as $visit) {
+        $noDriverStatuses[(string)$visit['date']] = (string)$visit['status'];
+    }
+    $assert((int)$noDriverRow['unassigned'] === 1 && (int)$noDriverRow['routed'] === 0, 'an order with product and no driver is counted for the store');
+    $assert($noDriverStatuses === [$d1 => 'unassigned', $d2 => 'not_routed'], 'the day with an order reads as no driver and the day without one reads as not routed');
+    $assert(bakery_delivery_manager_review_customer_status($noDriverRow)['key'] === 'delivery_review.state_unassigned', 'that store is labeled order with no driver');
+    $assert(bakery_delivery_manager_review_customer_matches($noDriverRow, 'unassigned') === true, 'the no driver filter finds that store');
+    $assert((int)$quietRow['unassigned'] === 0, 'an order with nothing on it is not waiting for a driver');
+    $assert((int)$extraRow['unassigned'] === 0 && (int)$extraRow['delivered'] === 1, 'an order already delivered without a route is not waiting for a driver');
+    $assert((int)$loaded['totals']['unassigned'] === 1, 'the window has one order with no driver');
+
+    if ($pauseReady) {
+        $pausedRow = $customers[$ids['Paused']];
+        $assert((int)$pausedRow['paused'] === 2 && (int)$pausedRow['expected'] === 0 && (int)$pausedRow['not_routed'] === 0, 'a paused week and a skipped date are not counted as called for');
+        $assert(empty($pausedRow['flags']['short']) && empty($pausedRow['flags']['quiet']), 'a paused store is not short and not never routed');
+        $assert($pausedRow['reading']['key'] === 'delivery_review.reading_paused', 'the paused store reads as paused');
+        $assert(array_column(bakery_delivery_manager_review_customer_strip($pausedRow, [$d1, $d2]), 'state') === ['paused', 'paused'], 'both paused days show as paused in the strip');
+    } else {
+        echo "NOTE  pause tables are not on this database, pause checks skipped\n";
+    }
+
+    $dee = $drivers[$deeId];
+    $deeDays = [];
+    foreach ($dee['day_rows'] as $day) {
+        $deeDays[(string)$day['date']] = $day;
+    }
+    $assert((int)$deeDays[$d1]['unrouted_stops'] === 1 && (string)$deeDays[$d1]['state'] === 'not_out', 'a standing stop whose order got no driver leaves that driver day not out');
+    if ($pauseReady) {
+        $assert((int)$deeDays[$d1]['paused_stops'] === 1 && (int)$deeDays[$d2]['paused_stops'] === 1, 'the paused standing stop is set apart on each day');
+    }
+
+    $assert((int)$adaDays[$d1]['kept_stops'] === 5 && (int)$adaDays[$d1]['covered_stops'] === 1 && (int)$adaDays[$d1]['unrouted_stops'] === 1, 'Ada ran five standing stops, another driver ran one, and one was not routed');
+    $assert((string)$adaDays[$d1]['state'] === 'problem', 'a day with an open stop is a problem day');
+    $assert((int)$cal['covering_stops'] === 2 && (int)$ada['covered_stops'] === 2, 'covering for another route is credited to the driver who went');
+    $assert((int)$ada['due'] === 14 && $ada['delivered_rate'] === 57, 'the delivered rate leaves the cancelled stops out');
+    $assert($ada['after_rate'] === 88, 'the After photo rate is out of delivered stops');
+    $assert((int)$ada['unclocked_days'] === 4, 'days driven without a punch are counted');
+    $assert($ada['usual_finish'] === '09:32', 'the usual finish is the middle of the last closes');
+    $adaStrip = bakery_delivery_manager_review_driver_strip($ada, [$d1, $d2]);
+    $assert(array_column($adaStrip, 'state') === ['problem', 'problem'] && array_column($adaStrip, 'stops') === [10, 3], 'the driver strip carries each day state and stop count');
+
+    $assert((int)($onRow['driver_mix'][0]['driver_id'] ?? 0) === $adaId && (int)($onRow['driver_mix'][0]['stops'] ?? 0) === 2, 'the store names who went and how often');
+    $assert($onRow['actual_days'] === [(int)$weekday => 2] && $onRow['usual_close'] === '09:00', 'the store shows which weekday it was delivered and its usual close time');
+    $assert(array_column(bakery_delivery_manager_review_customer_strip($onRow, [$d1, $d2]), 'state') === ['clean', 'clean'], 'two proven deliveries are two clean days');
+    $assert(array_column(bakery_delivery_manager_review_customer_strip($noDriverRow, [$d1, $d2]), 'state') === ['problem', 'not_out'], 'the no driver day stands out in the strip');
+
+    $dayTotals = [];
+    foreach ($loaded['days'] as $row) {
+        $dayTotals[(string)$row['date']] = $row;
+    }
+    $assert(count($loaded['days']) === count($loaded['dates']) && isset($dayTotals[$d1], $dayTotals[$d2]), 'every date in the range has a row');
+    $first = $dayTotals[$d1];
+    $assert((int)$first['stops'] === 11 && (int)$first['delivered'] === 8 && (int)$first['with_after'] === 7, 'the day row adds up every driver');
+    $assert((int)$first['open'] === 1 && (int)$first['failed'] === 1 && (int)$first['cancelled'] === 1, 'the day row keeps open, failed, and cancelled apart');
+    $assert((int)$first['drivers_out'] === 2 && (int)$first['unassigned'] === 1, 'the day row counts drivers out and orders with no driver');
+
+    $loadedSummary = bakery_delivery_manager_review_summary($loaded, '2099-12-01');
+    $assert($loadedSummary['problem'] === 6 && $loadedSummary['stale_open'] === 5 && $loadedSummary['unassigned'] === 1, 'the headline counts open, failed, and no driver');
+    $loadedKeys = array_column(bakery_delivery_manager_review_insights($loaded, '2099-12-01'), 'key');
+    foreach (['insight_stale_open', 'insight_failed', 'insight_unassigned', 'insight_missing_after', 'insight_repeat', 'insight_bulk'] as $expectedKey) {
+        $assert(in_array('delivery_review.' . $expectedKey, $loadedKeys, true), 'what stands out includes ' . $expectedKey);
+    }
 } finally {
+    if ($created['customers'] && table_exists($db, 'standing_order_pauses')) {
+        $ph = implode(',', array_fill(0, count($created['customers']), '?'));
+        $db->prepare("DELETE FROM standing_order_pauses WHERE customer_id IN ($ph)")->execute($created['customers']);
+    }
+    if ($created['customers'] && table_exists($db, 'customer_delivery_skips')) {
+        $ph = implode(',', array_fill(0, count($created['customers']), '?'));
+        $db->prepare("DELETE FROM customer_delivery_skips WHERE customer_id IN ($ph)")->execute($created['customers']);
+    }
+    if ($created['orders'] && table_exists($db, 'daily_order_items')) {
+        $ph = implode(',', array_fill(0, count($created['orders']), '?'));
+        $db->prepare("DELETE FROM daily_order_items WHERE daily_order_id IN ($ph)")->execute($created['orders']);
+    }
     if ($created['loads'] && table_exists($db, 'driver_loads')) {
         $ph = implode(',', array_fill(0, count($created['loads']), '?'));
         $db->prepare("DELETE FROM driver_loads WHERE id IN ($ph)")->execute($created['loads']);
