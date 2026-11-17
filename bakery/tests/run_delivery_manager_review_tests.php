@@ -240,6 +240,79 @@ $assert($sum['after_rate'] === 80, 'the After photo rate is out of delivered sto
 $assert($sum['problem'] === 3 && $sum['stale_open'] === 1, 'open and failed are counted together, and old open stops apart');
 $assert($sum['standing_rate'] === 60, 'standing visits routed is out of visits called for');
 
+echo "\n=== Morning brief ===\n";
+$clearBrief = bakery_delivery_manager_review_brief($clearReport, '2099-11-14');
+$assert($clearBrief['tone'] === 'good' && $clearBrief['lead']['key'] === 'delivery_review.insight_clear', 'a clean window opens on the all-clear sentence');
+$assert($clearBrief['cards'] === [] && $clearBrief['more'] === 0, 'a clean window has no cards');
+
+$briefReport = bakery_delivery_manager_review_blank('2099-11-01', '2099-11-14');
+$briefReport['dates'] = ['2099-11-13', '2099-11-14'];
+$briefReport['drivers'] = [
+    [
+        'driver_id' => 4,
+        'driver_name' => 'Rosa',
+        'open' => 1,
+        'failed' => 0,
+        'missing_after' => 0,
+        'day_rows' => [
+            ['date' => '2099-11-13', 'state' => 'problem', 'stops' => 4, 'delivered' => 3, 'open' => 1, 'failed' => 0],
+            ['date' => '2099-11-14', 'state' => 'clean', 'stops' => 2, 'delivered' => 2, 'open' => 0, 'failed' => 0],
+        ],
+    ],
+    [
+        'driver_id' => 5,
+        'driver_name' => 'Luis',
+        'open' => 0,
+        'failed' => 0,
+        'missing_after' => 0,
+        'day_rows' => [
+            ['date' => '2099-11-13', 'state' => 'clean', 'stops' => 2, 'delivered' => 2, 'open' => 0, 'failed' => 0],
+        ],
+    ],
+];
+$briefReport['needs'] = [
+    ['reason' => 'open', 'date' => '2099-11-13', 'driver_id' => 4, 'driver_name' => 'Rosa', 'customer_id' => 9, 'customer_name' => 'Bi-Rite', 'photo_url' => ''],
+    ['reason' => 'missing_after', 'date' => '2099-11-12', 'driver_id' => 4, 'driver_name' => 'Rosa', 'customer_id' => 8, 'customer_name' => 'Tartine', 'photo_url' => ''],
+    ['reason' => 'missing_after', 'date' => '2099-11-13', 'driver_id' => 4, 'driver_name' => 'Rosa', 'customer_id' => 7, 'customer_name' => 'Jane', 'photo_url' => ''],
+    ['reason' => 'missing_after', 'date' => '2099-11-14', 'driver_id' => 5, 'driver_name' => 'Luis', 'customer_id' => 6, 'customer_name' => 'Hayes', 'photo_url' => ''],
+];
+$quietStore = bakery_delivery_manager_review_blank_customer(3, 'Arizmendi', '', true);
+$quietStore['expected'] = 4;
+$briefReport['customers'] = [$quietStore];
+$morning = bakery_delivery_manager_review_brief($briefReport, '2099-11-14');
+$assert($morning['lead']['key'] === 'delivery_review.insight_stale_open', 'the sentence leads with the stop that is still open');
+$assert($morning['tone'] === 'bad', 'an open stop from an earlier day colors the sentence');
+$cardTitles = array_column($morning['cards'], 'title');
+$assert($cardTitles[0] === 'Bi-Rite', 'the first card is the store that is still open');
+$assert(($morning['cards'][0]['action'] ?? '') === 'sheet', 'that card opens the sheet');
+$photoCards = array_values(array_filter($morning['cards'], static function (array $card): bool {
+    return ($card['eyebrow_key'] ?? '') === 'delivery_review.eyebrow_photo';
+}));
+$assert(count($photoCards) === 1 && (int)$photoCards[0]['sentence_params']['count'] === 3 && $photoCards[0]['title'] === 'Rosa', 'missing After photos collapse to the driver with the most');
+$assert(in_array('Arizmendi', $cardTitles, true), 'a store that never went out gets a card');
+$wallNames = array_column($morning['wall']['rows'], 'name');
+$calmNames = array_column($morning['wall']['calm_rows'], 'name');
+$assert($wallNames === ['Rosa'] && $calmNames === ['Luis'], 'the day wall keeps the hot driver up and the clean driver folded');
+$focused = bakery_delivery_manager_review_brief($briefReport, '2099-11-14', 4, 0, 'drivers');
+$assert($focused['cards'] === [] && $focused['lead']['key'] === 'delivery_review.attention_open', 'opening one driver replaces the cards with that driver');
+$assert(array_column($focused['wall']['rows'], 'name') === ['Rosa'] && $focused['wall']['calm_rows'] === [], 'that driver is the only row on the wall');
+
+$pile = bakery_delivery_manager_review_blank('2099-11-01', '2099-11-14');
+for ($i = 1; $i <= 5; $i++) {
+    $pile['needs'][] = [
+        'reason' => 'failed',
+        'date' => '2099-11-' . str_pad((string)$i, 2, '0', STR_PAD_LEFT),
+        'driver_id' => 1,
+        'driver_name' => 'Ada',
+        'customer_id' => $i,
+        'customer_name' => 'Store ' . $i,
+        'photo_url' => '',
+    ];
+}
+$piled = bakery_delivery_manager_review_cards($pile, '2099-11-14');
+$assert(count($piled['cards']) === 4 && $piled['more'] === 1, 'the front door keeps four stops and counts the rest');
+$assert(($piled['cards'][0]['title'] ?? '') === 'Store 5', 'the newest failed stop is the first card');
+
 echo "\n=== Page is read only and gated ===\n";
 $pageAccess = [
     'logged out' => [null, 302],
@@ -273,6 +346,8 @@ $assert(strpos($catalog, "'href' => 'delivery_manager_review.php'") !== false, '
 $assert(strpos($manager, 'delivery_manager_review.php') !== false, 'manager page links the review');
 $assert(strpos($phone, 'delivery_manager_review.php') !== false, 'phone manager page links the review');
 $assert(strpos($pageSrc, 'bakery_delivery_manager_review_access_status') !== false, 'page checks the role gate');
+$assert(strpos($pageSrc, 'bakery_delivery_manager_review_brief') !== false && strpos($pageSrc, 'delivery-review__hero') !== false, 'the page opens with the morning sentence');
+$assert(strpos($pageSrc, 'delivery-review__record') !== false, 'the spreadsheet stays in the full record');
 $assert(stripos($pageSrc, 'method="post"') === false && stripos($includeSrc, 'method="post"') === false, 'the page does not post');
 foreach ([$pageSrc, $includeSrc] as $src) {
     $assert(preg_match('/\b(INSERT|UPDATE|DELETE|REPLACE)\b/i', $src) !== 1, 'delivery review source has no write SQL');

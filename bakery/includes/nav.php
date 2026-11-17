@@ -231,6 +231,24 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
       </a>
+      <?php
+        $navBakerClockOpen = null;
+        if (isset($db) && $db instanceof PDO && bakery_time_clock_ready($db) && $navUser) {
+            $navBakerClockOpen = bakery_time_clock_open_punch($db, (int)($navUser['id'] ?? 0));
+        }
+      ?>
+      <?php if (function_exists('bakery_csrf_field')): ?>
+      <form class="bakery-nav__clock" method="post" action="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
+        <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
+          <?php echo htmlspecialchars($navBakerClockOpen
+              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
+              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+        </button>
+      </form>
+      <?php endif; ?>
       <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
       <?php echo $navLogoutForm; ?>
     </div>
