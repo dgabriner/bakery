@@ -242,6 +242,49 @@ if (function_exists('bakery_survey_token_is_expired') && function_exists('bakery
         'a today token cannot be retargeted to another date'
     );
 }
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-11-17', '2026-11-17', false) === '2026-11-17',
+    'Today opens today when the open survey is tomorrow'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-12-01', '2026-11-17', false) === '2026-12-01',
+    'another day in the next three weeks can be chosen'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-12-08', '2026-11-17', false) === '2026-12-08',
+    'the far edge of the window is 21 days ahead'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-12-09', '2026-11-17', true) === '',
+    'a day past three weeks stays on the open survey'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-11-18', '2026-11-17', true) === '',
+    'choosing the day already open is not a switch'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-11-16', '2026-11-17', false) === '',
+    'a public link cannot move onto a past day'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-11-03', '2026-11-17', true) === '2026-11-03',
+    'signed-in staff can open a recent day'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', '2026-11-02', '2026-11-17', true) === '',
+    'signed-in staff cannot open a day older than two weeks'
+);
+$assert(
+    bakery_survey_requested_switch_date('2026-11-18', 'nope', '2026-11-17', true) === '',
+    'a junk day stays on the open survey'
+);
+$chipToday = date('Y-m-d');
+$chipTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+$daySwitchHtml = bakery_survey_day_switch_html('abc123', $chipTomorrow);
+$assert(substr_count($daySwitchHtml, 'value="switch_day"') === 3, 'Today, Tomorrow, and the date field each choose a day');
+$assert(strpos($daySwitchHtml, 'name="date" value="' . $chipToday . '"') !== false, 'Today chip posts today');
+$assert(substr_count($daySwitchHtml, 'name="date" value="' . $chipTomorrow . '"') === 2, 'Tomorrow chip and the date field show the open day');
+$assert(strpos($daySwitchHtml, 'survey-day-chip--active') !== false, 'the open day is marked active');
 $assert(bakery_survey_page_needs_login('', []) === true, 'no token still requires login');
 $assert(
     bakery_survey_page_needs_login('nope', []) === true,
@@ -538,6 +581,12 @@ $assert(strpos($navSrc, 'text_comms.php?view=surveys') === false, 'manager navig
 $assert(strpos($navSrc, 'survey.php') !== false, 'driver and manager nav include survey.php');
 $assert(preg_match("/currentPage === 'survey'/", $navSrc) === 1, 'primary nav lights Survey');
 $assert(strpos($surveyPhp, 'survey-day-chip') !== false, 'survey hub and store-verify expose Today/Tomorrow day chips');
+$assert(strpos($surveyPhp, 'bakery_survey_day_switch_html') !== false, 'store-verify day controls post the chosen day');
+$assert(strpos($surveyPhp, 'bakery_survey_find_dated_kind') !== false, 'a survey link for another day looks that day up');
+$assert(
+    preg_match("/action === 'switch_day'[\\s\\S]{0,2200}bakery_survey_ensure_day_pair/", $surveyPhp) === 1,
+    'choosing a day opens that day\'s survey'
+);
 $assert(strpos($surveyPhp, '$isManager ? 0') !== false, 'manager hub always mints HQ all-drivers surveys');
 $assert(strpos($surveyPhp, 'includes/header.php') !== false, 'logged-in survey hub uses app chrome');
 $assert(strpos($surveyPhp, 'hub_title_manager') !== false, 'manager hub uses everyone title');
@@ -638,6 +687,7 @@ $keys = [
     'common.tomorrow',
     'survey.hub_title_manager',
     'survey.hub_day_aria',
+    'survey.day_switch_rejected',
     'texts.survey_step1_help_hq',
     'texts.survey_step2_help_hq',
     'texts.view_surveys',
@@ -667,7 +717,10 @@ $assert(strpos($tcSrc, 'survey_step2_title') !== false, 'Survey Center shows ste
 $assert(strpos($tcSrc, 'bakery_survey_dual_hub_existing') !== false, 'coverage board reads hub links without creating them');
 $assert(strpos($tcSrc, "=== 'create_today_link'") !== false, 'today link is created by an explicit POST');
 $assert(strpos($surveyPhp, 'sibling_to_order') !== false, 'store-verify page links forward to order');
-$assert(strpos((string)file_get_contents($root . '/includes/survey_route_order_render.php'), 'sibling_to_verify') !== false, 'order page links back to lock-stores');
+$routeOrderRender = (string)file_get_contents($root . '/includes/survey_route_order_render.php');
+$assert(strpos($routeOrderRender, 'sibling_to_verify') !== false, 'order page links back to lock-stores');
+$assert(strpos($routeOrderRender, 'bakery_survey_day_switch_html') !== false, 'order page uses the same day switch');
+$assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');
 $authSrc = (string)file_get_contents($root . '/includes/auth.php');
 $assert(strpos($authSrc, "'survey.php'") !== false, 'survey.php is in the public-script door so enforce_request_security does not 302');
 $assert(

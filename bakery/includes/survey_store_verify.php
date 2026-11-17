@@ -222,6 +222,97 @@ function bakery_survey_store_verify_resolve_date(string $defaultDate, ?string $r
 }
 
 /**
+ * Today through 21 days ahead. Logged-in staff may also open the previous 14 days.
+ * The token's own delivery_date is never rewritten to land inside this window.
+ */
+function bakery_survey_date_in_switch_window(string $today, string $date, bool $allowRecentPast): bool
+{
+    try {
+        $today = bakery_survey_validate_ymd($today);
+        $date = bakery_survey_validate_ymd($date);
+    } catch (RuntimeException $e) {
+        return false;
+    }
+    $todayDt = new DateTimeImmutable($today);
+    $pastDays = $allowRecentPast ? 14 : 0;
+    $min = $todayDt->modify('-' . $pastDays . ' days')->format('Y-m-d');
+    $max = $todayDt->modify('+21 days')->format('Y-m-d');
+    return $date >= $min && $date <= $max;
+}
+
+/**
+ * Date to open when the viewer picks a different day. Empty means stay on the
+ * token's bound delivery date (same day, junk, or outside the window).
+ */
+function bakery_survey_requested_switch_date(string $boundDate, string $requested, string $today, bool $allowRecentPast): string
+{
+    $requested = trim($requested);
+    if ($requested === '') {
+        return '';
+    }
+    try {
+        $boundDate = bakery_survey_validate_ymd($boundDate);
+        $requested = bakery_survey_validate_ymd($requested);
+    } catch (RuntimeException $e) {
+        return '';
+    }
+    if ($requested === $boundDate) {
+        return '';
+    }
+    if (!bakery_survey_date_in_switch_window($today, $requested, $allowRecentPast)) {
+        return '';
+    }
+    return $requested;
+}
+
+/**
+ * Today / Tomorrow chips and the date field. Posts switch_day so the page
+ * opens that day's survey instead of ignoring the choice on a bound token.
+ */
+function bakery_survey_day_switch_html(string $token, string $activeDate): string
+{
+    $esc = static function (string $value): string {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    };
+    $activeDate = bakery_survey_validate_ymd($activeDate);
+    $today = date('Y-m-d');
+    $tomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+    $action = 'survey.php?t=' . rawurlencode($token);
+    $csrf = function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
+    $label = static function (string $key, string $fallback): string {
+        if (function_exists('bakery_survey_text')) {
+            return bakery_survey_text($key, [], $fallback);
+        }
+        return $fallback;
+    };
+    $chip = static function (string $date, string $text) use ($activeDate, $esc, $action, $csrf): string {
+        $active = $activeDate === $date;
+        $class = 'survey-day-chip' . ($active ? ' survey-day-chip--active' : '');
+        $current = $active ? ' aria-current="date"' : '';
+        return '<form method="post" action="' . $esc($action) . '" class="survey-day-chip-form">'
+            . $csrf
+            . '<input type="hidden" name="action" value="switch_day">'
+            . '<input type="hidden" name="date" value="' . $esc($date) . '">'
+            . '<button type="submit" class="' . $class . '"' . $current . '>' . $esc($text) . '</button>'
+            . '</form>';
+    };
+    $html = '<div class="survey-day-chips" role="group" aria-label="'
+        . $esc($label('survey.hub_day_aria', 'Choose delivery day')) . '">';
+    $html .= $chip($today, $label('common.today', 'Today'));
+    $html .= $chip($tomorrow, $label('common.tomorrow', 'Tomorrow'));
+    $html .= '</div>';
+    $html .= '<form class="date-bar" method="post" action="' . $esc($action) . '">';
+    $html .= $csrf;
+    $html .= '<input type="hidden" name="action" value="switch_day">';
+    $html .= '<label>' . $esc($label('survey.store_verify_date', 'Delivery day'));
+    $html .= '<input type="date" name="date" value="' . $esc($activeDate) . '" required></label>';
+    $html .= '<button type="submit" class="btn ghost">'
+        . $esc($label('survey.store_verify_date_go', 'Show day')) . '</button>';
+    $html .= '</form>';
+    return $html;
+}
+
+/**
  * Survey-only reassign: move store ids onto to_driver ON set; drop from others.
  *
  * @param array<int, list<int>> $postedByDriver

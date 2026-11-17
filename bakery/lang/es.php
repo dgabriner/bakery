@@ -201,6 +201,7 @@ return [
     'survey.hub_title_manager' => 'Encuestas de ruta de todos',
     'survey.hub_sub' => 'Haz el paso 1 primero, luego el 2. Mismo día: :date',
     'survey.hub_day_aria' => 'Elegir día de entrega',
+    'survey.day_switch_rejected' => 'Ese día queda fuera del rango. Elige hoy, un día reciente, o uno de las próximas tres semanas.',
     'survey.hub_empty' => 'Todavía no hay una encuesta abierta para :date.',
     'survey.hub_open' => 'Abrir las encuestas de este día',
     'texts.survey_coverage_empty_drivers' => 'Conductores sin tiendas asignadas (:count)',

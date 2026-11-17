@@ -767,6 +767,39 @@ function bakery_survey_find_route_order(PDO $db, int $driverId, string $delivery
     return $row ?: [];
 }
 
+/**
+ * Open survey of this kind for one driver and day. Does not insert.
+ * route_review shares the store-verify lookup.
+ *
+ * @return array<string, mixed>
+ */
+function bakery_survey_find_dated_kind(PDO $db, string $kind, int $driverId, string $deliveryDate): array
+{
+    if ($kind === 'route_order') {
+        return bakery_survey_find_route_order($db, $driverId, $deliveryDate);
+    }
+    if ($kind === 'store_verify' || $kind === 'route_review') {
+        return bakery_survey_find_store_verify($db, $driverId, $deliveryDate);
+    }
+    return [];
+}
+
+/**
+ * Open lock-stores and set-order for this driver and day. Returns the row
+ * matching $kind. route_review lands on the store-verify row.
+ *
+ * @return array<string, mixed>
+ */
+function bakery_survey_ensure_day_pair(PDO $db, string $kind, int $driverId, string $deliveryDate, int $createdBy = 0): array
+{
+    $verify = bakery_survey_ensure_store_verify($db, $driverId, $deliveryDate, $createdBy);
+    $order = bakery_survey_ensure_route_order($db, $driverId, $deliveryDate, $createdBy);
+    if ($kind === 'route_order') {
+        return $order;
+    }
+    return $verify;
+}
+
 function bakery_survey_ensure_route_order(PDO $db, int $driverId, string $deliveryDate, int $createdBy = 0): array
 {
     $deliveryDate = bakery_survey_validate_ymd($deliveryDate);

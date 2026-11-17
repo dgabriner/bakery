@@ -281,6 +281,26 @@ try {
     $stillNoOrder = bakery_survey_find_route_order($db, 0, $probeDate);
     $assert($stillNoOrder === [], 'route-order lookup stays read-only');
 
+    $switchFrom = '2099-02-02';
+    $switchTo = '2099-02-03';
+    $fromRow = bakery_survey_ensure_store_verify($db, 0, $switchFrom, 0);
+    $surveyIds[] = (int)$fromRow['id'];
+    $pair = bakery_survey_ensure_day_pair($db, 'store_verify', 0, $switchTo, 0);
+    $surveyIds[] = (int)$pair['id'];
+    $orderRow = bakery_survey_find_route_order($db, 0, $switchTo);
+    if (!empty($orderRow['id'])) {
+        $surveyIds[] = (int)$orderRow['id'];
+    }
+    $assert(substr((string)$pair['delivery_date'], 0, 10) === $switchTo, 'choosing another day opens that day');
+    $assert((string)$pair['token'] !== (string)$fromRow['token'], 'the original survey token stays on its own day');
+    $assert(
+        bakery_survey_bound_delivery_date($fromRow, $switchTo) === $switchFrom,
+        'switching days does not retarget the open token'
+    );
+    $assert(substr((string)($orderRow['delivery_date'] ?? ''), 0, 10) === $switchTo, 'set-order for that day opens with it');
+    $againPair = bakery_survey_ensure_day_pair($db, 'route_order', 0, $switchTo, 0);
+    $assert((int)$againPair['id'] === (int)$orderRow['id'], 'opening the same day again reuses the survey');
+
     $assert(function_exists('bakery_unassigned_for_date'), 'shared unassigned-for-date query exists');
     if (function_exists('bakery_unassigned_for_date')) {
         $gapDate = '2026-10-10';
@@ -348,6 +368,8 @@ try {
     $assert(strpos($surveyPhp, 'bakery_survey_token_is_expired') !== false, 'survey page rejects an expired token');
     $assert(strpos($surveyPhp, '!$expiredPublicToken && bakery_survey_page_needs_login') !== false, 'an expired public link shows the expired page without a login wall');
     $assert(strpos($surveyPhp, 'bakery_survey_bound_delivery_date') !== false, 'survey page keeps the token on its delivery date');
+    $assert(strpos($surveyPhp, "action === 'switch_day'") !== false, 'Today and other days open that day\'s survey');
+    $assert(strpos($routeOrderRender, 'bakery_survey_day_switch_html') !== false, 'route order uses the same day switch');
     $assert(strpos($surveyPhp, 'bakery_survey_record_interaction') === false, 'a survey page view does not write an open interaction');
     $assert(substr_count($surveyPhp, 'bakery_survey_dual_hub_links') === 1, 'creating hub rows happens in one POST path');
     $assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');

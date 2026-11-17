@@ -202,6 +202,7 @@ return [
     'survey.hub_title_manager' => 'Everyone\'s route surveys',
     'survey.hub_sub' => 'Do step 1 first, then step 2. Same day: :date',
     'survey.hub_day_aria' => 'Choose delivery day',
+    'survey.day_switch_rejected' => 'That day is outside the range. Choose today, a recent day, or a day in the next three weeks.',
     'survey.hub_empty' => 'No survey is open for :date yet.',
     'survey.hub_open' => 'Open surveys for this day',
     'texts.survey_coverage_empty_drivers' => 'Drivers with no stores assigned (:count)',
