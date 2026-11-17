@@ -323,6 +323,7 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         'metrics' => [
             'item_lines' => bakery_dashboard_metric(null, 'unavailable'),
             'units' => bakery_dashboard_metric(null, 'unavailable'),
+            'packed_lines' => bakery_dashboard_metric(null, 'unavailable'),
         ],
     ];
 
@@ -354,10 +355,24 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
         $pack['metrics']['item_lines'] = bakery_dashboard_metric($itemLines, $itemLines > 0 ? 'ready' : 'empty');
         $pack['metrics']['units'] = bakery_dashboard_metric($itemUnits, $itemUnits > 0 ? 'ready' : 'empty');
         if ($itemLines > 0) {
+            // Calm until finished-goods coverage says otherwise (same rule Daily Run uses).
             $pack['state'] = 'ok';
             $pack['summary'] = bakery_t_count('ux.cc.pack_one', 'ux.cc.pack_many', $itemLines, [
                 'units' => number_format($itemUnits),
             ]);
+            require_once __DIR__ . '/pack_list.php';
+            $packProgress = bakery_pack_day_progress($db, $date, $operatingLines);
+            if ($packProgress['tracking']) {
+                $pack['metrics']['packed_lines'] = bakery_dashboard_metric($packProgress['packed'], 'ready');
+                if ($packProgress['packed'] > 0) {
+                    $pack['summary'] .= ' · ' . bakery_t('ux.cc.pack_progress', [
+                        'packed' => number_format($packProgress['packed']),
+                        'total' => number_format($packProgress['total']),
+                    ]);
+                }
+            } else {
+                $pack['metrics']['packed_lines'] = bakery_dashboard_metric(null, 'unavailable');
+            }
         } else {
             $pack['state'] = 'empty';
             $pack['summary'] = bakery_t('ux.cc.nothing_to_pack');
@@ -418,6 +433,12 @@ function bakery_dashboard_command_center(PDO $db, string $date): array
             $production['metrics']['short_products'] = bakery_dashboard_metric(null, 'unavailable', 'Finished-goods inventory not installed');
         } else {
             $production['metrics']['short_products'] = bakery_dashboard_metric(0, 'empty');
+        }
+
+        // Pack follows the same finished-goods shortfall rule as Daily Run's Pack stage.
+        if ($pack['state'] === 'ok' && $shortProducts > 0) {
+            $pack['state'] = 'attention';
+            $pack['summary'] .= ' · ' . bakery_t_count('ux.cc.pack_stock_short_one', 'ux.cc.pack_stock_short_many', $shortProducts);
         }
 
         if (table_exists($db, 'production_plan_items') && $requiredUnits > 0) {

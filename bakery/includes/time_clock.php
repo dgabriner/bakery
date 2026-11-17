@@ -171,6 +171,31 @@ function bakery_time_clock_who_is_in(PDO $db): array
     return is_array($rows) ? $rows : [];
 }
 
+/**
+ * Split open punches into people who clocked in today and punches left open
+ * from an earlier day (usually a missed clock out). Same "earlier day" test the
+ * weekly correction cards use.
+ *
+ * @param list<array<string, mixed>> $openRows Rows from bakery_time_clock_who_is_in()
+ * @return array{now: list<array<string, mixed>>, earlier: list<array<string, mixed>>}
+ */
+function bakery_time_clock_split_open(array $openRows, ?int $now = null): array
+{
+    $now = $now ?? time();
+    $todayStart = strtotime(date('Y-m-d', $now) . ' 00:00:00');
+    $split = ['now' => [], 'earlier' => []];
+    foreach ($openRows as $row) {
+        $inTs = strtotime((string)($row['clock_in_at'] ?? ''));
+        if ($inTs !== false && $todayStart !== false && $inTs < $todayStart) {
+            $row['week_monday'] = bakery_time_clock_week_monday(date('Y-m-d', $inTs));
+            $split['earlier'][] = $row;
+        } else {
+            $split['now'][] = $row;
+        }
+    }
+    return $split;
+}
+
 /** @return list<array<string, mixed>> */
 function bakery_time_clock_punches_for_day(PDO $db, string $date): array
 {

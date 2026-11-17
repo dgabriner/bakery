@@ -1209,6 +1209,25 @@
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   }
 
+  /* The manager alert bell floats above the bottom bar (min-height 44px plus an
+     8px gap). Reserve that strip so it never covers a tap target at scroll end. */
+  body.workspace-manager {
+    --sf-manager-bar-h: calc(64px + env(safe-area-inset-bottom, 0px));
+    --sf-manager-bell-reserve: 56px;
+    padding-bottom: calc(92px + var(--sf-manager-bell-reserve) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Manager "view as driver" (driver.php under the manager bar): lift the sticky
+     docks above the bar and the bell, and keep the last stop clear of them. */
+  body.workspace-manager.driver-workflow-page .route-sticky-dock,
+  body.workspace-manager.driver-workflow-page .route-adjust-dock {
+    bottom: calc(var(--sf-manager-bar-h) + var(--sf-manager-bell-reserve));
+  }
+
+  body.workspace-manager.driver-workflow-page.route-has-sticky-dock {
+    padding-bottom: calc(var(--sf-manager-bar-h) + var(--sf-manager-bell-reserve) + var(--driver-dock-h, 72px) + 8px);
+  }
+
   .bakery-nav--focused {
     border-bottom: 0;
     border-top: 1px solid var(--sf-nav-border);

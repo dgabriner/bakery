@@ -519,7 +519,8 @@ body.workspace-manager {
 
 @media (max-width: 720px) {
   body.workspace-manager {
-    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+    /* 56px matches --sf-manager-bell-reserve in nav.css (alert bell above the bar). */
+    padding-bottom: calc(92px + var(--sf-manager-bell-reserve, 56px) + env(safe-area-inset-bottom, 0px));
   }
 }
 
