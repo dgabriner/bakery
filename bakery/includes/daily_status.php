@@ -90,11 +90,12 @@ function bakery_daily_status_public_blocker(array $exception): array
         'type' => (string)($exception['type'] ?? ''),
         'severity' => (string)($exception['severity'] ?? ''),
         'stage' => (string)($exception['stage'] ?? ''),
-        'title' => (string)($exception['title'] ?? ''),
-        'detail' => (string)($exception['detail'] ?? ''),
+        // The public status JSON stays English and stable whatever language the viewer uses.
+        'title' => (string)($exception['title_en'] ?? $exception['title'] ?? ''),
+        'detail' => (string)($exception['detail_en'] ?? $exception['detail'] ?? ''),
         'count' => array_key_exists('count', $exception) ? $exception['count'] : null,
         'href' => isset($exception['href']) ? (string)$exception['href'] : null,
-        'action' => (string)($exception['action'] ?? ''),
+        'action' => (string)($exception['action_en'] ?? $exception['action'] ?? ''),
     ];
 }
 
