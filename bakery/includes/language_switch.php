@@ -16,11 +16,9 @@ $variant = $langSwitchVariant ?? 'inline';
   <a class="bakery-lang-switch__btn<?php echo $currentLocale === 'en' ? ' bakery-lang-switch__btn--active' : ''; ?>"
      href="<?php echo htmlspecialchars(bakery_locale_switch_url('en'), ENT_QUOTES, 'UTF-8'); ?>"
      hreflang="en"
-     lang="en"
-     aria-current="<?php echo $currentLocale === 'en' ? 'true' : 'false'; ?>"><?php bakery_te('lang.en'); ?></a>
+     lang="en"<?php echo $currentLocale === 'en' ? ' aria-current="true"' : ''; ?>><?php bakery_te('lang.en'); ?></a>
   <a class="bakery-lang-switch__btn<?php echo $currentLocale === 'es' ? ' bakery-lang-switch__btn--active' : ''; ?>"
      href="<?php echo htmlspecialchars(bakery_locale_switch_url('es'), ENT_QUOTES, 'UTF-8'); ?>"
      hreflang="es"
-     lang="es"
-     aria-current="<?php echo $currentLocale === 'es' ? 'true' : 'false'; ?>"><?php bakery_te('lang.es'); ?></a>
+     lang="es"<?php echo $currentLocale === 'es' ? ' aria-current="true"' : ''; ?>><?php bakery_te('lang.es'); ?></a>
 </div>

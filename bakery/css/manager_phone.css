@@ -57,6 +57,14 @@ body.workspace-manager {
   text-decoration: none;
   font: inherit;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Row one: Prev, Today, Next share the width. Row two: the date picker and Go
+   fill the line, so Go and Next never wrap onto a second line by themselves. */
+.manager-phone__dates > a {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .manager-phone__today {
@@ -69,7 +77,8 @@ body.workspace-manager {
   display: flex;
   gap: 0.35rem;
   margin: 0;
-  flex: 1 1 auto;
+  flex: 1 1 100%;
+  order: 2;
 }
 
 .manager-phone__dates input[type="date"] {

@@ -679,5 +679,41 @@ sales_leads_cleanup($db);
 assert_eq(0, sales_leads_count($db, "SELECT COUNT(*) FROM leads WHERE external_id LIKE 'SFL-%'"), 'test leads are removed from bakerysf_test');
 assert_eq('Demo Prospect Shop', (string)$db->query("SELECT customer_name FROM leads WHERE customer_name = 'Demo Prospect Shop'")->fetchColumn(), 'cleanup keeps the demo lead');
 
+// System notes read in the viewer's language; typed notes are never touched.
+$noteLocales = [];
+foreach (['es', 'en'] as $noteLocale) {
+    $GLOBALS['bakery_i18n_catalog'] = null;
+    bakery_set_locale($noteLocale, false);
+    $noteLocales[$noteLocale] = [
+        'merged_en' => bakery_sales_leads_localize_note('Merged lead SFL-009 into this lead.'),
+        'converted_en' => bakery_sales_leads_localize_note('Converted to customer #42'),
+        'sample_en' => bakery_sales_leads_localize_note('Sample drop order #7 on 2026-11-18'),
+        'converted_es' => bakery_sales_leads_localize_note('Convertido al cliente #42'),
+        'typed' => bakery_sales_leads_localize_note('Call back Tuesday about the pan dulce sample'),
+    ];
+}
+assert_eq('Se unió el lead SFL-009 en este lead.', $noteLocales['es']['merged_en'], 'an English merge note reads in Spanish');
+assert_eq('Convertido al cliente #42', $noteLocales['es']['converted_en'], 'an English convert note reads in Spanish');
+assert_eq('Pedido de muestra #7 el 2026-11-18', $noteLocales['es']['sample_en'], 'an English sample note reads in Spanish');
+assert_eq('Converted to customer #42', $noteLocales['en']['converted_es'], 'a Spanish convert note reads in English');
+assert_eq('Merged lead SFL-009 into this lead.', $noteLocales['en']['merged_en'], 'the English merge note is unchanged in English');
+assert_eq('Call back Tuesday about the pan dulce sample', $noteLocales['es']['typed'], 'a typed note is never translated');
+assert_eq('Call back Tuesday about the pan dulce sample', $noteLocales['en']['typed'], 'a typed note is the same in English');
+assert_eq('', bakery_sales_leads_localize_note('   '), 'a blank note stays blank');
+$salesSources = [
+    'sales_home.php',
+    'includes/sales_pipeline_board.php',
+    'includes/sales_workspace_page.php',
+    'leads.php',
+];
+foreach ($salesSources as $salesSource) {
+    $salesSourceText = (string)file_get_contents($root . '/' . $salesSource);
+    assert_eq(true, strpos($salesSourceText, 'bakery_sales_leads_localize_note') !== false, $salesSource . ' localizes system notes');
+}
+$leadsLibText = (string)file_get_contents($root . '/includes/sales_leads.php');
+assert_eq(true, strpos($leadsLibText, "bakery_t('leads.activity_merged'") !== false, 'a merge writes its note through the language catalog');
+bakery_set_locale('en', false);
+$GLOBALS['bakery_i18n_catalog'] = null;
+
 echo "\n{$GLOBALS['TEST_PASS']} passed, {$GLOBALS['TEST_FAIL']} failed\n";
 exit($GLOBALS['TEST_FAIL'] > 0 ? 1 : 0);

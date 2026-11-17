@@ -671,7 +671,7 @@ $exportQuery = http_build_query(array_filter([
                                 <td><?php echo bakery_sales_leads_h((string)$entry['activity_date']); ?></td>
                                 <td><?php echo bakery_sales_leads_h($userName); ?></td>
                                 <td><?php echo bakery_sales_leads_h($stageText); ?></td>
-                                <td><?php echo bakery_sales_leads_h((string)($entry['note'] ?? '')); ?></td>
+                                <td><?php echo bakery_sales_leads_h(bakery_sales_leads_localize_note((string)($entry['note'] ?? ''))); ?></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>

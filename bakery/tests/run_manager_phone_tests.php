@@ -399,6 +399,15 @@ manager_phone_assert(strpos($phone, 'manager_phone.cod_collected_turnin_missing'
 manager_phone_assert(strpos($phone, 'bakery_manager_phone_mission_from_stops') !== false, 'routes render uses mission helper');
 manager_phone_assert(strpos($phone, 'manager_phone.mission_still_to_deliver') !== false, 'routes show remaining delivery order');
 manager_phone_assert(strpos($phoneCss, '.manager-phone__mission-list') !== false, 'mission timeline styles exist');
+manager_phone_assert(
+    preg_match('/\.manager-phone__dates a,\s*\.manager-phone__dates button \{[^}]*white-space:\s*nowrap/s', $phoneCss) === 1,
+    'date row buttons never break their label onto two lines'
+);
+manager_phone_assert(
+    preg_match('/\.manager-phone__dates > a \{[^}]*flex:\s*1 1 0/s', $phoneCss) === 1
+        && preg_match('/\.manager-phone__dates form \{[^}]*flex:\s*1 1 100%;[^}]*order:\s*2/s', $phoneCss) === 1,
+    'date row puts Prev, Today, Next on one line and the date picker with Go on the next'
+);
 
 echo "\n{$passed} passed, {$failed} failed\n";
 exit($failed === 0 ? 0 : 1);

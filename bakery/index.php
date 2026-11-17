@@ -237,7 +237,9 @@ require_once 'includes/nav.php';
                 </ol>
             </section>
 
-            <?php bakery_render_demand_cadence_strip($db, $today, 'dashboard'); ?>
+            <?php if ($selectedDate >= $today): ?>
+                <?php bakery_render_demand_cadence_strip($db, $today, 'dashboard'); ?>
+            <?php endif; ?>
 
             <?php if ($tomorrowReadiness !== null && $tomorrowReadiness['state'] !== 'unavailable'): ?>
                 <?php

@@ -713,6 +713,66 @@ function bakery_sales_leads_log(
     ]);
 }
 
+/**
+ * Templates for the notes the app writes itself. Each is matched in both
+ * languages so a note written under one locale still reads right in the other.
+ *
+ * @return list<array{key: string, regex: string}>
+ */
+function bakery_sales_leads_system_note_templates(): array
+{
+    static $built = null;
+    if ($built !== null) {
+        return $built;
+    }
+    $built = [];
+    if (!function_exists('bakery_load_lang_catalog')) {
+        return $built;
+    }
+    $keys = ['leads.activity_converted', 'leads.activity_sample', 'leads.activity_merged'];
+    foreach (['en', 'es'] as $locale) {
+        $catalog = bakery_load_lang_catalog($locale);
+        foreach ($keys as $key) {
+            $template = (string)($catalog[$key] ?? '');
+            $parts = $template === '' ? [] : preg_split('/:([a-z_]+)/', $template, -1, PREG_SPLIT_DELIM_CAPTURE);
+            if (!is_array($parts) || $parts === []) {
+                continue;
+            }
+            $regex = '';
+            foreach ($parts as $index => $part) {
+                $regex .= $index % 2 === 0 ? preg_quote($part, '/') : '(?P<' . $part . '>.+?)';
+            }
+            $built[] = ['key' => $key, 'regex' => '/^' . $regex . '$/u'];
+        }
+    }
+    return $built;
+}
+
+/**
+ * Show a note the app wrote itself (convert, sample drop, merge) in the
+ * viewer's language. Notes people typed are returned untouched.
+ */
+function bakery_sales_leads_localize_note(string $note): string
+{
+    $note = trim($note);
+    if ($note === '' || !function_exists('bakery_t')) {
+        return $note;
+    }
+    foreach (bakery_sales_leads_system_note_templates() as $template) {
+        if (preg_match($template['regex'], $note, $matches) !== 1) {
+            continue;
+        }
+        $params = [];
+        foreach ($matches as $name => $value) {
+            if (is_string($name)) {
+                $params[$name] = (string)$value;
+            }
+        }
+        return bakery_t($template['key'], $params);
+    }
+    return $note;
+}
+
 function bakery_sales_leads_next_external_id(PDO $db): string
 {
     $rows = $db->query("SELECT external_id FROM leads WHERE external_id LIKE 'SFL-%'")->fetchAll();
@@ -1863,7 +1923,9 @@ function bakery_sales_leads_merge(PDO $db, int $keepId, int $dropId, int $userId
             $db,
             $keepId,
             $userId,
-            'Merged lead ' . $dropLabel . ' into this lead.',
+            function_exists('bakery_t')
+                ? bakery_t('leads.activity_merged', ['label' => $dropLabel])
+                : 'Merged lead ' . $dropLabel . ' into this lead.',
             null,
             null,
             date('Y-m-d')

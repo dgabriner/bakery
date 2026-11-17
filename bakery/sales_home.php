@@ -111,7 +111,7 @@ require_once __DIR__ . '/includes/nav.php';
                                 <strong><?php echo $salesText((string)($item['customer_name'] ?? '')); ?></strong>
                                 <span><?php echo $salesText($stageName !== '' ? bakery_t('leads.stage.' . $stageName) : ''); ?></span>
                                 <span><?php echo $salesText($when); ?></span>
-                                <span><?php echo $salesText((string)($item['last_note'] ?? '')); ?></span>
+                                <span><?php echo $salesText(bakery_sales_leads_localize_note((string)($item['last_note'] ?? ''))); ?></span>
                             </a>
                         </li>
                     <?php endforeach; ?>

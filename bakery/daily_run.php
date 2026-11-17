@@ -275,7 +275,9 @@ require_once 'includes/nav.php';
             </section>
         <?php endif; ?>
 
-        <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
+        <?php if ($selectedDate >= $today): ?>
+            <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
+        <?php endif; ?>
 
         <?php if ($driverSmsBlocks !== []): ?>
         <section class="dr-driver-sms" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.driver_sms_title')); ?>">
