@@ -120,4 +120,5 @@ return [
     '111_sales_lead_customer_neighborhood',
     '112_route_load_and_carry',
     '113_sales_role',
+    '116_production_day_crew',
 ];
