@@ -103,6 +103,24 @@ $assert($std['batches_ceil'] === 3, 'standard batches ceil 3');
 $assert($std['label'] !== '', 'standard batches label');
 $assert(bakery_pmd_standard_batches(null, 1000)['label'] === '', 'no standard batch → empty');
 
+$assert(bakery_pmd_resolve_bake_date('2099-11-06') === '2099-11-06', 'resolve bake day');
+$assert(bakery_pmd_resolve_bake_date('nope') === date('Y-m-d'), 'bake day defaults to today');
+$assert(bakery_pmd_median([5, 15, 15]) === 15, 'median of three samples');
+$assert(bakery_pmd_usual_summary([15, 25, 25])['last'] === 15, 'usual last is the newest week');
+$assert(bakery_pmd_usual_summary([15, 25, 25])['median'] === 25, 'usual median from three weeks');
+$assert(bakery_pmd_usual_summary([15, 25])['median'] === null, 'median stays hidden under three samples');
+$saturdayFamilies = bakery_pmd_bake_families('2026-10-17');
+$assert($saturdayFamilies[0]['active'] === false && $saturdayFamilies[1]['active'] === false, 'Saturday has no pan dulce or Sour Flour bake');
+$wednesdayFamilies = bakery_pmd_bake_families('2026-10-14');
+$assert($wednesdayFamilies[0]['active'] === true, 'Wednesday is a pan dulce bake');
+$assert($wednesdayFamilies[1]['active'] === false, 'Wednesday has no Sour Flour bake');
+$fridayFamilies = bakery_pmd_bake_families('2026-10-16');
+$assert(count($fridayFamilies[0]['cover_dates']) === 3, 'Friday pan dulce covers Sat Sun Mon');
+$assert(count($fridayFamilies[1]['cover_dates']) === 2, 'Friday Sour Flour covers Sat Sun');
+require_once $root . '/includes/production_cadence.php';
+$mondayLinks = bakery_production_cadence_manager_bake_links('2026-10-19');
+$assert(count($mondayLinks) === 2, 'Monday delivery links to two bake days');
+
 // Optional live board build against bakerysf_test when configured.
 $ranBoard = false;
 $envPath = $root . '/.env';
@@ -339,6 +357,199 @@ foreach (bakery_navigation_catalog() as $section) {
     }
 }
 $assert($found, 'navigation catalog lists production_manager.php');
+
+$ranBakeDay = false;
+if (is_readable($envPath)) {
+    try {
+        if (!isset($db) || !$db instanceof PDO) {
+            require_once $root . '/tests/isolate_test_db.php';
+            require_once $root . '/includes/config.php';
+            require_once $root . '/includes/database.php';
+            require_once $root . '/includes/test_target_guard.php';
+            if (!(defined('IS_LOCAL') && IS_LOCAL)) {
+                throw new RuntimeException('not local');
+            }
+            $db = check_mysql_connection();
+            bakery_assert_local_test_target($db);
+        }
+        require_once $root . '/includes/production_plan.php';
+        $friday = new DateTimeImmutable('2099-11-01');
+        while ($friday->format('N') !== '5') {
+            $friday = $friday->modify('+1 day');
+        }
+        $sat = $friday->modify('+1 day');
+        $sun = $friday->modify('+2 days');
+        $mon = $friday->modify('+3 days');
+        $prevSat = $friday->modify('-6 days');
+        $coverDates = [$sat->format('Y-m-d'), $sun->format('Y-m-d'), $mon->format('Y-m-d'), $prevSat->format('Y-m-d')];
+        $lineId = static function (PDO $db, string $name): int {
+            $id = (int)$db->query('SELECT id FROM product_lines WHERE name = ' . $db->quote($name) . ' LIMIT 1')->fetchColumn();
+            if ($id > 0) {
+                return $id;
+            }
+            $db->prepare('INSERT INTO product_lines (name) VALUES (?)')->execute([$name]);
+            return (int)$db->lastInsertId();
+        };
+        $customerNames = ['PMD Bake A 2099', 'PMD Bake B 2099'];
+        $productNames = ['PMD Concha 2099', 'PMD Country 2099'];
+        $doughNames = ['PMD Concha Dough 2099', 'PMD Country Dough 2099'];
+        $cleanup = static function () use ($db, $customerNames, $productNames, $doughNames, $coverDates): void {
+            $customerIds = [];
+            foreach ($customerNames as $name) {
+                $id = (int)$db->query('SELECT id FROM customers WHERE name = ' . $db->quote($name))->fetchColumn();
+                if ($id > 0) {
+                    $customerIds[] = $id;
+                }
+            }
+            $productIds = [];
+            foreach ($productNames as $name) {
+                $id = (int)$db->query('SELECT id FROM products WHERE name = ' . $db->quote($name))->fetchColumn();
+                if ($id > 0) {
+                    $productIds[] = $id;
+                }
+            }
+            if ($customerIds !== []) {
+                $in = implode(',', array_fill(0, count($customerIds), '?'));
+                $db->prepare("DELETE FROM standing_orders WHERE customer_id IN ($in)")->execute($customerIds);
+                $orderIds = $db->prepare("SELECT id FROM daily_orders WHERE customer_id IN ($in)");
+                $orderIds->execute($customerIds);
+                $orders = $orderIds->fetchAll(PDO::FETCH_COLUMN);
+                if ($orders) {
+                    $orderIn = implode(',', array_fill(0, count($orders), '?'));
+                    $db->prepare("DELETE FROM daily_order_items WHERE daily_order_id IN ($orderIn)")->execute($orders);
+                }
+                $db->prepare("DELETE FROM daily_orders WHERE customer_id IN ($in)")->execute($customerIds);
+                $db->prepare("DELETE FROM customers WHERE id IN ($in)")->execute($customerIds);
+            }
+            if (table_exists($db, 'production_plan_commits')) {
+                $dateIn = implode(',', array_fill(0, count($coverDates), '?'));
+                if (table_exists($db, 'production_plan_commit_items')) {
+                    $db->prepare("DELETE FROM production_plan_commit_items WHERE delivery_date IN ($dateIn)")->execute($coverDates);
+                }
+                $db->prepare("DELETE FROM production_plan_commits WHERE delivery_date IN ($dateIn)")->execute($coverDates);
+            }
+            if ($productIds !== []) {
+                $in = implode(',', array_fill(0, count($productIds), '?'));
+                if (table_exists($db, 'production_plan_items')) {
+                    $db->prepare("DELETE FROM production_plan_items WHERE product_id IN ($in)")->execute($productIds);
+                }
+                if (table_exists($db, 'formula_ingredients')) {
+                    $doughIds = [];
+                    foreach ($doughNames as $name) {
+                        $id = (int)$db->query('SELECT id FROM dough_types WHERE name = ' . $db->quote($name))->fetchColumn();
+                        if ($id > 0) {
+                            $doughIds[] = $id;
+                        }
+                    }
+                    if ($doughIds !== []) {
+                        $doughIn = implode(',', array_fill(0, count($doughIds), '?'));
+                        $db->prepare("DELETE FROM formula_ingredients WHERE dough_type_id IN ($doughIn)")->execute($doughIds);
+                    }
+                }
+                $db->prepare("DELETE FROM products WHERE id IN ($in)")->execute($productIds);
+            }
+            foreach ($doughNames as $name) {
+                $db->prepare('DELETE FROM dough_types WHERE name = ?')->execute([$name]);
+            }
+            if (table_exists($db, 'ingredients')) {
+                $db->prepare('DELETE FROM ingredients WHERE name = ?')->execute(['PMD Flour 2099']);
+            }
+            $db->prepare('DELETE FROM product_lines WHERE name = ?')->execute(['PMD Rhythm 2099']);
+            unset($coverDates);
+        };
+        $cleanup();
+        $panLine = $lineId($db, 'PMD Rhythm 2099');
+        $db->prepare('INSERT INTO customers (name, is_active) VALUES (?, 1)')->execute([$customerNames[0]]);
+        $customerA = (int)$db->lastInsertId();
+        $db->prepare('INSERT INTO customers (name, is_active) VALUES (?, 1)')->execute([$customerNames[1]]);
+        $customerB = (int)$db->lastInsertId();
+        $db->prepare('INSERT INTO dough_types (name, product_line_id) VALUES (?, ?)')->execute([$doughNames[0], $panLine]);
+        $conchaDough = (int)$db->lastInsertId();
+        $db->prepare('INSERT INTO dough_types (name, product_line_id) VALUES (?, ?)')->execute([$doughNames[1], $panLine]);
+        $countryDough = (int)$db->lastInsertId();
+        $db->prepare('INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES (?, ?, 1, 100)')->execute([$productNames[0], $conchaDough]);
+        $conchaId = (int)$db->lastInsertId();
+        $db->prepare('INSERT INTO products (name, dough_type_id, price, weight_grams) VALUES (?, ?, 1, 100)')->execute([$productNames[1], $countryDough]);
+        $countryId = (int)$db->lastInsertId();
+        $stand = $db->prepare('INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)');
+        $stand->execute([$customerA, $conchaId, 6, 10]);
+        $stand->execute([$customerB, $conchaId, 6, 5]);
+        $stand->execute([$customerA, $conchaId, 7, 4]);
+        $stand->execute([$customerA, $conchaId, 1, 6]);
+        $stand->execute([$customerA, $countryId, 6, 8]);
+        $flourId = 0;
+        if (table_exists($db, 'ingredients') && table_exists($db, 'formula_ingredients')) {
+            $db->prepare('INSERT INTO ingredients (name, unit) VALUES (?, ?)')->execute(['PMD Flour 2099', 'g']);
+            $flourId = (int)$db->lastInsertId();
+            $db->prepare('INSERT INTO formula_ingredients (dough_type_id, ingredient_id, percentage) VALUES (?, ?, 100)')
+                ->execute([$conchaDough, $flourId]);
+        }
+        if (function_exists('column_exists') && column_exists($db, 'daily_orders', 'standing_fill_blocked')) {
+            $db->prepare(
+                "INSERT INTO daily_orders (customer_id, order_date, status, total_amount, standing_fill_blocked) VALUES (?, ?, 'pending', 0, 1)"
+            )->execute([$customerA, $prevSat->format('Y-m-d')]);
+        }
+        $allowed = [$conchaId => true, $countryId => true];
+        bakery_production_plan_save_targets($db, [$sat->format('Y-m-d') => [
+            $conchaId => 15,
+            $countryId => 30,
+        ]], $allowed, null);
+        bakery_production_plan_commit($db, $sat->format('Y-m-d'), null);
+        $board = bakery_pmd_bake_day($db, $friday->format('Y-m-d'), ['usual_weeks' => 3]);
+        $qtyFor = static function (array $built, int $productId): ?array {
+            foreach ($built['doughs'] as $dough) {
+                foreach ($dough['products'] as $product) {
+                    if ((int)$product['product_id'] === $productId) {
+                        return $product;
+                    }
+                }
+            }
+            return null;
+        };
+        $concha = $qtyFor($board, $conchaId);
+        $country = $qtyFor($board, $countryId);
+        $conchaDough = null;
+        foreach ($board['doughs'] as $doughRow) {
+            foreach ($doughRow['products'] as $productRow) {
+                if ((int)$productRow['product_id'] === $conchaId) {
+                    $conchaDough = $doughRow;
+                }
+            }
+        }
+        $assert(is_array($concha), 'Friday bake includes the pan dulce product');
+        $assert(is_array($concha) && (int)$concha['bake_quantity'] === 25, 'Friday bake sums Sat Sun Mon pan dulce');
+        $assert(is_array($concha) && (int)$concha['usual_last'] === 15, 'last week ignores the fill-blocked customer');
+        $assert(is_array($concha) && (int)$concha['usual_median'] === 25, 'median ignores the fill-blocked week');
+        $destSum = 0;
+        if (is_array($concha)) {
+            foreach ($concha['destinations'] as $dest) {
+                $destSum += (int)$dest['quantity'];
+            }
+        }
+        $assert(is_array($conchaDough) && !empty($conchaDough['formula']['ingredients']), 'formula attaches when ingredients exist');
+        $assert($destSum === 25, 'destinations name where the pan dulce goes');
+        $assert(is_array($country) && (int)$country['bake_quantity'] === 30, 'committed cover date wins over standing');
+        $saturdayBoard = bakery_pmd_bake_day($db, $sat->format('Y-m-d'), ['usual_weeks' => 0]);
+        $assert($saturdayBoard['doughs'] === [], 'Saturday bake day does not mix the Friday run');
+        $assert(empty($saturdayBoard['families'][1]['active']), 'Saturday family flag stays quiet for Sour Flour');
+        $cleanup();
+        $ranBakeDay = true;
+    } catch (Throwable $e) {
+        if (isset($cleanup)) {
+            try {
+                $cleanup();
+            } catch (Throwable $cleanupError) {
+                echo "FAIL  bake day cleanup (" . $cleanupError->getMessage() . ")\n";
+                $fail++;
+            }
+        }
+        echo "FAIL  bake day board (" . $e->getMessage() . ")\n";
+        $fail++;
+    }
+}
+if (!$ranBakeDay && !is_readable($envPath)) {
+    echo "SKIP  bake day board (no local bakerysf_test)\n";
+}
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

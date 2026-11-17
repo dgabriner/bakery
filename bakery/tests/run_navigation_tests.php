@@ -214,6 +214,12 @@ navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker 
 navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__label-short') !== false, 'baker navigation includes compact mobile labels');
+navigation_test_assert(strpos($bakerNav, 'time_clock.php') !== false, 'baker navigation posts to the time clock');
+navigation_test_assert(strpos($bakerNav, 'value="clock_in"') !== false, 'baker clock in is the punch action');
+navigation_test_assert(in_array('time_clock.php', bakery_baker_scripts(), true), 'baker may open the time clock');
+navigation_test_assert(bakery_time_clock_safe_return('/production.php?date=2099-11-20') === '/production.php?date=2099-11-20', 'baker punch returns to daily production');
+navigation_test_assert(strpos((string)file_get_contents(dirname(__DIR__) . '/time_clock.php'), "'baker'") !== false, 'time clock allows the baker role');
+navigation_test_assert(strpos((string)file_get_contents(dirname(__DIR__) . '/time_clock.php'), "['administrator', 'manager']") !== false, 'time clock hours board stays manager-only');
 require_once dirname(__DIR__) . '/includes/kitchen_segments.php';
 navigation_test_assert(strpos(bakery_role_home('baker'), bakery_baker_home_delivery_date()) !== false, 'baker login opens tomorrow\'s delivery');
 $navDateBefore = $_GET['date'] ?? null;

@@ -236,3 +236,29 @@ function bakery_production_cadence_delivery_legs(string $deliveryDate): array
     }
     return $legs;
 }
+
+/**
+ * Production Manager links for one delivery date.
+ * Pan dulce and Sour Flour keep their own bake day when those days differ.
+ *
+ * @return list<array{bake_date:string,families:list<string>}>
+ */
+function bakery_production_cadence_manager_bake_links(string $deliveryDate): array
+{
+    $grouped = [];
+    foreach ([BAKERY_PRODUCTION_CADENCE_DAILY, BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR] as $family) {
+        $bakeDate = bakery_production_cadence_bake_date_for_delivery($family, $deliveryDate);
+        if ($bakeDate === null) {
+            continue;
+        }
+        $grouped[$bakeDate][] = $family;
+    }
+    $links = [];
+    foreach ($grouped as $bakeDate => $families) {
+        $links[] = [
+            'bake_date' => (string)$bakeDate,
+            'families' => array_values($families),
+        ];
+    }
+    return $links;
+}

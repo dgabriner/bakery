@@ -1,17 +1,18 @@
 <?php
 /**
- * Production Manager Dashboard — expandable dough / batch / piece board,
- * plus week order sense, route plan vs actual, and demand vs supply.
- * Edit & commit stay on Production Center; bakers stay on Daily Production.
+ * Production Manager — bake-day board: doughs, formulas, destinations, crew.
+ * Edit and commit stay on Production Center. Bakers stay on Daily Production.
  */
 define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/production_manager_dashboard.php';
+require_once 'includes/production_day_crew.php';
+require_once 'includes/baker_mix.php';
 require_once 'includes/production_manager_print.php';
 require_once 'includes/production_workflow_strip.php';
 
-$selectedDate = bakery_pmd_resolve_date((string)($_GET['date'] ?? ''));
+$selectedDate = bakery_pmd_resolve_bake_date((string)($_GET['date'] ?? ''));
 $view = bakery_pmd_resolve_view((string)($_GET['view'] ?? 'batches'));
 $sourceMode = bakery_pmd_resolve_source((string)($_GET['source'] ?? 'bake_list'));
 $isPrint = (string)($_GET['print'] ?? '') === '1';
@@ -19,29 +20,57 @@ $expandAll = (string)($_GET['expand'] ?? '') === '1' || $isPrint;
 if ($isPrint) {
     $view = 'batches';
 }
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    bakery_production_day_handle_post($db);
+}
+
+$coverDates = bakery_pmd_bake_cover_dates($selectedDate);
+$coverDate = bakery_pmd_resolve_cover((string)($_GET['cover'] ?? ''), $coverDates, $selectedDate);
+$leadError = (string)($_GET['lead_error'] ?? '');
 
 $board = null;
 $week = null;
+$bakeWeek = null;
 $routes = null;
 $supply = null;
-$links = bakery_pmd_links($selectedDate);
+$crew = null;
+$leads = [];
+$staffOptions = [];
+$leadOptions = null;
+$links = bakery_pmd_links($coverDate);
 
 if ($view === 'week') {
-    $week = bakery_pmd_week_orders($db, $selectedDate);
+    $week = bakery_pmd_week_orders($db, $coverDate);
     $links = $week['links'];
+    try {
+        $bakeWeek = bakery_pmd_bake_week($db, $selectedDate);
+    } catch (Throwable $e) {
+        error_log('production_manager bake week: ' . $e->getMessage());
+    }
 } elseif ($view === 'routes') {
-    $routes = bakery_pmd_route_plan_vs_actual($db, $selectedDate);
+    $routes = bakery_pmd_route_plan_vs_actual($db, $coverDate);
     $links = $routes['links'];
 } elseif ($view === 'supply') {
-    $supply = bakery_pmd_demand_vs_supply($db, $selectedDate);
+    $supply = bakery_pmd_demand_vs_supply($db, $coverDate);
     $links = $supply['links'];
 } else {
-    $board = bakery_pmd_build($db, $selectedDate, [
+    $board = bakery_pmd_bake_day($db, $selectedDate, [
         'source' => $sourceMode,
-        'entered_date' => (string)($_GET['entered_date'] ?? ''),
+        'usual_weeks' => ($expandAll && !$isPrint) ? 8 : 1,
     ]);
     $links = $board['links'];
     $view = 'batches';
+    try {
+        $leads = bakery_production_leads($db);
+        bakery_production_apply_leads($board, $leads);
+        $crew = bakery_production_crew_for_day($db, $selectedDate);
+        $staffOptions = bakery_production_staff_options($db);
+        if ($expandAll && !$isPrint) {
+            $leadOptions = bakery_production_lead_options($db);
+        }
+    } catch (Throwable $e) {
+        error_log('production_manager crew: ' . $e->getMessage());
+    }
 }
 
 $summary = $board['summary'] ?? null;
@@ -62,7 +91,7 @@ $printLinks = bakery_pmd_print_links($selectedDate);
 
 $hubStages = [];
 try {
-    $hubStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
+    $hubStages = bakery_production_workflow_kitchen_stages($db, $coverDate);
 } catch (Throwable $e) {
     error_log('production_manager workflow strip: ' . $e->getMessage());
 }
@@ -107,7 +136,7 @@ if (!$isPrint) {
             <?php endif; ?>
         </div>
         <div class="pmd-print-meta">
-            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_route_label((string)($board['quantity_date'] ?? $selectedDate))); ?></p>
+            <p><strong><?php bakery_te('production_manager.print_covers'); ?></strong> <?php echo htmlspecialchars((string)($board['cover_label'] ?? '') !== '' ? (string)$board['cover_label'] : bakery_pmd_print_route_label((string)($board['quantity_date'] ?? $selectedDate))); ?></p>
             <p><strong><?php bakery_te('production_manager.print_source'); ?></strong> <?php echo htmlspecialchars(bakery_pmd_print_source_label($board)); ?></p>
             <p><strong><?php bakery_te('production_manager.metric_pieces'); ?></strong> <?php echo number_format((int)($board['summary']['pieces'] ?? 0)); ?>
                 · <strong><?php bakery_te('production_manager.metric_doughs'); ?></strong> <?php echo number_format((int)($board['summary']['dough_types'] ?? 0)); ?>
@@ -151,6 +180,22 @@ if (!$isPrint) {
             <?php endforeach; ?>
             </tbody>
         </table>
+    <?php endif; ?>
+    <?php if (is_array($crew) && ($crew['people'] ?? []) !== []): ?>
+        <p class="pmd-print-sub">
+            <?php bakery_te('production_manager.crew_title'); ?>:
+            <?php
+            $printCrew = [];
+            foreach ($crew['people'] as $person) {
+                $bit = (string)$person['display_name'];
+                if (!empty($person['hours_label'])) {
+                    $bit .= ' ' . $person['hours_label'];
+                }
+                $printCrew[] = $bit;
+            }
+            echo htmlspecialchars(implode(' · ', $printCrew));
+            ?>
+        </p>
     <?php endif; ?>
     <footer class="pmd-print-foot">
         <p><?php bakery_te(bakery_pmd_print_footer_key($board)); ?></p>
@@ -209,7 +254,7 @@ if (!$isPrint) {
         <a class="btn btn-outline" href="<?php echo htmlspecialchars($pmdHref($prevDate, $view, $expandAll)); ?>">
             <?php bakery_te('production_manager.prev_day'); ?>
         </a>
-        <label class="pmd-date-label"><?php bakery_te('production_manager.delivery_date'); ?>
+        <label class="pmd-date-label"><?php bakery_te('production_manager.bake_day'); ?>
             <input type="date" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>" onchange="this.form.submit()">
         </label>
         <a class="btn btn-outline" href="<?php echo htmlspecialchars($pmdHref($nextDate, $view, $expandAll)); ?>">
@@ -238,21 +283,193 @@ if (!$isPrint) {
         </a>
     </nav>
 
+    <?php if (($view === 'routes' || $view === 'supply') && $coverDates === []): ?>
+        <p class="pmd-note"><?php bakery_te('production_manager.no_cover'); ?></p>
+    <?php elseif (($view === 'routes' || $view === 'supply') && count($coverDates) > 1): ?>
+        <nav class="pmd-covers" aria-label="<?php bakery_te('production_manager.cover_for'); ?>">
+            <?php foreach ($coverDates as $chipDate): ?>
+                <a class="pmd-tab<?php echo $chipDate === $coverDate ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars($pmdHref($selectedDate, $view, false) . '&cover=' . rawurlencode($chipDate)); ?>">
+                    <?php echo htmlspecialchars(date('D n/j', strtotime($chipDate))); ?>
+                </a>
+            <?php endforeach; ?>
+        </nav>
+    <?php endif; ?>
+
     <?php if ($view === 'batches' && $board): ?>
+    <?php if (!empty($board['cover_label'])): ?>
+        <p class="pmd-view-lead"><?php echo htmlspecialchars((string)$board['cover_label']); ?></p>
+    <?php endif; ?>
+    <?php foreach ($board['families'] ?? [] as $familyRow): ?>
+        <?php if (!empty($familyRow['active'])) { continue; } ?>
+        <p class="pmd-quiet"><?php bakery_te($familyRow['family'] === 'sour_flour' ? 'production_manager.family_quiet_sour_flour' : 'production_manager.family_quiet_daily'); ?></p>
+    <?php endforeach; ?>
+
+    <section class="pmd-crew" aria-label="<?php bakery_te('production_manager.crew_aria'); ?>">
+        <div class="pmd-crew__head">
+            <h2><?php bakery_te('production_manager.crew_title'); ?></h2>
+        </div>
+        <?php if (!is_array($crew) || ($crew['people'] ?? []) === []): ?>
+            <p class="pmd-muted"><?php bakery_te('production_manager.crew_empty'); ?></p>
+        <?php else: ?>
+            <ul class="pmd-crew__list">
+                <?php foreach ($crew['people'] as $person): ?>
+                    <li class="pmd-crew__person<?php echo !empty($person['punched']) ? ' is-in' : ''; ?>">
+                        <strong><?php echo htmlspecialchars((string)$person['display_name']); ?></strong>
+                        <span class="pmd-muted">
+                            <?php
+                            if (!empty($person['extra'])) {
+                                bakery_te('production_manager.crew_extra');
+                            } elseif (!empty($person['punched'])) {
+                                bakery_te('production_manager.crew_in');
+                            } else {
+                                bakery_te('production_manager.crew_not_in');
+                            }
+                            ?>
+                        </span>
+                        <?php if (!empty($person['clock_in_at'])): ?>
+                            <span><?php echo htmlspecialchars(bakery_time_clock_format_time((string)$person['clock_in_at'])); ?>
+                                <?php echo bakery_locale_range_word(); ?>
+                                <?php echo $person['clock_out_at']
+                                    ? htmlspecialchars(bakery_time_clock_format_time((string)$person['clock_out_at']))
+                                    : htmlspecialchars(bakery_t('time_clock.still_in')); ?>
+                                · <?php echo htmlspecialchars((string)$person['hours_label']); ?>
+                            </span>
+                        <?php endif; ?>
+                        <?php foreach ($person['flags'] ?? [] as $flag): ?>
+                            <span class="pmd-pill pmd-pill--warn"><?php echo htmlspecialchars(bakery_t('time_clock.flag_' . $flag)); ?></span>
+                        <?php endforeach; ?>
+                        <form method="post" action="production_manager.php" class="pmd-crew__form">
+                            <?php echo bakery_csrf_field(); ?>
+                            <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                            <input type="hidden" name="expand" value="<?php echo $expandAll ? '1' : '0'; ?>">
+                            <input type="hidden" name="user_id" value="<?php echo (int)$person['user_id']; ?>">
+                            <?php if (!empty($person['pin'])): ?>
+                                <input type="hidden" name="action" value="crew_clear">
+                                <button type="submit" class="btn btn-outline btn-sm"><?php bakery_te('production_manager.crew_clear'); ?></button>
+                            <?php else: ?>
+                                <input type="hidden" name="action" value="crew_remove">
+                                <button type="submit" class="btn btn-outline btn-sm"><?php bakery_te('production_manager.crew_remove'); ?></button>
+                            <?php endif; ?>
+                        </form>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+        <?php if ($staffOptions !== []): ?>
+            <form method="post" action="production_manager.php" class="pmd-crew__add">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="crew_add">
+                <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                <input type="hidden" name="expand" value="<?php echo $expandAll ? '1' : '0'; ?>">
+                <label><?php bakery_te('production_manager.crew_person'); ?>
+                    <select name="user_id" required>
+                        <?php foreach ($staffOptions as $staff): ?>
+                            <option value="<?php echo (int)$staff['id']; ?>"><?php echo htmlspecialchars($staff['display_name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="submit" class="btn btn-outline btn-sm"><?php bakery_te('production_manager.crew_add'); ?></button>
+            </form>
+        <?php endif; ?>
+    </section>
+
+    <?php if ($expandAll && !$isPrint && is_array($leadOptions)): ?>
+        <details class="pmd-leads" open>
+            <summary><?php bakery_te('production_manager.leads_title'); ?></summary>
+            <p class="pmd-muted"><?php bakery_te('production_manager.leads_help'); ?></p>
+            <?php if ($leadError === 'scope'): ?>
+                <p class="pmd-note"><?php bakery_te('production_manager.leads_need_scope'); ?></p>
+            <?php endif; ?>
+            <?php if ($leads === []): ?>
+                <p class="pmd-muted"><?php bakery_te('production_manager.leads_none'); ?></p>
+            <?php else: ?>
+                <ul class="pmd-leads__list">
+                    <?php foreach ($leads as $lead): ?>
+                        <li>
+                            <strong><?php echo htmlspecialchars((string)$lead['display_name']); ?></strong>
+                            <span class="pmd-muted">
+                                <?php
+                                $bits = array_filter([
+                                    (string)($lead['product_line_name'] ?? ''),
+                                    (string)($lead['dough_type_name'] ?? ''),
+                                    (string)($lead['customer_name'] ?? ''),
+                                ]);
+                                echo htmlspecialchars(implode(' · ', $bits));
+                                ?>
+                            </span>
+                            <form method="post" action="production_manager.php">
+                                <?php echo bakery_csrf_field(); ?>
+                                <input type="hidden" name="action" value="lead_delete">
+                                <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                                <input type="hidden" name="lead_id" value="<?php echo (int)$lead['id']; ?>">
+                                <button type="submit" class="btn btn-outline btn-sm"><?php bakery_te('production_manager.leads_delete'); ?></button>
+                            </form>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+            <form method="post" action="production_manager.php" class="pmd-leads__add">
+                <?php echo bakery_csrf_field(); ?>
+                <input type="hidden" name="action" value="lead_add">
+                <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate); ?>">
+                <label><?php bakery_te('production_manager.leads_user'); ?>
+                    <select name="user_id" required>
+                        <?php foreach ($leadOptions['staff'] as $staff): ?>
+                            <option value="<?php echo (int)$staff['id']; ?>"><?php echo htmlspecialchars($staff['display_name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label><?php bakery_te('production_manager.leads_line'); ?>
+                    <select name="product_line_id">
+                        <option value=""><?php bakery_te('production_manager.leads_any'); ?></option>
+                        <?php foreach ($leadOptions['lines'] as $line): ?>
+                            <option value="<?php echo (int)$line['id']; ?>"><?php echo htmlspecialchars($line['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label><?php bakery_te('production_manager.leads_dough'); ?>
+                    <select name="dough_type_id">
+                        <option value=""><?php bakery_te('production_manager.leads_any'); ?></option>
+                        <?php foreach ($leadOptions['doughs'] as $doughOption): ?>
+                            <option value="<?php echo (int)$doughOption['id']; ?>">
+                                <?php echo htmlspecialchars(trim($doughOption['line_name'] . ' ' . $doughOption['name'])); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label><?php bakery_te('production_manager.leads_customer'); ?>
+                    <select name="customer_id">
+                        <option value=""><?php bakery_te('production_manager.leads_any'); ?></option>
+                        <?php foreach ($leadOptions['customers'] as $customerOption): ?>
+                            <option value="<?php echo (int)$customerOption['id']; ?>"><?php echo htmlspecialchars($customerOption['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="submit" class="btn btn-outline"><?php bakery_te('production_manager.leads_save'); ?></button>
+            </form>
+        </details>
+    <?php endif; ?>
+
     <section class="pmd-status-row" aria-label="<?php bakery_te('production_manager.status_aria'); ?>">
-        <?php if ($board['committed']): ?>
+        <?php if (($board['bake_source'] ?? '') === 'mixed'): ?>
+            <span class="pmd-pill pmd-pill--warn"><?php bakery_te('production_manager.partly_committed'); ?></span>
+        <?php elseif ($board['committed']): ?>
             <span class="pmd-pill pmd-pill--ok"><?php bakery_te('production_manager.committed'); ?></span>
         <?php else: ?>
             <span class="pmd-pill pmd-pill--warn"><?php bakery_te('production_manager.not_committed'); ?></span>
         <?php endif; ?>
         <span class="pmd-pill pmd-pill--muted">
-            <?php echo htmlspecialchars(
-                $board['bake_source'] === 'last_entered'
-                    ? bakery_pmd_print_source_label($board)
-                    : ($board['bake_source'] === 'committed_plan'
-                        ? bakery_t('production_manager.source_committed')
-                        : bakery_t('production_manager.source_demand'))
-            ); ?>
+            <?php
+            if (($board['bake_source'] ?? '') === 'last_entered') {
+                echo htmlspecialchars(bakery_pmd_print_source_label($board));
+            } elseif (($board['bake_source'] ?? '') === 'committed_plan') {
+                bakery_te('production_manager.source_committed');
+            } elseif (($board['bake_source'] ?? '') === 'mixed') {
+                bakery_te('production_manager.source_mixed');
+            } else {
+                bakery_te('production_manager.source_rhythm');
+            }
+            ?>
         </span>
         <?php if (!empty($board['changed_since']['count'])): ?>
             <span class="pmd-pill pmd-pill--danger">
@@ -267,6 +484,11 @@ if (!$isPrint) {
             ])); ?>
         </span>
     </section>
+    <?php if (($board['bake_source'] ?? '') === 'demand'): ?>
+        <p class="pmd-note"><?php bakery_te('production_manager.rhythm_note'); ?></p>
+    <?php elseif (($board['bake_source'] ?? '') === 'mixed'): ?>
+        <p class="pmd-note"><?php bakery_te('production_manager.mixed_note'); ?></p>
+    <?php endif; ?>
 
     <section class="pmd-summary" aria-label="<?php bakery_te('production_manager.summary_aria'); ?>">
         <div class="pmd-metric">
@@ -304,7 +526,9 @@ if (!$isPrint) {
     </section>
 
     <?php if ($board['doughs'] === []): ?>
+        <?php if (!empty($board['any_family_active'])): ?>
         <div class="pmd-empty"><?php bakery_te('production_manager.empty'); ?></div>
+        <?php endif; ?>
     <?php else: ?>
         <section class="pmd-board" aria-label="<?php bakery_te('production_manager.board_aria'); ?>">
             <?php foreach ($board['doughs'] as $dough): ?>
@@ -320,6 +544,12 @@ if (!$isPrint) {
                             <strong class="pmd-dough__name"><?php echo htmlspecialchars($dough['dough_type_name']); ?></strong>
                             <?php if ($dough['product_line_name'] !== ''): ?>
                                 <span class="pmd-muted"><?php echo htmlspecialchars($dough['product_line_name']); ?></span>
+                            <?php endif; ?>
+                            <?php if (!empty($dough['leads'])): ?>
+                                <span class="pmd-lead"><?php echo htmlspecialchars(implode(', ', $dough['leads'])); ?></span>
+                            <?php endif; ?>
+                            <?php if (!empty($dough['cover_dates'])): ?>
+                                <span class="pmd-muted"><?php echo htmlspecialchars(bakery_pmd_format_cover_dates($dough['cover_dates'])); ?></span>
                             <?php endif; ?>
                             <span class="pmd-dough__sku-count">
                                 <?php echo htmlspecialchars(bakery_t('production_manager.sku_count', [
@@ -341,6 +571,10 @@ if (!$isPrint) {
                                 <strong><?php echo htmlspecialchars($weight['label'] !== '' ? number_format($weight['lb'], 1) . ' lb' : '-'); ?></strong>
                             </div>
                             <div class="pmd-stat">
+                                <span><?php bakery_te('production_manager.last_week'); ?></span>
+                                <strong><?php echo number_format((int)($dough['usual_last'] ?? $dough['prior_pieces'] ?? 0)); ?></strong>
+                            </div>
+                            <div class="pmd-stat">
                                 <span><?php bakery_te('production_manager.col_vs_prior'); ?></span>
                                 <strong><?php echo htmlspecialchars($fmtSigned((int)$dough['delta_vs_prior'])); ?></strong>
                             </div>
@@ -355,6 +589,25 @@ if (!$isPrint) {
                     </summary>
 
                     <div class="pmd-dough__body">
+                        <?php if (isset($dough['usual_median']) && $dough['usual_median'] !== null): ?>
+                            <p class="pmd-standard"><?php echo htmlspecialchars(bakery_t('production_manager.usual_median', [
+                                'count' => number_format((int)$dough['usual_median']),
+                            ])); ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($dough['formula']['ingredients']) && function_exists('bakery_baker_mix_echo_formula')): ?>
+                            <div class="pmd-formula">
+                                <?php bakery_baker_mix_echo_formula(
+                                    $dough['formula']['ingredients'],
+                                    (float)$dough['formula']['total_flour_grams'],
+                                    (float)$dough['formula']['total_dough_grams'],
+                                    false,
+                                    is_array($dough['formula']['structure'] ?? null) ? $dough['formula']['structure'] : null,
+                                    is_array($dough['formula']['add_in_rows'] ?? null) ? $dough['formula']['add_in_rows'] : []
+                                ); ?>
+                            </div>
+                        <?php elseif ((int)$dough['pieces'] > 0): ?>
+                            <p class="pmd-muted"><?php bakery_te('production_manager.formula_missing'); ?></p>
+                        <?php endif; ?>
                         <?php if ($standard['label'] !== ''): ?>
                             <p class="pmd-standard">
                                 <span><?php bakery_te('production_manager.standard_batches'); ?></span>
@@ -422,12 +675,62 @@ if (!$isPrint) {
                             </table>
                         </div>
 
+                        <?php foreach ($dough['products'] as $product): ?>
+                            <?php $where = $product['destinations'] ?? []; ?>
+                            <details class="pmd-where"<?php echo $expandAll ? ' open' : ''; ?>>
+                                <summary><?php echo htmlspecialchars(bakery_t('production_manager.where_goes')); ?> — <?php echo htmlspecialchars((string)$product['name']); ?></summary>
+                                <?php if ($where === []): ?>
+                                    <p class="pmd-muted"><?php bakery_te('production_manager.where_empty'); ?></p>
+                                <?php else: ?>
+                                    <table class="pmd-table">
+                                        <thead>
+                                            <tr>
+                                                <th><?php bakery_te('production_manager.col_when'); ?></th>
+                                                <th><?php bakery_te('production_manager.col_customer'); ?></th>
+                                                <th><?php bakery_te('production_manager.col_pieces'); ?></th>
+                                                <th><?php bakery_te('production_manager.col_source'); ?></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        <?php foreach ($where as $dest): ?>
+                                            <?php
+                                            $sourceKey = [
+                                                'daily' => 'production_manager.dest_source_daily',
+                                                'standing' => 'production_manager.dest_source_standing',
+                                                'pan_dulce_standard' => 'production_manager.dest_source_pan_dulce_standard',
+                                                'mixed' => 'production_manager.dest_source_mixed',
+                                            ][(string)$dest['source']] ?? '';
+                                            ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars(date('D n/j', strtotime((string)$dest['date']))); ?></td>
+                                                <td>
+                                                    <strong><?php echo htmlspecialchars((string)$dest['customer_name']); ?></strong>
+                                                    <?php if (!empty($dest['leads'])): ?>
+                                                        <div class="pmd-lead"><?php echo htmlspecialchars(implode(', ', $dest['leads'])); ?></div>
+                                                    <?php endif; ?>
+                                                    <?php if (($dest['zone'] ?? '') !== ''): ?>
+                                                        <div class="pmd-muted"><?php echo htmlspecialchars((string)$dest['zone']); ?></div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td><?php echo number_format((int)$dest['quantity']); ?></td>
+                                                <td><?php echo $sourceKey !== '' ? htmlspecialchars(bakery_t($sourceKey)) : htmlspecialchars((string)$dest['source']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                <?php endif; ?>
+                            </details>
+                        <?php endforeach; ?>
+
                         <div class="pmd-dough__actions">
-                            <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars($board['links']['production_center']); ?>">
+                            <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars($dough['links']['production_center'] ?? $board['links']['production_center']); ?>">
                                 <?php bakery_te('production_manager.edit_plan'); ?>
                             </a>
-                            <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars($board['links']['production']); ?>">
+                            <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars($dough['links']['production'] ?? $board['links']['production']); ?>">
                                 <?php bakery_te('production_manager.open_baker'); ?>
+                            </a>
+                            <a class="btn btn-outline btn-sm" href="<?php echo htmlspecialchars($dough['links']['pack_list'] ?? $board['links']['pack_list']); ?>">
+                                <?php bakery_te('production_manager.link_pack'); ?>
                             </a>
                         </div>
                     </div>
@@ -437,6 +740,51 @@ if (!$isPrint) {
     <?php endif; ?>
 
     <?php elseif ($view === 'week' && $week): ?>
+        <?php if (is_array($bakeWeek) && ($bakeWeek['days'] ?? []) !== []): ?>
+            <p class="pmd-view-lead"><?php bakery_te('production_manager.week_bake_lead'); ?></p>
+            <div class="pmd-table-wrap">
+                <table class="pmd-table" aria-label="<?php bakery_te('production_manager.week_bake_aria'); ?>">
+                    <thead>
+                        <tr>
+                            <th><?php bakery_te('production_manager.week_col_day'); ?></th>
+                            <th><?php bakery_te('production_manager.week_col_pan_dulce'); ?></th>
+                            <th><?php bakery_te('production_manager.week_col_sour_flour'); ?></th>
+                            <th><?php bakery_te('production_manager.week_col_crew'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($bakeWeek['days'] as $bakeDayRow): ?>
+                        <?php
+                        $familyPieces = $bakeDayRow['by_family'] ?? [];
+                        $familyActive = $bakeDayRow['family_active'] ?? [];
+                        $fmtFamily = static function (string $family) use ($familyPieces, $familyActive): string {
+                            if (empty($familyActive[$family])) {
+                                return '—';
+                            }
+                            return number_format((int)($familyPieces[$family] ?? 0));
+                        };
+                        $crewBits = [];
+                        foreach ($bakeDayRow['crew'] ?? [] as $person) {
+                            $bit = (string)$person['display_name'];
+                            if (!empty($person['hours_label'])) {
+                                $bit .= ' ' . $person['hours_label'];
+                            } elseif (empty($person['punched'])) {
+                                $bit .= ' · ' . bakery_t('production_manager.crew_not_in');
+                            }
+                            $crewBits[] = $bit;
+                        }
+                        ?>
+                        <tr class="<?php echo !empty($bakeDayRow['is_selected']) ? 'is-selected' : ''; ?>">
+                            <td><a href="<?php echo htmlspecialchars($pmdHref($bakeDayRow['date'], 'batches')); ?>"><?php echo htmlspecialchars((string)$bakeDayRow['label']); ?></a></td>
+                            <td><?php echo htmlspecialchars($fmtFamily('daily')); ?></td>
+                            <td><?php echo htmlspecialchars($fmtFamily('sour_flour')); ?></td>
+                            <td><?php echo $crewBits === [] ? '—' : htmlspecialchars(implode(', ', $crewBits)); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
         <?php $ws = $week['summary']; ?>
         <?php $weekUnavailable = (($week['load_state'] ?? 'ready') !== 'ready'); ?>
         <p class="pmd-view-lead"><?php bakery_te('production_manager.week_lead'); ?></p>
