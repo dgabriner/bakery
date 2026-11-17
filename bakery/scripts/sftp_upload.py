@@ -86,6 +86,184 @@ def assert_sftp_target(user: str, remote_root: str, target: str = "") -> None:
         return
 
 
+def sftp_login_settings() -> dict[str, str]:
+    """Connection settings shared by the uploader and the cloud staging helper."""
+    host = env_required("SFTP_HOST")
+    user = env_required("SFTP_USER")
+    raw_password = os.environ.get("SFTP_PASSWORD")
+    if raw_password is None:
+        raw_password = ""
+    password = raw_password.strip()
+    if password == "":
+        raise SystemExit("Missing required environment variable: SFTP_PASSWORD")
+    remote_root = env_required("SFTP_REMOTE_ROOT").strip("/").replace("\\", "/")
+    target = (os.environ.get("SFTP_TARGET") or "").strip()
+    return {
+        "host": host,
+        "user": user,
+        "password": password,
+        "raw_password": raw_password,
+        "remote_root": remote_root,
+        "target": target,
+    }
+
+
+def _scrub(value: str, raw_password: str, password: str) -> str:
+    redacted = value
+    for secret in (raw_password, password):
+        if secret and len(secret) >= 4 and secret in redacted:
+            redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
+def _password_flags(raw_password: str) -> tuple[bool, bool, bool]:
+    leading = bool(raw_password) and raw_password[0].isspace()
+    trailing = bool(raw_password) and raw_password[-1].isspace()
+    newline = ("\n" in raw_password) or ("\r" in raw_password)
+    return leading, trailing, newline
+
+
+def format_sftp_diagnose(settings: dict[str, str], allowed: list[str]) -> str:
+    """Non-secret login facts. Never includes the password or any part of it."""
+    raw_password = settings["raw_password"]
+    password = settings["password"]
+    leading, trailing, newline = _password_flags(raw_password)
+    methods = ",".join(allowed) if allowed else "(none reported)"
+    lines = [
+        "host=" + _scrub(settings["host"], raw_password, password),
+        "user=" + _scrub(settings["user"], raw_password, password),
+        "remote_root=" + _scrub(settings["remote_root"], raw_password, password),
+        "target=" + _scrub(settings["target"] or "(unset)", raw_password, password),
+        f"password_length={len(raw_password)}",
+        "password_leading_whitespace=" + ("yes" if leading else "no"),
+        "password_trailing_whitespace=" + ("yes" if trailing else "no"),
+        "password_newline=" + ("yes" if newline else "no"),
+        "auth_methods=" + _scrub(methods, raw_password, password),
+    ]
+    return _scrub("\n".join(lines), raw_password, password)
+
+
+def _remember_auth_methods(allowed: list[str], types) -> None:
+    if allowed:
+        return
+    allowed.extend(str(item) for item in (types or []))
+
+
+def method_probe_factory(paramiko_mod, allowed: list[str]):
+    """Build a transport that records server auth methods before password auth."""
+
+    def factory(sock, *args, **kwargs):
+        transport = paramiko_mod.Transport(sock, *args, **kwargs)
+        original = transport.auth_password
+
+        def auth_password(username, passwd, event=None, fallback=True):
+            try:
+                result = transport.auth_none(username)
+            except paramiko_mod.BadAuthenticationType as exc:
+                _remember_auth_methods(allowed, getattr(exc, "allowed_types", None))
+            except Exception:
+                pass
+            else:
+                if result:
+                    _remember_auth_methods(allowed, result)
+                elif not allowed:
+                    allowed.append("none")
+            return original(username, passwd, event=event, fallback=fallback)
+
+        transport.auth_password = auth_password
+        return transport
+
+    return factory
+
+
+def allowed_auth_methods(transport, user: str) -> list[str]:
+    """Read auth methods from transport.auth_none or BadAuthenticationType."""
+    paramiko_mod = require_paramiko()
+    if transport is None:
+        return []
+    try:
+        result = transport.auth_none(user)
+    except paramiko_mod.BadAuthenticationType as exc:
+        return [str(item) for item in (getattr(exc, "allowed_types", None) or [])]
+    except Exception:
+        return []
+    if result:
+        return [str(item) for item in result]
+    return ["none"]
+
+
+def _preflight_failure(settings: dict[str, str], diagnose: bool, allowed: list[str], message: str) -> int:
+    if diagnose:
+        print(format_sftp_diagnose(settings, allowed))
+    print(message, file=sys.stderr)
+    return 1
+
+
+def sftp_login_preflight(diagnose: bool = False) -> int:
+    """Open one SFTP session, list the remote root, and close it.
+
+    Uses the same host, user, stripped password, target, and password-only
+    auth flags as the uploader. Exits non-zero before any build or upload
+    when the login fails.
+    """
+    settings = sftp_login_settings()
+    assert_sftp_target(settings["user"], settings["remote_root"], settings["target"])
+    paramiko_mod = require_paramiko()
+    allowed: list[str] = []
+    client = paramiko_mod.SSHClient()
+    client.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
+    try:
+        connect_kwargs = {
+            "hostname": settings["host"],
+            "username": settings["user"],
+            "password": settings["password"],
+            "timeout": 45,
+            "allow_agent": False,
+            "look_for_keys": False,
+        }
+        if diagnose:
+            connect_kwargs["transport_factory"] = method_probe_factory(paramiko_mod, allowed)
+        client.connect(**connect_kwargs)
+        sftp = client.open_sftp()
+        try:
+            sftp.listdir(settings["remote_root"])
+        finally:
+            sftp.close()
+        if diagnose and not allowed:
+            allowed.extend(allowed_auth_methods(client.get_transport(), settings["user"]))
+    except paramiko_mod.AuthenticationException as exc:
+        if isinstance(exc, paramiko_mod.BadAuthenticationType):
+            _remember_auth_methods(allowed, getattr(exc, "allowed_types", None))
+        user = _scrub(settings["user"], settings["raw_password"], settings["password"])
+        host = _scrub(settings["host"], settings["raw_password"], settings["password"])
+        return _preflight_failure(
+            settings,
+            diagnose,
+            allowed,
+            f"SFTP login failed for {user}@{host} before any build or upload ({exc.__class__.__name__}).",
+        )
+    except Exception as exc:
+        user = _scrub(settings["user"], settings["raw_password"], settings["password"])
+        host = _scrub(settings["host"], settings["raw_password"], settings["password"])
+        detail = _scrub(str(exc), settings["raw_password"], settings["password"])
+        return _preflight_failure(
+            settings,
+            diagnose,
+            allowed,
+            f"SFTP preflight failed for {user}@{host} before any build or upload ({exc.__class__.__name__}: {detail}).",
+        )
+    finally:
+        client.close()
+
+    if diagnose:
+        print(format_sftp_diagnose(settings, allowed))
+    else:
+        user = _scrub(settings["user"], settings["raw_password"], settings["password"])
+        root = _scrub(settings["remote_root"], settings["raw_password"], settings["password"])
+        print(f"SFTP preflight OK  user={user}  root={root}")
+    return 0
+
+
 def ensure_remote_dir(sftp: "paramiko.SFTPClient", remote_dir: str) -> None:
     parts = remote_dir.replace("\\", "/").strip("/").split("/")
     path = ""
@@ -113,10 +291,11 @@ def read_file_list(list_path: str | None) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="SFTP upload bakery deploy files")
-    parser.add_argument("--local-root", required=True, help="Local bakery root directory")
+    parser.add_argument("--local-root", help="Local bakery root directory")
     parser.add_argument("--list", help="Path to file containing relative paths (default: stdin)")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without connecting")
     parser.add_argument("--check-target", action="store_true", help="Validate SFTP target env and exit")
+    parser.add_argument("--diagnose", action="store_true", help="Check the SFTP login and print non-secret facts")
     parser.add_argument("--fetch", action="store_true", help="Download files from the remote root into --local-root")
     parser.add_argument("--from-file", help="Upload one local file (relative or absolute)")
     parser.add_argument("--to-name", help="Remote filename under SFTP_REMOTE_ROOT (with --from-file)")
@@ -126,6 +305,9 @@ def main() -> int:
                         help="Additional PHP script to upload into stage-tools and run between checkpoint and migrations")
     parser.add_argument("--bootstrap-live-migration-worker", action="store_true", help="Atomically install the owner-approved Live migration wrapper and runtime")
     args = parser.parse_args()
+
+    if args.diagnose:
+        return sftp_login_preflight(diagnose=True)
 
     host = env_required("SFTP_HOST")
     user = env_required("SFTP_USER")
@@ -137,6 +319,14 @@ def main() -> int:
     if args.check_target:
         print(f"SFTP target OK  user={user}  root={remote_root}  target={target or '(unset)'}")
         return 0
+
+    if not args.local_root:
+        raise SystemExit("--local-root is required")
+
+    if not args.dry_run:
+        preflight_code = sftp_login_preflight(diagnose=False)
+        if preflight_code != 0:
+            return preflight_code
 
     require_paramiko()
 
