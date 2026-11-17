@@ -460,9 +460,9 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     <?php else: ?>
     <?php foreach (bakery_admin_workspace_mode_shortcuts($navAdminMode) as $navModeShortcut): ?>
     <?php $navModeShortcutActive = $currentPage === $navModeShortcut['page']; ?>
-    <a class="bakery-nav__route-shortcut<?php echo $navModeShortcutActive ? ' bakery-nav__route-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . $navModeShortcut['href'], ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navModeShortcutActive ? ' aria-current="page"' : ''; ?>>
-      <span class="bakery-nav__label-full"><?php echo htmlspecialchars($navModeShortcut['label'], ENT_QUOTES, 'UTF-8'); ?></span>
-      <span class="bakery-nav__label-short"><?php echo htmlspecialchars($navModeShortcut['short'], ENT_QUOTES, 'UTF-8'); ?></span>
+    <a class="bakery-nav__route-shortcut bakery-nav__route-shortcut--compact<?php echo $navModeShortcutActive ? ' bakery-nav__route-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . $navModeShortcut['href'], ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars($navModeShortcut['label'], ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($navModeShortcut['label'], ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navModeShortcutActive ? ' aria-current="page"' : ''; ?>>
+      <span class="bakery-nav__label-full" aria-hidden="true"><?php echo htmlspecialchars($navModeShortcut['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="bakery-nav__label-short" aria-hidden="true"><?php echo htmlspecialchars($navModeShortcut['short'], ENT_QUOTES, 'UTF-8'); ?></span>
     </a>
     <?php endforeach; ?>
     <?php endif; ?>
@@ -513,8 +513,24 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           </div>
           <div class="bakery-nav__section-groups">
           <?php foreach ($section['groups'] as $group): ?>
-        <?php $groupActive = false; foreach ($group['items'] as $item) { if (bakery_nav_is_active($item, $currentPage)) { $groupActive = true; break; } } ?>
-        <details class="bakery-nav__group <?php echo $groupActive ? 'bakery-nav__group--active' : ''; ?>">
+        <?php
+          $groupActive = false;
+          foreach ($group['items'] as $item) {
+              if (bakery_nav_is_active($item, $currentPage)) {
+                  $groupActive = true;
+                  break;
+              }
+          }
+          $navGroupKey = (string)($group['key'] ?? '');
+          $navGroupClass = 'bakery-nav__group';
+          if ($navGroupKey === 'mode_focus' || $navGroupKey === 'mode_more') {
+              $navGroupClass .= ' bakery-nav__group--' . $navGroupKey;
+          }
+          if ($groupActive) {
+              $navGroupClass .= ' bakery-nav__group--active';
+          }
+        ?>
+        <details class="<?php echo htmlspecialchars($navGroupClass, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navGroupKey === 'mode_focus' ? ' open' : ''; ?>>
           <summary><?php echo htmlspecialchars($group['label'], ENT_QUOTES, 'UTF-8'); ?></summary>
           <div class="bakery-nav__panel">
             <div class="bakery-nav__usage-legend-slot bakery-nav__usage-legend-slot--panel">

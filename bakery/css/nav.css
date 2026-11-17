@@ -111,6 +111,33 @@
   line-height: 1;
 }
 
+.bakery-nav__route-shortcut--compact .bakery-nav__label-full {
+  display: none;
+}
+
+.bakery-nav__route-shortcut--compact .bakery-nav__label-short {
+  display: inline;
+}
+
+@media (min-width: 721px) {
+  /* The wide bar already shows these as pills. Phones hide those pills, so Today stays in the menu. */
+  .bakery-nav__group--mode_focus {
+    display: none;
+  }
+}
+
+.bakery-nav:not(.bakery-nav--focused) .bakery-nav__section--mode_more > .bakery-nav__section-header {
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .bakery-nav__route-shortcut,
 .bakery-nav__billing-shortcut,
 .bakery-nav__staff-shortcut {
@@ -148,6 +175,19 @@
   border-color: #88c8be;
   color: #fff;
   outline: none;
+}
+
+.bakery-nav__route-shortcut--active,
+.bakery-nav__route-shortcut--active:hover,
+.bakery-nav__route-shortcut--active:focus-visible {
+  background: #fff;
+  border-color: #fff;
+  color: #143532;
+}
+
+.bakery-nav__group--mode_more > .bakery-nav__panel {
+  max-height: min(70vh, 32rem);
+  overflow: auto;
 }
 
 .bakery-nav__route-shortcut:hover,
