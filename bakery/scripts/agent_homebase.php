@@ -35,7 +35,7 @@ Commands:
   brief       Opening briefing (packed mission packet, craft stanza, bugs, board)
   tests-for   Map files to tests (--files=a.php,b.php)
   craft       Development manual + poem (no database required for the text)
-  nag-check   Whether the stop hook should remind (open sessions)
+  nag-check   Manual open-session check. Run this yourself before ending a session.
   start       Open a development session
   learn       Mark a lesson complete (--lesson=slug)
   lessons     List curriculum
