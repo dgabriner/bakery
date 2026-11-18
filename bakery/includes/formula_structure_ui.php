@@ -7,6 +7,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/formula_structure.php';
+require_once __DIR__ . '/formula_readout.php';
 
 /**
  * @param list<array<string, mixed>> $ingredients
@@ -22,7 +23,8 @@ function bakery_formula_structure_render_card(
     array $catalogue,
     array $structure,
     array $partsByProduct,
-    bool $ready
+    bool $ready,
+    ?float $mixPieces = null
 ): void {
     $structure = bakery_formula_normalize_structure($structure);
     echo '<section class="formula-structure" aria-labelledby="formula-structure-' . $doughTypeId . '">';
@@ -30,11 +32,13 @@ function bakery_formula_structure_render_card(
     echo '<p class="formula-structure-lead">' . bakery_formula_structure_h('formula_structure.section_lead') . '</p>';
     if (!$ready) {
         echo '<p class="formula-structure-lead">' . bakery_formula_structure_h('formula_structure.not_ready') . '</p>';
+        bakery_formula_readout_render($doughTypeId, $ingredients, $structure, $products, $mixPieces);
         echo '</section>';
         return;
     }
 
     bakery_formula_structure_render_batch($doughTypeId, $structure, $products);
+    bakery_formula_readout_render($doughTypeId, $ingredients, $structure, $products, $mixPieces);
     bakery_formula_structure_render_folded($ingredients, $structure);
     bakery_formula_structure_render_starters($doughTypeId, $ingredients, $catalogue, $structure);
     bakery_formula_structure_render_parts($doughTypeId, $products, $catalogue, $partsByProduct);
@@ -383,6 +387,250 @@ function bakery_formula_structure_line_fields(array $catalogue, bool $starter): 
         echo '<input type="number" name="line_grams_per_piece[]" step="0.001" min="0" placeholder=""></label>';
     }
     echo '</div>';
+}
+
+/**
+ * @param list<array<string, mixed>> $ingredients
+ * @param list<array<string, mixed>> $catalogue
+ */
+function bakery_formula_readout_h(string $key, array $params = []): string
+{
+    return htmlspecialchars(bakery_t($key, $params), ENT_QUOTES, 'UTF-8');
+}
+
+function bakery_formula_readout_num(float $number, int $decimals): string
+{
+    return number_format($number, $decimals);
+}
+
+function bakery_formula_readout_pieces_value(float $pieces): string
+{
+    $text = rtrim(rtrim(number_format($pieces, 3, '.', ''), '0'), '.');
+    return $text === '' ? '0' : $text;
+}
+
+/**
+ * @param list<array<string, mixed>> $lines
+ * @return list<array<string, mixed>>
+ */
+function bakery_formula_readout_lines_of(array $lines, string $kind): array
+{
+    $matched = [];
+    foreach ($lines as $line) {
+        if (($line['kind'] ?? '') === $kind) {
+            $matched[] = $line;
+        }
+    }
+    return $matched;
+}
+
+/**
+ * @param array<string, mixed>|null $metric
+ */
+function bakery_formula_readout_metric(string $labelKey, ?array $metric, string $field): void
+{
+    echo '<p><strong>' . bakery_formula_readout_h($labelKey) . '</strong> ';
+    if ($metric === null || empty($metric['enough']) || $metric[$field] === null) {
+        echo bakery_formula_readout_h('formula_readout.not_enough');
+    } else {
+        echo htmlspecialchars(bakery_formula_readout_num((float) $metric[$field], 1) . '%', ENT_QUOTES, 'UTF-8');
+    }
+    echo '</p>';
+}
+
+/**
+ * Read-only hydration, preferment, target mix, and implied pieces.
+ * The mix form is GET. It does not save.
+ *
+ * @param list<array<string, mixed>> $lines
+ * @param array<string, mixed> $structure
+ * @param list<array<string, mixed>> $products
+ */
+function bakery_formula_readout_render(
+    int $doughTypeId,
+    array $lines,
+    array $structure,
+    array $products,
+    ?float $mixPieces
+): void {
+    $weighted = [];
+    foreach ($products as $product) {
+        if (!is_array($product)) {
+            continue;
+        }
+        $weight = bakery_formula_normalize_optional_number($product['weight_grams'] ?? null);
+        if ($weight === null || $weight <= 0) {
+            continue;
+        }
+        $product['weight_grams'] = $weight;
+        $weighted[] = $product;
+    }
+
+    $sampleWeight = $weighted === [] ? null : (float) $weighted[0]['weight_grams'];
+    $sample = bakery_formula_readout($lines, $structure, [
+        'piece_weight_grams' => $sampleWeight,
+        'pieces' => $mixPieces,
+    ]);
+    $formPieces = $mixPieces !== null ? $mixPieces : $sample['implied']['entered_pieces'];
+
+    echo '<div class="formula-readout">';
+    echo '<h4 id="formula-readout-' . $doughTypeId . '">' . bakery_formula_readout_h('formula_readout.title') . '</h4>';
+    echo '<p class="formula-structure-hint">' . bakery_formula_readout_h('formula_readout.lead') . '</p>';
+    bakery_formula_readout_metric('formula_readout.hydration', $sample['hydration'], 'percent');
+    bakery_formula_readout_metric('formula_readout.pff', $sample['pff'], 'percent');
+    echo '<p class="formula-structure-hint">' . bakery_formula_readout_h('formula_readout.pff_hint') . '</p>';
+    bakery_formula_readout_metric('formula_readout.preferment_share', $sample['preferment_share'], 'percent');
+    if (!empty($sample['starter_incomplete'])) {
+        echo '<p class="formula-structure-hint">' . bakery_formula_readout_h('formula_readout.starter_not_folded') . '</p>';
+    }
+    if (!empty($sample['loss_unset'])) {
+        echo '<p class="formula-structure-hint">' . bakery_formula_readout_h('formula_readout.loss_unset') . '</p>';
+    }
+
+    echo '<form method="get" action="formulas.php#formula-' . $doughTypeId . '" class="formula-readout-form">';
+    echo '<fieldset>';
+    echo '<legend>' . bakery_formula_readout_h('formula_readout.mix_title') . '</legend>';
+    echo '<input type="hidden" name="dough_type" value="' . $doughTypeId . '">';
+    echo '<label class="formula-structure-field" for="mix-pieces-' . $doughTypeId . '">';
+    echo '<span>' . bakery_formula_readout_h('formula_readout.mix_pieces') . '</span>';
+    echo '<input id="mix-pieces-' . $doughTypeId . '" type="number" name="mix_pieces" inputmode="decimal" min="0" step="any"';
+    if ($formPieces !== null) {
+        echo ' value="' . htmlspecialchars(bakery_formula_readout_pieces_value((float) $formPieces), ENT_QUOTES, 'UTF-8') . '"';
+    }
+    echo '>';
+    echo '</label>';
+    echo '<button type="submit">' . bakery_formula_readout_h('formula_readout.mix_show') . '</button>';
+    echo '<p class="formula-structure-hint">' . bakery_formula_readout_h('formula_readout.mix_note') . '</p>';
+    echo '</fieldset></form>';
+
+    if ($weighted === []) {
+        echo '<p><strong>' . bakery_formula_readout_h('formula_readout.mix_title') . '</strong> ';
+        echo bakery_formula_readout_h('formula_readout.not_enough') . '</p>';
+        echo '<p><strong>' . bakery_formula_readout_h('formula_readout.implied_title') . '</strong> ';
+        echo bakery_formula_readout_h('formula_readout.not_enough') . '</p>';
+        echo '</div>';
+        return;
+    }
+
+    foreach ($weighted as $product) {
+        $readout = bakery_formula_readout($lines, $structure, [
+            'piece_weight_grams' => (float) $product['weight_grams'],
+            'pieces' => $mixPieces,
+        ]);
+        $name = htmlspecialchars((string) ($product['name'] ?? ''), ENT_QUOTES, 'UTF-8');
+        echo '<article class="formula-readout-product">';
+        echo '<h5>' . $name . '</h5>';
+        echo '<p><strong>' . bakery_formula_readout_h('formula_readout.piece_weight') . '</strong> ';
+        echo htmlspecialchars(bakery_formula_readout_num((float) $product['weight_grams'], 1) . ' g', ENT_QUOTES, 'UTF-8') . '</p>';
+        bakery_formula_readout_mix_block($readout);
+        bakery_formula_readout_implied_block($readout);
+        echo '</article>';
+    }
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed> $readout
+ */
+function bakery_formula_readout_mix_block(array $readout): void
+{
+    $mix = $readout['mix'];
+    echo '<h5>' . bakery_formula_readout_h('formula_readout.mix_title') . '</h5>';
+    if (empty($mix['dough_enough']) || $mix['dough_grams'] === null) {
+        echo '<p>' . bakery_formula_readout_h('formula_readout.not_enough') . '</p>';
+        return;
+    }
+    echo '<p><strong>' . bakery_formula_readout_h('formula_readout.dough_total') . '</strong> ';
+    echo htmlspecialchars(bakery_formula_readout_num((float) $mix['dough_grams'], 1) . ' g', ENT_QUOTES, 'UTF-8');
+    echo ' <span class="formula-structure-hint">('
+        . htmlspecialchars(bakery_formula_readout_num((float) $mix['pieces'], 1), ENT_QUOTES, 'UTF-8')
+        . ' × '
+        . htmlspecialchars(bakery_formula_readout_num((float) $mix['piece_weight_grams'], 1), ENT_QUOTES, 'UTF-8')
+        . ' g + '
+        . htmlspecialchars(bakery_formula_readout_num((float) $readout['loss_grams'], 1), ENT_QUOTES, 'UTF-8')
+        . ' g ' . bakery_formula_readout_h('formula_readout.loss')
+        . ')</span></p>';
+    if (empty($mix['enough'])) {
+        echo '<p>' . bakery_formula_readout_h('formula_readout.not_enough') . '</p>';
+        return;
+    }
+    bakery_formula_readout_sum_row('formula_readout.direct_flour', $mix['lines'], 'flour', (float) $mix['direct_flour_grams']);
+    bakery_formula_readout_sum_row('formula_readout.direct_water', $mix['lines'], 'water', (float) $mix['direct_water_grams']);
+    bakery_formula_readout_sum_row('formula_readout.starter', $mix['lines'], 'starter', (float) $mix['starter_grams']);
+    bakery_formula_readout_sum_row('formula_readout.salt', $mix['lines'], 'salt', (float) $mix['salt_grams']);
+    foreach ($mix['lines'] as $line) {
+        $kind = (string) ($line['kind'] ?? '');
+        if ($kind === 'flour' || $kind === 'water' || $kind === 'starter' || $kind === 'salt') {
+            continue;
+        }
+        echo '<p><strong>' . htmlspecialchars((string) $line['name'], ENT_QUOTES, 'UTF-8') . '</strong> ';
+        echo htmlspecialchars(bakery_formula_readout_num((float) $line['grams'], 1) . ' g', ENT_QUOTES, 'UTF-8') . '</p>';
+    }
+}
+
+/**
+ * @param list<array<string, mixed>> $lines
+ */
+function bakery_formula_readout_sum_row(string $labelKey, array $lines, string $kind, float $grams): void
+{
+    $matched = bakery_formula_readout_lines_of($lines, $kind);
+    if ($matched === [] && $grams <= 0) {
+        return;
+    }
+    $label = bakery_formula_readout_h($labelKey);
+    if (count($matched) === 1 && $matched[0]['name'] !== '') {
+        $label .= ' · ' . htmlspecialchars((string) $matched[0]['name'], ENT_QUOTES, 'UTF-8');
+    }
+    echo '<p><strong>' . $label . '</strong> ';
+    echo htmlspecialchars(bakery_formula_readout_num($grams, 1) . ' g', ENT_QUOTES, 'UTF-8') . '</p>';
+    if (count($matched) > 1) {
+        echo '<ul class="formula-structure-lines">';
+        foreach ($matched as $line) {
+            echo '<li><span>' . htmlspecialchars((string) $line['name'], ENT_QUOTES, 'UTF-8') . '</span><strong>'
+                . htmlspecialchars(bakery_formula_readout_num((float) $line['grams'], 1) . ' g', ENT_QUOTES, 'UTF-8')
+                . '</strong></li>';
+        }
+        echo '</ul>';
+    }
+}
+
+/**
+ * @param array<string, mixed> $readout
+ */
+function bakery_formula_readout_implied_block(array $readout): void
+{
+    $implied = $readout['implied'];
+    $class = !empty($implied['flag']) ? ' class="formula-readout-flag"' : '';
+    echo '<h5>' . bakery_formula_readout_h('formula_readout.implied_title') . '</h5>';
+    echo '<p' . $class . '>';
+    echo '<strong>' . bakery_formula_readout_h('formula_readout.implied_pieces') . '</strong> ';
+    if (empty($implied['enough']) || $implied['pieces'] === null) {
+        echo bakery_formula_readout_h('formula_readout.not_enough');
+    } else {
+        echo htmlspecialchars(bakery_formula_readout_num((float) $implied['pieces'], 1), ENT_QUOTES, 'UTF-8');
+    }
+    echo ' · <strong>' . bakery_formula_readout_h('formula_readout.entered_pieces') . '</strong> ';
+    if ($implied['entered_pieces'] === null) {
+        echo bakery_formula_readout_h('formula_readout.not_enough');
+    } else {
+        echo htmlspecialchars(bakery_formula_readout_num((float) $implied['entered_pieces'], 1), ENT_QUOTES, 'UTF-8');
+    }
+    if (!empty($implied['flag'])) {
+        echo ' <span>' . bakery_formula_readout_h('formula_readout.flag') . '</span>';
+    }
+    echo '</p>';
+    if (!empty($implied['enough']) && $implied['total_flour_grams'] !== null && $implied['total_bakers_percent'] !== null) {
+        $flourGrams = (float) $implied['total_flour_grams'];
+        echo '<p class="formula-structure-hint"><strong>' . bakery_formula_readout_h('formula_readout.total_flour') . '</strong> ';
+        echo htmlspecialchars(
+            bakery_formula_readout_num($flourGrams, 1) . ' g · ' . bakery_format_formula_lb($flourGrams),
+            ENT_QUOTES,
+            'UTF-8'
+        );
+        echo ' · <strong>' . bakery_formula_readout_h('formula_readout.bakers_percent') . '</strong> ';
+        echo htmlspecialchars(bakery_formula_readout_num((float) $implied['total_bakers_percent'], 1) . '%', ENT_QUOTES, 'UTF-8');
+        echo '</p>';
+    }
 }
 
 /**
