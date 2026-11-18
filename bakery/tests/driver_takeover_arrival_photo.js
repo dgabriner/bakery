@@ -342,8 +342,9 @@ async function main() {
   const dirtyAt = Number(sessionStorage.getItem('bakeryRouteDirtyAt') || 0);
   if (!(dirtyAt > 0)) fail('take-over did not mark the route dirty');
   else pass('take-over marks the route dirty');
-  if (reloadCount !== 1) fail('prep page did not ask to reload after take-over, saw ' + reloadCount);
-  else pass('prep page reloads after take-over');
+  // Data saver: the prep page updates in place after a take-over, it does not reload.
+  if (reloadCount !== 0) fail('prep page reloaded after take-over, saw ' + reloadCount + ' (it should update in place)');
+  else pass('prep page updates in place after take-over without a reload');
 
   const beforeBack = reloadCount;
   fireWindow('pageshow', { persisted: true });

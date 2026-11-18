@@ -54,8 +54,18 @@
     inline: false,
     uploadPromise: null,
     proofSkipReason: '',
-    proofState: ''
+    proofState: '',
+    secondPhoto: false,
+    secondState: '',
+    secondThumbUrl: '',
+    reviewAddAfter: false,
+    lastPingAt: 0
   };
+
+  // A session ping that succeeded this recently is reused, so a photo and the
+  // Delivered tap do not each pay a serial round trip on a slow connection.
+  var SESSION_FRESH_MS = 90 * 1000;
+  var CAMERA_PREF_KEY = 'bakeryDriverCameraPref';
 
   var CAMERA_DENIED_KEY = 'bakeryDriverCameraDenied';
   var CAMERA_TIP_KEY = 'bakeryDriverCameraTipSeen';
@@ -102,11 +112,21 @@
     return at > 0 && (Date.now() - at) < CAMERA_DENIED_TTL_MS;
   }
 
-  function inlineCameraAvailable() {
+  function inlineCameraSupported() {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
       && window.isSecureContext !== false
       && !isInAppWebview()
       && !cameraDeniedRecently();
+  }
+
+  // A driver who picked "Use phone camera" keeps getting the phone's own
+  // camera app until they switch back; the in-app viewfinder is the default.
+  function phoneCameraPreferred() {
+    return storageGet(CAMERA_PREF_KEY) === 'phone';
+  }
+
+  function inlineCameraAvailable() {
+    return inlineCameraSupported() && !phoneCameraPreferred();
   }
 
   function isPhoneLayout() {
@@ -337,9 +357,22 @@
     return true;
   }
 
-  async function refreshRouteSession() {
+  // The route page listens for these so phone Back closes the capture layer first.
+  // A missing CustomEvent (old WebView) must never break opening or closing the camera.
+  function announceCapture(name) {
+    try {
+      if (typeof CustomEvent === 'function') {
+        document.dispatchEvent(new CustomEvent(name));
+      }
+    } catch (ignored) { /* the announcement is cosmetic */ }
+  }
+
+  async function refreshRouteSession(options) {
     if (state.sessionRefreshPromise) {
       return state.sessionRefreshPromise;
+    }
+    if (!(options && options.force) && state.lastPingAt && (Date.now() - state.lastPingAt) < SESSION_FRESH_MS) {
+      return { ok: true, cached: true };
     }
 
     state.sessionRefreshPromise = (async function () {
@@ -361,8 +394,10 @@
           throw sessionError;
         }
         applyCsrfToken(data.csrf_token);
+        state.lastPingAt = Date.now();
         return { ok: true };
       } catch (err) {
+        state.lastPingAt = 0;
         if (err && err.isSessionError) {
           throw err;
         }
@@ -412,7 +447,9 @@
     var captureBtn = $('deliveryCaptureBtn');
     if (captureBtn) {
       captureBtn.classList.remove('hidden');
-      captureBtn.textContent = state.cameraActive ? i18n('take_photo') : i18n('activate_camera');
+      captureBtn.textContent = state.cameraActive
+        ? i18n(state.secondPhoto ? 'take_second_photo' : 'take_photo')
+        : i18n('activate_camera');
     }
     var retakeBtn = $('deliveryRetakeBtn');
     if (retakeBtn) retakeBtn.classList.add('hidden');
@@ -509,22 +546,34 @@
     var pickerBtn = $('deliveryFilePickerBtn');
     var captureBtn = $('deliveryCaptureBtn');
     var skipBtn = $('deliverySkipPhotoInlineBtn');
+    var inAppBtn = $('deliveryInAppCameraBtn');
     var isDeparture = state.photoReturnStep === 'complete';
+    var modal = $('deliveryPhotoModal');
+    var nativeMode = !!(modal && (modal.classList.contains('native-camera-mode') || modal.classList.contains('camera-unavailable')));
     if (pickerBtn) {
-      pickerBtn.textContent = isDeparture ? i18n('take_departure_photo') : i18n('phone_camera');
+      // In the in-app viewfinder this is the "switch" option; in native mode it is the main button.
+      pickerBtn.textContent = isDeparture
+        ? i18n('take_departure_photo')
+        : (nativeMode ? i18n('phone_camera') : i18n('use_phone_camera'));
     }
     if (captureBtn) {
       captureBtn.textContent = isDeparture
         ? i18n('take_departure_photo')
-        : (state.cameraActive ? i18n('take_photo') : i18n('activate_camera'));
+        : (state.cameraActive ? i18n(state.secondPhoto ? 'take_second_photo' : 'take_photo') : i18n('activate_camera'));
     }
     if (skipBtn) {
-      skipBtn.textContent = isDeparture ? i18n('skip_departure_photo') : i18n('skip_photo');
+      // The second photo is optional, so its escape hatch is just "Back", with no reason chips.
+      skipBtn.textContent = state.secondPhoto
+        ? i18n('back')
+        : (isDeparture ? i18n('skip_departure_photo') : i18n('skip_photo'));
+    }
+    if (inAppBtn) {
+      inAppBtn.hidden = !(nativeMode && inlineCameraSupported());
     }
   }
 
   function setPhotoControlsBusy(isBusy) {
-    ['deliveryCaptureBtn', 'deliveryRetakeBtn', 'deliveryFilePickerBtn', 'deliveryGalleryPickerBtn', 'deliverySkipPhotoInlineBtn']
+    ['deliveryCaptureBtn', 'deliveryRetakeBtn', 'deliveryFilePickerBtn', 'deliveryInAppCameraBtn', 'deliveryGalleryPickerBtn', 'deliverySkipPhotoInlineBtn']
       .forEach(function (id) {
         var button = $(id);
         if (button) button.disabled = isBusy;
@@ -548,6 +597,7 @@
     if (frame) frame.classList.add('is-camera-idle');
     if (video) video.style.display = 'none';
     setStatus('', '');
+    updateNativeCameraControls();
   }
 
   function openNativeCameraPicker() {
@@ -623,15 +673,17 @@
 
     if (applySuggestedType && !state.retakePhotoId) {
       if (state.photoMode === 'review') {
-        typeSelect.value = hasPhotoType('Before') ? 'After' : 'Before';
+        typeSelect.value = (state.reviewAddAfter || hasPhotoType('Before')) ? 'After' : 'Before';
       } else {
-        typeSelect.value = state.photoReturnStep === 'complete' ? 'After' : 'Before';
+        typeSelect.value = (state.photoReturnStep === 'complete' || state.secondPhoto) ? 'After' : 'Before';
       }
     }
 
     var type = typeSelect.value || 'Before';
     if (heading) {
-      heading.textContent = state.retakePhotoId
+      heading.textContent = state.secondPhoto
+        ? i18n('second_photo_title')
+        : state.retakePhotoId
         ? i18n('retake_photo_type', type.toLowerCase())
         : type === 'Before'
           ? i18n('take_arrival_photo')
@@ -640,7 +692,9 @@
             : i18n('take_receipt_photo');
     }
     if (guidance) {
-      guidance.textContent = type === 'Before'
+      guidance.textContent = state.secondPhoto
+        ? i18n('second_photo_hint')
+        : type === 'Before'
         ? i18n('photo_guidance')
         : type === 'After'
           ? i18n('departure_guidance')
@@ -674,6 +728,8 @@
 
   function goToStep(step) {
     if (STEPS.indexOf(step) === -1) step = 'photo';
+    // Photo 2 is a detour from the charge screen; any other destination ends it.
+    if (step !== 'photo') state.secondPhoto = false;
     state.currentStep = step;
     state.invoiceReady = step === 'invoice';
     var isDeparturePhoto = step === 'photo' && state.photoReturnStep === 'complete';
@@ -740,7 +796,11 @@
       if (invoiceFooter) invoiceFooter.hidden = true;
       if (step === 'photo') {
         showLivePreview();
-        if (title) title.textContent = isDeparturePhoto ? i18n('take_departure_photo') : i18n('arrival_photo');
+        if (title) {
+          title.textContent = isDeparturePhoto
+            ? i18n('take_departure_photo')
+            : (state.secondPhoto ? i18n('second_photo_title') : i18n('arrival_photo'));
+        }
         if (eyebrow) eyebrow.textContent = isDeparturePhoto ? i18n('leave') : i18n('stop_workflow');
         if (state.photoMode !== 'review') {
           beginPhotoCapture();
@@ -751,7 +811,11 @@
     }
 
     if (backBtn) backBtn.hidden = step === 'photo';
-    if (skipBtn) skipBtn.hidden = step !== 'photo';
+    if (skipBtn) {
+      skipBtn.hidden = step !== 'photo';
+      skipBtn.textContent = state.secondPhoto ? i18n('back') : i18n('skip_photo');
+    }
+    updateSecondPhotoUi();
     if (primaryBtn) {
       if (step === 'photo') {
         primaryBtn.hidden = true;
@@ -831,6 +895,7 @@
     updatePhotoWorkflowUi(false);
     var cameraModal = $('deliveryPhotoModal');
     if (cameraModal) cameraModal.classList.remove('native-camera-mode');
+    updateNativeCameraControls();
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       var unsupportedModal = $('deliveryPhotoModal');
@@ -854,7 +919,7 @@
       state.stream = await navigator.mediaDevices.getUserMedia(constraints);
       state.cameraActive = true;
       var captureButton = $('deliveryCaptureBtn');
-      if (captureButton) captureButton.textContent = i18n('take_photo');
+      if (captureButton) captureButton.textContent = i18n(state.secondPhoto ? 'take_second_photo' : 'take_photo');
     } catch (err) {
       try {
         state.stream = await navigator.mediaDevices.getUserMedia({
@@ -886,7 +951,10 @@
     var video = $('deliveryCameraVideo');
     var frame = $('deliveryCameraFrame');
     var activeModal = $('deliveryPhotoModal');
-    if ((activeModal && activeModal.getAttribute('aria-hidden') === 'true') || state.currentStep !== 'photo') {
+    // Review mode shows the camera on its own panel (Add a photo, Retake) while the step stays 'invoice',
+    // so only a guided stop that already moved past the photo step should drop the stream.
+    var cameraStillWanted = state.currentStep === 'photo' || state.photoMode === 'review';
+    if ((activeModal && activeModal.getAttribute('aria-hidden') === 'true') || !cameraStillWanted) {
       stopCamera();
       return;
     }
@@ -951,17 +1019,134 @@
    * waits on state.uploadPromise, so the stop never saves ahead of its photo.
    */
   function startBackgroundUpload(blob, filename, objectUrl) {
+    var second = !!state.secondPhoto && state.currentStep === 'photo' && state.photoMode !== 'review';
     var guided = state.photoMode !== 'review' && !state.retakePhotoId && state.currentStep === 'photo';
-    if (guided) {
+    // Read the type now: the select is reset as soon as the charge screen returns.
+    var typeSelect = $('deliveryPhotoType');
+    var photoType = second ? 'After' : ((typeSelect && typeSelect.value) || 'Before');
+    if (second) {
+      // The shared preview URL is revoked when the camera restarts; keep the Photo 2 thumb on its own.
+      revokeSecondThumb();
+      state.secondThumbUrl = URL.createObjectURL(blob);
+      objectUrl = state.secondThumbUrl;
+    }
+    if (guided && second) {
+      setSecondState('uploading', objectUrl);
+      goToStep('delivery');
+      setPhotoTypeForNextShot();
+    } else if (guided) {
       setProofState('uploading', objectUrl);
       goToStep('delivery');
     } else {
       setStatus(i18n('photo_captured_saving'), 'loading');
     }
-    state.uploadPromise = uploadBlob(blob, filename).finally(function () {
+    state.uploadPromise = uploadBlob(blob, filename, { photoType: photoType, second: second }).finally(function () {
       state.uploadPromise = null;
     });
     return state.uploadPromise;
+  }
+
+  function revokeSecondThumb() {
+    if (state.secondThumbUrl) {
+      try {
+        URL.revokeObjectURL(state.secondThumbUrl);
+      } catch (err) {
+        // Nothing to clean up.
+      }
+      state.secondThumbUrl = '';
+    }
+  }
+
+  function setPhotoTypeForNextShot() {
+    var typeSelect = $('deliveryPhotoType');
+    if (typeSelect) typeSelect.value = 'Before';
+    updatePhotoWorkflowUi(false);
+  }
+
+  /**
+   * Photo 2 is optional and can be taken either right after the arrival photo
+   * (from the charge screen, before Delivered) or from the toast after. It
+   * uploads in the background like photo 1, so Delivered is never blocked on it.
+   */
+  function setSecondState(kind, objectUrl) {
+    state.secondState = kind;
+    var box = $('deliveryInlineProof2');
+    var thumb = $('deliveryInlineThumb2');
+    var label = $('deliveryInlineProofLabel2');
+    if (box) {
+      box.hidden = !kind;
+      box.setAttribute('data-proof-state', kind || '');
+    }
+    if (thumb) {
+      if (objectUrl) {
+        thumb.src = objectUrl;
+        thumb.hidden = false;
+      } else if (!kind) {
+        thumb.removeAttribute('src');
+        thumb.hidden = true;
+      }
+    }
+    if (label) {
+      var text = '';
+      if (kind === 'uploading') text = i18n('second_photo_saving');
+      else if (kind === 'saved') text = i18n('second_photo_saved');
+      else if (kind === 'queued') text = i18n('outbox_queued');
+      label.textContent = text;
+    }
+    updateSecondPhotoUi();
+  }
+
+  function updateSecondPhotoUi() {
+    var btn = $('deliverySecondPhotoBtn');
+    var actions = $('deliveryWizardActions');
+    var onCharge = state.currentStep === 'delivery' && state.photoMode !== 'review';
+    // Offer Photo 2 once the arrival photo exists (or is saving) and it is still empty.
+    var arrivalOk = state.proofState === 'saved' || state.proofState === 'uploading' || state.proofState === 'queued';
+    var show = onCharge && arrivalOk && !state.secondState && !state.submitting;
+    if (btn) btn.hidden = !show;
+    if (actions) actions.classList.toggle('has-photo2', show);
+  }
+
+  function savedAfterPhoto() {
+    var found = null;
+    state.photos.forEach(function (photo) {
+      if (String(photo.photo_type || '').toLowerCase() === 'after') found = photo;
+    });
+    return found;
+  }
+
+  function syncSecondPhotoFromList() {
+    if (state.photoMode === 'review' || state.secondPhoto) return;
+    var after = savedAfterPhoto();
+    if (after && state.secondState !== 'uploading') {
+      setSecondState('saved', thumbUrl(after));
+    } else if (!after && state.secondState === 'saved') {
+      setSecondState('');
+    }
+  }
+
+  function startSecondPhoto(options) {
+    options = options || {};
+    if (state.submitting || state.uploading || state.preparing) return;
+    if (state.currentStep !== 'delivery' || state.photoMode === 'review') return;
+    state.secondPhoto = true;
+    state.blob = null;
+    var existing = options.retake ? savedAfterPhoto() : null;
+    state.retakePhotoId = existing ? Number(existing.id) : null;
+    var typeSelect = $('deliveryPhotoType');
+    if (typeSelect) typeSelect.value = 'After';
+    updatePhotoWorkflowUi(false);
+    goToStep('photo');
+  }
+
+  function cancelSecondPhoto() {
+    if (state.uploading || state.preparing) return;
+    state.secondPhoto = false;
+    state.retakePhotoId = null;
+    state.blob = null;
+    stopCamera();
+    setPhotoTypeForNextShot();
+    goToStep('delivery');
   }
 
   function setProofState(kind, objectUrl) {
@@ -981,10 +1166,11 @@
         thumb.hidden = true;
       }
     }
+    updateSecondPhotoUi();
     if (label) {
       var text = '';
       if (kind === 'uploading') text = i18n('saving_photo');
-      else if (kind === 'saved') text = i18n('arrival_saved');
+      else if (kind === 'saved') text = i18n('first_photo_saved');
       else if (kind === 'queued') text = i18n('outbox_queued');
       else if (kind === 'skipped') text = i18n('no_photo_reason_' + state.proofSkipReason, i18n('no_photo'));
       label.textContent = text;
@@ -1188,6 +1374,7 @@
       renderPhotos();
       updatePhotoWorkflowUi(true);
       resumeAfterSavedArrival();
+      syncSecondPhotoFromList();
       if (state.photos.length > 0) {
         maybeEnableGpsTracking();
       }
@@ -1411,7 +1598,9 @@
     return { blob: blob, filename: baseName + '.jpg' };
   }
 
-  async function uploadBlob(blob, filename) {
+  async function uploadBlob(blob, filename, uploadOptions) {
+    uploadOptions = uploadOptions || {};
+    var isSecond = !!uploadOptions.second;
     if (state.uploading) return;
     if (!blob) {
       setStatus(i18n('take_or_choose_photo'), 'error');
@@ -1429,9 +1618,13 @@
     if (fill) fill.style.width = '35%';
 
     try {
-      var photoType = ($('deliveryPhotoType') && $('deliveryPhotoType').value) || 'Before';
+      var photoType = uploadOptions.photoType
+        || ($('deliveryPhotoType') && $('deliveryPhotoType').value)
+        || 'Before';
+      // The upload must not wait on GPS: Delivered waits on this upload. A cached
+      // fix is used when one exists, otherwise at most a short wait.
       var coordsAndSession = await Promise.all([
-        getCoords({ timeout: 1500, maximumAge: 120000 }),
+        getCoords({ timeout: 400, maximumAge: 300000 }),
         refreshRouteSession()
       ]);
       var photoCoords = coordsAndSession[0] || {};
@@ -1517,13 +1710,23 @@
       state.proofAccepted = true;
       state.explicitProofSkip = false;
       state.proofSkipReason = '';
+      if (isSecond) {
+        state.secondPhoto = false;
+        setSecondState(data.queued ? 'queued' : 'saved');
+        setStatus(data.queued ? i18n('outbox_queued') : i18n('second_photo_added'), 'success');
+        if (state.currentStep !== 'delivery') goToStep('delivery');
+        setPhotoTypeForNextShot();
+        return;
+      }
       if (state.proofState === 'uploading') {
         setProofState(data.queued ? 'queued' : 'saved');
       }
       if (state.photoMode === 'review') {
         state.photoReturnStep = null;
         setStatus(
-          data.queued ? i18n('outbox_queued') : (photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved')),
+          data.queued
+            ? i18n('outbox_queued')
+            : (photoType === 'Before' ? i18n('arrival_saved') : (photoType === 'After' ? i18n('second_photo_added') : i18n('departure_saved'))),
           'success'
         );
         goToStep('invoice');
@@ -1535,6 +1738,17 @@
         if (state.currentStep !== 'delivery') goToStep('delivery');
       }
     } catch (err) {
+      if (isSecond) {
+        // Photo 2 is optional: a failed upload never blocks the stop or touches photo 1.
+        state.secondPhoto = false;
+        state.retakePhotoId = null;
+        var keptAfter = savedAfterPhoto();
+        setSecondState(keptAfter ? 'saved' : '', keptAfter ? thumbUrl(keptAfter) : '');
+        if (state.currentStep !== 'delivery') goToStep('delivery');
+        setPhotoTypeForNextShot();
+        setStatus(err.message || i18n('upload_failed'), 'error');
+        return;
+      }
       if (state.proofState === 'uploading') {
         setProofState('');
         state.proofAccepted = false;
@@ -2394,8 +2608,12 @@
     setStatus(i18n('saving_delivery'), 'loading');
 
     try {
-      var coords = await getCoords({ timeout: 1500, maximumAge: 120000 });
-      await refreshRouteSession();
+      // GPS and the session check run together; neither waits on the other, and a cached fix is fine.
+      var confirmContext = await Promise.all([
+        getCoords({ timeout: 800, maximumAge: 300000 }),
+        refreshRouteSession()
+      ]);
+      var coords = confirmContext[0];
       var outbox = window.BakeryDriverOutbox;
       var requestId = outbox && typeof outbox.newId === 'function' ? outbox.newId('confirm') : '';
       var body = 'action=confirm_delivery&daily_order_id=' + encodeURIComponent(String(state.dailyOrderId)) +
@@ -2483,8 +2701,10 @@
     if (state.stopFinished) return;
     state.stopFinished = true;
     state.confirmationSaved = false;
+    // After Delivered, Photo 2 is still one tap away from the toast (stocked shelf photos often come last).
+    var canAddPhoto = state.photoMode !== 'review' && !state.secondState && state.proofState !== 'skipped';
     if (window.DriverRoute && typeof window.DriverRoute.afterDeliveryComplete === 'function') {
-      window.DriverRoute.afterDeliveryComplete(state.dailyOrderId, message);
+      window.DriverRoute.afterDeliveryComplete(state.dailyOrderId, message, { canAddPhoto: canAddPhoto });
     } else {
       var stop = document.querySelector('.stop-item[data-daily-order-id="' + state.dailyOrderId + '"]');
       if (stop) {
@@ -2494,7 +2714,43 @@
       }
     }
     state.submitting = false;
-    setTimeout(function () { closeModal({ focusRoute: true, deliveryFinished: true }); }, 650);
+    setTimeout(function () {
+      // Opening another stop (for example Add photo 2 from the toast) resets stopFinished; leave that one open.
+      if (!state.stopFinished) return;
+      closeModal({ focusRoute: true, deliveryFinished: true });
+    }, 650);
+  }
+
+  /**
+   * Opens the saved-photos review of a delivered stop and goes straight to the
+   * camera for an After photo, so the toast action is a single tap.
+   */
+  function openReviewAddPhoto(btn) {
+    if (!btn || state.submitting || state.uploading || state.preparing) return;
+    openModal({
+      driverId: parseInt(btn.getAttribute('data-driver-id'), 10) || 0,
+      driverName: btn.getAttribute('data-driver-name') || '',
+      customerId: parseInt(btn.getAttribute('data-customer-id'), 10) || 0,
+      dailyOrderId: parseInt(btn.getAttribute('data-daily-order-id'), 10) || 0,
+      customerName: btn.getAttribute('data-customer-name') || '',
+      address: btn.getAttribute('data-address') || '',
+      date: btn.getAttribute('data-date') || '',
+      assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
+      photoMode: 'review',
+      startStep: '',
+      autoOpenCamera: false
+    });
+    state.reviewAddAfter = true;
+    showReviewCameraControls();
+    var typeSelect = $('deliveryPhotoType');
+    if (typeSelect) typeSelect.value = 'After';
+    updatePhotoWorkflowUi(false);
+    if (!inlineCameraAvailable()) {
+      useNativeCamera();
+      openNativeCameraPicker();
+    } else {
+      startCamera();
+    }
   }
 
   function openModal(opts) {
@@ -2552,7 +2808,11 @@
     state.stopFinished = false;
     state.uploadPromise = null;
     state.proofSkipReason = '';
+    state.secondPhoto = false;
+    state.reviewAddAfter = false;
+    revokeSecondThumb();
     setProofState('');
+    setSecondState('');
     showNoPhotoReasons(false);
     var adjustDetails = $('deliveryAdjustDetails');
     if (adjustDetails) adjustDetails.open = false;
@@ -2623,7 +2883,7 @@
       document.body.classList.add('photo-mode-open');
       lockPhotoModalViewport();
     }
-    document.dispatchEvent(new CustomEvent('driver:capture-open'));
+    announceCapture('driver:capture-open');
     requestAnimationFrame(function () {
       modal.classList.add('is-open');
       var closeButton = $('deliveryPhotoModalClose');
@@ -2666,6 +2926,7 @@
     state.blob = null;
     revokePreviewUrl();
     state.retakePhotoId = null;
+    state.secondPhoto = false;
     state.submitting = false;
     state.preparing = false;
     setPhotoControlsBusy(false);
@@ -2689,7 +2950,7 @@
       }, wasInline ? 0 : 240);
     }
     document.body.classList.remove('now-capture-open');
-    document.dispatchEvent(new CustomEvent('driver:capture-close'));
+    announceCapture('driver:capture-close');
     var routeRoot = $('driverRouteRoot');
     if (routeRoot) routeRoot.removeAttribute('inert');
     document.body.classList.remove('photo-mode-open');
@@ -2876,8 +3137,17 @@
     });
     function skipPhotoStep() {
       if (state.submitting) return;
+      // Photo 2 is optional: Back returns to the charge screen with no reason prompt.
+      if (state.secondPhoto) {
+        cancelSecondPhoto();
+        return;
+      }
       showNoPhotoReasons(true);
     }
+    var secondPhotoBtn = $('deliverySecondPhotoBtn');
+    if (secondPhotoBtn) secondPhotoBtn.addEventListener('click', function () { startSecondPhoto(); });
+    var secondRetake = $('deliveryInlineRetake2');
+    if (secondRetake) secondRetake.addEventListener('click', function () { startSecondPhoto({ retake: true }); });
     $('deliveryWizardSkipBtn').addEventListener('click', skipPhotoStep);
     var skipInlineBtn = $('deliverySkipPhotoInlineBtn');
     if (skipInlineBtn) skipInlineBtn.addEventListener('click', skipPhotoStep);
@@ -3023,8 +3293,23 @@
       updatePhotoWorkflowUi(false);
     });
     $('deliveryFilePickerBtn').addEventListener('click', function () {
+      var pickerModal = $('deliveryPhotoModal');
+      var alreadyNative = !!(pickerModal && (pickerModal.classList.contains('native-camera-mode') || pickerModal.classList.contains('camera-unavailable')));
+      // Choosing the phone camera from the in-app viewfinder is remembered until switched back.
+      if (!alreadyNative && inlineCameraSupported()) {
+        storageSet(CAMERA_PREF_KEY, 'phone');
+        useNativeCamera();
+      }
       openNativeCameraPicker();
     });
+    var inAppCameraBtn = $('deliveryInAppCameraBtn');
+    if (inAppCameraBtn) {
+      inAppCameraBtn.addEventListener('click', function () {
+        storageSet(CAMERA_PREF_KEY, null);
+        showLivePreview();
+        beginPhotoCapture();
+      });
+    }
     $('deliveryGalleryPickerBtn').addEventListener('click', function () {
       $('deliveryGalleryInput').click();
     });
@@ -3084,6 +3369,7 @@
   window.DriverDelivery = {
     bindPhotoButtons: bindPhotoButtons,
     openModal: openModal,
+    openReviewAddPhoto: openReviewAddPhoto,
     closeModal: closeModal,
     isOpen: function () {
       var modal = $('deliveryPhotoModal');

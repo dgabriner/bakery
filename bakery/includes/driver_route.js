@@ -339,17 +339,31 @@
         }
     }
 
-    function showSuccessToast(message) {
+    function showSuccessToast(message, action) {
         var toast = document.getElementById('routeSuccessToast');
         if (!toast) return;
         toast.textContent = message || di.delivery_saved;
+        toast.classList.toggle('has-action', !!action);
+        if (action && action.label && typeof action.run === 'function') {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'route-toast-action';
+            button.textContent = action.label;
+            button.addEventListener('click', function () {
+                clearTimeout(showSuccessToast._timer);
+                toast.classList.remove('is-visible');
+                toast.hidden = true;
+                action.run();
+            });
+            toast.appendChild(button);
+        }
         toast.hidden = false;
         toast.classList.add('is-visible');
         clearTimeout(showSuccessToast._timer);
         showSuccessToast._timer = setTimeout(function () {
             toast.classList.remove('is-visible');
             toast.hidden = true;
-        }, 4200);
+        }, action ? 9000 : 4200);
     }
 
     function routeOrderValue(stopEl) {
@@ -929,16 +943,24 @@
             refreshRouteUi();
             showSuccessToast(message || di.empty_order_flagged);
         },
-        afterDeliveryComplete: function (dailyOrderId, message) {
+        afterDeliveryComplete: function (dailyOrderId, message, options) {
             var stop = findRouteStop(dailyOrderId);
+            var photoAction = null;
             if (stop) {
                 stop.setAttribute('data-status', 'delivered');
                 updateStopStatusBadge(stop, 'delivered');
                 rebuildStopContactActions(stop);
                 moveStopToPastList(stop);
+                var reviewBtn = stop.querySelector('.photo-complete-btn[data-photo-mode="review"]');
+                if (options && options.canAddPhoto && reviewBtn && window.DriverDelivery && typeof window.DriverDelivery.openReviewAddPhoto === 'function') {
+                    photoAction = {
+                        label: di.second_photo_toast_action,
+                        run: function () { window.DriverDelivery.openReviewAddPhoto(reviewBtn); }
+                    };
+                }
             }
             refreshRouteUi();
-            showSuccessToast(message || di.delivery_saved_next);
+            showSuccessToast(message || di.delivery_saved_next, photoAction);
         },
         afterStopSkipped: function (dailyOrderId, message) {
             if (document.getElementById('routePrepRoot')) {

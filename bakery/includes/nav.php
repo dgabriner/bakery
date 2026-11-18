@@ -29,6 +29,15 @@ $navPackLabel = $navRouteDate === date('Y-m-d')
     ? bakery_t('nav.pack_list')
     : bakery_t('nav.pack_for_date', ['date' => date('M j', strtotime($navRouteDate))]);
 
+// A manager or administrator who also drives: My Route opens their own profile, and
+// the driver screens show the focused Driving nav with a one-tap way back to manager tools.
+require_once __DIR__ . '/staff_driver_profile.php';
+$navStaffOwnDriverId = (isset($db) && $db instanceof PDO) ? bakery_staff_own_driver_id($db, $navUser) : 0;
+$navStaffMyRouteHref = bakery_staff_my_route_href(BASE_URL, $navRouteDate);
+$navDrivingAsSelf = $navStaffOwnDriverId > 0
+    && in_array($currentPage, ['driver', 'driver_stops'], true)
+    && (int)$navSelectedDriverId === $navStaffOwnDriverId;
+
 if (!function_exists('bakery_nav_is_active')) {
     function bakery_nav_is_active(array $item, $page) {
         $href = (string)($item['href'] ?? '');
@@ -69,8 +78,12 @@ $navLogoutForm = function_exists('bakery_csrf_field')
         . '</button></form>'
     : '';
 ?>
-<?php if (bakery_is_driver_route_role($navRole)): ?>
+<?php if (bakery_is_driver_route_role($navRole) || $navDrivingAsSelf): ?>
 <?php
+$navStaffHomeHref = BASE_URL . ($navRole === 'administrator'
+    ? bakery_admin_workspace_mode_home(bakery_admin_workspace_mode())
+    : 'manager.php?date=' . rawurlencode($navRouteDate));
+$navStaffChangeDriverHref = BASE_URL . 'driver.php?change_driver=1&date=' . rawurlencode($navRouteDate);
 $navDriverDateRaw = $_GET['date'] ?? date('Y-m-d');
 $navDriverDateObject = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$navDriverDateRaw);
 if (!$navDriverDateObject || $navDriverDateObject->format('Y-m-d') !== (string)$navDriverDateRaw) {
@@ -162,6 +175,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet">
+          <?php if ($navDrivingAsSelf): ?>
+          <div class="bakery-nav__more-staff">
+            <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffHomeHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te($navRole === 'administrator' ? 'nav.driving_admin_home' : 'nav.driving_manager_home'); ?></a>
+            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars($navStaffChangeDriverHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.change_driver'); ?></a>
+          </div>
+          <?php endif; ?>
           <?php if ($navDriverShowDateToggle): ?>
           <div class="bakery-nav__more-route">
             <?php if ($navClockReady && function_exists('bakery_csrf_field')): ?>
@@ -364,6 +383,9 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
+          <?php if ($navStaffOwnDriverId > 0): ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffMyRouteHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.my_route'); ?></a>
+          <?php endif; ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'survey' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.survey_route'); ?></a>
           <?php if (function_exists('bakery_sandbox_home_for_user') && bakery_sandbox_home_for_user($navUser)): ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'sandbox' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'sandbox.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'sandbox' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.item.sandbox'); ?></a>
@@ -440,7 +462,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       <span class="bakery-nav__label-full"><?php bakery_te('nav.manager_mode'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.manager_mode_short'); ?></span>
     </a>
-    <a class="bakery-nav__route-shortcut" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>driver.php?change_driver=1">
+    <a class="bakery-nav__route-shortcut" href="<?php echo htmlspecialchars($navStaffOwnDriverId > 0 ? $navStaffMyRouteHref : BASE_URL . 'driver.php?change_driver=1', ENT_QUOTES, 'UTF-8'); ?>">
       <span class="bakery-nav__label-full"><?php bakery_te('nav.my_route'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.my_route_short'); ?></span>
     </a>
