@@ -505,12 +505,15 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
     $ownTransaction = !$db->inTransaction();
     if ($ownTransaction) $db->beginTransaction();
     try {
+        $hasLoadSource = function_exists('column_exists') && column_exists($db, 'driver_loads', 'load_source');
         $loadStmt = $db->prepare(
-            'SELECT id, status FROM driver_loads WHERE driver_id = ? AND delivery_date = ? FOR UPDATE'
+            'SELECT id, status' . ($hasLoadSource ? ', load_source' : '')
+            . ' FROM driver_loads WHERE driver_id = ? AND delivery_date = ? FOR UPDATE'
         );
         $loadStmt->execute([$driverId, $date]);
         $loadRow = $loadStmt->fetch(PDO::FETCH_ASSOC);
         $loadId = $loadRow ? (int)$loadRow['id'] : 0;
+        $implicitForStock = $hasLoadSource && (string)($loadRow['load_source'] ?? '') === 'implicit';
         if ($loadRow && (string)$loadRow['status'] === 'reconciled') {
             throw new RuntimeException(
                 'This driver route is already closed out. Reopen the closeout before changing pickup quantities.'
@@ -536,7 +539,10 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
             bakery_inventory_ensure_day($db, $date, $productId);
             $oldStmt->execute([$loadId, $productId]);
             $oldQuantity = (int)$oldStmt->fetchColumn();
-            $delta = $quantity - $oldQuantity;
+            // An implicit row never reserved finished goods, so a later human save
+            // reserves the full pickup instead of only the delta from that row.
+            $stockOld = $implicitForStock ? 0 : $oldQuantity;
+            $delta = $quantity - $stockOld;
             if ($delta > 0) {
                 $stockStmt->execute([$date, $productId]);
                 $available = max(0, (int)$stockStmt->fetchColumn());
@@ -561,6 +567,9 @@ function bakery_inventory_save_driver_load(PDO $db, string $date, int $driverId,
                 bakery_inventory_movement($db, $date, $productId, 'load_correction', -$delta, $driverId, $notes);
             }
             $itemUpdate->execute([$loadId, $productId, $quantity]);
+        }
+        if ($implicitForStock && $hasLoadSource && $loadId > 0) {
+            $db->prepare('UPDATE driver_loads SET load_source = \'manager\' WHERE id = ?')->execute([$loadId]);
         }
         bakery_inventory_mark_open_stops_out_for_delivery($db, $driverId, $date);
         if (!function_exists('bakery_customer_notify_out_for_delivery_batch')) {
@@ -1015,17 +1024,27 @@ function bakery_inventory_closeout_board(PDO $db, string $date): array {
             'load_id' => null,
             'needs_closeout' => false,
             'is_reconciled' => false,
+            'load_source' => '',
+            'closeout_source' => '',
         ];
     }
 
+    $sourceCols = function_exists('column_exists') && column_exists($db, 'driver_loads', 'load_source')
+        ? ', dl.load_source, dl.closeout_source'
+        : ', NULL AS load_source, NULL AS closeout_source';
     $loadStmt = $db->prepare(
         'SELECT dl.id, dl.driver_id, dl.status, d.name AS driver_name,
-                COALESCE(SUM(li.loaded_quantity), 0) AS loaded_units
+                COALESCE(SUM(li.loaded_quantity), 0) AS loaded_units'
+        . $sourceCols . '
          FROM driver_loads dl
          JOIN drivers d ON d.id = dl.driver_id
          LEFT JOIN driver_load_items li ON li.driver_load_id = dl.id
          WHERE dl.delivery_date = ?
-         GROUP BY dl.id, dl.driver_id, dl.status, d.name'
+         GROUP BY dl.id, dl.driver_id, dl.status, d.name' . (
+            function_exists('column_exists') && column_exists($db, 'driver_loads', 'load_source')
+                ? ', dl.load_source, dl.closeout_source'
+                : ''
+        )
     );
     $loadStmt->execute([$date]);
     foreach ($loadStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -1043,12 +1062,16 @@ function bakery_inventory_closeout_board(PDO $db, string $date): array {
                 'load_id' => null,
                 'needs_closeout' => false,
                 'is_reconciled' => false,
+                'load_source' => '',
+                'closeout_source' => '',
             ];
         }
         $drivers[$driverId]['load_id'] = (int)$row['id'];
         $drivers[$driverId]['load_status'] = (string)$row['status'];
         $drivers[$driverId]['loaded_units'] = (int)$row['loaded_units'];
         $drivers[$driverId]['is_reconciled'] = (string)$row['status'] === 'reconciled';
+        $drivers[$driverId]['load_source'] = (string)($row['load_source'] ?? '');
+        $drivers[$driverId]['closeout_source'] = (string)($row['closeout_source'] ?? '');
     }
 
     $board = [];
@@ -1338,8 +1361,10 @@ function bakery_inventory_reopen_driver_closeout(PDO $db, string $date, int $dri
         $db->beginTransaction();
     }
     try {
+        $hasLoadSource = function_exists('column_exists') && column_exists($db, 'driver_loads', 'load_source');
         $stmt = $db->prepare(
-            'SELECT id, status FROM driver_loads WHERE driver_id = ? AND delivery_date = ? FOR UPDATE'
+            'SELECT id, status' . ($hasLoadSource ? ', load_source' : '')
+            . ' FROM driver_loads WHERE driver_id = ? AND delivery_date = ? FOR UPDATE'
         );
         $stmt->execute([$driverId, $date]);
         $load = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1357,7 +1382,10 @@ function bakery_inventory_reopen_driver_closeout(PDO $db, string $date, int $dri
         );
         $itemStmt->execute([$loadId]);
         $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
-        $deliveredByProduct = bakery_inventory_driver_delivered_by_product($db, $date, $driverId);
+        $implicitLoad = $hasLoadSource && (string)($load['load_source'] ?? '') === 'implicit';
+        $deliveredByProduct = $implicitLoad
+            ? []
+            : bakery_inventory_driver_delivered_by_product($db, $date, $driverId);
 
         $stockUpdate = $db->prepare(
             'UPDATE product_inventory_days
@@ -1373,35 +1401,37 @@ function bakery_inventory_reopen_driver_closeout(PDO $db, string $date, int $dri
 
         foreach ($items as $row) {
             $productId = (int)$row['product_id'];
-            $loaded = (int)$row['loaded_quantity'];
-            $returned = (int)$row['returned_quantity'];
-            $wasted = (int)$row['wasted_quantity'];
-            $delivered = (int)($deliveredByProduct[$productId] ?? max(0, $loaded - $returned - $wasted));
+            if (!$implicitLoad) {
+                $loaded = (int)$row['loaded_quantity'];
+                $returned = (int)$row['returned_quantity'];
+                $wasted = (int)$row['wasted_quantity'];
+                $delivered = (int)($deliveredByProduct[$productId] ?? max(0, $loaded - $returned - $wasted));
 
-            bakery_inventory_ensure_day($db, $date, $productId);
-            $lock = $db->prepare(
-                'SELECT id FROM product_inventory_days WHERE delivery_date = ? AND product_id = ? FOR UPDATE'
-            );
-            $lock->execute([$date, $productId]);
+                bakery_inventory_ensure_day($db, $date, $productId);
+                $lock = $db->prepare(
+                    'SELECT id FROM product_inventory_days WHERE delivery_date = ? AND product_id = ? FOR UPDATE'
+                );
+                $lock->execute([$date, $productId]);
 
-            if ($returned > 0) {
-                // Undo return: take back from available into loaded.
-                $stockUpdate->execute([-$returned, $returned, $date, $productId]);
-                bakery_inventory_movement(
-                    $db, $date, $productId, 'return', -$returned, $driverId, 'Reopen route closeout'
-                );
-            }
-            if ($wasted > 0) {
-                $stockUpdate->execute([0, $wasted, $date, $productId]);
-                bakery_inventory_movement(
-                    $db, $date, $productId, 'waste', $wasted, $driverId, 'Reopen route closeout'
-                );
-            }
-            if ($delivered > 0) {
-                $stockUpdate->execute([0, $delivered, $date, $productId]);
-                bakery_inventory_movement(
-                    $db, $date, $productId, 'delivery', $delivered, $driverId, 'Reopen route closeout'
-                );
+                if ($returned > 0) {
+                    // Undo return: take back from available into loaded.
+                    $stockUpdate->execute([-$returned, $returned, $date, $productId]);
+                    bakery_inventory_movement(
+                        $db, $date, $productId, 'return', -$returned, $driverId, 'Reopen route closeout'
+                    );
+                }
+                if ($wasted > 0) {
+                    $stockUpdate->execute([0, $wasted, $date, $productId]);
+                    bakery_inventory_movement(
+                        $db, $date, $productId, 'waste', $wasted, $driverId, 'Reopen route closeout'
+                    );
+                }
+                if ($delivered > 0) {
+                    $stockUpdate->execute([0, $delivered, $date, $productId]);
+                    bakery_inventory_movement(
+                        $db, $date, $productId, 'delivery', $delivered, $driverId, 'Reopen route closeout'
+                    );
+                }
             }
             $clearItem->execute([$loadId, $productId]);
         }

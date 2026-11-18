@@ -6111,6 +6111,12 @@ return [
     'delivery_review.help_prior' => 'Periodo anterior es la misma cantidad de días justo antes de este rango, :from a :to.',
     'delivery_review.clock_missing' => 'Los registros de reloj no están instalados, así que el reloj queda en blanco.',
     'delivery_review.close_missing' => 'Los cierres de ruta no están instalados, así que ruta cerrada queda en blanco.',
+    'driver.finish_counts' => 'Cargado :loaded. Entregado :delivered.',
+    'driver.nothing_left' => 'No queda nada en el carro',
+    'driver.nothing_left_saved' => 'Ruta cerrada. No queda nada en el carro.',
+    'closeout.chip_auto' => 'Auto',
+    'closeout.chip_implicit' => 'Implícita',
+    'driver_load.implicit_chip' => 'Carga implícita. No se reservó producto terminado.',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demanda',

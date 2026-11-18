@@ -6114,6 +6114,12 @@ return [
     'delivery_review.help_prior' => 'Period before is the same number of days just before this range, :from to :to.',
     'delivery_review.clock_missing' => 'Clock-in punches are not installed, so clock-in stays blank.',
     'delivery_review.close_missing' => 'Route close loads are not installed, so route closed stays blank.',
+    'driver.finish_counts' => 'Loaded :loaded. Delivered :delivered.',
+    'driver.nothing_left' => 'Nothing left in the car',
+    'driver.nothing_left_saved' => 'Route closed. Nothing left in the car.',
+    'closeout.chip_auto' => 'Auto',
+    'closeout.chip_implicit' => 'Implicit',
+    'driver_load.implicit_chip' => 'Implicit load. Finished goods were not reserved.',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demand',
