@@ -202,6 +202,157 @@ function promotion_merge_hash_index(array $priorFiles, array $approvedFiles): ar
     return array_values($byPath);
 }
 
+/**
+ * Catalog keys in a lang/en.php or lang/es.php source string.
+ *
+ * @return array<string, true>
+ */
+function promotion_lang_catalog_keys(string $text): array
+{
+    $keys = [];
+    if (preg_match_all("/^\\s*'((?:\\\\'|[^'])*)'\\s*=>/m", $text, $matches)) {
+        foreach ($matches[1] as $key) {
+            $keys[str_replace("\\'", "'", $key)] = true;
+        }
+    }
+    return $keys;
+}
+
+/**
+ * Literal translation keys used by one PHP source string.
+ *
+ * @return array<string, true>
+ */
+function promotion_lang_php_keys(string $text): array
+{
+    $keys = [];
+    if (preg_match_all("/bakery_t(?:e)?\\(\\s*'([^']+)'/", $text, $calls)) {
+        foreach ($calls[1] as $key) {
+            if (substr($key, -1) !== '.') {
+                $keys[$key] = true;
+            }
+        }
+    }
+    if (preg_match_all("/'([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)'/", $text, $quoted)) {
+        foreach ($quoted[1] as $key) {
+            if (substr($key, -4) === '.php' || substr($key, -1) === '.') {
+                continue;
+            }
+            $keys[$key] = true;
+        }
+    }
+    if (strpos($text, "'mode.' . \$mode") !== false) {
+        foreach (['full', 'driver', 'production'] as $mode) {
+            $keys['mode.' . $mode] = true;
+            $keys['mode.' . $mode . '_short'] = true;
+        }
+    }
+    if (strpos($text, "'formula.units.'") !== false) {
+        foreach (['g', 'lb', 'gal', 'all', 'g_aria', 'lb_aria', 'gal_aria', 'all_aria'] as $unit) {
+            $keys['formula.units.' . $unit] = true;
+        }
+    }
+    if (strpos($text, "'nav.sales_short.'") !== false) {
+        foreach (['sales_home', 'sales_leads', 'sales_customers'] as $page) {
+            $keys['nav.sales_short.' . $page] = true;
+        }
+    }
+    return $keys;
+}
+
+/**
+ * Keys the new catalog drops that the current catalog or PHP still needs.
+ *
+ * @param array<string, true> $used
+ * @return list<string>
+ */
+function promotion_lang_dropped_keys(string $newText, string $currentText, array $used): array
+{
+    $protected = promotion_lang_catalog_keys($currentText);
+    foreach ($used as $key => $on) {
+        if ($on) {
+            $protected[$key] = true;
+        }
+    }
+    $newKeys = promotion_lang_catalog_keys($newText);
+    $dropped = [];
+    foreach (array_keys($protected) as $key) {
+        if (!isset($newKeys[$key])) {
+            $dropped[] = $key;
+        }
+    }
+    sort($dropped, SORT_STRING);
+    return $dropped;
+}
+
+/**
+ * @return array<string, true>
+ */
+function promotion_lang_tree_keys(string $root): array
+{
+    $keys = [];
+    if (!is_dir($root)) {
+        return $keys;
+    }
+    $skip = ['vendor' => true, 'storage' => true, 'node_modules' => true, '.git' => true];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+    foreach ($iterator as $file) {
+        if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
+            continue;
+        }
+        $blocked = false;
+        foreach (explode('/', str_replace('\\', '/', $file->getPathname())) as $part) {
+            if (isset($skip[$part])) {
+                $blocked = true;
+                break;
+            }
+        }
+        if ($blocked) {
+            continue;
+        }
+        $keys += promotion_lang_php_keys((string)file_get_contents($file->getPathname()));
+    }
+    return $keys;
+}
+
+/**
+ * Refuse before Live files change. Returns the audit line when an override is used.
+ *
+ * @param list<string> $allow
+ */
+function promotion_lang_gate(string $rel, string $newText, string $currentText, array $used, array $allow, string $reason, string $actor): string
+{
+    $dropped = promotion_lang_dropped_keys($newText, $currentText, $used);
+    if ($dropped === []) {
+        return '';
+    }
+    $allowSet = [];
+    foreach ($allow as $key) {
+        $key = trim($key);
+        if ($key !== '') {
+            $allowSet[$key] = true;
+        }
+    }
+    $refused = [];
+    $permitted = [];
+    foreach ($dropped as $key) {
+        if (isset($allowSet[$key])) {
+            $permitted[] = $key;
+        } else {
+            $refused[] = $key;
+        }
+    }
+    if ($refused !== []) {
+        throw new RuntimeException('Refusing ' . $rel . ': this catalog would drop keys the current copy has or PHP still uses: ' . implode(', ', $refused));
+    }
+    if (trim($reason) === '') {
+        throw new RuntimeException('Refusing ' . $rel . ': --allow-drop-keys needs --allow-drop-reason.');
+    }
+    $line = 'LANG KEY DROP ALLOWED by ' . $actor . ' reason=' . trim($reason) . ' file=' . $rel . ' keys=' . implode(',', $permitted);
+    fwrite(STDERR, $line . "\n");
+    return $line;
+}
+
 if (defined('BAKERY_PROMOTION_WORKER_LIBRARY')) {
     return;
 }
@@ -330,6 +481,21 @@ try {
             $lint = promotion_run([PHP_BINARY, '-l', $source], 20);
             if ($lint['exit'] !== 0) throw new RuntimeException('A PHP file failed validation; no Live files were changed.');
         }
+    }
+    $langAllow = array_values(array_filter(array_map('trim', explode(',', (string)($approval['allow_drop_keys'] ?? '')))));
+    $langReason = (string)($approval['allow_drop_reason'] ?? '');
+    $langActor = (string)($approval['allow_drop_actor'] ?? 'unknown');
+    $liveUsed = null;
+    foreach (['lang/en.php', 'lang/es.php'] as $langFile) {
+        if (!isset($deployPaths[$langFile])) {
+            continue;
+        }
+        if ($liveUsed === null) {
+            $liveUsed = promotion_lang_tree_keys($liveRoot);
+        }
+        $newText = (string)file_get_contents($incoming . '/' . $langFile);
+        $currentText = is_file($liveRoot . '/' . $langFile) ? (string)file_get_contents($liveRoot . '/' . $langFile) : '';
+        promotion_lang_gate($langFile, $newText, $currentText, $liveUsed, $langAllow, $langReason, $langActor);
     }
 
     $releaseBackup = $backupRoot . '/' . $releaseId;

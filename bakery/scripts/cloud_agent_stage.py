@@ -43,6 +43,51 @@ def run_uploader(extra: list[str]) -> int:
     return proc.returncode
 
 
+def _lang_gate_module():
+    import importlib.util
+    path = ROOT / "scripts" / "lang_release_gate.py"
+    spec = importlib.util.spec_from_file_location("lang_release_gate", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit("Missing scripts/lang_release_gate.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _guard_staging_lang(paths: list[str]) -> int:
+    """Refuse to queue a language file that drops keys Staging still has or uses."""
+    import paramiko
+    gate = _lang_gate_module()
+    host = os.environ["SFTP_HOST"]
+    user = os.environ["SFTP_USER"]
+    password = os.environ["SFTP_PASSWORD"]
+    sftp_root = (os.environ.get("SFTP_REMOTE_ROOT") or "").strip().strip("/")
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(hostname=host, username=user, password=password, timeout=45, allow_agent=False, look_for_keys=False)
+    sftp = client.open_sftp()
+    try:
+        pairs = []
+        for rel in paths:
+            local = ROOT / rel
+            if not local.is_file():
+                print(f"Refusing {rel}: local language file is missing.", file=sys.stderr)
+                return 1
+            pairs.append((rel, local))
+        return gate.guard_connected(
+            client,
+            sftp,
+            sftp_root,
+            ROOT,
+            pairs,
+            gate.parse_allow_list(os.environ.get("LANG_ALLOW_DROP_KEYS", "")),
+            os.environ.get("LANG_ALLOW_DROP_REASON", ""),
+        )
+    finally:
+        sftp.close()
+        client.close()
+
+
 def hosted_stage_root() -> str:
     user = (os.environ.get("SFTP_USER") or "").strip()
     remote = (os.environ.get("SFTP_REMOTE_ROOT") or "").strip().strip("/")
@@ -175,6 +220,11 @@ def staging_file_sha256(paths: list[str]) -> dict[str, str]:
 
 def queue_files_live_only(paths: list[str], commit: str) -> int:
     cleaned = reject_files_live_only_paths(paths)
+    lang_paths = [path for path in cleaned if _lang_gate_module().is_lang_file(path)]
+    if lang_paths:
+        refused = _guard_staging_lang(lang_paths)
+        if refused != 0:
+            return refused
     full_commit = resolve_commit(commit)
     expected = {path: git_file_sha256(full_commit, path) for path in cleaned}
     actual = staging_file_sha256(cleaned)
@@ -232,6 +282,8 @@ def main() -> int:
     parser.add_argument("--commit", default="", help="Git commit whose bytes Staging must match")
     parser.add_argument("--smoke", action="store_true", help="Hit Staging login.php")
     parser.add_argument("--check-target", action="store_true")
+    parser.add_argument("--allow-drop-keys", default="", help="Comma-separated language keys this run may remove")
+    parser.add_argument("--allow-drop-reason", default="", help="Why those keys may be removed. Required with --allow-drop-keys")
     args = parser.parse_args()
 
     live_only = args.files_live_only is not None
@@ -250,6 +302,8 @@ def main() -> int:
             list_path = Path("/tmp/bakery_cloud_agent_files.txt")
             list_path.write_text("\n".join(args.files) + "\n", encoding="utf-8")
             extra = ["--list", str(list_path)]
+        if args.allow_drop_keys:
+            extra.extend(["--allow-drop-keys", args.allow_drop_keys, "--allow-drop-reason", args.allow_drop_reason])
         code = run_uploader(extra)
         if code != 0:
             return code
@@ -262,6 +316,18 @@ def main() -> int:
         if code != 0:
             return code
     if args.queue_live:
+        if args.allow_drop_keys:
+            os.environ["LANG_ALLOW_DROP_KEYS"] = args.allow_drop_keys
+            os.environ["LANG_ALLOW_DROP_REASON"] = args.allow_drop_reason
+            os.environ["LANG_ALLOW_DROP_ACTOR"] = _lang_gate_module().actor_label()
+        queued_paths = list(args.files_live_only or []) if live_only else []
+        if args.list and live_only:
+            queued_paths.extend(read_path_list(args.list))
+        if args.files_live or any(_lang_gate_module().is_lang_file(path) for path in queued_paths):
+            print(
+                "Live language gate: the promotion worker refuses this queue if the staged catalog drops a key Live still has or Live PHP still uses.",
+                file=sys.stderr,
+            )
         if live_only:
             chosen = list(args.files_live_only or [])
             if args.list:

@@ -34,6 +34,17 @@ def require_paramiko():
     return paramiko
 
 
+def _lang_gate():
+    import importlib.util
+    path = Path(__file__).resolve().parent / "lang_release_gate.py"
+    spec = importlib.util.spec_from_file_location("lang_release_gate", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit("Missing scripts/lang_release_gate.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 LIVE_REMOTE_ROOTS = ("bakery.sourflour.org/bake",)
 STAGING_REMOTE_ROOTS = ("staging.sourflour.org",)
 
@@ -125,6 +136,8 @@ def main() -> int:
     parser.add_argument("--stage-tool", action="append", default=[], metavar="LOCAL_PHP",
                         help="Additional PHP script to upload into stage-tools and run between checkpoint and migrations")
     parser.add_argument("--bootstrap-live-migration-worker", action="store_true", help="Atomically install the owner-approved Live migration wrapper and runtime")
+    parser.add_argument("--allow-drop-keys", default=os.environ.get("LANG_ALLOW_DROP_KEYS", ""), help="Comma-separated language keys this upload may remove")
+    parser.add_argument("--allow-drop-reason", default=os.environ.get("LANG_ALLOW_DROP_REASON", ""), help="Why those keys may be removed. Required with --allow-drop-keys")
     args = parser.parse_args()
 
     host = env_required("SFTP_HOST")
@@ -365,6 +378,37 @@ def main() -> int:
         look_for_keys=False,
     )
     sftp = client.open_sftp()
+
+    def lang_pairs() -> list[tuple[str, Path]]:
+        pairs: list[tuple[str, Path]] = []
+        gate = _lang_gate()
+        if single:
+            source, remote_name = single
+            rel = remote_name.replace("\\", "/").lstrip("/")
+            if gate.is_lang_file(rel):
+                pairs.append((rel, source))
+        else:
+            for rel in files:
+                if gate.is_lang_file(rel):
+                    pairs.append((rel, local_root / rel))
+        return pairs
+
+    pending_lang = lang_pairs()
+    if pending_lang:
+        gate = _lang_gate()
+        refused = gate.guard_connected(
+            client,
+            sftp,
+            remote_root,
+            local_root,
+            pending_lang,
+            gate.parse_allow_list(args.allow_drop_keys),
+            args.allow_drop_reason,
+        )
+        if refused != 0:
+            sftp.close()
+            client.close()
+            return refused
 
     uploaded = 0
     try:
