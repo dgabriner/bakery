@@ -71,6 +71,12 @@ $assert(count($zeta['products']) === 3, 'repeated product lines stay separate in
 $assert((int)$zeta['products'][0]['quantity'] === 4 && (int)$zeta['products'][2]['quantity'] === 2, 'customer products stay in line order with their own quantities');
 $assert($zeta['products'][0]['dough_type'] === 'French', 'blank dough falls back to the product dough map');
 $assert($grouped['by_customer'][4]['route_name'] === '' && (int)$grouped['by_customer'][4]['driver_id'] === 0, 'a store with no route has no route name');
+$assert(bakery_pack_customer_route_label('') === bakery_t('pack_list.unassigned_route'), 'a customer card with no route says Not on a route yet');
+$assert(bakery_pack_customer_route_label('   ') === bakery_t('pack_list.unassigned_route'), 'a blank route name uses the unassigned route words');
+$assert(
+    bakery_pack_customer_route_label('Maria Route') === bakery_t('pack_list.customer_route', ['route' => 'Maria Route']),
+    'a customer card with a driver names that route'
+);
 $assert($grouped['by_route'][0]['driver_name'] === 'Not on a route yet' && (int)$grouped['by_route'][0]['total'] === 5, 'unassigned stops stay in their own route bucket');
 $assert(isset($grouped['all_line_keys']['c2_p10']) && isset($grouped['line_keys_by_driver'][8]['c1_p10']), 'line keys follow the customer and the route');
 $assert(!isset($grouped['all_line_keys']['c3_p10']), 'zero-quantity lines do not become pack keys');
@@ -141,7 +147,12 @@ $assert(strpos($packSrc, 'bakery_pack_phone_focus_nav_html') !== false, 'Pack Li
 $assert(strpos($packSrc, 'role="group"') !== false && strpos($packSrc, 'pack-view-toggle__btn') !== false, 'Pack List view toggle is a button group');
 $assert(strpos($packSrc, 'method="get"') !== false && strpos($packSrc, 'name="view"') !== false, 'view toggle submits with GET and keeps view in the URL');
 $assert(strpos($packSrc, 'min-block-size: 44px') !== false, 'view toggle buttons are at least 44px tall');
-$assert(strpos($packSrc, 'pack_list.customer_route') !== false, 'customer view prints the route name');
+$helperSrc = (string)file_get_contents($root . '/includes/pack_list.php');
+$assert(strpos($packSrc, 'bakery_pack_customer_route_label') !== false, 'customer view prints a route line for every store');
+$assert(
+    strpos($helperSrc, 'pack_list.customer_route') !== false && strpos($helperSrc, 'pack_list.unassigned_route') !== false,
+    'customer route line uses the route name or Not on a route yet'
+);
 $assert(strpos($packSrc, "'product' => 'pack_list.by_product', 'route' => 'pack_list.by_route', 'customer' => 'pack_list.by_customer'") !== false, 'view order is product, route, then customer');
 $assert(function_exists('bakery_pack_phone_focus_keys'), 'phone focus keys helper exists');
 $assert(bakery_pack_phone_focus_keys('product', [['product_id' => 9], ['product_id' => 3]], [], []) === [9, 3], 'product focus keys');

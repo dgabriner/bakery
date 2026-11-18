@@ -1906,9 +1906,7 @@ require_once 'includes/nav.php';
                                     </span>
                                 <?php endif; ?>
                             </h2>
-                            <?php if (($customer['route_name'] ?? '') !== ''): ?>
-                                <p class="pack-section__subtitle pack-customer-route"><?php echo htmlspecialchars(bakery_t('pack_list.customer_route', ['route' => (string)$customer['route_name']]), ENT_QUOTES, 'UTF-8'); ?></p>
-                            <?php endif; ?>
+                            <p class="pack-section__subtitle pack-customer-route"><?php echo htmlspecialchars(bakery_pack_customer_route_label((string)($customer['route_name'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></p>
                             <?php if (!$isBaker): ?>
                                 <?php
                                 echo bakery_ops_render_row_chips($pageExceptions, [

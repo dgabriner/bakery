@@ -306,4 +306,80 @@ i18n_assert(
         && strpos($crSource, "bakery_te('common.tomorrow')") !== false
 );
 
+$bakerDayKeys = [
+    'nav.baker_day',
+    'nav.baker_day_short',
+    'nav.baker_day_aria',
+    'nav.drive_as',
+    'nav.drive_as_go',
+    'nav.craft_admin',
+    'baker_day.title',
+    'baker_day.lead',
+    'baker_day.stage_mix',
+    'baker_day.stage_shape',
+    'baker_day.stage_pack',
+    'baker_day.mix_lead',
+    'baker_day.shape_lead',
+    'baker_day.pack_lead',
+    'baker_day.pack_driver_lead',
+    'baker_day.pack_by_product',
+    'baker_day.pack_by_driver',
+    'baker_day.pack_view_aria',
+    'baker_day.starter_title',
+    'baker_day.starter_lead',
+    'baker_day.pull_title',
+    'baker_day.pull_lead',
+    'baker_day.pull_empty',
+    'baker_day.row_meta',
+    'baker_day.ingredients',
+    'baker_day.shapes',
+    'baker_day.set',
+    'baker_day.plus',
+    'baker_day.minus',
+    'baker_day.made_left',
+    'baker_day.add_dough',
+    'baker_day.add',
+    'baker_day.products',
+    'baker_day.stops',
+    'baker_day.gap',
+    'baker_day.pack_summary_empty',
+    'baker_day.pile_civic',
+    'baker_day.pile_noe',
+    'baker_day.pile_capp',
+    'baker_day.unassigned',
+    'baker_day.carried_by',
+    'baker_day.status_match_committed',
+    'baker_day.status_match_open',
+    'baker_day.status_draft',
+    'baker_day.publish',
+    'baker_day.publish_delta',
+    'baker_day.published',
+    'baker_day.saved',
+    'baker_day.capp_counter',
+    'baker_day.capp_counter_lead',
+    'baker_day.capp_counter_empty',
+    'baker_day.empty',
+    'baker_day.error_save',
+    'baker_day.no_formula',
+    'baker_day.forbidden',
+];
+$bdEn = bakery_load_lang_catalog('en');
+$bdEs = bakery_load_lang_catalog('es');
+foreach ($bakerDayKeys as $bdKey) {
+    $enText = (string)($bdEn[$bdKey] ?? '');
+    $esText = (string)($bdEs[$bdKey] ?? '');
+    i18n_assert("Baker day key $bdKey exists in en and es", $enText !== '' && $esText !== '' && $enText !== $bdKey && $esText !== $bdKey);
+    preg_match_all('/:[a-z_]+/', $enText, $enSlots);
+    preg_match_all('/:[a-z_]+/', $esText, $esSlots);
+    i18n_assert(
+        "Baker day key $bdKey keeps the same placeholders",
+        ($enSlots[0] ?? []) === ($esSlots[0] ?? [])
+    );
+}
+i18n_assert(
+    'Pack List unassigned route words stay available for customer cards',
+    ($bdEn['pack_list.unassigned_route'] ?? '') === 'Not on a route yet'
+        && ($bdEs['pack_list.unassigned_route'] ?? '') !== ''
+);
+
 exit($failures > 0 ? 1 : 0);

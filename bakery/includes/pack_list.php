@@ -35,6 +35,19 @@ function bakery_pack_normalize_view(string $raw): string
 }
 
 /**
+ * Customer-card route line. A store with no driver uses the same words as the
+ * unassigned route sheet.
+ */
+function bakery_pack_customer_route_label(string $routeName): string
+{
+    $routeName = trim($routeName);
+    if ($routeName === '') {
+        return bakery_t('pack_list.unassigned_route');
+    }
+    return bakery_t('pack_list.customer_route', ['route' => $routeName]);
+}
+
+/**
  * Group operating-demand lines into the product, customer, and route sheets.
  * Zero quantities are dropped. Repeated customer × product lines stay separate.
  * Customer groups carry the route (driver) name when one is assigned.
