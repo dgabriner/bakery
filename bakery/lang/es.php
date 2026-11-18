@@ -3201,6 +3201,8 @@ return [
     'pack_list.by_product' => 'Por producto',
     'pack_list.by_customer' => 'Por cliente / parada',
     'pack_list.by_route' => 'Por ruta / conductor',
+    'pack_list.view_group' => 'Vista de empaque',
+    'pack_list.customer_route' => 'Ruta: :route',
     'pack_list.phone_focus_aria' => 'Un grupo a la vez',
     'pack_list.phone_focus_of' => ':current de :total',
     'pack_list.phone_prev' => 'Anterior',

@@ -22,10 +22,10 @@ require_once $root . '/includes/pack_list.php';
 require_once $root . '/includes/product_inventory.php';
 require_once $root . '/includes/demand_review.php';
 
-function pack_coverage_capture(string $date): array
+function pack_coverage_capture(string $date, string $view = 'route'): array
 {
     global $db;
-    $_GET = ['date' => $date, 'view' => 'route'];
+    $_GET = ['date' => $date, 'view' => $view];
     $_REQUEST = $_GET;
     $_POST = [];
     $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -202,7 +202,11 @@ try {
         assert_eq(0, (int)$countById[$productB]['short'], 'product B is not short when covered stock meets the order');
     }
 
+    $progressBefore = $db->prepare('SELECT COUNT(*) FROM pack_progress WHERE pack_date = ?');
+    $progressBefore->execute([$date]);
     $page = pack_coverage_capture($date);
+    $progressBefore->execute([$date]);
+    assert_eq(0, (int)$progressBefore->fetchColumn(), 'opening the pack list with GET does not write pack progress');
     assert_true($page['error'] === null, 'pack list page loads the date without an error');
     $pageProducts = pack_coverage_index_products($page['by_product']);
     assert_true(isset($pageProducts[$productA]), 'pack list product view includes product A');
@@ -292,6 +296,40 @@ try {
     assert_true(in_array($productA, $northProductIds, true) && in_array($productB, $northProductIds, true), 'north store lists both positive products');
     assert_true(!in_array($productC, $northProductIds, true), 'north store omits the zero-quantity product');
     assert_eq(2, count($northOnA['products']), 'north store pack lines are the two positive quantities only');
+
+    $driverNames = [];
+    $driverNameStmt = $db->query('SELECT id, name FROM drivers WHERE id IN (' . implode(',', array_map('intval', $drivers)) . ')');
+    foreach ($driverNameStmt->fetchAll(PDO::FETCH_ASSOC) as $driverRow) {
+        $driverNames[(int)$driverRow['id']] = (string)$driverRow['name'];
+    }
+    $customersById = [];
+    foreach ($page['by_customer'] as $customerRow) {
+        $customersById[(int)$customerRow['customer_id']] = $customerRow;
+    }
+    assert_true(isset($customersById[$storeNorth]) && isset($customersById[$storeSouth]), 'customer view groups both stores');
+    assert_eq($driverNames[$drivers[0]], (string)$customersById[$storeNorth]['route_name'], 'north store customer group names its route');
+    assert_eq($driverNames[$drivers[1]], (string)$customersById[$storeSouth]['route_name'], 'south store customer group names its route');
+    assert_eq(8, (int)$customersById[$storeNorth]['total'], 'north store customer total is 6 + 2');
+    $northCustomerProducts = array_map(static function ($line) {
+        return (int)$line['product_id'];
+    }, $customersById[$storeNorth]['products']);
+    assert_true(in_array($productA, $northCustomerProducts, true) && in_array($productB, $northCustomerProducts, true), 'customer view lists that store\'s products');
+    assert_true(!in_array($productC, $northCustomerProducts, true), 'customer view omits the zero-quantity product');
+
+    $customerPage = pack_coverage_capture($date, 'customer');
+    $northRouteLabel = htmlspecialchars(
+        bakery_t('pack_list.customer_route', ['route' => $driverNames[$drivers[0]]]),
+        ENT_QUOTES,
+        'UTF-8'
+    );
+    assert_true(strpos($customerPage['html'], 'pack-customer-route') !== false, 'customer screen shows a route line');
+    assert_true(strpos($customerPage['html'], $northRouteLabel) !== false, 'customer screen includes the north route name');
+    assert_true(strpos($customerPage['html'], 'value="customer"') !== false && strpos($customerPage['html'], 'aria-pressed="true"') !== false, 'customer view button is pressed');
+    assert_true(strpos($customerPage['html'], 'class="pack-routes pack-routes--print-only"') !== false, 'customer view keeps the route sheets for print');
+    assert_true(strpos($customerPage['html'], 'pack-screen-view') !== false, 'customer view renders the on-screen sheet');
+    $productPage = pack_coverage_capture($date, 'product');
+    assert_true(strpos($productPage['html'], 'id="pack-product-' . $productA . '"') !== false, 'product view still renders product sections');
+    assert_true(strpos($productPage['html'], 'class="pack-routes pack-routes--print-only"') !== false, 'product view keeps the same print sheets');
 
     $lineKey = bakery_pack_line_key($storeNorth, $productA);
     assert_true(bakery_pack_progress_ready($db), 'pack_progress table is installed');

@@ -86,7 +86,7 @@ if (isset($_GET['date'])) {
 
 $selectedDay = bakery_standing_day_from_date($selectedDate);
 $viewRaw = (string)($_GET['view'] ?? $_POST['view'] ?? 'route');
-$viewMode = in_array($viewRaw, ['product', 'customer', 'route'], true) ? $viewRaw : 'route';
+$viewMode = bakery_pack_normalize_view($viewRaw);
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $pageReturnKey = $returnTarget['key'] ?? null;
 $attentionShortfall = (string)($_GET['attention'] ?? '') === 'shortfall';
@@ -219,112 +219,31 @@ try {
     $error = bakery_t('pack_list.error_load', ['message' => $e->getMessage()]);
 }
 
-// Build grouped views and detect exceptions.
-$byProduct = [];
-$byCustomer = [];
-$byRoute = []; // driver_id => section (0 = unassigned)
-$productTotals = [];
-$customerTotals = [];
-$allLineKeys = [];
-$lineKeysByDriver = [];
-$totalUnits = 0;
+// Build grouped views and detect exceptions. Grouping is read-only.
+$groupedPack = bakery_pack_group_lines(
+    $lineItems,
+    $customerRouteById,
+    $doughByProduct,
+    bakery_t('pack_list.unassigned_route')
+);
+$byProduct = $groupedPack['by_product'];
+$byCustomer = $groupedPack['by_customer'];
+$byRoute = $groupedPack['by_route'];
+$productTotals = $groupedPack['product_totals'];
+$customerTotals = $groupedPack['customer_totals'];
+$allLineKeys = $groupedPack['all_line_keys'];
+$lineKeysByDriver = $groupedPack['line_keys_by_driver'];
+$totalUnits = $groupedPack['total_units'];
 $shortageProducts = [];
 $shortageUnits = 0;
 
 foreach ($lineItems as $row) {
-    $customerId = (int)$row['customer_id'];
-    $productId = (int)$row['product_id'];
     $qty = (int)$row['quantity'];
-    $customerName = (string)$row['customer_name'];
-    $customerZone = trim((string)($row['customer_zone'] ?? ''));
-    $productName = (string)$row['product_name'];
-    $doughType = (string)($row['dough_type_name'] ?? '');
-    if ($doughType === '' && isset($doughByProduct[$productId])) {
-        $doughType = $doughByProduct[$productId];
-    }
-
     if ($qty <= 0) {
         continue;
     }
-
-    $totalUnits += $qty;
-    $productTotals[$productId] = ($productTotals[$productId] ?? 0) + $qty;
-    $customerTotals[$customerId] = ($customerTotals[$customerId] ?? 0) + $qty;
-    $lineKey = bakery_pack_line_key($customerId, $productId);
-    $allLineKeys[$lineKey] = true;
-
-    if (!isset($byProduct[$productId])) {
-        $byProduct[$productId] = [
-            'product_id' => $productId,
-            'product_name' => $productName,
-            'dough_type' => $doughType,
-            'total' => 0,
-            'customers' => [],
-        ];
-    }
-    $byProduct[$productId]['total'] += $qty;
-    $byProduct[$productId]['customers'][] = [
-        'customer_id' => $customerId,
-        'customer_name' => $customerName,
-        'zone' => $customerZone,
-        'quantity' => $qty,
-        'line_key' => $lineKey,
-    ];
-
-    if (!isset($byCustomer[$customerId])) {
-        $byCustomer[$customerId] = [
-            'customer_id' => $customerId,
-            'customer_name' => $customerName,
-            'zone' => $customerZone,
-            'total' => 0,
-            'products' => [],
-        ];
-    }
-    $byCustomer[$customerId]['total'] += $qty;
-    $byCustomer[$customerId]['products'][] = [
-        'product_id' => $productId,
-        'product_name' => $productName,
-        'dough_type' => $doughType,
-        'quantity' => $qty,
-        'line_key' => $lineKey,
-    ];
-
-    $routeMeta = $customerRouteById[$customerId] ?? null;
-    $driverId = $routeMeta ? (int)$routeMeta['driver_id'] : 0;
-    $driverName = $routeMeta
-        ? (string)$routeMeta['driver_name']
-        : bakery_t('pack_list.unassigned_route');
-    $routeOrder = $routeMeta ? (int)$routeMeta['route_order'] : 2147483647;
-
-    if (!isset($byRoute[$driverId])) {
-        $byRoute[$driverId] = [
-            'driver_id' => $driverId,
-            'driver_name' => $driverName,
-            'total' => 0,
-            'customers' => [],
-        ];
-    }
-    $byRoute[$driverId]['total'] += $qty;
-    if (!isset($byRoute[$driverId]['customers'][$customerId])) {
-        $byRoute[$driverId]['customers'][$customerId] = [
-            'customer_id' => $customerId,
-            'customer_name' => $customerName,
-            'zone' => $customerZone,
-            'route_order' => $routeOrder,
-            'total' => 0,
-            'products' => [],
-        ];
-    }
-    $byRoute[$driverId]['customers'][$customerId]['total'] += $qty;
-    $byRoute[$driverId]['customers'][$customerId]['products'][] = [
-        'product_id' => $productId,
-        'product_name' => $productName,
-        'dough_type' => $doughType,
-        'quantity' => $qty,
-        'line_key' => $lineKey,
-    ];
-    $lineKeysByDriver[$driverId][$lineKey] = true;
-
+    $customerName = (string)$row['customer_name'];
+    $customerZone = trim((string)($row['customer_zone'] ?? ''));
     if (preg_match('/^Customer #\d+$/', $customerName)) {
         $exceptions[] = [
             'type' => 'missing_customer',
@@ -389,70 +308,14 @@ if ($inventoryReady) {
     }
 }
 
-usort($byProduct, static function ($a, $b) use ($attentionShortfall) {
-    if ($attentionShortfall) {
-        $shortCmp = ((int)($b['short'] ?? 0)) <=> ((int)($a['short'] ?? 0));
-        if ($shortCmp !== 0) {
-            return $shortCmp;
-        }
-    }
-    return strcasecmp($a['product_name'], $b['product_name']);
-});
-usort($byCustomer, static function ($a, $b) {
-    return strcasecmp($a['customer_name'], $b['customer_name']);
-});
 usort($shortageProducts, static function ($a, $b) {
     return $b['short'] <=> $a['short'];
 });
 
-// Sort routes: named drivers A–Z, unassigned last. Stops by route_order then name.
-$byRouteList = array_values($byRoute);
-usort($byRouteList, static function ($a, $b) {
-    $aUnassigned = ((int)$a['driver_id'] === 0) ? 1 : 0;
-    $bUnassigned = ((int)$b['driver_id'] === 0) ? 1 : 0;
-    if ($aUnassigned !== $bUnassigned) {
-        return $aUnassigned <=> $bUnassigned;
-    }
-    return strcasecmp($a['driver_name'], $b['driver_name']);
-});
-foreach ($byRouteList as &$routeSection) {
-    $customers = array_values($routeSection['customers']);
-    usort($customers, static function ($a, $b) {
-        if ($a['route_order'] !== $b['route_order']) {
-            return $a['route_order'] <=> $b['route_order'];
-        }
-        return strcasecmp($a['customer_name'], $b['customer_name']);
-    });
-    $routeSection['customers'] = $customers;
-    $productRoll = [];
-    foreach ($customers as $stop) {
-        foreach ($stop['products'] as $prodLine) {
-            $pid = (int)$prodLine['product_id'];
-            if (!isset($productRoll[$pid])) {
-                $productRoll[$pid] = [
-                    'product_id' => $pid,
-                    'product_name' => (string)$prodLine['product_name'],
-                    'dough_type' => (string)$prodLine['dough_type'],
-                    'quantity' => 0,
-                    'stores' => [],
-                ];
-            }
-            $productRoll[$pid]['quantity'] += (int)$prodLine['quantity'];
-            $productRoll[$pid]['stores'][] = [
-                'customer_id' => (int)$stop['customer_id'],
-                'customer_name' => (string)$stop['customer_name'],
-                'zone' => (string)$stop['zone'],
-                'quantity' => (int)$prodLine['quantity'],
-                'line_key' => (string)$prodLine['line_key'],
-            ];
-        }
-    }
-    uasort($productRoll, static function ($a, $b) {
-        return strcasecmp($a['product_name'], $b['product_name']);
-    });
-    $routeSection['product_totals'] = array_values($productRoll);
-}
-unset($routeSection);
+$sortedPack = bakery_pack_sort_grouped($byProduct, $byCustomer, $byRoute, $attentionShortfall);
+$byProduct = $sortedPack['by_product'];
+$byCustomer = $sortedPack['by_customer'];
+$byRouteList = $sortedPack['by_route'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pack_all') {
     bakery_require_login();
@@ -743,7 +606,6 @@ $totalProducts = count($byProduct);
 $totalMadeUnits = array_sum($producedByProduct);
 $orderSourceLabel = $hasDailyOrders ? bakery_t('pack_list.daily_orders') : bakery_t('pack_list.standing_schedule');
 $dateLabel = $days[$selectedDay] . ', ' . date('M j, Y', strtotime($selectedDate));
-$queryBase = http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
 $productionHref = 'production.php?' . http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
 $packPhoneFocusKeys = $isBaker
     ? bakery_pack_phone_focus_keys($viewMode, $byProduct, $byCustomer, $byRouteList)
@@ -1084,30 +946,55 @@ require_once 'includes/nav.php';
 }
 
 .pack-view-toggle {
-    display: flex;
-    gap: 0;
     margin-bottom: 14px;
 }
 
-.pack-view-toggle a {
+.pack-view-toggle__group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.pack-view-toggle__btn {
+    appearance: none;
     background: #eef3f1;
     border: 1px solid #c8d8d2;
     color: #34524c;
-    flex: 1;
+    cursor: pointer;
+    flex: 1 1 7.5rem;
+    font: inherit;
     font-size: .9rem;
     font-weight: 700;
-    padding: 12px;
+    line-height: 1.2;
+    margin: 0;
+    min-block-size: 44px;
+    min-inline-size: 44px;
+    padding: 10px 8px;
     text-align: center;
-    text-decoration: none;
+    touch-action: manipulation;
 }
 
-.pack-view-toggle a:first-child { border-radius: 10px 0 0 10px; }
-.pack-view-toggle a:last-child { border-radius: 0 10px 10px 0; }
-.pack-view-toggle a:not(:first-child) { border-left: 0; }
-.pack-view-toggle a.active {
+.pack-view-toggle__btn:first-child { border-radius: 10px 0 0 10px; }
+.pack-view-toggle__btn:last-child { border-radius: 0 10px 10px 0; }
+.pack-view-toggle__btn:not(:first-child) { margin-left: -1px; }
+.pack-view-toggle__btn.is-active {
     background: var(--pack-accent);
     border-color: var(--pack-accent);
     color: #fff;
+    position: relative;
+    z-index: 1;
+}
+
+.pack-view-toggle__btn:focus-visible {
+    outline: 2px solid #1c2a26;
+    outline-offset: 2px;
+    position: relative;
+    z-index: 1;
+}
+
+.pack-customer-route {
+    display: block;
+    margin: 4px 0 0;
 }
 
 .pack-section__header--route {
@@ -1902,14 +1789,20 @@ require_once 'includes/nav.php';
     <?php else: ?>
         <p class="pack-session-note"><?php bakery_te($packProgressReady ? 'pack_list.session_note' : 'pack_list.progress_unavailable'); ?></p>
 
-        <nav class="pack-view-toggle" aria-label="<?php bakery_te('pack_list.by_product'); ?>">
-            <a class="<?php echo $viewMode === 'product' ? 'active' : ''; ?>"
-               href="pack_list.php?<?php echo $queryBase; ?>&amp;view=product"><?php bakery_te('pack_list.by_product'); ?></a>
-            <a class="<?php echo $viewMode === 'customer' ? 'active' : ''; ?>"
-               href="pack_list.php?<?php echo $queryBase; ?>&amp;view=customer"><?php bakery_te('pack_list.by_customer'); ?></a>
-            <a class="<?php echo $viewMode === 'route' ? 'active' : ''; ?>"
-               href="pack_list.php?<?php echo $queryBase; ?>&amp;view=route"><?php bakery_te('pack_list.by_route'); ?></a>
-        </nav>
+        <form method="get" action="pack_list.php" class="pack-view-toggle">
+            <?php foreach (bakery_ops_workflow_query(['date' => $selectedDate]) as $viewKey => $viewValue): ?>
+                <input type="hidden" name="<?php echo htmlspecialchars((string)$viewKey, ENT_QUOTES, 'UTF-8'); ?>" value="<?php echo htmlspecialchars((string)$viewValue, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php endforeach; ?>
+            <div class="pack-view-toggle__group" role="group" aria-label="<?php echo htmlspecialchars(bakery_t('pack_list.view_group'), ENT_QUOTES, 'UTF-8'); ?>">
+                <?php foreach (['product' => 'pack_list.by_product', 'route' => 'pack_list.by_route', 'customer' => 'pack_list.by_customer'] as $mode => $modeKey): ?>
+                    <button type="submit"
+                            name="view"
+                            value="<?php echo htmlspecialchars($mode, ENT_QUOTES, 'UTF-8'); ?>"
+                            class="pack-view-toggle__btn<?php echo $viewMode === $mode ? ' is-active' : ''; ?>"
+                            aria-pressed="<?php echo $viewMode === $mode ? 'true' : 'false'; ?>"><?php bakery_te($modeKey); ?></button>
+                <?php endforeach; ?>
+            </div>
+        </form>
 
         <?php if ($viewMode === 'product'): ?>
             <div class="pack-screen-view">
@@ -2013,6 +1906,9 @@ require_once 'includes/nav.php';
                                     </span>
                                 <?php endif; ?>
                             </h2>
+                            <?php if (($customer['route_name'] ?? '') !== ''): ?>
+                                <p class="pack-section__subtitle pack-customer-route"><?php echo htmlspecialchars(bakery_t('pack_list.customer_route', ['route' => (string)$customer['route_name']]), ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php endif; ?>
                             <?php if (!$isBaker): ?>
                                 <?php
                                 echo bakery_ops_render_row_chips($pageExceptions, [
