@@ -9,10 +9,20 @@ require_once 'includes/customer_portal.php';
 require_once 'includes/pan_dulce_standards.php';
 require_once 'includes/sfb_origin.php';
 require_once 'includes/standing_orders_manager_actions.php';
+require_once 'includes/daily_order_generation.php';
 bakery_ensure_portal_schema($db);
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ((string)$_POST['action'] === 'add_standing_route' && (string)($_POST['redirect'] ?? '') === '1') {
+        if (function_exists('bakery_require_csrf')) {
+            bakery_require_csrf();
+        }
+        $added = bakery_standing_orders_manager_action_add_route($db, $_POST, function_exists('bakery_current_user') ? bakery_current_user() : null);
+        $back = 'standing_orders_manager.php?route_added=' . (!empty($added['added']) ? '1' : '0');
+        header('Location: ' . $back);
+        exit;
+    }
     header('Content-Type: application/json');
 
     try {
@@ -855,6 +865,28 @@ $somRenderDayTotals = static function ($customerId, array $activeDays) use ($exi
                                 ?>
                                     <div class="day-column <?php echo $isRouteDay ? 'is-route-day' : 'is-non-route-day'; ?>" data-day="<?php echo $dayNum; ?>" data-is-route-day="<?php echo $isRouteDay ? '1' : '0'; ?>" title="<?php echo $isRouteDay ? 'Route day' : 'No standing route on this day'; ?>">
                                         <?php echo $days[$dayNum]; ?><?php echo $isRouteDay ? '' : ' *'; ?>
+                                        <?php
+                                        $somHasOrder = isset($orderDaySummary[(int)$customer['id']][$dayNum]);
+                                        if (!$isRouteDay && $somHasOrder && function_exists('bakery_orphan_driver_for')) {
+                                            $somWeekStart = bakery_week_start_monday(date('Y-m-d'));
+                                            $somDate = date('Y-m-d', strtotime($somWeekStart . ' +' . ((int)$dayNum - 1) . ' days'));
+                                            $somDriver = bakery_orphan_driver_for($db, (int)$customer['id'], $somDate);
+                                            if (is_array($somDriver) && (int)$somDriver['driver_id'] > 0) {
+                                                echo '<p class="som-no-route">' . htmlspecialchars(bakery_t('standing_orders.no_route_day')) . '</p>';
+                                                echo '<form method="post" action="standing_orders_manager.php" class="som-add-route">';
+                                                if (function_exists('bakery_csrf_field')) {
+                                                    echo bakery_csrf_field();
+                                                }
+                                                echo '<input type="hidden" name="action" value="add_standing_route">';
+                                                echo '<input type="hidden" name="redirect" value="1">';
+                                                echo '<input type="hidden" name="customer_id" value="' . (int)$customer['id'] . '">';
+                                                echo '<input type="hidden" name="day_of_week" value="' . (int)$dayNum . '">';
+                                                echo '<input type="hidden" name="driver_id" value="' . (int)$somDriver['driver_id'] . '">';
+                                                echo '<button type="submit">' . htmlspecialchars(bakery_t('standing_orders.add_to_route', ['driver' => (string)$somDriver['driver_name']])) . '</button>';
+                                                echo '</form>';
+                                            }
+                                        }
+                                        ?>
                                         <button class="day-copy-btn" 
                                                 data-target-customer="<?php echo $customer['id']; ?>"
                                                 data-target-day="<?php echo $dayNum; ?>"

@@ -182,8 +182,11 @@ function bakery_survey_route_order_data(PDO $db, int $driverId, string $delivery
     }
     $rows = [];
     if ($driverId > 0 && function_exists('table_exists') && table_exists($db, 'daily_order_assignments')) {
+        $noteSelect = function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes')
+            ? ', doa.notes'
+            : '';
         $sql = 'SELECT doa.id, doa.daily_order_id, doa.route_order, doa.delivery_status,
-                       do.customer_id, c.name
+                       do.customer_id, c.name' . $noteSelect . '
                 FROM daily_order_assignments doa
                 JOIN daily_orders do ON do.id = doa.daily_order_id
                 JOIN customers c ON c.id = do.customer_id

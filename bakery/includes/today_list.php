@@ -11,6 +11,7 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/daily_status.php';
+require_once __DIR__ . '/daily_order_generation.php';
 require_once __DIR__ . '/exception_desk.php';
 require_once __DIR__ . '/account_health.php';
 require_once __DIR__ . '/billing.php';
@@ -176,6 +177,20 @@ function bakery_today_push_routes(PDO $db, string $date, string $when, array &$i
             'when' => $when,
             'kind' => 'unassigned',
             'type' => 'delivery_unassigned',
+        ]));
+    }
+    $needsDriver = function_exists('bakery_orphan_needs_driver_names')
+        ? bakery_orphan_needs_driver_names($db, $date)
+        : [];
+    if ($needsDriver !== []) {
+        bakery_today_push($items, $seen, bakery_today_item([
+            'severity' => 'critical',
+            'sentence' => bakery_t('today.needs_driver', ['count' => (string)count($needsDriver)]),
+            'href' => bakery_ops_link_driver_assignment($date, ['filter' => 'unassigned'], 'today'),
+            'date' => $date,
+            'when' => $when,
+            'kind' => 'needs_driver',
+            'type' => 'needs_driver',
         ]));
     }
     foreach (bakery_daily_status_standing_orders_without_route($db, $date) as $stop) {

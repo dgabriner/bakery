@@ -137,6 +137,7 @@ try {
             doa.route_order,
             doa.scheduled_delivery_time,
             doa.delivery_status,
+            " . ((function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes')) ? 'doa.notes AS assignment_note' : 'NULL AS assignment_note') . ",
             d.name as assigned_driver_name
         FROM daily_orders do
         JOIN customers c ON do.customer_id = c.id
@@ -425,6 +426,7 @@ try {
                         <div class="order-item unassigned-item ops-attention-row" id="order-<?= (int)$order['id'] ?>" data-order-id="<?= (int)$order['id'] ?>" data-customer-id="<?= (int)$order['customer_id'] ?>">
                             <div class="order-info">
                                 <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                    <?php if (strncmp((string)($order['assignment_note'] ?? ''), 'Auto:', 5) === 0): ?><span class="orphan-auto-chip"><?= htmlspecialchars(bakery_t('route.auto_chip')) ?></span><?php endif; ?>
                                 <?php
                                 echo bakery_ops_render_row_chips($pageExceptions, [
                                     'customer_id' => (int)$order['customer_id'],
@@ -530,6 +532,7 @@ try {
                                             <div class="drag-handle"><?= $isLocked ? '🔒' : '⋮⋮' ?></div>
                                             <div class="order-info">
                                                 <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                    <?php if (strncmp((string)($order['assignment_note'] ?? ''), 'Auto:', 5) === 0): ?><span class="orphan-auto-chip"><?= htmlspecialchars(bakery_t('route.auto_chip')) ?></span><?php endif; ?>
                                                 <?php
                                                 $orderFlags = [];
                                                 if (($order['delivery_status'] ?? '') === 'failed') {
@@ -652,6 +655,7 @@ try {
                                 </label>
                                 <div class="order-info">
                                     <div class="customer-name"><?= bakery_customer_record_link_html((int)$order['customer_id'], $order['customer_name'], $selectedDate) ?>
+                                    <?php if (strncmp((string)($order['assignment_note'] ?? ''), 'Auto:', 5) === 0): ?><span class="orphan-auto-chip"><?= htmlspecialchars(bakery_t('route.auto_chip')) ?></span><?php endif; ?>
                                     <?php
                                     echo bakery_ops_render_row_chips($pageExceptions, [
                                         'customer_id' => $customerId,

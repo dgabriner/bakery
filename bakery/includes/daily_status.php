@@ -357,6 +357,7 @@ function bakery_daily_status_stops(PDO $db, string $date): array
             $arrivalUrl = is_array($arrivalHero) ? trim((string)($arrivalHero['url'] ?? '')) : '';
             $deliveryStatus = (string)($delivery['delivery_status'] ?? 'pending');
             $stops[] = [
+                'daily_order_id' => (int)($delivery['daily_order_id'] ?? 0),
                 'store_name' => (string)($delivery['customer_name'] ?? ''),
                 'driver_id' => $driverId,
                 'driver_name' => $driverName,
@@ -368,8 +369,29 @@ function bakery_daily_status_stops(PDO $db, string $date): array
                 'arrival_photo_present' => $arrivalUrl !== '',
                 'arrival_photo_url' => $arrivalUrl !== '' ? $arrivalUrl : null,
                 'arrival_only' => $deliveryStatus === 'delivered' && $arrivalUrl !== '' && $podUrl === '',
+                'source' => 'dated',
             ];
         }
+    }
+    if ($stops !== [] && function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes')) {
+        $noteStmt = $db->prepare(
+            'SELECT daily_order_id, notes FROM daily_order_assignments WHERE delivery_date = ? AND notes IS NOT NULL'
+        );
+        $noteStmt->execute([$date]);
+        $autoOrders = [];
+        foreach ($noteStmt->fetchAll(PDO::FETCH_ASSOC) as $noteRow) {
+            $note = (string)($noteRow['notes'] ?? '');
+            if (function_exists('bakery_orphan_note_is_auto') ? bakery_orphan_note_is_auto($note) : strncmp($note, 'Auto:', 5) === 0) {
+                $autoOrders[(int)$noteRow['daily_order_id']] = true;
+            }
+        }
+        foreach ($stops as &$stop) {
+            $orderId = (int)($stop['daily_order_id'] ?? 0);
+            if ($orderId > 0 && isset($autoOrders[$orderId])) {
+                $stop['source'] = 'auto';
+            }
+        }
+        unset($stop);
     }
     return $stops;
 }
