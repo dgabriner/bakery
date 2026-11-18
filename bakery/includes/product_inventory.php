@@ -4,6 +4,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/audit_log.php';
+
 function bakery_inventory_ready(PDO $db): bool {
     return table_exists($db, 'product_inventory_days')
         && table_exists($db, 'inventory_movements')
@@ -440,6 +442,129 @@ function bakery_inventory_record_production(PDO $db, string $date, int $productI
     bakery_inventory_movement($db, $date, $productId, 'production', $quantity + $wasteQuantity, null, $notes);
     if ($wasteQuantity > 0) {
         bakery_inventory_movement($db, $date, $productId, 'waste', -$wasteQuantity, null, $notes ?: 'Production waste');
+    }
+}
+
+/**
+ * Set MADE to an exact count, lower or higher.
+ * Shelf stock moves with the same delta and cannot go below zero.
+ * field_audit stores who, when, old, new, and the reason. The movement note repeats them.
+ *
+ * @return array{
+ *   product_id:int,
+ *   inventory_day_id:int,
+ *   old_produced:int,
+ *   new_produced:int,
+ *   old_available:int,
+ *   new_available:int,
+ *   loaded:int,
+ *   reason:string
+ * }
+ */
+function bakery_inventory_correct_made(
+    PDO $db,
+    string $date,
+    int $productId,
+    int $newQuantity,
+    string $reason,
+    ?int $expectedProduced = null
+): array {
+    if (!bakery_inventory_ready($db)) {
+        throw new RuntimeException('Finished-goods inventory is not installed. Run the database migrations first.');
+    }
+    if ($productId <= 0) {
+        throw new InvalidArgumentException('correct_made_product');
+    }
+    if ($newQuantity < 0) {
+        throw new InvalidArgumentException('correct_made_negative');
+    }
+    $reason = trim((string)(preg_replace('/\s+/u', ' ', $reason) ?? ''));
+    $length = function_exists('mb_strlen') ? mb_strlen($reason, 'UTF-8') : strlen($reason);
+    if ($length < 3 || $length > 240) {
+        throw new InvalidArgumentException('correct_made_reason');
+    }
+    $date = bakery_inventory_validate_date($date);
+
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        bakery_inventory_ensure_day($db, $date, $productId);
+        $current = $db->prepare(
+            'SELECT id, available_quantity, produced_quantity, loaded_quantity
+             FROM product_inventory_days
+             WHERE delivery_date = ? AND product_id = ?
+             FOR UPDATE'
+        );
+        $current->execute([$date, $productId]);
+        $row = $current->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            throw new RuntimeException('correct_made_missing');
+        }
+        $dayId = (int)$row['id'];
+        $oldProduced = (int)$row['produced_quantity'];
+        $oldAvailable = (int)$row['available_quantity'];
+        $loaded = (int)$row['loaded_quantity'];
+        if ($expectedProduced !== null && $oldProduced !== $expectedProduced) {
+            throw new RuntimeException('stale_production_count');
+        }
+        if ($newQuantity === $oldProduced) {
+            throw new InvalidArgumentException('correct_made_unchanged');
+        }
+        $newAvailable = $oldAvailable + ($newQuantity - $oldProduced);
+        if ($newAvailable < 0) {
+            throw new InvalidArgumentException('correct_made_below_shelf');
+        }
+        $update = $db->prepare(
+            'UPDATE product_inventory_days
+             SET available_quantity = ?, produced_quantity = ?
+             WHERE id = ?'
+        );
+        $update->execute([$newAvailable, $newQuantity, $dayId]);
+        $note = 'Correct MADE from ' . $oldProduced . ' to ' . $newQuantity . '. ' . $reason;
+        if (strlen($note) > 500) {
+            $note = substr($note, 0, 500);
+        }
+        bakery_inventory_movement($db, $date, $productId, 'production', $newQuantity - $oldProduced, null, $note);
+        if (bakery_audit_ready($db)) {
+            bakery_audit_write(
+                $db,
+                'product_inventory_day',
+                $dayId,
+                'correct',
+                'produced_quantity',
+                (string)$oldProduced,
+                (string)$newQuantity
+            );
+            bakery_audit_write(
+                $db,
+                'product_inventory_day',
+                $dayId,
+                'correct',
+                'reason',
+                null,
+                $reason
+            );
+        }
+        if ($ownTransaction) {
+            $db->commit();
+        }
+        return [
+            'product_id' => $productId,
+            'inventory_day_id' => $dayId,
+            'old_produced' => $oldProduced,
+            'new_produced' => $newQuantity,
+            'old_available' => $oldAvailable,
+            'new_available' => $newAvailable,
+            'loaded' => $loaded,
+            'reason' => $reason,
+        ];
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
     }
 }
 

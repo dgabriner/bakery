@@ -90,6 +90,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_production_cadence_tests.php',
                 'tests/run_golden_day_qa.php',
                 'tests/run_production_confirm_tests.php',
+                'tests/run_correct_made_tests.php',
                 'tests/run_product_pack_yield_tests.php',
                 'tests/run_product_manager_plan_tests.php',
                 'tests/run_production_manager_dashboard_tests.php',

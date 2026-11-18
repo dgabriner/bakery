@@ -138,6 +138,7 @@ if (is_array($bakerProductIds)) {
         : ' AND p.id IN (' . implode(',', array_fill(0, count($bakerProductIds), '?')) . ')';
 }
 $inventoryNotice = '';
+$correctMadeProductIds = [];
 $inventoryError = '';
 $productionDeskNotice = !empty($_GET['notice']) ? substr(trim((string)$_GET['notice']), 0, 160) : '';
 $isBaker = function_exists('bakery_user_has_role') && bakery_user_has_role(['baker']);
@@ -153,6 +154,21 @@ if (!function_exists('bakery_production_user_message')) {
         }
         if (stripos($msg, 'stale_production_count') !== false) {
             return bakery_t('production.error_stale_made');
+        }
+        if ($msg === 'correct_made_reason') {
+            return bakery_t('production.correct_made_reason');
+        }
+        if ($msg === 'correct_made_negative') {
+            return bakery_t('production.correct_made_negative');
+        }
+        if ($msg === 'correct_made_unchanged') {
+            return bakery_t('production.correct_made_unchanged');
+        }
+        if ($msg === 'correct_made_below_shelf') {
+            return bakery_t('production.correct_made_below_shelf');
+        }
+        if ($msg === 'correct_made_product') {
+            return bakery_t('production.correct_made_product');
         }
         if (stripos($msg, 'at least one produced') !== false) {
             return bakery_t('production.error_enter_units');
@@ -179,6 +195,17 @@ if (isset($_GET['saved'])) {
                 'count' => number_format($savedUnits),
                 'date' => date('l, M j', strtotime($savedDate)),
             ]);
+    }
+}
+if ((string)($_GET['corrected'] ?? '') === '1') {
+    $correctedNow = filter_var($_GET['made'] ?? '', FILTER_VALIDATE_INT);
+    $correctedWas = filter_var($_GET['was'] ?? '', FILTER_VALIDATE_INT);
+    if ($correctedNow !== false && $correctedWas !== false && $correctedNow >= 0 && $correctedWas >= 0) {
+        $correctedNotice = bakery_t('production.correct_made_notice', [
+            'count' => number_format((int)$correctedNow),
+            'old' => number_format((int)$correctedWas),
+        ]);
+        $inventoryNotice = trim(($inventoryNotice ? $inventoryNotice . ' ' : '') . $correctedNotice);
     }
 }
 $savedWasteNotice = filter_var($_GET['waste'] ?? 0, FILTER_VALIDATE_INT);
@@ -243,6 +270,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confi
         }
         $db->commit();
         header('Location: production.php?date=' . urlencode($productionDate) . '&saved=' . $savedUnits . '&waste=' . $savedWaste . '&products=' . $savedProducts);
+        exit;
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        $inventoryError = bakery_production_user_message($e, $isBaker);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'correct_made') {
+    bakery_require_role(['baker', 'manager', 'administrator']);
+    try {
+        if (!$inventoryReady) {
+            throw new RuntimeException(bakery_t('production.error_inventory_ops'));
+        }
+        $productionDate = bakery_inventory_validate_date((string)($_POST['production_date'] ?? ''));
+        $productId = filter_var($_POST['product_id'] ?? '', FILTER_VALIDATE_INT);
+        $newMade = filter_var($_POST['made_quantity'] ?? '', FILTER_VALIDATE_INT);
+        $expectedMade = filter_var($_POST['made_was'] ?? '', FILTER_VALIDATE_INT);
+        if ($productId === false || (int)$productId <= 0 || $newMade === false) {
+            throw new InvalidArgumentException('correct_made_product');
+        }
+        if (is_array($bakerProductIds) && !in_array((int)$productId, $bakerProductIds, true)) {
+            throw new InvalidArgumentException('correct_made_product');
+        }
+        $result = bakery_inventory_correct_made(
+            $db,
+            $productionDate,
+            (int)$productId,
+            (int)$newMade,
+            (string)($_POST['reason'] ?? ''),
+            $expectedMade === false ? null : (int)$expectedMade
+        );
+        header('Location: production.php?date=' . urlencode($productionDate)
+            . '&corrected=1&made=' . (int)$result['new_produced']
+            . '&was=' . (int)$result['old_produced']);
         exit;
     } catch (Throwable $e) {
         if ($db->inTransaction()) {
@@ -1179,6 +1242,43 @@ if (!empty($groupedData) && is_array($groupedData)) {
                                     <label class="bp-waste-label" for="waste-<?php echo (int)$product['product_id']; ?>"><?php bakery_te('production.waste_now'); ?></label>
                                     <input type="number" id="waste-<?php echo (int)$product['product_id']; ?>" class="bp-waste-input" min="0" step="1" inputmode="numeric" name="waste[<?php echo (int)$product['product_id']; ?>]" value="0" aria-label="<?php echo htmlspecialchars(bakery_t('production.waste_for', ['name' => $product['product_name']]), ENT_QUOTES, 'UTF-8'); ?>">
                                 </div>
+                                <?php
+                                $correctPid = (int)$product['product_id'];
+                                $correctMadeProductIds[] = $correctPid;
+                                $correctFormId = 'bp-correct-' . $correctPid;
+                                ?>
+                                <details class="bp-correct">
+                                    <summary class="bp-correct__toggle"><?php bakery_te('production.correct_made'); ?></summary>
+                                    <p class="bp-correct__lead"><?php bakery_te('production.correct_made_lead'); ?></p>
+                                    <label class="bp-correct__label" for="correct-made-<?php echo $correctPid; ?>"><?php bakery_te('production.correct_made_quantity'); ?></label>
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>"
+                                           id="correct-made-<?php echo $correctPid; ?>"
+                                           class="bp-correct__input"
+                                           type="number"
+                                           min="0"
+                                           step="1"
+                                           inputmode="numeric"
+                                           name="made_quantity"
+                                           required
+                                           value="<?php echo (int)$product['made_quantity']; ?>"
+                                           aria-label="<?php echo htmlspecialchars(bakery_t('production.correct_made_quantity'), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <label class="bp-correct__label" for="correct-reason-<?php echo $correctPid; ?>"><?php bakery_te('production.correct_made_reason_label'); ?></label>
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>"
+                                           id="correct-reason-<?php echo $correctPid; ?>"
+                                           class="bp-correct__input"
+                                           type="text"
+                                           name="reason"
+                                           maxlength="240"
+                                           required
+                                           autocomplete="off"
+                                           aria-label="<?php echo htmlspecialchars(bakery_t('production.correct_made_reason_label'), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="hidden" name="action" value="correct_made">
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="hidden" name="product_id" value="<?php echo $correctPid; ?>">
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="hidden" name="production_date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="hidden" name="made_was" value="<?php echo (int)$product['made_quantity']; ?>">
+                                    <input form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <button form="<?php echo htmlspecialchars($correctFormId, ENT_QUOTES, 'UTF-8'); ?>" type="submit" class="bp-correct__save"><?php bakery_te('production.correct_made_save'); ?></button>
+                                </details>
                             </article>
                         <?php endforeach; ?>
                     </div>
@@ -1197,6 +1297,9 @@ if (!empty($groupedData) && is_array($groupedData)) {
                 </div>
             </footer>
         </form>
+        <?php foreach (array_unique($correctMadeProductIds) as $correctPid): ?>
+            <form id="bp-correct-<?php echo (int)$correctPid; ?>" method="post" action="production.php" class="bp-correct-form"></form>
+        <?php endforeach; ?>
         <dialog class="bp-save-dialog" id="bp-save-dialog" aria-labelledby="bp-save-dialog-title">
             <h2 class="bp-save-dialog__title" id="bp-save-dialog-title"><?php bakery_te('production.record_production'); ?></h2>
             <p class="bp-save-dialog__message" id="bp-save-dialog-message"></p>
@@ -1317,6 +1420,13 @@ button.bp-pack-link { font: inherit; cursor: pointer; }
 .bp-record__label { display: block; margin-bottom: 8px; font-weight: 700; color: #1f5f32; }
 .bp-waste-label { display: block; margin-top: 10px; font-size: .82rem; font-weight: 700; color: #7a3d21; }
 .bp-waste-input { width: 100%; min-height: 42px; margin-top: 5px; border: 1px solid #d6a17f; border-radius: 8px; padding: 7px 10px; font-size: 1rem; }
+.bp-correct { margin-top: 12px; }
+.bp-correct__toggle { display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 12px; border: 2px solid #8db59a; background: #fff; color: #1f6637; font-weight: 800; cursor: pointer; }
+.bp-correct__lead { margin: 8px 0; color: #42545a; }
+.bp-correct__label { display: block; margin-top: 8px; font-weight: 700; }
+.bp-correct__input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 6px 0 10px; padding: 8px 10px; border: 2px solid #8db59a; border-radius: 10px; font-size: 1rem; }
+.bp-correct__save { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 12px; border: 2px solid #1f7a48; background: #1f7a48; color: #fff; font-weight: 800; cursor: pointer; }
+.bp-correct-form { display: none; }
 .quantity-stepper { display: grid; grid-template-columns: 56px minmax(88px, 1fr) 56px; gap: 8px; align-items: stretch; }
 .quantity-stepper input { width: 100%; min-width: 0; min-height: 56px; padding: 8px; border: 2px solid #8db59a; border-radius: 10px; text-align: center; font-size: 1.45rem; font-weight: 800; color: #173f3c; background: #fff; }
 .quantity-step { min-height: 56px; border: 2px solid #8db59a; border-radius: 10px; background: #fff; color: #1f6637; font-size: 1.8rem; line-height: 1; cursor: pointer; touch-action: manipulation; }
