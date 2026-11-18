@@ -136,6 +136,12 @@ $h = static function (string $value): string {
     <?php foreach ($day['drivers'] ?? [] as $driver): ?>
       <section class="driver-reports__driver">
         <h2><?php echo $h((string)$driver['name']); ?></h2>
+        <?php $proofCounts = is_array($driver['proof_counts'] ?? null) ? $driver['proof_counts'] : ['after' => 0, 'arrival_only' => 0, 'none' => 0]; ?>
+        <p class="driver-reports__proof-tally"><?php echo $h(bakery_t('driver_reports.proof_tally', [
+            'after' => (int)($proofCounts['after'] ?? 0),
+            'arrival' => (int)($proofCounts['arrival_only'] ?? 0),
+            'none' => (int)($proofCounts['none'] ?? 0),
+        ])); ?></p>
         <h3><?php bakery_te('driver_reports.flags_label'); ?></h3>
         <?php $flagLines = bakery_driver_reports_flag_lines($driver['flags'] ?? []); ?>
         <?php if ($flagLines === []): ?>

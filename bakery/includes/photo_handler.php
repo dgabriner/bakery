@@ -308,7 +308,8 @@ class PhotoHandler {
             if ($finalSize === false) {
                 $finalSize = $file['size']; // Fallback to original size
             }
-            
+            $sha256 = hash_file('sha256', $targetPath);
+
             return [
                 'success' => true,
                 'data' => [
@@ -321,7 +322,8 @@ class PhotoHandler {
                     'photo_type' => $photoType,
                     'latitude' => $latitude,
                     'longitude' => $longitude,
-                    'notes' => $notes
+                    'notes' => $notes,
+                    'sha256' => is_string($sha256) ? $sha256 : null,
                 ]
             ];
             
@@ -593,56 +595,62 @@ class PhotoHandler {
             }
             $hasClientRequestCol = function_exists('column_exists')
                 && column_exists($db, 'driver_photos', 'client_request_id');
+            $tailCols = '';
+            $tailVals = '';
+            $tailParams = [];
+            $hasSha = function_exists('column_exists') && column_exists($db, 'driver_photos', 'sha256');
+            $hasCaptureCol = function_exists('column_exists') && column_exists($db, 'driver_photos', 'captured_at');
+            if ($hasSha) {
+                $tailCols .= ', sha256';
+                $tailVals .= ', ?';
+                $tailParams[] = $photoData['sha256'] ?? null;
+            }
+            if ($hasCaptureCol) {
+                $tailCols .= ', captured_at, capture_source';
+                $tailVals .= ', ?, ?';
+                $tailParams[] = $photoData['captured_at'] ?? null;
+                $tailParams[] = $photoData['capture_source'] ?? null;
+            }
 
+            $baseParams = [
+                $driverId,
+                $customerId,
+                $deliveryDate,
+                $photoData['filename'],
+                $photoData['original_filename'],
+                $photoData['file_path'],
+                $photoData['thumbnail_path'],
+                $photoData['file_size'],
+                $photoData['mime_type'],
+                $photoData['photo_type'],
+                $photoData['latitude'],
+                $photoData['longitude'],
+                $photoData['notes'],
+            ];
             if ($hasClientRequestCol && $clientRequestId !== '') {
                 $stmt = $db->prepare("
                     INSERT INTO driver_photos
                     (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
-                     file_size, mime_type, photo_type, latitude, longitude, notes, client_request_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     file_size, mime_type, photo_type, latitude, longitude, notes, client_request_id{$tailCols})
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{$tailVals})
                 ");
-                $result = $stmt->execute([
-                    $driverId,
-                    $customerId,
-                    $deliveryDate,
-                    $photoData['filename'],
-                    $photoData['original_filename'],
-                    $photoData['file_path'],
-                    $photoData['thumbnail_path'],
-                    $photoData['file_size'],
-                    $photoData['mime_type'],
-                    $photoData['photo_type'],
-                    $photoData['latitude'],
-                    $photoData['longitude'],
-                    $photoData['notes'],
-                    $clientRequestId,
-                ]);
+                $result = $stmt->execute(array_merge($baseParams, [$clientRequestId], $tailParams));
             } else {
                 $stmt = $db->prepare("
                     INSERT INTO driver_photos
                     (driver_id, customer_id, delivery_date, filename, original_filename, file_path, thumbnail_path,
-                     file_size, mime_type, photo_type, latitude, longitude, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     file_size, mime_type, photo_type, latitude, longitude, notes{$tailCols})
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{$tailVals})
                 ");
-                $result = $stmt->execute([
-                    $driverId,
-                    $customerId,
-                    $deliveryDate,
-                    $photoData['filename'],
-                    $photoData['original_filename'],
-                    $photoData['file_path'],
-                    $photoData['thumbnail_path'],
-                    $photoData['file_size'],
-                    $photoData['mime_type'],
-                    $photoData['photo_type'],
-                    $photoData['latitude'],
-                    $photoData['longitude'],
-                    $photoData['notes'],
-                ]);
+                $result = $stmt->execute(array_merge($baseParams, $tailParams));
             }
 
             if ($result) {
-                return ['success' => true, 'photo_id' => $db->lastInsertId()];
+                $photoId = (int)$db->lastInsertId();
+                if ($photoId > 0 && $hasSha && function_exists('bakery_photo_integrity_apply')) {
+                    bakery_photo_integrity_apply($db, $photoId);
+                }
+                return ['success' => true, 'photo_id' => $photoId];
             } else {
                 return ['success' => false, 'error' => 'Failed to save photo to database'];
             }
@@ -835,4 +843,6 @@ class PhotoHandler {
             }
         }
     }
-} 
+}
+
+require_once __DIR__ . '/photo_integrity.php'; 

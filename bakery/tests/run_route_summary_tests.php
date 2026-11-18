@@ -232,8 +232,10 @@ foreach ($coverage['drivers'][0]['stops'] ?? [] as $stop) {
     $coverageStops[(string)$stop['customer_name']] = $stop;
 }
 route_summary_assert(
-    'a delivered stop counts as with photo when it has an arrival or leaving photo',
-    (int)$coverage['stats']['with_photos'] === 3
+    'con foto counts only a real After photo',
+    (int)$coverage['stats']['with_photos'] === 1
+        && (int)($coverage['stats']['proof_counts']['after'] ?? -1) === 1
+        && (int)($coverage['stats']['proof_counts']['arrival_only'] ?? -1) === 1
 );
 route_summary_assert(
     'arrival and proof photos are counted separately',
@@ -249,7 +251,8 @@ route_summary_assert(
         && !empty($coverageStops['Arrival Only']['has_arrival_photo'])
         && empty($coverageStops['Proof After']['arrival_only'])
         && !empty($coverageStops['Proof After']['has_pod_photo'])
-        && !empty($coverageStops['Proof Receipt']['has_pod_photo'])
+        && empty($coverageStops['Proof Receipt']['has_pod_photo'])
+        && (($coverageStops['Proof Receipt']['proof_class'] ?? '') === 'receipt_only')
         && empty($coverageStops['Pending Arrival']['arrival_only'])
         && ($coverageStops['Pending Arrival']['visit_state'] ?? '') === 'arrived_not_closed'
         && ($coverageStops['Arrival Only']['visit_state'] ?? '') === 'delivered'

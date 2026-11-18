@@ -13,6 +13,8 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/pan_carry.php';
 require_once 'includes/driver_route_snapshot.php';
+require_once 'includes/stop_proof.php';
+require_once 'includes/route_summary.php';
 
 bakery_customer_account_ensure_schema($db);
 
@@ -352,7 +354,8 @@ function bakery_render_driver_stop_item(
         data-maps-url="<?php echo htmlspecialchars($mapsHref, ENT_QUOTES, 'UTF-8'); ?>"
         data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
         data-lines="<?php echo htmlspecialchars(bakery_driver_stop_lines_json($stop, $selectedDate), ENT_QUOTES, 'UTF-8'); ?>"
-        data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>">
+        data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>"
+        data-has-after="<?php echo !empty($stop['has_after_photo']) ? '1' : '0'; ?>">
         <div class="stop-item-main">
             <span class="stop-item-order">#<?php echo $stop['route_order'] ?: '&mdash;'; ?></span>
             <span class="stop-item-pick" aria-hidden="true"></span>
@@ -398,6 +401,19 @@ function bakery_render_driver_stop_item(
         </div>
         <?php endif; ?>
         <div class="contact-actions"<?php echo $isDone ? '' : ' hidden'; ?>>
+            <?php if ($isDone && $status === 'delivered' && !empty($stop['needs_photo_2'])): ?>
+            <button type="button"
+                class="contact-link photo2-pending-chip photo-complete-btn"
+                data-photo-mode="review"
+                data-photo2-pending="1"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.photo2_pending'); ?></button>
+            <?php endif; ?>
             <?php if ($isDone && $status === 'delivered'): ?>
             <button type="button"
                 class="contact-link photo-complete-btn"
@@ -580,6 +596,14 @@ if ($selectedDriverId > 0 && $driver) {
                 'carry_label' => '',
                 'carry_id' => 0,
             ];
+        }
+        $routePhotos = route_manager_fetch_photos_for_date($db, $selectedDate, [(int)$selectedDriverId]);
+        foreach ($orderedStops as $stopIndex => $stop) {
+            $photoKey = (int)$stop['driver_id'] . ':' . (int)$stop['customer_id'];
+            $stopPhotos = $routePhotos[$photoKey] ?? [];
+            $orderedStops[$stopIndex]['photos'] = $stopPhotos;
+            $orderedStops[$stopIndex]['needs_photo_2'] = bakery_stop_needs_photo_2($stopPhotos, (string)$stop['delivery_status']);
+            $orderedStops[$stopIndex]['has_after_photo'] = bakery_stop_proof_class($stopPhotos, (string)$stop['delivery_status']) === 'after';
         }
         $carryByCustomer = bakery_pan_carry_labels_for_date($db, $selectedDate);
         foreach ($orderedStops as $stopIndex => $stop) {
@@ -1035,6 +1059,24 @@ document.body.classList.add('driver-route-prep');
             'driver' => $driver['name'],
             'date' => $selectedDate === $todayDate ? bakery_t('common.today') : bakery_localized_date_label($selectedDateObject),
         ])); ?></p>
+        <ul class="photo2-pending-list" id="photo2PendingList">
+            <?php foreach ($orderedStops as $pendingStop): ?>
+                <?php if (empty($pendingStop['needs_photo_2'])) { continue; } ?>
+                <li>
+                    <button type="button"
+                        class="photo2-pending-chip photo-complete-btn"
+                        data-photo-mode="review"
+                        data-photo2-pending="1"
+                        data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                        data-driver-name="<?php echo htmlspecialchars($pendingStop['driver_name'] ?? $driver['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                        data-customer-id="<?php echo (int)$pendingStop['customer_id']; ?>"
+                        data-daily-order-id="<?php echo (int)$pendingStop['daily_order_id']; ?>"
+                        data-customer-name="<?php echo htmlspecialchars($pendingStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                        data-address="<?php echo htmlspecialchars($pendingStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                        data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($pendingStop['customer_name']); ?>: <?php bakery_te('driver.photo2_pending'); ?></button>
+                </li>
+            <?php endforeach; ?>
+        </ul>
     </section>
 
             <section class="route-overview route-section-overview" aria-label="<?php echo htmlspecialchars(bakery_t('driver.route_summary')); ?>">
@@ -1653,6 +1695,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'fail_success' => bakery_t('exception_desk.reported'),
     'fail_error' => bakery_t('exception_desk.report_error'),
     'view_invoice_photos' => bakery_t('driver.view_invoice_photos'),
+    'photo2_pending' => bakery_t('driver.photo2_pending'),
     'photo' => bakery_t('driver.photo'),
     'call' => bakery_t('driver.call'),
     'status_delivered' => bakery_t('driver.status_delivered'),

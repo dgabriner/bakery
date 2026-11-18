@@ -6111,6 +6111,11 @@ return [
     'delivery_review.help_prior' => 'Periodo anterior es la misma cantidad de días justo antes de este rango, :from a :to.',
     'delivery_review.clock_missing' => 'Los registros de reloj no están instalados, así que el reloj queda en blanco.',
     'delivery_review.close_missing' => 'Los cierres de ruta no están instalados, así que ruta cerrada queda en blanco.',
+    'driver.photo2_pending' => 'Foto 2 pendiente',
+    'driver.photo2_pending_hint' => 'Esta parada quedó entregada solo con la foto de llegada. Toma la foto de salida.',
+    'driver_reports.mark_doubtful' => 'Foto dudosa',
+    'driver_reports.proof_tally' => ':after con foto, :arrival entregadas sin foto, :none sin info',
+    'driver_reports.doubtful_photos' => 'Fotos dudosas: :stores',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demanda',

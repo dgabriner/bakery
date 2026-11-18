@@ -6114,6 +6114,11 @@ return [
     'delivery_review.help_prior' => 'Period before is the same number of days just before this range, :from to :to.',
     'delivery_review.clock_missing' => 'Clock-in punches are not installed, so clock-in stays blank.',
     'delivery_review.close_missing' => 'Route close loads are not installed, so route closed stays blank.',
+    'driver.photo2_pending' => 'Photo 2 pending',
+    'driver.photo2_pending_hint' => 'This stop was delivered with only the arrival photo. Take the after photo.',
+    'driver_reports.mark_doubtful' => 'Doubtful photo',
+    'driver_reports.proof_tally' => ':after with photo, :arrival delivered without a leaving photo, :none no info',
+    'driver_reports.doubtful_photos' => 'Doubtful photos: :stores',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     'ux.stage.demand' => 'Demand',

@@ -255,6 +255,22 @@
         return html + '</ul>';
     }
 
+    function renderPhoto2Pending() {
+        var list = document.getElementById('photo2PendingList');
+        if (!list) return;
+        var pending = document.querySelectorAll('.stop-item[data-status="delivered"][data-has-after="0"]');
+        var html = '';
+        Array.prototype.forEach.call(pending, function (stopEl) {
+            var name = stopEl.getAttribute('data-customer-name') || '';
+            html += '<li><button type="button" class="photo2-pending-chip photo-complete-btn" data-photo-mode="review" data-photo2-pending="1"' +
+                photoButtonAttrs(stopEl) + '>' + escapeHtml(name) + ': ' + escapeHtml(di.photo2_pending || 'Photo 2 pending') + '</button></li>';
+        });
+        list.innerHTML = html;
+        if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
+            window.DriverDelivery.bindPhotoButtons(list);
+        }
+    }
+
     function renderNextStop(stopEl) {
         var card = document.getElementById('nextStopCard');
         var done = document.getElementById('routeDoneBanner');
@@ -430,6 +446,10 @@
         var name = stopEl.getAttribute('data-customer-name') || '';
         var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
         var html = '';
+        if (status === 'delivered' && stopEl.getAttribute('data-has-after') !== '1') {
+            html += '<button type="button" class="contact-link photo2-pending-chip photo-complete-btn" data-photo-mode="review" data-photo2-pending="1"' +
+                photoButtonAttrs(stopEl) + '>' + escapeHtml(di.photo2_pending || 'Photo 2 pending') + '</button>';
+        }
         if (status === 'delivered') {
             html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
                 photoButtonAttrs(stopEl) + '>' + escapeHtml(di.view_invoice_photos) + '</button>';
@@ -503,6 +523,7 @@
         var past = getPastStops();
         var active = getActiveStops();
         renderNextStop(active[0] || null);
+        renderPhoto2Pending();
 
         var root = document.getElementById('driverRouteRoot');
         var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
@@ -929,6 +950,7 @@
             refreshRouteUi();
             showSuccessToast(message || di.empty_order_flagged);
         },
+        refreshPhoto2Pending: renderPhoto2Pending,
         afterDeliveryComplete: function (dailyOrderId, message) {
             var stop = findRouteStop(dailyOrderId);
             if (stop) {

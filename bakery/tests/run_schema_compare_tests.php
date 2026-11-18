@@ -347,8 +347,8 @@ $assert($shippedGitIds === bakery_schema_migration_ids_from_dir(), 'shipped git 
 $assert(!in_array('114_user_112_role_probe', $shippedGitIds, true), '114_user_112_role_probe is not a git schema file');
 $assert(!in_array('115_user_112_sales_role', $shippedGitIds, true), '115_user_112_sales_role is not a git schema file');
 $assert(bakery_schema_live_only_ledger_numbers() === [114, 115], '114 and 115 are Live-only ledger numbers');
-$assert(bakery_schema_next_migration_number() === 116, 'next unused schema number is 116');
-$assert(bakery_schema_next_migration_id('demo_feature') === '116_demo_feature', 'next id is 116_ plus slug');
+$assert(bakery_schema_next_migration_number() === 118, 'next unused schema number is 118');
+$assert(bakery_schema_next_migration_id('demo_feature') === '118_demo_feature', 'next id is 118_ plus slug');
 $assert(bakery_schema_next_migration_number(['092_time_clock_overrides']) === 97, '093 through 096 stay reserved');
 $assert(bakery_schema_next_migration_number(['113_sales_role']) === 116, '114 and 115 stay reserved after 113');
 $assert(bakery_schema_files_reusing_live_ledger() === [], 'schema files do not reuse Live-only ledger numbers 114 and 115');

@@ -2,9 +2,10 @@
 /**
  * Proof-of-delivery gate for marking a stop delivered.
  *
- * One arrival (Before) photo is enough proof; After and Receipt photos count
- * too. Reports still tell arrival and leaving photos apart through
- * bakery_route_summary_is_pod_photo. This file only decides whether a confirm
+ * Whether a Before photo is enough lives in BAKERY_DELIVERY_BEFORE_PHOTO_COUNTS.
+ * It is true, so a stop is never blocked in the field for lack of an After
+ * photo. After and Receipt still count. Reports use includes/stop_proof.php
+ * and do not read this constant. This file only decides whether a confirm
  * may proceed, and logs a no-photo delivery with the driver's reason.
  */
 if (!defined('ACCESS_ALLOWED')) {
@@ -33,9 +34,18 @@ function bakery_delivery_proof_photo_types(PDO $db, int $dailyOrderId): array
     return $types;
 }
 
+/**
+ * Danny's decision. True: an arrival photo still lets the driver mark delivered.
+ * Set this to false later to require an After photo at the gate.
+ */
+const BAKERY_DELIVERY_BEFORE_PHOTO_COUNTS = true;
+
 function bakery_delivery_is_proof_photo_type(string $type): bool
 {
-    return bakery_route_summary_is_pod_photo($type) || bakery_route_summary_is_arrival_photo($type);
+    if (bakery_route_summary_is_arrival_photo($type)) {
+        return BAKERY_DELIVERY_BEFORE_PHOTO_COUNTS;
+    }
+    return bakery_route_summary_is_pod_photo($type);
 }
 
 /** @return list<string> */

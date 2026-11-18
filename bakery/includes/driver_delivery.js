@@ -1185,6 +1185,7 @@
       }
       if (requestCustomerId !== state.customerId || requestDate !== state.date) return;
       state.photos = data.photos || [];
+      syncPhoto2Pending();
       renderPhotos();
       updatePhotoWorkflowUi(true);
       resumeAfterSavedArrival();
@@ -1445,7 +1446,9 @@
         photo_type: photoType,
         notes: ($('deliveryPhotoNotes') && $('deliveryPhotoNotes').value) || '',
         latitude: photoCoords.latitude || '',
-        longitude: photoCoords.longitude || ''
+        longitude: photoCoords.longitude || '',
+        captured_at: new Date().toISOString(),
+        capture_source: 'browser'
       };
 
       if (fill) fill.style.width = '70%';
@@ -2479,7 +2482,26 @@
     }
   }
 
+  function syncPhoto2Pending() {
+    if (!state.dailyOrderId) return;
+    var stop = document.querySelector('.stop-item[data-daily-order-id="' + state.dailyOrderId + '"]');
+    if (!stop) return;
+    var hasAfter = state.photos.some(function (photo) {
+      return String(photo.photo_type || '').toLowerCase() === 'after';
+    });
+    stop.setAttribute('data-has-after', hasAfter ? '1' : '0');
+    if (hasAfter) {
+      stop.querySelectorAll('[data-photo2-pending]').forEach(function (chip) {
+        if (chip.parentNode) chip.parentNode.removeChild(chip);
+      });
+    }
+    if (window.DriverRoute && typeof window.DriverRoute.refreshPhoto2Pending === 'function') {
+      window.DriverRoute.refreshPhoto2Pending();
+    }
+  }
+
   function finishDeliveryUi(message) {
+    syncPhoto2Pending();
     if (state.stopFinished) return;
     state.stopFinished = true;
     state.confirmationSaved = false;
