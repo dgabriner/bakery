@@ -85,7 +85,7 @@ $assert(strpos($deliverySrc, 'bakery_route_summary_is_pod_photo') !== false || s
 $scriptSrc = is_file($scriptFile) ? (string)file_get_contents($scriptFile) : '';
 $assert(strpos($scriptSrc, "PHP_SAPI !== 'cli'") !== false, 'dual survey open script is CLI only');
 $assert(strpos($scriptSrc, 'bakery_demand_scheduler_assert_cli') !== false, 'dual survey open uses the demand scheduler CLI guard');
-$assert(strpos($scriptSrc, '0 17 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/survey_dual_open.php') !== false, 'cron line is 5 PM for the bake path');
+$assert(strpos($scriptSrc, '0 17 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/survey_dual_open.php') !== false, 'cron line is 5 PM for the bake path');
 $assert(strpos($scriptSrc, 'bakery_survey_dual_open_next') !== false, 'script opens the next sell day');
 $surveyPhp = (string)file_get_contents($root . '/survey.php');
 $assert(strpos($surveyPhp, 'bakery_survey_dual_open_next') === false, 'survey page GET does not open the dual survey');
