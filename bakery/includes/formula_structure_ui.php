@@ -57,6 +57,7 @@ function bakery_formula_structure_render_batch(int $doughTypeId, array $structur
     $pieces = $structure['standard_batch_pieces'];
     $multiplier = $structure['batch_multiplier'];
     $loss = $structure['dough_loss_grams'];
+    $lossValue = $loss === null ? bakery_formula_default_dough_loss_grams() : $loss;
     $sampleWeight = null;
     foreach ($products as $product) {
         if (!empty($product['weight_grams'])) {
@@ -103,9 +104,9 @@ function bakery_formula_structure_render_batch(int $doughTypeId, array $structur
     bakery_formula_structure_number(
         'dough_loss_grams',
         bakery_t('formula_structure.dough_loss'),
-        $loss,
+        $lossValue,
         '0.1',
-        (string) bakery_formula_default_dough_loss_grams()
+        ''
     );
     echo '</div>';
     echo '<p class="formula-structure-hint">' . bakery_formula_structure_h('formula_structure.pieces_per_batch_hint') . '</p>';
