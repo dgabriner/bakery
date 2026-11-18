@@ -3335,6 +3335,8 @@ return [
     'pack_list.by_product' => 'By product',
     'pack_list.by_customer' => 'By customer / stop',
     'pack_list.by_route' => 'By route / driver',
+    'pack_list.view_group' => 'Pack list view',
+    'pack_list.customer_route' => 'Route: :route',
     'pack_list.phone_focus_aria' => 'One group at a time',
     'pack_list.phone_focus_of' => ':current of :total',
     'pack_list.phone_prev' => 'Previous',

@@ -18,6 +18,247 @@ function bakery_pack_line_key_valid(string $key): bool
     return $key !== '' && strlen($key) <= 64 && (bool)preg_match('/^c\d+_p\d+$/', $key);
 }
 
+/**
+ * Pack List screen view. Missing or unknown values stay on the route sheet,
+ * which is the page default.
+ */
+function bakery_pack_normalize_view(string $raw): string
+{
+    switch ($raw) {
+        case 'product':
+        case 'customer':
+        case 'route':
+            return $raw;
+        default:
+            return 'route';
+    }
+}
+
+/**
+ * Group operating-demand lines into the product, customer, and route sheets.
+ * Zero quantities are dropped. Repeated customer × product lines stay separate.
+ * Customer groups carry the route (driver) name when one is assigned.
+ *
+ * @param list<array<string,mixed>> $lineItems
+ * @param array<int,array<string,mixed>> $customerRouteById
+ * @param array<int,string> $doughByProduct
+ * @return array{
+ *   by_product: array<int,array<string,mixed>>,
+ *   by_customer: array<int,array<string,mixed>>,
+ *   by_route: array<int,array<string,mixed>>,
+ *   product_totals: array<int,int>,
+ *   customer_totals: array<int,int>,
+ *   all_line_keys: array<string,true>,
+ *   line_keys_by_driver: array<int,array<string,true>>,
+ *   total_units: int
+ * }
+ */
+function bakery_pack_group_lines(array $lineItems, array $customerRouteById, array $doughByProduct, string $unassignedRouteLabel): array
+{
+    $byProduct = [];
+    $byCustomer = [];
+    $byRoute = [];
+    $productTotals = [];
+    $customerTotals = [];
+    $allLineKeys = [];
+    $lineKeysByDriver = [];
+    $totalUnits = 0;
+
+    foreach ($lineItems as $row) {
+        $customerId = (int)$row['customer_id'];
+        $productId = (int)$row['product_id'];
+        $qty = (int)$row['quantity'];
+        $customerName = (string)$row['customer_name'];
+        $customerZone = trim((string)($row['customer_zone'] ?? ''));
+        $productName = (string)$row['product_name'];
+        $doughType = (string)($row['dough_type_name'] ?? '');
+        if ($doughType === '' && isset($doughByProduct[$productId])) {
+            $doughType = (string)$doughByProduct[$productId];
+        }
+        if ($qty <= 0) {
+            continue;
+        }
+
+        $totalUnits += $qty;
+        $productTotals[$productId] = ($productTotals[$productId] ?? 0) + $qty;
+        $customerTotals[$customerId] = ($customerTotals[$customerId] ?? 0) + $qty;
+        $lineKey = bakery_pack_line_key($customerId, $productId);
+        $allLineKeys[$lineKey] = true;
+
+        if (!isset($byProduct[$productId])) {
+            $byProduct[$productId] = [
+                'product_id' => $productId,
+                'product_name' => $productName,
+                'dough_type' => $doughType,
+                'total' => 0,
+                'customers' => [],
+            ];
+        }
+        $byProduct[$productId]['total'] += $qty;
+        $byProduct[$productId]['customers'][] = [
+            'customer_id' => $customerId,
+            'customer_name' => $customerName,
+            'zone' => $customerZone,
+            'quantity' => $qty,
+            'line_key' => $lineKey,
+        ];
+
+        $routeMeta = $customerRouteById[$customerId] ?? null;
+        $driverId = $routeMeta ? (int)$routeMeta['driver_id'] : 0;
+        $driverName = $routeMeta
+            ? (string)$routeMeta['driver_name']
+            : $unassignedRouteLabel;
+        $routeOrder = $routeMeta ? (int)$routeMeta['route_order'] : 2147483647;
+        $routeName = $routeMeta ? trim((string)$routeMeta['driver_name']) : '';
+
+        if (!isset($byCustomer[$customerId])) {
+            $byCustomer[$customerId] = [
+                'customer_id' => $customerId,
+                'customer_name' => $customerName,
+                'zone' => $customerZone,
+                'route_name' => $routeName,
+                'driver_id' => $driverId,
+                'total' => 0,
+                'products' => [],
+            ];
+        }
+        $byCustomer[$customerId]['total'] += $qty;
+        $byCustomer[$customerId]['products'][] = [
+            'product_id' => $productId,
+            'product_name' => $productName,
+            'dough_type' => $doughType,
+            'quantity' => $qty,
+            'line_key' => $lineKey,
+        ];
+
+        if (!isset($byRoute[$driverId])) {
+            $byRoute[$driverId] = [
+                'driver_id' => $driverId,
+                'driver_name' => $driverName,
+                'total' => 0,
+                'customers' => [],
+            ];
+        }
+        $byRoute[$driverId]['total'] += $qty;
+        if (!isset($byRoute[$driverId]['customers'][$customerId])) {
+            $byRoute[$driverId]['customers'][$customerId] = [
+                'customer_id' => $customerId,
+                'customer_name' => $customerName,
+                'zone' => $customerZone,
+                'route_order' => $routeOrder,
+                'total' => 0,
+                'products' => [],
+            ];
+        }
+        $byRoute[$driverId]['customers'][$customerId]['total'] += $qty;
+        $byRoute[$driverId]['customers'][$customerId]['products'][] = [
+            'product_id' => $productId,
+            'product_name' => $productName,
+            'dough_type' => $doughType,
+            'quantity' => $qty,
+            'line_key' => $lineKey,
+        ];
+        $lineKeysByDriver[$driverId][$lineKey] = true;
+    }
+
+    return [
+        'by_product' => $byProduct,
+        'by_customer' => $byCustomer,
+        'by_route' => $byRoute,
+        'product_totals' => $productTotals,
+        'customer_totals' => $customerTotals,
+        'all_line_keys' => $allLineKeys,
+        'line_keys_by_driver' => $lineKeysByDriver,
+        'total_units' => $totalUnits,
+    ];
+}
+
+/**
+ * Sort the three pack sheets the way the page shows them.
+ * Product order follows shortage only when attention=shortfall is on.
+ *
+ * @param array<int,array<string,mixed>> $byProduct
+ * @param array<int,array<string,mixed>> $byCustomer
+ * @param array<int,array<string,mixed>> $byRoute
+ * @return array{
+ *   by_product: list<array<string,mixed>>,
+ *   by_customer: list<array<string,mixed>>,
+ *   by_route: list<array<string,mixed>>
+ * }
+ */
+function bakery_pack_sort_grouped(array $byProduct, array $byCustomer, array $byRoute, bool $attentionShortfall): array
+{
+    $products = array_values($byProduct);
+    usort($products, static function ($a, $b) use ($attentionShortfall) {
+        if ($attentionShortfall) {
+            $shortCmp = ((int)($b['short'] ?? 0)) <=> ((int)($a['short'] ?? 0));
+            if ($shortCmp !== 0) {
+                return $shortCmp;
+            }
+        }
+        return strcasecmp((string)$a['product_name'], (string)$b['product_name']);
+    });
+
+    $customers = array_values($byCustomer);
+    usort($customers, static function ($a, $b) {
+        return strcasecmp((string)$a['customer_name'], (string)$b['customer_name']);
+    });
+
+    $routes = array_values($byRoute);
+    usort($routes, static function ($a, $b) {
+        $aUnassigned = ((int)$a['driver_id'] === 0) ? 1 : 0;
+        $bUnassigned = ((int)$b['driver_id'] === 0) ? 1 : 0;
+        if ($aUnassigned !== $bUnassigned) {
+            return $aUnassigned <=> $bUnassigned;
+        }
+        return strcasecmp((string)$a['driver_name'], (string)$b['driver_name']);
+    });
+    foreach ($routes as &$routeSection) {
+        $stops = array_values($routeSection['customers']);
+        usort($stops, static function ($a, $b) {
+            if ($a['route_order'] !== $b['route_order']) {
+                return $a['route_order'] <=> $b['route_order'];
+            }
+            return strcasecmp((string)$a['customer_name'], (string)$b['customer_name']);
+        });
+        $routeSection['customers'] = $stops;
+        $productRoll = [];
+        foreach ($stops as $stop) {
+            foreach ($stop['products'] as $prodLine) {
+                $pid = (int)$prodLine['product_id'];
+                if (!isset($productRoll[$pid])) {
+                    $productRoll[$pid] = [
+                        'product_id' => $pid,
+                        'product_name' => (string)$prodLine['product_name'],
+                        'dough_type' => (string)$prodLine['dough_type'],
+                        'quantity' => 0,
+                        'stores' => [],
+                    ];
+                }
+                $productRoll[$pid]['quantity'] += (int)$prodLine['quantity'];
+                $productRoll[$pid]['stores'][] = [
+                    'customer_id' => (int)$stop['customer_id'],
+                    'customer_name' => (string)$stop['customer_name'],
+                    'zone' => (string)$stop['zone'],
+                    'quantity' => (int)$prodLine['quantity'],
+                    'line_key' => (string)$prodLine['line_key'],
+                ];
+            }
+        }
+        uasort($productRoll, static function ($a, $b) {
+            return strcasecmp((string)$a['product_name'], (string)$b['product_name']);
+        });
+        $routeSection['product_totals'] = array_values($productRoll);
+    }
+    unset($routeSection);
+
+    return [
+        'by_product' => $products,
+        'by_customer' => $customers,
+        'by_route' => $routes,
+    ];
+}
+
 function bakery_pack_progress_ready(PDO $db): bool
 {
     return function_exists('table_exists') && table_exists($db, 'pack_progress');

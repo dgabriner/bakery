@@ -42,6 +42,62 @@ $assert(bakery_pack_line_key(12, 34) === 'c12_p34', 'line key format');
 $assert(bakery_pack_line_key_valid('c12_p34'), 'valid line key accepted');
 $assert(!bakery_pack_line_key_valid('nope'), 'junk line key rejected');
 
+$assert(bakery_pack_normalize_view('product') === 'product', 'product view is kept');
+$assert(bakery_pack_normalize_view('route') === 'route', 'route view is kept');
+$assert(bakery_pack_normalize_view('customer') === 'customer', 'customer view is kept');
+$assert(bakery_pack_normalize_view('') === 'route', 'missing view stays on the route default');
+$assert(bakery_pack_normalize_view('store') === 'route', 'unknown view stays on the route default');
+
+$packLines = [
+    ['customer_id' => 2, 'product_id' => 10, 'quantity' => 4, 'customer_name' => 'Zeta Market', 'customer_zone' => 'South', 'product_name' => 'Bolillo', 'dough_type_name' => ''],
+    ['customer_id' => 2, 'product_id' => 11, 'quantity' => 1, 'customer_name' => 'Zeta Market', 'customer_zone' => 'South', 'product_name' => 'Concha', 'dough_type_name' => 'Pan dulce'],
+    ['customer_id' => 2, 'product_id' => 10, 'quantity' => 2, 'customer_name' => 'Zeta Market', 'customer_zone' => 'South', 'product_name' => 'Bolillo', 'dough_type_name' => 'French'],
+    ['customer_id' => 1, 'product_id' => 10, 'quantity' => 3, 'customer_name' => 'Alpha Cafe', 'customer_zone' => '', 'product_name' => 'Bolillo', 'dough_type_name' => 'French'],
+    ['customer_id' => 3, 'product_id' => 10, 'quantity' => 0, 'customer_name' => 'Zero Stop', 'customer_zone' => 'West', 'product_name' => 'Bolillo', 'dough_type_name' => 'French'],
+    ['customer_id' => 4, 'product_id' => 12, 'quantity' => 5, 'customer_name' => 'No Route Deli', 'customer_zone' => 'East', 'product_name' => 'Telera', 'dough_type_name' => ''],
+];
+$packRoutes = [
+    2 => ['driver_id' => 8, 'driver_name' => 'Maria Route', 'route_order' => 2],
+    1 => ['driver_id' => 8, 'driver_name' => 'Maria Route', 'route_order' => 1],
+];
+$grouped = bakery_pack_group_lines($packLines, $packRoutes, [10 => 'French', 12 => 'White'], 'Not on a route yet');
+$assert((int)$grouped['total_units'] === 15, 'grouping drops zero quantities and sums the rest');
+$assert((int)$grouped['product_totals'][10] === 9, 'product total adds every positive line, including a repeated store line');
+$assert(!isset($grouped['by_customer'][3]), 'a zero-quantity customer is left out of the customer view');
+$zeta = $grouped['by_customer'][2];
+$assert((int)$zeta['total'] === 7, 'customer total is the sum of that store\'s products');
+$assert($zeta['route_name'] === 'Maria Route' && (int)$zeta['driver_id'] === 8, 'customer view keeps the route name when a route is assigned');
+$assert(count($zeta['products']) === 3, 'repeated product lines stay separate instead of being merged');
+$assert((int)$zeta['products'][0]['quantity'] === 4 && (int)$zeta['products'][2]['quantity'] === 2, 'customer products stay in line order with their own quantities');
+$assert($zeta['products'][0]['dough_type'] === 'French', 'blank dough falls back to the product dough map');
+$assert($grouped['by_customer'][4]['route_name'] === '' && (int)$grouped['by_customer'][4]['driver_id'] === 0, 'a store with no route has no route name');
+$assert($grouped['by_route'][0]['driver_name'] === 'Not on a route yet' && (int)$grouped['by_route'][0]['total'] === 5, 'unassigned stops stay in their own route bucket');
+$assert(isset($grouped['all_line_keys']['c2_p10']) && isset($grouped['line_keys_by_driver'][8]['c1_p10']), 'line keys follow the customer and the route');
+$assert(!isset($grouped['all_line_keys']['c3_p10']), 'zero-quantity lines do not become pack keys');
+
+$sorted = bakery_pack_sort_grouped($grouped['by_product'], $grouped['by_customer'], $grouped['by_route'], false);
+$sortedNames = array_map(static function ($row) {
+    return $row['customer_name'];
+}, $sorted['by_customer']);
+$assert($sortedNames === ['Alpha Cafe', 'No Route Deli', 'Zeta Market'], 'customer view sorts stores by name');
+$assert((int)$sorted['by_route'][0]['driver_id'] === 8 && (int)$sorted['by_route'][1]['driver_id'] === 0, 'named routes sort ahead of the unassigned bucket');
+$assert(
+    (int)$sorted['by_route'][0]['customers'][0]['customer_id'] === 1
+        && (int)$sorted['by_route'][0]['customers'][1]['customer_id'] === 2,
+    'stops on a route follow route order'
+);
+$mariaProducts = array_map(static function ($row) {
+    return $row['product_name'] . ':' . $row['quantity'];
+}, $sorted['by_route'][0]['product_totals']);
+$assert($mariaProducts === ['Bolillo:9', 'Concha:1'], 'route product totals sum stores and sort by product name');
+$grouped['by_product'][12]['short'] = 9;
+$grouped['by_product'][11]['short'] = 2;
+$shortFirst = bakery_pack_sort_grouped($grouped['by_product'], $grouped['by_customer'], $grouped['by_route'], true);
+$shortNames = array_map(static function ($row) {
+    return $row['product_name'];
+}, $shortFirst['by_product']);
+$assert($shortNames[0] === 'Telera' && $shortNames[1] === 'Concha', 'shortfall attention sorts larger shorts first');
+
 if (!bakery_pack_progress_ready($db)) {
     echo "SKIP pack_progress table missing\n";
     echo "\n$pass passed, $fail failed\n";
@@ -82,6 +138,11 @@ $assert(strpos($packSrc, 'seed_driver_loads') !== false && strpos($packSrc, 'pac
 $assert(strpos($packSrc, 'bakery_kitchen_segments_render') !== false, 'Pack List renders kitchen segments for bakers');
 $assert(strpos($packSrc, 'pack-page--baker') !== false, 'Pack List marks baker phone mode');
 $assert(strpos($packSrc, 'bakery_pack_phone_focus_nav_html') !== false, 'Pack List renders phone focus chrome');
+$assert(strpos($packSrc, 'role="group"') !== false && strpos($packSrc, 'pack-view-toggle__btn') !== false, 'Pack List view toggle is a button group');
+$assert(strpos($packSrc, 'method="get"') !== false && strpos($packSrc, 'name="view"') !== false, 'view toggle submits with GET and keeps view in the URL');
+$assert(strpos($packSrc, 'min-block-size: 44px') !== false, 'view toggle buttons are at least 44px tall');
+$assert(strpos($packSrc, 'pack_list.customer_route') !== false, 'customer view prints the route name');
+$assert(strpos($packSrc, "'product' => 'pack_list.by_product', 'route' => 'pack_list.by_route', 'customer' => 'pack_list.by_customer'") !== false, 'view order is product, route, then customer');
 $assert(function_exists('bakery_pack_phone_focus_keys'), 'phone focus keys helper exists');
 $assert(bakery_pack_phone_focus_keys('product', [['product_id' => 9], ['product_id' => 3]], [], []) === [9, 3], 'product focus keys');
 $assert(bakery_pack_phone_focus_keys('route', [], [], [['driver_id' => 0], ['driver_id' => 4]]) === [0, 4], 'route focus keys include unassigned');
