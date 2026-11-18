@@ -717,7 +717,7 @@ function bakery_admin_craft_preview_enforce(string $script): bool
     }
     $script = strtolower(basename($script));
     if ($preview === 'baker') {
-        $allowed = ['baker_day.php', 'logout.php', 'time_clock.php', 'client_error_api.php', 'login_audit_api.php'];
+        $allowed = ['baker_day.php', 'pack_list.php', 'logout.php', 'time_clock.php', 'client_error_api.php', 'login_audit_api.php'];
         if (in_array($script, $allowed, true)) {
             return true;
         }

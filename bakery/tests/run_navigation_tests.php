@@ -385,4 +385,31 @@ navigation_test_assert(substr_count($fullModeNav, '<details class="bakery-nav__g
 $managerWithMode = navigation_test_render_nav('manager', 'manager', 'driver');
 navigation_test_assert(strpos($managerWithMode, 'name="bakery_admin_mode"') === false, 'manager navigation does not offer admin workspace modes');
 
+$_SESSION = [
+    'user_id' => 1,
+    'user_role_slug' => 'administrator',
+    'user_display_name' => 'Danny',
+    'admin_craft_preview' => 'baker',
+];
+$_GET = ['date' => '2026-11-17', 'view' => 'customer'];
+navigation_test_assert(
+    bakery_admin_craft_preview_enforce('pack_list.php') === true,
+    'baker preview does not redirect pack_list.php?view=customer'
+);
+$_GET = ['date' => '2026-11-17'];
+navigation_test_assert(
+    bakery_admin_craft_preview_enforce('pack_list.php') === true,
+    'baker preview does not redirect pack_list.php'
+);
+$_SESSION['admin_craft_preview'] = '';
+navigation_test_assert(
+    bakery_admin_craft_preview_enforce('pack_list.php') === false,
+    'pack list is unchanged when baker preview is off'
+);
+$craftSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/admin_workspace_mode.php');
+navigation_test_assert(
+    strpos($craftSrc, "bakery_admin_craft_preview_redirect('baker_day.php?date='") !== false,
+    'other baker-preview pages still land on Baker Day'
+);
+
 exit($failed === 0 ? 0 : 1);
