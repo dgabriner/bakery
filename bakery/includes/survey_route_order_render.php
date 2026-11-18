@@ -79,6 +79,9 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
             ?>
           <button type="button" class="ro-store" data-ro-store data-order-id="<?php echo $oid; ?>" data-name="<?php echo $esc($name); ?>">
             <span class="ro-name"><?php echo $esc($name); ?></span>
+            <?php if (strncmp((string)($row['notes'] ?? ''), 'Auto:', 5) === 0): ?>
+              <span class="orphan-auto-chip"><?php echo $esc(function_exists('bakery_t') ? bakery_t('route.auto_chip') : 'Auto'); ?></span>
+            <?php endif; ?>
             <?php
             $carry = $carryLabels[(int)($row['customer_id'] ?? 0)] ?? null;
             if (is_array($carry) && (string)($carry['label'] ?? '') !== '') {

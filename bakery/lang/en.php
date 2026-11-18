@@ -5201,6 +5201,7 @@ return [
     'today.blocker.ingredient_alert' => ':when, an ingredient needs a look.',
     'today.blocker.delivery_unavailable' => ':when, delivery data is unavailable.',
     'today.blocker.invoice_unavailable' => ':when, invoice data is unavailable.',
+    'today.needs_driver' => 'Needs a driver: :count stores',
 
     'catalog_gaps.page_title' => 'Catalog gaps',
     'catalog_gaps.heading' => 'Catalog gaps',
@@ -6116,6 +6117,9 @@ return [
     'delivery_review.close_missing' => 'Route close loads are not installed, so route closed stays blank.',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
+    'route.auto_chip' => 'Auto',
+    'standing_orders.no_route_day' => 'No route this day',
+    'standing_orders.add_to_route' => 'Add to :driver\'s route',
     'ux.stage.demand' => 'Demand',
     'ux.stage.production' => 'Production',
     'ux.stage.pack' => 'Pack',

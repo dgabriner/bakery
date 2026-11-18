@@ -181,6 +181,9 @@ function bakery_demand_confirmation_confirm(PDO $db, string $date, ?int $userId)
     bakery_ensure_daily_orders_for_date($db, $date, [
         'assign_routes' => true,
     ]);
+    if (function_exists('bakery_assign_orphan_dated_stops')) {
+        bakery_assign_orphan_dated_stops($db, $date);
+    }
 
     $review = bakery_demand_review_build($db, $date, []);
     $summary = $review['summary'];

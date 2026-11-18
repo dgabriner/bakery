@@ -436,6 +436,260 @@ function bakery_dated_route_customers_for_orders(PDO $db, array $orderIds): arra
     return $map;
 }
 
+function bakery_orphan_note_is_auto(?string $note): bool
+{
+    return $note !== null && strncmp($note, 'Auto:', 5) === 0;
+}
+
+function bakery_orphan_assignment_note(?string $deliveredOn): string
+{
+    if ($deliveredOn !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveredOn)) {
+        return 'Auto: usual driver (last delivered ' . $deliveredOn . ')';
+    }
+    return 'Auto: usual driver (standing route)';
+}
+
+function bakery_orphan_day_is_closed(PDO $db, string $date): bool
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'operating_day_closeouts')) {
+        return false;
+    }
+    try {
+        $stmt = $db->prepare('SELECT closed_at, reopened_at FROM operating_day_closeouts WHERE operating_date = ? LIMIT 1');
+        $stmt->execute([$date]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+    return is_array($row) && !empty($row['closed_at']) && empty($row['reopened_at']);
+}
+
+/**
+ * Driver for a dated order that has no standing stop on this weekday.
+ * Another weekday's standing route wins (most stops, then the newest row).
+ * Otherwise the driver of the last delivered stop in the past 35 days.
+ *
+ * @return array{driver_id:int,driver_name:string,source:string,delivered_on:?string}|null
+ */
+function bakery_orphan_driver_for(PDO $db, int $customerId, string $date): ?array
+{
+    if ($customerId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return null;
+    }
+    $last = null;
+    if (function_exists('table_exists') && table_exists($db, 'daily_order_assignments') && table_exists($db, 'daily_orders')) {
+        $from = (new DateTimeImmutable($date))->modify('-35 days')->format('Y-m-d');
+        $lastStmt = $db->prepare(
+            'SELECT doa.driver_id, d.name AS driver_name, doa.delivery_date
+             FROM daily_order_assignments doa
+             JOIN daily_orders o ON o.id = doa.daily_order_id
+             JOIN drivers d ON d.id = doa.driver_id
+             WHERE o.customer_id = ?
+               AND doa.delivery_status = \'delivered\'
+               AND doa.delivery_date < ?
+               AND doa.delivery_date >= ?
+             ORDER BY doa.delivery_date DESC, doa.id DESC
+             LIMIT 1'
+        );
+        $lastStmt->execute([$customerId, $date, $from]);
+        $lastRow = $lastStmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($lastRow) && (int)$lastRow['driver_id'] > 0) {
+            $last = [
+                'driver_id' => (int)$lastRow['driver_id'],
+                'driver_name' => (string)$lastRow['driver_name'],
+                'source' => 'last_delivered',
+                'delivered_on' => (string)$lastRow['delivery_date'],
+            ];
+        }
+    }
+    if (function_exists('table_exists') && table_exists($db, 'standing_routes')) {
+        $day = bakery_standing_day_from_date($date);
+        $match = bakery_standing_day_in_clause($day);
+        $routeStmt = $db->prepare(
+            'SELECT sr.driver_id, d.name AS driver_name, COUNT(*) AS stop_count, MAX(sr.id) AS newest
+             FROM standing_routes sr
+             JOIN drivers d ON d.id = sr.driver_id
+             WHERE sr.customer_id = ?
+               AND NOT (CASE WHEN sr.day_of_week = 0 THEN 7 ELSE sr.day_of_week END ' . $match['sql'] . ')
+             GROUP BY sr.driver_id, d.name
+             ORDER BY stop_count DESC, newest DESC
+             LIMIT 1'
+        );
+        $routeStmt->execute([$customerId, ...$match['values']]);
+        $route = $routeStmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($route) && (int)$route['driver_id'] > 0) {
+            $sameDelivery = $last !== null && (int)$last['driver_id'] === (int)$route['driver_id']
+                ? $last['delivered_on']
+                : null;
+            return [
+                'driver_id' => (int)$route['driver_id'],
+                'driver_name' => (string)$route['driver_name'],
+                'source' => 'standing_other_day',
+                'delivered_on' => $sameDelivery,
+            ];
+        }
+    }
+    return $last;
+}
+
+/**
+ * Dated orders with no assignment that are still eligible for a driver.
+ *
+ * @return list<array{daily_order_id:int,customer_id:int,customer_name:string}>
+ */
+function bakery_orphan_open_orders(PDO $db, string $date): array
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || bakery_orphan_day_is_closed($db, $date)) {
+        return [];
+    }
+    if (!function_exists('table_exists') || !table_exists($db, 'daily_orders') || !table_exists($db, 'daily_order_assignments')) {
+        return [];
+    }
+    if (!$db->inTransaction()) {
+        if (function_exists('bakery_customer_order_ensure_schema')) {
+            bakery_customer_order_ensure_schema($db);
+        }
+        if (function_exists('bakery_dated_route_removals_ready')) {
+            bakery_dated_route_removals_ready($db);
+        }
+    }
+    $removed = function_exists('bakery_dated_route_removed_customer_ids')
+        ? bakery_dated_route_removed_customer_ids($db, $date)
+        : [];
+    $origin = function_exists('bakery_sfb_ops_origin_clause') ? bakery_sfb_ops_origin_clause('c', $db) : '';
+    $stmt = $db->prepare(
+        'SELECT do.id AS daily_order_id, do.customer_id, c.name AS customer_name
+         FROM daily_orders do
+         JOIN customers c ON c.id = do.customer_id AND c.is_active = 1
+         ' . $origin . '
+         WHERE do.order_date = ?
+           AND NOT EXISTS (
+               SELECT 1 FROM daily_order_assignments doa
+               WHERE doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
+           )
+         ORDER BY c.name, do.id'
+    );
+    $stmt->execute([$date]);
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $customerId = (int)$row['customer_id'];
+        if ($customerId <= 0 || isset($removed[$customerId])) {
+            continue;
+        }
+        if (function_exists('bakery_customer_delivery_is_paused') && bakery_customer_delivery_is_paused($db, $customerId, $date)) {
+            continue;
+        }
+        $rows[] = [
+            'daily_order_id' => (int)$row['daily_order_id'],
+            'customer_id' => $customerId,
+            'customer_name' => (string)$row['customer_name'],
+        ];
+    }
+    return $rows;
+}
+
+/**
+ * @return list<array{daily_order_id:int,customer_id:int,customer_name:string}>
+ */
+function bakery_orphan_needs_driver_names(PDO $db, string $date): array
+{
+    $needs = [];
+    foreach (bakery_orphan_open_orders($db, $date) as $order) {
+        if (bakery_orphan_driver_for($db, (int)$order['customer_id'], $date) === null) {
+            $needs[] = $order;
+        }
+    }
+    return $needs;
+}
+
+/**
+ * Put an unassigned dated order on the usual driver's route.
+ * Existing assignments are not moved. A recorded removal, skip, pause, or
+ * closed day is left alone. A second call changes nothing.
+ *
+ * @return array{assigned:list<array<string,mixed>>,needs_driver:list<array<string,mixed>>}
+ */
+function bakery_assign_orphan_dated_stops(PDO $db, string $date): array
+{
+    $empty = ['assigned' => [], 'needs_driver' => []];
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || bakery_orphan_day_is_closed($db, $date)) {
+        return $empty;
+    }
+    $open = bakery_orphan_open_orders($db, $date);
+    if ($open === []) {
+        return $empty;
+    }
+    $hasNotes = function_exists('column_exists') && column_exists($db, 'daily_order_assignments', 'notes');
+    $noteSql = $hasNotes ? ', notes' : '';
+    $notePlaceholder = $hasNotes ? ', ?' : '';
+    $insert = $db->prepare(
+        'INSERT INTO daily_order_assignments (
+            daily_order_id, driver_id, delivery_date, scheduled_delivery_time,
+            actual_delivery_time, route_order, estimated_delivery_time, delivery_status' . $noteSql . '
+         ) VALUES (?, ?, ?, NULL, NULL, ?, NULL, \'pending\'' . $notePlaceholder . ')'
+    );
+    $legacy = $db->prepare('UPDATE daily_orders SET driver_id = ? WHERE id = ?');
+    $usedStmt = $db->prepare('SELECT driver_id, route_order FROM daily_order_assignments WHERE delivery_date = ?');
+    $usedStmt->execute([$date]);
+    $maxRouteOrderByDriver = [];
+    $usedRouteOrdersByDriver = [];
+    foreach ($usedStmt->fetchAll(PDO::FETCH_ASSOC) as $route) {
+        $driverId = (int)$route['driver_id'];
+        $routeOrder = max(0, (int)$route['route_order']);
+        $maxRouteOrderByDriver[$driverId] = max($maxRouteOrderByDriver[$driverId] ?? 0, $routeOrder);
+        if ($routeOrder > 0) {
+            $usedRouteOrdersByDriver[$driverId][$routeOrder] = true;
+        }
+    }
+    $own = !$db->inTransaction();
+    if ($own) {
+        $db->beginTransaction();
+    }
+    $assigned = [];
+    $needs = [];
+    try {
+        foreach ($open as $order) {
+            $driver = bakery_orphan_driver_for($db, (int)$order['customer_id'], $date);
+            if ($driver === null) {
+                $needs[] = $order;
+                continue;
+            }
+            $routeOrder = bakery_next_standing_route_order(
+                (int)$driver['driver_id'],
+                0,
+                $maxRouteOrderByDriver,
+                $usedRouteOrdersByDriver
+            );
+            $note = bakery_orphan_assignment_note($driver['delivered_on']);
+            $params = [(int)$order['daily_order_id'], (int)$driver['driver_id'], $date, $routeOrder];
+            if ($hasNotes) {
+                $params[] = $note;
+            }
+            $insert->execute($params);
+            $legacy->execute([(int)$driver['driver_id'], (int)$order['daily_order_id']]);
+            $assigned[] = [
+                'daily_order_id' => (int)$order['daily_order_id'],
+                'customer_id' => (int)$order['customer_id'],
+                'customer_name' => (string)$order['customer_name'],
+                'driver_id' => (int)$driver['driver_id'],
+                'driver_name' => (string)$driver['driver_name'],
+                'route_order' => $routeOrder,
+                'note' => $note,
+                'source' => (string)$driver['source'],
+            ];
+        }
+        if ($own) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($own && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+    return ['assigned' => $assigned, 'needs_driver' => $needs];
+}
+
 /**
  * Generate dated daily orders from standing orders for one date.
  *
@@ -856,6 +1110,12 @@ function bakery_generate_daily_orders_from_standing(PDO $db, string $date, array
             }
         }
 
+        if ($assignRoutes) {
+            $orphans = bakery_assign_orphan_dated_stops($db, $date);
+            $driversAssigned += count($orphans['assigned']);
+            $ordersWithoutRoute = max(0, $ordersWithoutRoute - count($orphans['assigned']));
+        }
+
         $db->commit();
 
         if ($assignRoutes) {
@@ -1051,6 +1311,9 @@ function bakery_ensure_daily_orders_for_date(PDO $db, string $date, array $optio
         || $missingRoutes;
 
     if (!$needsGeneration) {
+        if ($assignRoutes) {
+            bakery_assign_orphan_dated_stops($db, $date);
+        }
         return $noop('already_generated');
     }
 

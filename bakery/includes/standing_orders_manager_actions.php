@@ -220,6 +220,50 @@ function bakery_standing_orders_manager_action_copy_orders(PDO $db, array $input
     return ['success' => true, 'copied' => $copiedCount];
 }
 
+function bakery_standing_orders_manager_action_add_route(PDO $db, array $input, ?array $user = null): array
+{
+    $customerId = (int)($input['customer_id'] ?? 0);
+    $driverId = (int)($input['driver_id'] ?? 0);
+    $day = function_exists('bakery_normalize_standing_day')
+        ? bakery_normalize_standing_day((int)($input['day_of_week'] ?? 0))
+        : (int)($input['day_of_week'] ?? 0);
+    if ($customerId <= 0 || $driverId <= 0 || $day < 1 || $day > 7) {
+        return ['success' => false, 'error' => 'invalid'];
+    }
+    if (!function_exists('bakery_sfb_ops_customer_allowed') || !bakery_sfb_ops_customer_allowed($db, $customerId)) {
+        return ['success' => false, 'error' => 'forbidden'];
+    }
+    $role = strtolower((string)($user['role_slug'] ?? ''));
+    if ($user !== null && !in_array($role, ['administrator', 'manager'], true)) {
+        return ['success' => false, 'error' => 'forbidden'];
+    }
+    $dayMatch = function_exists('bakery_standing_day_in_clause')
+        ? bakery_standing_day_in_clause($day)
+        : ['sql' => 'IN (?)', 'values' => [$day]];
+    $exists = $db->prepare(
+        'SELECT id FROM standing_routes WHERE customer_id = ? AND day_of_week ' . $dayMatch['sql'] . ' LIMIT 1'
+    );
+    $exists->execute([$customerId, ...$dayMatch['values']]);
+    if ((int)$exists->fetchColumn() > 0) {
+        return ['success' => true, 'added' => false];
+    }
+    $max = $db->prepare(
+        'SELECT COALESCE(MAX(route_order), 0) FROM standing_routes WHERE driver_id = ? AND day_of_week ' . $dayMatch['sql']
+    );
+    $max->execute([$driverId, ...$dayMatch['values']]);
+    $routeOrder = (int)$max->fetchColumn() + 1;
+    $db->prepare(
+        'INSERT INTO standing_routes (day_of_week, driver_id, customer_id, route_order) VALUES (?, ?, ?, ?)'
+    )->execute([$day, $driverId, $customerId, $routeOrder]);
+    return [
+        'success' => true,
+        'added' => true,
+        'driver_id' => $driverId,
+        'day_of_week' => $day,
+        'route_order' => $routeOrder,
+    ];
+}
+
 function bakery_standing_orders_manager_dispatch(PDO $db, array $input, ?array $user = null): array
 {
     $action = (string)($input['action'] ?? '');
@@ -238,6 +282,8 @@ function bakery_standing_orders_manager_dispatch(PDO $db, array $input, ?array $
             return bakery_standing_orders_manager_action_apply_pan_dulce_standard($db, $input, $user);
         case 'copy_orders':
             return bakery_standing_orders_manager_action_copy_orders($db, $input, $user);
+        case 'add_standing_route':
+            return bakery_standing_orders_manager_action_add_route($db, $input, $user);
         default:
             throw new Exception('Invalid action');
     }

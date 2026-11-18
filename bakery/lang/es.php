@@ -5198,6 +5198,7 @@ return [
     'today.blocker.ingredient_alert' => ':when, un ingrediente necesita revisión.',
     'today.blocker.delivery_unavailable' => ':when, los datos de entrega no están disponibles.',
     'today.blocker.invoice_unavailable' => ':when, los datos de facturación no están disponibles.',
+    'today.needs_driver' => 'Falta chofer: :count tiendas',
 
     'catalog_gaps.page_title' => 'Huecos del catálogo',
     'catalog_gaps.heading' => 'Huecos del catálogo',
@@ -6113,6 +6114,9 @@ return [
     'delivery_review.close_missing' => 'Los cierres de ruta no están instalados, así que ruta cerrada queda en blanco.',
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
+    'route.auto_chip' => 'Auto',
+    'standing_orders.no_route_day' => 'No hay ruta este día',
+    'standing_orders.add_to_route' => 'Agregar a la ruta de :driver',
     'ux.stage.demand' => 'Demanda',
     'ux.stage.production' => 'Producción',
     'ux.stage.pack' => 'Empaque',
