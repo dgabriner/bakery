@@ -375,6 +375,193 @@ foreach (['time_clock.earlier_open_title', 'time_clock.earlier_open_help', 'time
     tc_assert(isset($tcEn[$tcKey], $tcEs[$tcKey]) && $tcEn[$tcKey] !== $tcEs[$tcKey], "i18n {$tcKey} exists in en and es");
 }
 
+echo "\n=== Auto-close stale punches ===\n";
+
+$systemNote = 'system: Auto-closed: no clock out';
+$autoUser = tc_user($db, 'clock-auto@sourflour.test', 'Clock Auto', 'driver', '6164');
+$autoOther = tc_user($db, 'clock-auto-other@sourflour.test', 'Clock Auto Other', 'cashier', '6165');
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?)')->execute([$autoUser, $autoOther]);
+
+$nullEditor = $db->query("SHOW COLUMNS FROM time_clock_punches LIKE 'overridden_by_user_id'")->fetch(PDO::FETCH_ASSOC);
+tc_assert(is_array($nullEditor) && strtoupper((string)$nullEditor['Null']) === 'YES', 'a system close can leave the editor empty');
+
+$insertOpen = static function (int $userId, string $inAt) use ($db): int {
+    $db->prepare('INSERT INTO time_clock_punches (user_id, clock_in_at) VALUES (?, ?)')->execute([$userId, $inAt]);
+    return (int)$db->lastInsertId();
+};
+$loadPunch = static function (int $id) use ($db): array {
+    $stmt = $db->prepare(
+        'SELECT clock_in_at, clock_out_at, original_clock_in_at, original_clock_out_at, override_note,
+                overridden_by_user_id IS NULL AS system_editor, overridden_at
+         FROM time_clock_punches WHERE id = ?'
+    );
+    $stmt->execute([$id]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return is_array($row) ? $row : [];
+};
+
+$yesterdayNow = strtotime('2026-11-17 10:00:00');
+$yesterdayId = $insertOpen($autoUser, '2026-11-16 09:00:00');
+$firstClose = bakery_time_clock_autoclose_stale($db, $yesterdayNow, false);
+$yesterdayRow = $loadPunch($yesterdayId);
+tc_assert(
+    ($yesterdayRow['clock_out_at'] ?? null) !== null && ($yesterdayRow['clock_out_at'] ?? '') !== '',
+    'an open punch from yesterday gets a clock out'
+);
+tc_assert(($yesterdayRow['original_clock_in_at'] ?? '') === '2026-11-16 09:00:00', 'the original clock in is preserved');
+tc_assert(($yesterdayRow['original_clock_out_at'] ?? null) === null, 'the original missing clock out stays empty');
+tc_assert(($yesterdayRow['override_note'] ?? '') === $systemNote, 'the note reads Auto-closed: no clock out and carries system');
+tc_assert((int)($yesterdayRow['system_editor'] ?? 0) === 1, 'the system close has no editor user');
+$closedIds = array_map(static function ($row) {
+    return (int)($row['id'] ?? 0);
+}, $firstClose['closed'] ?? []);
+tc_assert(in_array($yesterdayId, $closedIds, true), 'the close is reported in the result');
+$againClose = bakery_time_clock_autoclose_stale($db, $yesterdayNow, false);
+$againIds = array_map(static function ($row) {
+    return (int)($row['id'] ?? 0);
+}, $againClose['closed'] ?? []);
+$yesterdayAgain = $loadPunch($yesterdayId);
+tc_assert(!in_array($yesterdayId, $againIds, true), 'a second run does not close the punch again');
+tc_assert($yesterdayAgain === $yesterdayRow, 'a second run changes nothing');
+
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?)')->execute([$autoUser, $autoOther]);
+$sameDayNow = strtotime('2026-11-17 16:00:00');
+$thirteenId = $insertOpen($autoUser, '2026-11-17 03:00:00');
+$fifteenId = $insertOpen($autoOther, '2026-11-17 01:00:00');
+$sameDay = bakery_time_clock_autoclose_stale($db, $sameDayNow, false);
+$thirteen = $loadPunch($thirteenId);
+$fifteen = $loadPunch($fifteenId);
+tc_assert(($thirteen['clock_out_at'] ?? null) === null, 'an open punch of 13 hours today is untouched');
+tc_assert(($fifteen['clock_out_at'] ?? '') === '2026-11-17 13:00:00', 'an open punch of 15 hours is closed at the cap of 12 hours');
+$sameDayClosed = array_map(static function ($row) {
+    return (int)($row['id'] ?? 0);
+}, $sameDay['closed'] ?? []);
+tc_assert(!in_array($thirteenId, $sameDayClosed, true) && in_array($fifteenId, $sameDayClosed, true), 'only the 15 hour punch is closed');
+$capWeek = bakery_time_clock_week($db, '2026-11-16', $sameDayNow);
+$capPerson = null;
+foreach ($capWeek['people'] as $person) {
+    if ((int)$person['user_id'] === $autoOther) {
+        $capPerson = $person;
+    }
+}
+tc_assert(is_array($capPerson) && (int)$capPerson['minutes'] === 720, 'week totals use the closed hours');
+tc_assert(($capPerson['days']['2026-11-17'] ?? 0) === 720, 'the closed hours land on the clock-in day');
+$capFlags = $capPerson['flagged'][0]['flags'] ?? [];
+tc_assert($capFlags === ['auto_closed'], 'the correction card says review instead of missing');
+
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?)')->execute([$autoUser, $autoOther]);
+$driverRow = $db->prepare('INSERT INTO drivers (name) VALUES (?)');
+$driverRow->execute(['Clock Auto Driver']);
+$linkedDriverId = (int)$db->lastInsertId();
+$db->prepare('UPDATE users SET driver_id = ? WHERE id = ?')->execute([$linkedDriverId, $autoUser]);
+$activityNow = strtotime('2026-11-17 18:00:00');
+$activityId = $insertOpen($autoUser, '2026-11-16 08:00:00');
+$db->prepare(
+    'INSERT INTO driver_photos (driver_id, delivery_date, filename, original_filename, file_path, file_size, mime_type, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+)->execute([$linkedDriverId, '2026-11-16', 'auto-close.jpg', 'auto-close.jpg', 'uploads/auto-close.jpg', 12, 'image/jpeg', '2026-11-16 16:47:00']);
+bakery_time_clock_autoclose_stale($db, $activityNow, false);
+$activity = $loadPunch($activityId);
+tc_assert(($activity['clock_out_at'] ?? '') === '2026-11-16 17:02:00', 'driver activity at 4:47 PM closes the punch at 5:02 PM');
+
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$autoOther]);
+$quietNow = strtotime('2026-11-17 08:00:00');
+$quietId = $insertOpen($autoOther, '2026-11-16 22:00:00');
+bakery_time_clock_autoclose_stale($db, $quietNow, false);
+$quiet = $loadPunch($quietId);
+tc_assert(($quiet['clock_out_at'] ?? '') === '2026-11-17 06:00:00', 'with no activity the punch closes at clock-in plus 8 hours');
+
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$autoUser]);
+$blockedIn = '2026-11-16 09:30:00';
+$blockedId = $insertOpen($autoUser, $blockedIn);
+$stillOpen = bakery_time_clock_who_is_in($db);
+$stillOpenIds = array_map(static function ($row) {
+    return (int)$row['user_id'];
+}, $stillOpen);
+tc_assert(in_array($autoUser, $stillOpenIds, true), 'reading who is in does not close a stale punch');
+$clockIn = bakery_time_clock_in($db, $autoUser);
+tc_assert(!empty($clockIn['ok']) && ($clockIn['error'] ?? '') !== 'already_in', 'clock in closes the stale punch and creates the new punch');
+$blocked = $loadPunch($blockedId);
+tc_assert(($blocked['override_note'] ?? '') === $systemNote && ($blocked['clock_out_at'] ?? '') !== '', 'the punch closed by clock in carries the system note');
+tc_assert(bakery_time_clock_open_punch($db, $autoUser) !== null, 'the new punch is open');
+
+$managerFix = bakery_time_clock_override(
+    $db,
+    $managerId,
+    'manager',
+    $blockedId,
+    '2026-11-16T09:30',
+    '2026-11-16T15:00',
+    'Real out was 3'
+);
+tc_assert(!empty($managerFix['ok']), 'a manager override after an auto-close still works');
+$afterManager = $loadPunch($blockedId);
+tc_assert(($afterManager['original_clock_in_at'] ?? '') === $blockedIn, 'the manager override keeps the first original clock in');
+tc_assert(($afterManager['original_clock_out_at'] ?? null) === null, 'the manager override keeps the first original missing clock out');
+tc_assert(($afterManager['clock_out_at'] ?? '') === '2026-11-16 15:00:00', 'the manager out replaces the estimated out');
+tc_assert(($afterManager['override_note'] ?? '') === 'Real out was 3', 'the manager note replaces the system note');
+
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$autoOther]);
+$ancientNow = strtotime('2026-11-17 12:00:00');
+$ancientId = $insertOpen($autoOther, date('Y-m-d H:i:s', $ancientNow - 8 * 86400));
+$held = bakery_time_clock_autoclose_stale($db, $ancientNow, false);
+$heldIds = array_map(static function ($row) {
+    return (int)($row['id'] ?? 0);
+}, $held['reported'] ?? []);
+$ancient = $loadPunch($ancientId);
+tc_assert(($ancient['clock_out_at'] ?? null) === null, 'without backfill a punch older than 7 days is not closed');
+tc_assert(in_array($ancientId, $heldIds, true), 'without backfill a punch older than 7 days is reported');
+$filled = bakery_time_clock_autoclose_stale($db, $ancientNow, true);
+$filledIds = array_map(static function ($row) {
+    return (int)($row['id'] ?? 0);
+}, $filled['closed'] ?? []);
+$ancientClosed = $loadPunch($ancientId);
+tc_assert(in_array($ancientId, $filledIds, true) && ($ancientClosed['override_note'] ?? '') === $systemNote, 'backfill closes the old punch with the system note');
+
+$deliveryCustomer = $db->prepare('INSERT INTO customers (name) VALUES (?)');
+$deliveryCustomer->execute(['Clock Auto Store']);
+$deliveryCustomerId = (int)$db->lastInsertId();
+$deliveryOrder = $db->prepare('INSERT INTO daily_orders (customer_id, order_date, status) VALUES (?, ?, ?)');
+$deliveryOrder->execute([$deliveryCustomerId, '2026-11-15', 'pending']);
+$deliveryOrderId = (int)$db->lastInsertId();
+$db->prepare(
+    'INSERT INTO daily_order_assignments (daily_order_id, driver_id, delivery_date, route_order, actual_delivery_time, delivery_status)
+     VALUES (?, ?, ?, ?, ?, ?)'
+)->execute([$deliveryOrderId, $linkedDriverId, '2026-11-15', 77, '15:10:00', 'delivered']);
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id = ?')->execute([$autoUser]);
+$deliveryPunch = $insertOpen($autoUser, '2026-11-15 08:00:00');
+bakery_time_clock_autoclose_stale($db, strtotime('2026-11-16 12:00:00'), false);
+$deliveryClosed = $loadPunch($deliveryPunch);
+tc_assert(($deliveryClosed['clock_out_at'] ?? '') === '2026-11-15 15:25:00', 'a delivery time closes the punch 15 minutes later');
+$db->prepare('DELETE FROM daily_order_assignments WHERE daily_order_id = ?')->execute([$deliveryOrderId]);
+$db->prepare('DELETE FROM daily_orders WHERE id = ?')->execute([$deliveryOrderId]);
+$db->prepare('DELETE FROM customers WHERE id = ?')->execute([$deliveryCustomerId]);
+$db->prepare('DELETE FROM driver_photos WHERE driver_id = ? AND filename = ?')->execute([$linkedDriverId, 'auto-close.jpg']);
+$db->prepare('DELETE FROM time_clock_punches WHERE user_id IN (?, ?)')->execute([$autoUser, $autoOther]);
+$db->prepare('UPDATE users SET driver_id = NULL WHERE id = ?')->execute([$autoUser]);
+$db->prepare('DELETE FROM drivers WHERE id = ?')->execute([$linkedDriverId]);
+
+$scheduler = (string)file_get_contents($root . '/scripts/demand_scheduler.php');
+tc_assert(strpos($scheduler, "in_array('--backfill', \$argv, true)") !== false, 'the nightly script keeps backfill off unless asked');
+tc_assert(strpos($scheduler, 'bakery_time_clock_autoclose_stale($db, null, $backfill)') !== false, 'the nightly script closes stale punches');
+$generation = (string)file_get_contents($root . '/includes/daily_order_generation.php');
+$stalePos = strpos($generation, 'function bakery_demand_self_heal_if_stale');
+$dispatchPos = strpos($generation, 'function bakery_demand_self_heal_dispatch');
+$beaconPos = strpos($generation, 'function bakery_demand_self_heal_render_beacon');
+$staleBody = substr($generation, $stalePos, $dispatchPos - $stalePos);
+$beaconBody = substr($generation, $beaconPos);
+tc_assert(strpos($staleBody, 'bakery_time_clock_autoclose_stale(') !== false, 'the demand self-heal closes stale punches');
+tc_assert(strpos($beaconBody, 'bakery_time_clock_autoclose_stale') === false, 'the page beacon does not close punches');
+tc_assert(strpos($tcPage, 'bakery_time_clock_autoclose_stale') === false, 'the time clock page does not close punches on render');
+tc_assert(strpos($tcPage, "case 'auto_closed':") !== false, 'the weekly card has a review flag');
+tc_assert(strpos($tcPage, 'time_clock.system_note') !== false, 'the weekly card shows the system note');
+tc_assert(($tcEn['time_clock.flag_auto_closed'] ?? '') === 'review', 'English review label');
+tc_assert(($tcEs['time_clock.flag_auto_closed'] ?? '') === 'revisar', 'Spanish review label');
+tc_assert(($tcEn['time_clock.system_note'] ?? '') === 'system', 'English system note');
+tc_assert(($tcEs['time_clock.system_note'] ?? '') === 'sistema', 'Spanish system note');
+tc_assert(strpos((string)file_get_contents($root . '/lang/en.php'), "\u{2013}") === false, 'English copy has no en dash');
+tc_assert(strpos((string)file_get_contents($root . '/lang/es.php'), "\u{2014}") === false, 'Spanish copy has no em dash');
+
 echo $failed === 0
     ? "Time clock tests passed ({$passed})\n"
     : "Time clock tests finished with {$failed} failure(s), {$passed} pass(es)\n";

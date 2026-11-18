@@ -110,6 +110,8 @@ $flagKey = static function (string $flag): string {
             return 'time_clock.flag_long';
         case 'next_day':
             return 'time_clock.flag_next_day';
+        case 'auto_closed':
+            return 'time_clock.flag_auto_closed';
         default:
             return 'time_clock.flag_no_out';
     }
@@ -134,6 +136,9 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
             <li><?php echo $h(bakery_t($flagKey((string)$flag))); ?></li>
           <?php endforeach; ?>
         </ul>
+        <?php if (in_array('auto_closed', $flags, true)): ?>
+          <p class="time-clock__was"><?php echo $h(bakery_t('time_clock.system_note')); ?></p>
+        <?php endif; ?>
       <?php endif; ?>
       <?php if (!empty($punch['original_clock_in_at'])): ?>
         <p class="time-clock__was"><?php echo $h(bakery_t('time_clock.was', [

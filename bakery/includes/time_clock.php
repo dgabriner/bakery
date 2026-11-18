@@ -93,6 +93,210 @@ function bakery_time_clock_open_punch(PDO $db, int $userId): ?array
     return is_array($row) ? $row : null;
 }
 
+function bakery_time_clock_system_note(): string
+{
+    return 'system: Auto-closed: no clock out';
+}
+
+function bakery_time_clock_pt(int $ts): DateTimeImmutable
+{
+    return (new DateTimeImmutable('@' . $ts))->setTimezone(new DateTimeZone('America/Los_Angeles'));
+}
+
+function bakery_time_clock_stamp_from(int $ts): string
+{
+    return bakery_time_clock_pt($ts)->format('Y-m-d H:i:s');
+}
+
+/**
+ * A punch is stale when it is still open and started before today in
+ * America/Los_Angeles, or it has been open for more than 14 hours.
+ */
+function bakery_time_clock_punch_is_stale(int $inTs, int $now): bool
+{
+    $todayStart = bakery_time_clock_pt($now)->setTime(0, 0, 0);
+    if (bakery_time_clock_pt($inTs) < $todayStart) {
+        return true;
+    }
+    return ($now - $inTs) > 14 * 3600;
+}
+
+/**
+ * Latest driver photo or delivery time on the clock-in day, at or after clock in.
+ */
+function bakery_time_clock_last_activity_ts(PDO $db, int $userId, int $inTs): ?int
+{
+    if ($userId <= 0 || !function_exists('column_exists') || !column_exists($db, 'users', 'driver_id')) {
+        return null;
+    }
+    $driverStmt = $db->prepare('SELECT driver_id FROM users WHERE id = ? LIMIT 1');
+    $driverStmt->execute([$userId]);
+    $driverId = (int)$driverStmt->fetchColumn();
+    if ($driverId <= 0) {
+        return null;
+    }
+    $day = bakery_time_clock_pt($inTs)->format('Y-m-d');
+    $start = $day . ' 00:00:00';
+    $end = bakery_time_clock_pt($inTs)->modify('+1 day')->format('Y-m-d') . ' 00:00:00';
+    $best = null;
+    $consider = static function (?int $ts) use (&$best, $inTs): void {
+        if ($ts === null || $ts < $inTs) {
+            return;
+        }
+        if ($best === null || $ts > $best) {
+            $best = $ts;
+        }
+    };
+    if (function_exists('table_exists') && table_exists($db, 'driver_photos') && column_exists($db, 'driver_photos', 'created_at')) {
+        $photo = $db->prepare(
+            'SELECT created_at FROM driver_photos
+             WHERE driver_id = ? AND created_at >= ? AND created_at < ?
+             ORDER BY created_at DESC
+             LIMIT 1'
+        );
+        $photo->execute([$driverId, $start, $end]);
+        $raw = $photo->fetchColumn();
+        $photoTs = is_string($raw) && $raw !== '' ? strtotime($raw) : false;
+        $consider($photoTs === false ? null : $photoTs);
+    }
+    if (function_exists('table_exists') && table_exists($db, 'daily_order_assignments') && column_exists($db, 'daily_order_assignments', 'actual_delivery_time')) {
+        $stops = $db->prepare(
+            'SELECT actual_delivery_time FROM daily_order_assignments
+             WHERE driver_id = ? AND delivery_date = ? AND actual_delivery_time IS NOT NULL'
+        );
+        $stops->execute([$driverId, $day]);
+        foreach ($stops->fetchAll(PDO::FETCH_COLUMN) as $time) {
+            $time = trim((string)$time);
+            if ($time === '') {
+                continue;
+            }
+            $stopTs = strtotime($day . ' ' . $time);
+            $consider($stopTs === false ? null : $stopTs);
+        }
+    }
+    if (function_exists('table_exists')
+        && table_exists($db, 'daily_orders')
+        && table_exists($db, 'daily_order_assignments')
+        && column_exists($db, 'daily_orders', 'delivery_confirmed_at')
+    ) {
+        $confirmed = $db->prepare(
+            'SELECT do.delivery_confirmed_at
+             FROM daily_order_assignments doa
+             JOIN daily_orders do ON do.id = doa.daily_order_id
+             WHERE doa.driver_id = ? AND doa.delivery_date = ?
+               AND do.delivery_confirmed_at IS NOT NULL'
+        );
+        $confirmed->execute([$driverId, $day]);
+        foreach ($confirmed->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+            $confirmedTs = strtotime((string)$raw);
+            if ($confirmedTs === false) {
+                continue;
+            }
+            if (bakery_time_clock_pt($confirmedTs)->format('Y-m-d') !== $day) {
+                continue;
+            }
+            $consider($confirmedTs);
+        }
+    }
+    return $best;
+}
+
+/**
+ * Activity plus 15 minutes, otherwise clock in plus 8 hours.
+ * A punch already open more than 12 hours, with no activity, closes at the
+ * 12 hour cap. Nothing is ever later than clock in plus 12 hours.
+ */
+function bakery_time_clock_autoclose_out_ts(int $inTs, ?int $activityTs, int $now): int
+{
+    $cap = $inTs + 12 * 3600;
+    $eight = $inTs + 8 * 3600;
+    if ($activityTs !== null) {
+        $out = $activityTs + 15 * 60;
+    } elseif (($now - $inTs) > 12 * 3600) {
+        $out = $cap;
+    } else {
+        $out = $eight;
+    }
+    if ($out > $cap) {
+        $out = $cap;
+    }
+    if ($out <= $inTs) {
+        $out = $eight > $cap ? $cap : $eight;
+    }
+    return $out;
+}
+
+/**
+ * Close forgotten punches. Punches older than 7 days are only reported
+ * unless $backfill is true. A second call does not change a closed punch.
+ * Callers are clock in (POST), the nightly scheduler, and the demand self-heal.
+ * Page reads must not call this.
+ *
+ * @return array{closed: list<array{id: int, user_id: int, clock_out_at: string}>, reported: list<array{id: int, user_id: int, clock_in_at: string}>}
+ */
+function bakery_time_clock_autoclose_stale(PDO $db, ?int $now = null, bool $backfill = false): array
+{
+    $empty = ['closed' => [], 'reported' => []];
+    if (!bakery_time_clock_ready($db) || !bakery_time_clock_overrides_ready($db)) {
+        return $empty;
+    }
+    $now = $now ?? time();
+    $stmt = $db->query(
+        'SELECT id, user_id, clock_in_at
+         FROM time_clock_punches
+         WHERE clock_out_at IS NULL
+         ORDER BY id ASC'
+    );
+    $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    if (!is_array($rows)) {
+        return $empty;
+    }
+    $update = $db->prepare(
+        'UPDATE time_clock_punches
+         SET clock_out_at = ?,
+             original_clock_in_at = COALESCE(original_clock_in_at, clock_in_at),
+             override_note = ?,
+             overridden_by_user_id = NULL,
+             overridden_at = ?
+         WHERE id = ? AND user_id = ? AND clock_out_at IS NULL'
+    );
+    $stamp = bakery_time_clock_stamp_from($now);
+    $note = bakery_time_clock_system_note();
+    $closed = [];
+    $reported = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $inTs = strtotime((string)($row['clock_in_at'] ?? ''));
+        if ($inTs === false || !bakery_time_clock_punch_is_stale($inTs, $now)) {
+            continue;
+        }
+        $id = (int)$row['id'];
+        $userId = (int)$row['user_id'];
+        if (($now - $inTs) > 7 * 86400 && !$backfill) {
+            $reported[] = [
+                'id' => $id,
+                'user_id' => $userId,
+                'clock_in_at' => (string)$row['clock_in_at'],
+            ];
+            continue;
+        }
+        $activity = bakery_time_clock_last_activity_ts($db, $userId, $inTs);
+        $outAt = bakery_time_clock_stamp_from(bakery_time_clock_autoclose_out_ts($inTs, $activity, $now));
+        $update->execute([$outAt, $note, $stamp, $id, $userId]);
+        if ($update->rowCount() !== 1) {
+            continue;
+        }
+        $closed[] = [
+            'id' => $id,
+            'user_id' => $userId,
+            'clock_out_at' => $outAt,
+        ];
+    }
+    return ['closed' => $closed, 'reported' => $reported];
+}
+
 /** @return array{ok: bool, error?: string, punch?: array<string, mixed>} */
 function bakery_time_clock_in(PDO $db, int $userId): array
 {
@@ -102,6 +306,7 @@ function bakery_time_clock_in(PDO $db, int $userId): array
     if (!bakery_time_clock_ready($db)) {
         return ['ok' => false, 'error' => 'not_ready'];
     }
+    bakery_time_clock_autoclose_stale($db);
     if (bakery_time_clock_open_punch($db, $userId) !== null) {
         return ['ok' => false, 'error' => 'already_in'];
     }
@@ -290,13 +495,17 @@ function bakery_time_clock_flags(array $punch, ?int $now = null): array
         if ($todayStart !== false && ($inTs < $todayStart || ($now - $inTs) > 12 * 3600)) {
             $flags[] = 'no_out';
         }
-        return $flags;
+    } else {
+        if (($outTs - $inTs) > 12 * 3600) {
+            $flags[] = 'long';
+        }
+        if (date('Y-m-d', $inTs) !== date('Y-m-d', $outTs)) {
+            $flags[] = 'next_day';
+        }
     }
-    if (($outTs - $inTs) > 12 * 3600) {
-        $flags[] = 'long';
-    }
-    if (date('Y-m-d', $inTs) !== date('Y-m-d', $outTs)) {
-        $flags[] = 'next_day';
+    $note = (string)($punch['override_note'] ?? '');
+    if ($note !== '' && strpos($note, 'Auto-closed: no clock out') !== false) {
+        $flags[] = 'auto_closed';
     }
     return $flags;
 }
