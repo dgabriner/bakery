@@ -173,6 +173,12 @@ def staging_file_sha256(paths: list[str]) -> dict[str, str]:
     return found
 
 
+def staging_newer_than_main_line(files: list[str]) -> str:
+    if not files:
+        return "Staging newer than main: none"
+    return "Staging newer than main: " + ", ".join(files)
+
+
 def queue_files_live_only(paths: list[str], commit: str) -> int:
     cleaned = reject_files_live_only_paths(paths)
     full_commit = resolve_commit(commit)
@@ -180,10 +186,12 @@ def queue_files_live_only(paths: list[str], commit: str) -> int:
     actual = staging_file_sha256(cleaned)
     mismatched = [path for path in cleaned if actual[path] != expected[path]]
     if mismatched:
+        print(staging_newer_than_main_line(mismatched), file=sys.stderr)
         print("Staging hash does not match " + full_commit + " for:", file=sys.stderr)
         for path in mismatched:
             print(f"  {path}", file=sys.stderr)
         return 1
+    print(staging_newer_than_main_line([]))
     payload = {
         "commit": full_commit,
         "files": [{"path": path, "sha256": expected[path]} for path in cleaned],
