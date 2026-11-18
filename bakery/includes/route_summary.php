@@ -11,6 +11,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/route_manager.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/stop_proof.php';
 
 /**
  * @return array<string, string>
@@ -210,7 +211,9 @@ function bakery_route_summary_status_key(string $status): string
 function bakery_route_summary_matches_filter(array $stop, string $filter): bool
 {
     $status = (string)($stop['delivery_status'] ?? 'pending');
-    $hasProof = !empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']);
+    $hasProof = ((int)($stop['photo_count'] ?? 0) > 0)
+        || !empty($stop['has_pod_photo'])
+        || !empty($stop['has_arrival_photo']);
     switch ($filter) {
         case 'photos':
             return $hasProof;
@@ -254,6 +257,7 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
 
     foreach ($driversData as $driver) {
         $visibleStops = [];
+        $driverAllStops = [];
         $driverPhotos = 0;
         $driverMissing = 0;
         $driverArrivalOnly = 0;
@@ -267,7 +271,10 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             $hasArrival = $classified['arrival'] !== [];
             $hasPod = $classified['pod'] !== [];
             $status = (string)($delivery['delivery_status'] ?? 'pending');
-            $arrivalOnly = $status === 'delivered' && $hasArrival && !$hasPod;
+            $proofClass = bakery_stop_proof_class($photos, $status);
+            $proofDoubtful = bakery_stop_proof_after_is_doubtful($photos);
+            $conFoto = bakery_stop_proof_is_delivery_photo($proofClass) && !$proofDoubtful;
+            $arrivalOnly = $status === 'delivered' && $proofClass === 'arrival_only';
             $sold = bakery_route_summary_sold_amount($delivery);
             $pieces = bakery_route_summary_pieces($delivery);
             $stop = $delivery;
@@ -280,9 +287,11 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             $stop['arrival_count'] = count($classified['arrival']);
             $stop['pod_count'] = count($classified['pod']);
             $stop['has_arrival_photo'] = $hasArrival;
-            $stop['has_pod_photo'] = $hasPod;
+            $stop['has_pod_photo'] = $conFoto;
             $stop['arrival_only'] = $arrivalOnly;
-            $stop['photo_status'] = bakery_route_summary_photo_status($status, $hasArrival, $hasPod);
+            $stop['proof_class'] = $proofClass;
+            $stop['proof_doubtful'] = $proofDoubtful;
+            $stop['photo_status'] = bakery_route_summary_photo_status($status, $hasArrival, $conFoto);
             $stop['visit_state'] = bakery_route_stop_visit_state($status, $hasArrival, $hasPod);
             $stop['hero_photo'] = bakery_route_summary_choose_hero_photo($photos);
             $stop['sold_amount'] = $sold;
@@ -306,7 +315,7 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
                 $stats['photo_count'] += count($photos);
                 $driverPhotos += count($photos);
             }
-            if ($status === 'delivered' && ($hasPod || $hasArrival)) {
+            if ($status === 'delivered' && $conFoto) {
                 $stats['with_photos']++;
             }
             if ($arrivalOnly) {
@@ -322,6 +331,7 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
                 $stats['pieces'] += $pieces;
             }
 
+            $driverAllStops[] = $stop;
             if (bakery_route_summary_matches_filter($stop, $filter)) {
                 $visibleStops[] = $stop;
             }
@@ -343,12 +353,30 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             'pod_photo_count' => $driverPodPhotos,
             'arrival_only' => $driverArrivalOnly,
             'missing_photos' => $driverMissing,
+            'proof_counts' => bakery_stop_proof_report_counts($driverAllStops),
             'cash_summary' => $cashSummary,
         ];
     }
 
     $stats['sold'] = round($stats['sold'], 2);
     $stats['drivers'] = count($drivers);
+    $countedStops = [];
+    foreach ($driversData as $driverRow) {
+        if (!is_array($driverRow)) {
+            continue;
+        }
+        $driverId = (int)($driverRow['id'] ?? 0);
+        foreach ($driverRow['deliveries'] ?? [] as $delivery) {
+            if (!is_array($delivery)) {
+                continue;
+            }
+            $customerId = (int)($delivery['customer_id'] ?? 0);
+            $photos = $photosByStop[$driverId . ':' . $customerId] ?? [];
+            $delivery['photos'] = $photos;
+            $countedStops[] = $delivery;
+        }
+    }
+    $stats['proof_counts'] = bakery_stop_proof_report_counts($countedStops);
 
     return [
         'drivers' => $drivers,
@@ -444,16 +472,20 @@ function bakery_route_closeout_stops(PDO $db, string $date, int $driverId): arra
             $photos = $photosByStop[$driverId . ':' . $customerId] ?? [];
             $classified = bakery_route_summary_classify_photos($photos);
             $hasArrival = $classified['arrival'] !== [];
-            $hasPod = $classified['pod'] !== [];
+            $proofClass = bakery_stop_proof_class($photos, $status);
+            $proofDoubtful = bakery_stop_proof_after_is_doubtful($photos);
+            $conFoto = bakery_stop_proof_is_delivery_photo($proofClass) && !$proofDoubtful;
             $stops[] = [
                 'customer_id' => $customerId,
                 'customer_name' => (string)($delivery['customer_name'] ?? ''),
                 'route_order' => (int)($delivery['route_order'] ?? 0),
                 'delivery_status' => $status,
-                'photo_status' => bakery_route_summary_photo_status($status, $hasArrival, $hasPod),
-                'arrival_only' => $status === 'delivered' && $hasArrival && !$hasPod,
+                'photos' => $photos,
+                'photo_status' => bakery_route_summary_photo_status($status, $hasArrival, $conFoto),
+                'proof_class' => $proofClass,
+                'arrival_only' => $status === 'delivered' && $proofClass === 'arrival_only',
                 'has_arrival_photo' => $hasArrival,
-                'has_pod_photo' => $hasPod,
+                'has_pod_photo' => $conFoto,
             ];
         }
     }

@@ -109,6 +109,8 @@ function bakery_driver_reports_mark_key(string $mark): string
     switch ($mark) {
         case 'with_photo':
             return 'driver_reports.mark_with_photo';
+        case 'doubtful_photo':
+            return 'driver_reports.mark_doubtful';
         case 'delivered_no_photo':
             return 'driver_reports.mark_delivered_no_photo';
         case 'no_info':
@@ -270,6 +272,19 @@ function bakery_driver_reports_flags(array $stops, ?array $closeout): array
             $never[] = $name;
         }
     }
+    $doubtful = [];
+    foreach ($stops as $stop) {
+        if (!is_array($stop)) {
+            continue;
+        }
+        if (bakery_driver_reports_stop_mark($stop) !== 'doubtful_photo') {
+            continue;
+        }
+        $name = (string)($stop['customer_name'] ?? '');
+        if ($name !== '') {
+            $doubtful[] = $name;
+        }
+    }
     $hasStops = $stops !== [];
     $hasLoad = is_array($closeout) && ((int)($closeout['loaded_units'] ?? 0) > 0 || !empty($closeout['load_id']));
     $closed = is_array($closeout) && !empty($closeout['is_reconciled']);
@@ -277,6 +292,7 @@ function bakery_driver_reports_flags(array $stops, ?array $closeout): array
         'arrived_not_closed' => $arrived,
         'bulk_stamps' => bakery_driver_reports_bulk_stamp_names($stops),
         'never_visited' => $never,
+        'doubtful_photos' => $doubtful,
         'no_pickup_load' => $hasStops && !$hasLoad,
         'route_not_closed' => $hasStops && !$closed,
     ];
@@ -313,6 +329,12 @@ function bakery_driver_reports_flag_lines(array $flags): array
     if (!empty($flags['route_not_closed'])) {
         $lines[] = bakery_t('driver_reports.flag_route_open');
     }
+    $doubtful = $flags['doubtful_photos'] ?? [];
+    if (is_array($doubtful) && $doubtful !== []) {
+        $lines[] = bakery_t('driver_reports.doubtful_photos', [
+            'stores' => implode(', ', $doubtful),
+        ]);
+    }
     return $lines;
 }
 
@@ -348,6 +370,7 @@ function bakery_driver_reports_summary_driver(array $journeyDriver, array $close
         'id' => (int)($journeyDriver['id'] ?? 0),
         'name' => (string)($journeyDriver['name'] ?? ''),
         'stops' => $ordered,
+        'proof_counts' => bakery_stop_proof_report_counts($ordered),
         'flags' => bakery_driver_reports_flags($ordered, $closeoutRow),
     ];
 }

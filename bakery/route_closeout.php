@@ -225,6 +225,15 @@ require_once 'includes/nav.php';
                 <div class="closeout-driver-meta">
                     <span><?php echo (int)$sheet['stop_count']; ?> stop<?php echo (int)$sheet['stop_count'] === 1 ? '' : 's'; ?></span>
                     <span><?php echo (int)$sheet['delivered_stops']; ?> delivered</span>
+                    <?php
+                    $closeoutProofStops = bakery_route_closeout_stops($db, $selectedDate, $driverId);
+                    $closeoutProof = bakery_stop_proof_report_counts($closeoutProofStops);
+                    ?>
+                    <span><?php echo htmlspecialchars(bakery_t('driver_reports.proof_tally', [
+                        'after' => (int)$closeoutProof['after'],
+                        'arrival' => (int)$closeoutProof['arrival_only'],
+                        'none' => (int)$closeoutProof['none'],
+                    ])); ?></span>
                     <?php if ($openStops > 0): ?>
                         <span class="closeout-meta-warn"><?php echo $openStops; ?> still open</span>
                     <?php endif; ?>

@@ -552,7 +552,7 @@ try {
     $assert((int)$extraRow['expected'] === 0 && (int)$extraRow['delivered'] === 1 && $extraRow['reading']['key'] === 'delivery_review.reading_no_standing', 'a delivery with no standing route says so');
 
     $beforeRow = $customers[$ids['Before']];
-    $assert((int)$beforeRow['missing_after'] === 0 && (int)$beforeRow['with_after'] === 1, 'a Before photo is delivery proof');
+    $assert((int)$beforeRow['missing_after'] === 1 && (int)$beforeRow['with_after'] === 0, 'a Before photo is not con foto');
     $beforeUrl = '';
     foreach ($beforeRow['visits'] as $visit) {
         if ((string)$visit['photo_url'] !== '') {
@@ -571,7 +571,7 @@ try {
     }
     $assert((int)$adaDays[$d1]['standing_stops'] === 7, 'Ada standing count ignores the inactive store');
     $assert((int)$adaDays[$d1]['stops'] === 10 && (int)$adaDays[$d1]['delivered'] === 7 && (int)$adaDays[$d1]['open'] === 1 && (int)$adaDays[$d1]['failed'] === 1 && (int)$adaDays[$d1]['cancelled'] === 1, 'Ada day one counts each kind of stop');
-    $assert((int)$adaDays[$d1]['delivered_with_after'] === 7, 'the Before photo counts as proof for its delivered stop');
+    $assert((int)$adaDays[$d1]['delivered_with_after'] === 6, 'the Before photo does not count as con foto');
     $assert((string)$adaDays[$d1]['last_close'] === $d1 . ' 10:04:00', 'the day closes at the last delivered stop');
     $assert($adaDays[$d1]['clocked_in'] === true && $adaDays[$d1]['route_closed'] === true, 'clock-in and a reconciled load show on that day');
     $assert((int)$adaDays[$d2]['standing_stops'] === 7 && (int)$adaDays[$d2]['stops'] === 3 && (int)$adaDays[$d2]['delivered'] === 1, 'the second standing day shows the stops that were actually routed');
@@ -583,7 +583,7 @@ try {
     $assert($bulk === $expectedBulk, 'three closes inside a few minutes are named and the earlier stops are not');
     $repeatNames = array_map(static fn(array $row): string => (string)$row['customer_name'], $ada['repeat']);
     $assert($repeatNames === [$prefix . ' Repeat'], 'a store left open three times is a repeat for that driver');
-    $assert((int)$ada['missing_after'] === 0 && (int)$ada['bulk_days'] === 1, 'Ada has no missing proof photo and one bulk-stamp day');
+    $assert((int)$ada['missing_after'] === 1 && (int)$ada['bulk_days'] === 1, 'Ada has the Before-only stop and one bulk-stamp day');
 
     $bo = $drivers[$boId];
     $assert((int)$bo['stops'] === 0 && (int)$bo['standing_stops'] === 2 && (int)$bo['quiet_days'] === 2, 'a standing driver with no routed stops is listed at zero');
@@ -595,7 +595,7 @@ try {
     foreach ($adaNeeds as $need) {
         $needByCustomer[(int)$need['customer_id']][] = (string)$need['reason'];
     }
-    $assert(!in_array('missing_after', $needByCustomer[$ids['Before']] ?? [], true), 'a delivered Before photo does not need a look');
+    $assert(in_array('missing_after', $needByCustomer[$ids['Before']] ?? [], true), 'a delivered Before photo is listed for a look');
     $assert(in_array('failed', $needByCustomer[$ids['Failed']] ?? [], true), 'a failed stop needs a look');
     $assert(!isset($needByCustomer[$ids['OnTrack']]), 'a delivered After photo does not need a look');
     $assert(!isset($needByCustomer[$ids['Cancel']]), 'a cancelled stop is not listed as open or failed');
@@ -638,7 +638,12 @@ try {
     $assert((string)$adaDays[$d1]['state'] === 'problem', 'a day with an open stop is a problem day');
     $assert((int)$cal['covering_stops'] === 2 && (int)$ada['covered_stops'] === 2, 'covering for another route is credited to the driver who went');
     $assert((int)$ada['due'] === 14 && $ada['delivered_rate'] === 57, 'the delivered rate leaves the cancelled stops out');
-    $assert($ada['after_rate'] === 100, 'the proof photo rate is out of delivered stops');
+    $assert(
+        (int)$ada['delivered'] > 0
+        && (int)$ada['delivered_with_after'] === (int)$ada['delivered'] - 1
+        && $ada['after_rate'] === bakery_delivery_manager_review_percent((int)$ada['delivered'] - 1, (int)$ada['delivered']),
+        'the proof photo rate leaves out the Before-only stop'
+    );
     $assert((int)$ada['unclocked_days'] === 4, 'days driven without a punch are counted');
     $assert($ada['usual_finish'] === '09:32', 'the usual finish is the middle of the last closes');
     $adaStrip = bakery_delivery_manager_review_driver_strip($ada, [$d1, $d2]);
@@ -655,14 +660,14 @@ try {
     }
     $assert(count($loaded['days']) === count($loaded['dates']) && isset($dayTotals[$d1], $dayTotals[$d2]), 'every date in the range has a row');
     $first = $dayTotals[$d1];
-    $assert((int)$first['stops'] === 11 && (int)$first['delivered'] === 8 && (int)$first['with_after'] === 8, 'the day row adds up every driver');
+    $assert((int)$first['stops'] === 11 && (int)$first['delivered'] === 8 && (int)$first['with_after'] === 7, 'the day row adds up every driver');
     $assert((int)$first['open'] === 1 && (int)$first['failed'] === 1 && (int)$first['cancelled'] === 1, 'the day row keeps open, failed, and cancelled apart');
     $assert((int)$first['drivers_out'] === 2 && (int)$first['unassigned'] === 1, 'the day row counts drivers out and orders with no driver');
 
     $loadedSummary = bakery_delivery_manager_review_summary($loaded, '2099-12-01');
     $assert($loadedSummary['problem'] === 6 && $loadedSummary['stale_open'] === 5 && $loadedSummary['unassigned'] === 1, 'the headline counts open, failed, and no driver');
     $loadedKeys = array_column(bakery_delivery_manager_review_insights($loaded, '2099-12-01'), 'key');
-    $assert(!in_array('delivery_review.insight_missing_after', $loadedKeys, true), 'what stands out has no missing-photo line when every delivered stop has a photo');
+    $assert(in_array('delivery_review.insight_missing_after', $loadedKeys, true), 'what stands out names the Before-only stop');
     foreach (['insight_stale_open', 'insight_failed', 'insight_unassigned', 'insight_repeat', 'insight_bulk'] as $expectedKey) {
         $assert(in_array('delivery_review.' . $expectedKey, $loadedKeys, true), 'what stands out includes ' . $expectedKey);
     }

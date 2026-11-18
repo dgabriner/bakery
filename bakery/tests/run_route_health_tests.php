@@ -52,8 +52,8 @@ $beforeStop = [
     ]],
 ];
 $assert(bakery_route_stop_has_after_photo($beforeStop['photos']) === false, 'a Before filename is not an After photo even when the column says After');
-$assert(bakery_route_stop_photo_mark($beforeStop) === 'with_photo', 'a delivered stop with only a Before photo is with photo');
-$assert(bakery_driver_reports_stop_mark($beforeStop) === 'with_photo', 'driver reports uses the same proof-photo mark');
+$assert(bakery_route_stop_photo_mark($beforeStop) === 'delivered_no_photo', 'a delivered stop with only a Before photo is not con foto');
+$assert(bakery_driver_reports_stop_mark($beforeStop) === 'delivered_no_photo', 'driver reports uses the same proof-photo mark');
 
 $afterStop = [
     'delivery_status' => 'delivered',
@@ -334,7 +334,7 @@ try {
     $assert(is_array($adaD1) && (int)$adaD1['stops'] === 8, 'Ada has 8 stops on the first day');
     $assert(is_array($adaD1) && (int)$adaD1['delivered'] === 6, 'Ada delivered 6 stops on the first day');
     $assert(is_array($adaD1) && (int)$adaD1['open'] === 2, 'Ada left 2 stops open on the first day');
-    $assert(is_array($adaD1) && (int)$adaD1['delivered_with_after'] === 2, 'an arrival or leaving photo counts as delivery proof');
+    $assert(is_array($adaD1) && (int)$adaD1['delivered_with_after'] === 1, 'only the After photo counts as delivery proof');
     $assert(is_array($adaD1) && $adaD1['route_closed'] === true, 'a reconciled load is a closed route');
     $assert(is_array($adaD1) && $adaD1['clocked_in'] === true, 'a punch linked to the driver is a clock-in');
     $assert(is_array($boD1) && (int)$boD1['stops'] === 0, 'a standing driver with no routed stops is listed at 0');
@@ -364,7 +364,7 @@ try {
     $assert($twice === null, 'a stop open twice is not a repeat skip');
 
     $missingNames = array_map(static fn(array $row): string => (string)$row['customer_name'], $loaded['missing_after']);
-    $assert(!in_array($prefix . ' BeforeOnly', $missingNames, true), 'a delivered Before photo is not a missing-proof flag');
+    $assert(in_array($prefix . ' BeforeOnly', $missingNames, true), 'a delivered Before photo is not con foto');
     $assert(in_array($prefix . ' Later', $missingNames, true), 'a delivered stop with no photo is a missing-proof flag');
     $assert(!in_array($prefix . ' AfterProof', $missingNames, true), 'a delivered After photo is not a missing-proof flag');
     $assert(!in_array($prefix . ' Skip', $missingNames, true), 'an open stop is not a missing After photo');

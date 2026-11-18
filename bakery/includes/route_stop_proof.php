@@ -2,13 +2,14 @@
 /**
  * Shared stop proof for Route health and Driver reports.
  *
- * One arrival (Before) photo is delivery proof; an After photo is proof too.
- * The filename wins over the photo_type column, same as Route photo journey.
+ * Con foto is a real After photo from includes/stop_proof.php. A Before photo
+ * is arrival only. The filename wins over the photo_type column.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/stop_proof.php';
 require_once __DIR__ . '/route_photo_journey.php';
 
 const BAKERY_ROUTE_STOP_BULK_STAMP_MINUTES = 5;
@@ -19,7 +20,7 @@ const BAKERY_ROUTE_STOP_BULK_STAMP_MIN_STOPS = 3;
  */
 function bakery_route_stop_photo_type(array $photo): string
 {
-    return bakery_route_photo_journey_photo_type($photo);
+    return bakery_stop_proof_photo_type($photo);
 }
 
 /**
@@ -43,16 +44,8 @@ function bakery_route_stop_has_after_photo(array $photos): bool
  */
 function bakery_route_stop_has_proof_photo(array $photos): bool
 {
-    foreach ($photos as $photo) {
-        if (!is_array($photo)) {
-            continue;
-        }
-        $type = bakery_route_stop_photo_type($photo);
-        if (strcasecmp($type, 'After') === 0 || strcasecmp($type, 'Before') === 0) {
-            return true;
-        }
-    }
-    return false;
+    $class = bakery_stop_proof_class($photos, 'delivered');
+    return bakery_stop_proof_is_delivery_photo($class) && !bakery_stop_proof_after_is_doubtful($photos);
 }
 
 function bakery_route_stop_time_or_null($value): ?string
@@ -68,30 +61,14 @@ function bakery_route_stop_time_or_null($value): ?string
 }
 
 /**
- * with_photo when the stop has an arrival (Before) or After photo.
- * A receipt alone is not delivery proof here.
+ * with_photo only for a real After photo. Arrival only is delivered_no_photo.
+ * A flagged After photo is doubtful_photo and is not con foto.
  *
  * @param array<string, mixed> $stop
  */
 function bakery_route_stop_photo_mark(array $stop): string
 {
-    $photos = $stop['photos'] ?? [];
-    if (!is_array($photos)) {
-        $photos = [];
-    }
-    if (bakery_route_stop_has_proof_photo($photos)) {
-        return 'with_photo';
-    }
-    if ($photos === [] && (!empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']))) {
-        return 'with_photo';
-    }
-    $status = (string)($stop['delivery_status'] ?? '');
-    $departure = bakery_route_stop_time_or_null($stop['delivered_at'] ?? null);
-    $badge = (string)($stop['badge'] ?? '');
-    if ($status === 'delivered' || ($departure !== null && $badge !== 'arrived_open')) {
-        return 'delivered_no_photo';
-    }
-    return 'no_info';
+    return bakery_stop_proof_mark($stop);
 }
 
 /**

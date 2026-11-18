@@ -280,7 +280,9 @@ foreach ($stops as $stop) {
     }
 }
 assert_true(is_array($arrivalOnly), 'stops include the arrival-only delivery');
-assert_eq(true, $arrivalOnly['photo_present'] ?? null, 'an arrival photo is proof of delivery');
+assert_eq(true, $arrivalOnly['photo_present'] ?? null, 'an arrival photo is still shown');
+assert_eq('arrival_only', $arrivalOnly['proof_class'] ?? null, 'an arrival photo class is arrival_only');
+assert_eq('after', $delivered['proof_class'] ?? null, 'an After photo class is after');
 assert_eq(false, $arrivalOnly['pod_photo_present'] ?? null, 'arrival-only stop has no pod photo');
 assert_eq(true, $arrivalOnly['arrival_photo_present'] ?? null, 'arrival photo is tracked separately');
 assert_eq(true, $arrivalOnly['arrival_only'] ?? null, 'delivered stop with only an arrival photo is flagged');
@@ -292,7 +294,9 @@ $arrivalUrl = (string)($arrivalOnly['arrival_photo_url'] ?? '');
 assert_true(strpos($arrivalUrl, 'status-arrival.jpg') !== false, 'arrival photo URL is returned on its own field');
 $coverage = $body['photo_coverage'] ?? [];
 assert_eq(1, (int)($coverage['arrival_only'] ?? -1), 'snapshot coverage counts arrival-only delivered stops');
-assert_eq(2, (int)($coverage['with_proof'] ?? -1), 'snapshot coverage counts delivered stops with an arrival or leaving photo');
+assert_eq(1, (int)($coverage['with_proof'] ?? -1), 'snapshot coverage counts only a real After photo');
+assert_eq(1, (int)($coverage['proof_counts']['after'] ?? -1), 'proof counts agree on the After photo');
+assert_eq(1, (int)($coverage['proof_counts']['arrival_only'] ?? -1), 'proof counts agree on the arrival-only stop');
 $fourInStops = false;
 foreach ($stops as $stop) {
     if ((string)($stop['store_name'] ?? '') === $names['four']) {

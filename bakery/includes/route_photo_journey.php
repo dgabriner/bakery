@@ -449,12 +449,14 @@ function bakery_route_photo_journey_visited_stop(array $stop, array $photos): ar
     $hasArrivalPhoto = false;
     foreach ($photos as $photo) {
         $type = (string)($photo['_photo_type'] ?? bakery_route_photo_journey_photo_type($photo));
-        if ($type === 'After' || $type === 'Receipt') {
-            $hasPodPhoto = true;
-        } elseif ($type === 'Before') {
+        if ($type === 'Before') {
             $hasArrivalPhoto = true;
         }
     }
+    $statusForClass = (string)($stop['delivery_status'] ?? 'pending');
+    $proofClass = bakery_stop_proof_class($photos, $statusForClass);
+    $hasPodPhoto = bakery_stop_proof_is_delivery_photo($proofClass)
+        && !bakery_stop_proof_after_is_doubtful($photos);
     $status = (string)($stop['delivery_status'] ?? 'pending');
     $visit = bakery_route_stop_visit_state($status, $hasArrivalPhoto, $hasPodPhoto);
     if ($visit === 'arrived_not_closed') {
@@ -462,13 +464,7 @@ function bakery_route_photo_journey_visited_stop(array $stop, array $photos): ar
         $delivered = null;
     } else {
         $delivered = bakery_route_photo_journey_delivered_at($stop, $ordered);
-        $badge = 'arrival';
-        foreach ($ordered as $photo) {
-            if (in_array((string)$photo['photo_type'], ['After', 'Receipt'], true)) {
-                $badge = 'pod';
-                break;
-            }
-        }
+        $badge = $hasPodPhoto ? 'pod' : 'arrival';
     }
     $row = bakery_route_photo_journey_stop_base($stop);
     $row['arrival_at'] = $arrival;

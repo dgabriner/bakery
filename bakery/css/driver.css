@@ -7363,3 +7363,21 @@ body.driver-workflow-page .route-sticky-btn--finish {
     background: #a8600f;
     color: #fff;
 }
+
+.photo2-pending-chip {
+    display: inline-flex;
+    align-items: center;
+    margin: 6px 8px 0 0;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: #fff1d6;
+    color: #99540d;
+    font-weight: 700;
+}
+
+.photo2-pending-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+}
