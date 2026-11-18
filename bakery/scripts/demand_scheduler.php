@@ -23,9 +23,11 @@ require_once $root . '/includes/daily_order_generation.php';
 require_once $root . '/includes/operational_timeline.php';
 require_once $root . '/includes/cron_run.php';
 require_once $root . '/includes/pan_carry.php';
+require_once $root . '/includes/time_clock.php';
 
 $force = in_array('--force', $argv, true);
 $json = in_array('--json', $argv, true);
+$backfill = in_array('--backfill', $argv, true);
 
 $db = null;
 $exitCode = 0;
@@ -46,8 +48,11 @@ try {
         }
     }
     $routeStats = bakery_route_load_rebuild($db);
+    $clockClose = bakery_time_clock_autoclose_stale($db, null, $backfill);
     $result['pan_carry'] = $carry;
     $result['route_load'] = $routeStats;
+    $result['time_clock_closed'] = count($clockClose['closed']);
+    $result['time_clock_reported'] = count($clockClose['reported']);
     bakery_cron_record_run($db, 'demand_scheduler', 'ok', [
         'from_date' => $result['from_date'] ?? null,
         'through_date' => $result['through_date'] ?? null,
@@ -56,6 +61,9 @@ try {
         'restored' => (int)$carry['restored'],
         'route_service_stats' => (int)($routeStats['service'] ?? 0),
         'route_drive_stats' => (int)($routeStats['drive'] ?? 0),
+        'time_clock_closed' => (int)$result['time_clock_closed'],
+        'time_clock_reported' => (int)$result['time_clock_reported'],
+        'time_clock_backfill' => $backfill,
     ]);
     if ($json) {
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
@@ -72,6 +80,12 @@ try {
             (int)$carry['carried'],
             (int)$carry['restored'],
             (string)$db->query('SELECT DATABASE()')->fetchColumn()
+        );
+        echo sprintf(
+            "time_clock_closed=%d time_clock_reported=%d backfill=%s\n",
+            (int)$result['time_clock_closed'],
+            (int)$result['time_clock_reported'],
+            $backfill ? 'yes' : 'no'
         );
     }
 } catch (Throwable $e) {
