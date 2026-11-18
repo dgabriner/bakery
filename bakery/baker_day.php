@@ -24,6 +24,10 @@ $stage = (string)($_GET['stage'] ?? $_POST['stage'] ?? 'mix');
 if (!in_array($stage, ['mix', 'shape', 'pack'], true)) {
     $stage = 'mix';
 }
+$packView = (string)($_GET['pack'] ?? $_POST['pack'] ?? 'product');
+if (!in_array($packView, ['product', 'driver'], true)) {
+    $packView = 'product';
+}
 $selectedDate = bakery_staff_selected_date($_GET['date'] ?? ($_POST['date'] ?? null), bakery_baker_home_delivery_date());
 $noticeCode = (string)($_GET['notice'] ?? '');
 $error = '';
@@ -66,11 +70,15 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
             $noticeCode = '';
         }
         if ($noticeCode !== '') {
-            header('Location: ' . BASE_URL . 'baker_day.php?' . http_build_query([
+            $returnQuery = [
                 'date' => $postDate,
                 'stage' => $postStage,
                 'notice' => $noticeCode,
-            ]));
+            ];
+            if ($postStage === 'pack' && $packView === 'driver') {
+                $returnQuery['pack'] = 'driver';
+            }
+            header('Location: ' . BASE_URL . 'baker_day.php?' . http_build_query($returnQuery));
             exit;
         }
     } catch (Throwable $e) {
@@ -108,12 +116,21 @@ require_once 'includes/nav.php';
         <p class="bd-lead"><?php bakery_te('baker_day.lead'); ?></p>
         <form method="get" action="baker_day.php" class="bd-date">
             <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php if ($stage === 'pack' && $packView === 'driver'): ?>
+            <input type="hidden" name="pack" value="driver">
+            <?php endif; ?>
             <label for="baker-day-date"><?php bakery_te('baker_mix.bake_for_delivery'); ?></label>
             <input id="baker-day-date" type="date" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" onchange="this.form.submit()">
         </form>
         <nav class="bd-stages" aria-label="<?php bakery_te('nav.baker_day_aria'); ?>">
             <?php foreach (['mix' => 'baker_day.stage_mix', 'shape' => 'baker_day.stage_shape', 'pack' => 'baker_day.stage_pack'] as $key => $labelKey): ?>
-                <?php $href = 'baker_day.php?' . http_build_query(['date' => $selectedDate, 'stage' => $key]); ?>
+                <?php
+                $stageQuery = ['date' => $selectedDate, 'stage' => $key];
+                if ($key === 'pack' && $packView === 'driver') {
+                    $stageQuery['pack'] = 'driver';
+                }
+                $href = 'baker_day.php?' . http_build_query($stageQuery);
+                ?>
                 <a class="bd-stages__link<?php echo $stage === $key ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars($href, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $stage === $key ? ' aria-current="page"' : ''; ?>><?php bakery_te($labelKey); ?></a>
             <?php endforeach; ?>
         </nav>
@@ -312,7 +329,13 @@ require_once 'includes/nav.php';
             </article>
         <?php endforeach; ?>
     <?php else: ?>
-        <p class="bd-stage-lead"><?php bakery_te('baker_day.pack_lead'); ?></p>
+        <p class="bd-stage-lead"><?php bakery_te($packView === 'driver' ? 'baker_day.pack_driver_lead' : 'baker_day.pack_lead'); ?></p>
+        <nav class="bd-pack-view" aria-label="<?php bakery_te('baker_day.pack_view_aria'); ?>">
+            <?php foreach (['product' => 'baker_day.pack_by_product', 'driver' => 'baker_day.pack_by_driver'] as $packKey => $packLabel): ?>
+                <?php $packHref = 'baker_day.php?' . http_build_query(['date' => $selectedDate, 'stage' => 'pack', 'pack' => $packKey]); ?>
+                <a class="<?php echo $packView === $packKey ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $packView === $packKey ? ' aria-current="page"' : ''; ?>><?php bakery_te($packLabel); ?></a>
+            <?php endforeach; ?>
+        </nav>
         <details class="bd-card" open>
             <summary><?php bakery_te('baker_day.capp_counter'); ?></summary>
             <p class="bd-card__lead"><?php bakery_te('baker_day.capp_counter_lead'); ?></p>
@@ -367,6 +390,46 @@ require_once 'includes/nav.php';
             return strcasecmp($a['product_name'], $b['product_name']);
         });
         ?>
+        <?php if ($packView === 'driver'): ?>
+            <?php $destinations = bakery_baker_day_pack_destinations($packRows); ?>
+            <?php if ($destinations === []): ?>
+                <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>
+            <?php endif; ?>
+            <?php foreach ($destinations as $group): ?>
+                <?php
+                $summaryParts = [];
+                foreach ($group['products'] as $product) {
+                    $summaryParts[] = (string)$product['product_name'] . ' ' . number_format((int)$product['quantity']);
+                }
+                $summary = $summaryParts !== [] ? implode(' · ', $summaryParts) : bakery_t('baker_day.pack_summary_empty');
+                ?>
+                <article class="bd-batch">
+                    <div class="bd-batch__row">
+                        <h2><?php echo htmlspecialchars(bakery_baker_day_pile_label($group), ENT_QUOTES, 'UTF-8'); ?></h2>
+                        <p class="bd-batch__meta"><?php echo htmlspecialchars(number_format((int)$group['quantity']) . ' · ' . $summary, ENT_QUOTES, 'UTF-8'); ?></p>
+                    </div>
+                    <details>
+                        <summary><?php bakery_te('baker_day.products'); ?></summary>
+                        <?php foreach ($group['products'] as $product): ?>
+                            <section class="bd-pile">
+                                <h3><?php echo htmlspecialchars((string)$product['product_name'] . ' · ' . number_format((int)$product['quantity']), ENT_QUOTES, 'UTF-8'); ?></h3>
+                                <ul>
+                                    <?php foreach ($product['stops'] as $stop): ?>
+                                        <li>
+                                            <span><?php echo htmlspecialchars((string)$stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                            <?php if ((string)$group['kind'] !== 'driver' && trim((string)($stop['driver_name'] ?? '')) !== ''): ?>
+                                                <em><?php echo htmlspecialchars(bakery_t('baker_day.carried_by', ['driver' => (string)$stop['driver_name']]), ENT_QUOTES, 'UTF-8'); ?></em>
+                                            <?php endif; ?>
+                                            <strong><?php echo number_format((int)$stop['quantity']); ?></strong>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </section>
+                        <?php endforeach; ?>
+                    </details>
+                </article>
+            <?php endforeach; ?>
+        <?php else: ?>
         <?php if ($packRows === []): ?>
             <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>
         <?php endif; ?>
@@ -414,6 +477,7 @@ require_once 'includes/nav.php';
                 </details>
             </article>
         <?php endforeach; ?>
+        <?php endif; ?>
     <?php endif; ?>
 
     <?php if ($stage !== 'pack' && $view['addable'] !== []): ?>
@@ -437,6 +501,9 @@ require_once 'includes/nav.php';
         <input type="hidden" name="action" value="publish">
         <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
+        <?php if ($stage === 'pack' && $packView === 'driver'): ?>
+        <input type="hidden" name="pack" value="driver">
+        <?php endif; ?>
         <button type="submit"<?php echo $canPublish ? '' : ' disabled'; ?>><?php echo htmlspecialchars($publishLabel, ENT_QUOTES, 'UTF-8'); ?></button>
     </form>
 </div>

@@ -63,6 +63,32 @@
     margin-top: 12px;
 }
 
+.bd-pack-view {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 8px 0 12px;
+}
+
+.bd-pack-view a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1px solid #8db59a;
+    background: #f3fbf5;
+    color: #173f3c;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.bd-pack-view a.is-active {
+    background: #1f6637;
+    border-color: #1f6637;
+    color: #fff;
+}
+
 .bd-stages__link,
 .bd-stepper__btn,
 .bd-shape button,

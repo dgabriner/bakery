@@ -484,6 +484,73 @@ function bakery_baker_day_pack_products(array $lines, array $routesByCustomer): 
 }
 
 /**
+ * Same pieces as the product sheet, grouped by driver and by Civic Center,
+ * Noe Valley, and Capp. A market loaf stays out of the driver total.
+ *
+ * @param list<array<string,mixed>> $products
+ * @return list<array<string,mixed>>
+ */
+function bakery_baker_day_pack_destinations(array $products): array
+{
+    $groups = [];
+    foreach ($products as $product) {
+        if (!is_array($product)) {
+            continue;
+        }
+        foreach ($product['piles'] ?? [] as $pile) {
+            if (!is_array($pile)) {
+                continue;
+            }
+            $key = (string)($pile['key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'key' => $key,
+                    'kind' => (string)($pile['kind'] ?? 'unassigned'),
+                    'driver_id' => (int)($pile['driver_id'] ?? 0),
+                    'driver_name' => (string)($pile['driver_name'] ?? ''),
+                    'quantity' => 0,
+                    'products' => [],
+                ];
+            }
+            $quantity = (int)($pile['quantity'] ?? 0);
+            $groups[$key]['quantity'] += $quantity;
+            $groups[$key]['products'][] = [
+                'product_id' => (int)($product['product_id'] ?? 0),
+                'product_name' => (string)($product['product_name'] ?? ''),
+                'quantity' => $quantity,
+                'stops' => is_array($pile['stops'] ?? null) ? $pile['stops'] : [],
+            ];
+        }
+    }
+    $kindOrder = [
+        'driver' => 0,
+        'civic_center' => 1,
+        'noe_valley' => 2,
+        'capp' => 3,
+        'unassigned' => 4,
+    ];
+    $out = array_values($groups);
+    usort($out, static function (array $a, array $b) use ($kindOrder): int {
+        $aOrder = $kindOrder[$a['kind']] ?? 9;
+        $bOrder = $kindOrder[$b['kind']] ?? 9;
+        if ($aOrder !== $bOrder) {
+            return $aOrder <=> $bOrder;
+        }
+        return strcasecmp((string)$a['driver_name'], (string)$b['driver_name']);
+    });
+    foreach ($out as &$group) {
+        usort($group['products'], static function (array $a, array $b): int {
+            return strcasecmp((string)$a['product_name'], (string)$b['product_name']);
+        });
+    }
+    unset($group);
+    return $out;
+}
+
+/**
  * @return array<int,int>
  */
 function bakery_baker_day_produced(PDO $db, string $date): array
