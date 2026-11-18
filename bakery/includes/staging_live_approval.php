@@ -595,7 +595,26 @@ function bakery_staging_live_approval_submit(string $releaseId = '', string $com
     if (!bakery_staging_live_approval_available()) {
         throw new RuntimeException('Live promotion is available only to administrators on Staging.');
     }
-    return bakery_staging_live_approval_publish(bakery_staging_live_snapshot_files(), []);
+    return bakery_staging_live_approval_publish(
+        bakery_staging_live_snapshot_files(),
+        bakery_staging_live_lang_drop_extra()
+    );
+}
+
+/**
+ * @return array<string, string>
+ */
+function bakery_staging_live_lang_drop_extra(): array
+{
+    $keys = trim((string)getenv('LANG_ALLOW_DROP_KEYS'));
+    if ($keys === '') {
+        return [];
+    }
+    return [
+        'allow_drop_keys' => $keys,
+        'allow_drop_reason' => (string)getenv('LANG_ALLOW_DROP_REASON'),
+        'allow_drop_actor' => (string)getenv('LANG_ALLOW_DROP_ACTOR'),
+    ];
 }
 
 /**
@@ -614,10 +633,10 @@ function bakery_staging_live_approval_submit_files(array $paths, array $expected
         throw new InvalidArgumentException('Files-only promotion requires a commit SHA.');
     }
     $files = bakery_staging_live_files_only_entries($paths, $expectedHashes);
-    return bakery_staging_live_approval_publish($files, [
+    return bakery_staging_live_approval_publish($files, array_merge([
         'scope' => 'files_only',
         'commit' => $commit,
-    ]);
+    ], bakery_staging_live_lang_drop_extra()));
 }
 
 /**
