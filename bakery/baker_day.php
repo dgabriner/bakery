@@ -25,7 +25,7 @@ if (!in_array($stage, ['mix', 'shape', 'pack'], true)) {
     $stage = 'mix';
 }
 $packView = (string)($_GET['pack'] ?? $_POST['pack'] ?? 'product');
-if (!in_array($packView, ['product', 'driver'], true)) {
+if (!in_array($packView, ['product', 'driver', 'customer'], true)) {
     $packView = 'product';
 }
 $selectedDate = bakery_staff_selected_date($_GET['date'] ?? ($_POST['date'] ?? null), bakery_baker_home_delivery_date());
@@ -75,8 +75,8 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
                 'stage' => $postStage,
                 'notice' => $noticeCode,
             ];
-            if ($postStage === 'pack' && $packView === 'driver') {
-                $returnQuery['pack'] = 'driver';
+            if ($postStage === 'pack' && $packView !== 'product') {
+                $returnQuery['pack'] = $packView;
             }
             header('Location: ' . BASE_URL . 'baker_day.php?' . http_build_query($returnQuery));
             exit;
@@ -116,8 +116,8 @@ require_once 'includes/nav.php';
         <p class="bd-lead"><?php bakery_te('baker_day.lead'); ?></p>
         <form method="get" action="baker_day.php" class="bd-date">
             <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
-            <?php if ($stage === 'pack' && $packView === 'driver'): ?>
-            <input type="hidden" name="pack" value="driver">
+            <?php if ($stage === 'pack' && $packView !== 'product'): ?>
+            <input type="hidden" name="pack" value="<?php echo htmlspecialchars($packView, ENT_QUOTES, 'UTF-8'); ?>">
             <?php endif; ?>
             <label for="baker-day-date"><?php bakery_te('baker_mix.bake_for_delivery'); ?></label>
             <input id="baker-day-date" type="date" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" onchange="this.form.submit()">
@@ -126,8 +126,8 @@ require_once 'includes/nav.php';
             <?php foreach (['mix' => 'baker_day.stage_mix', 'shape' => 'baker_day.stage_shape', 'pack' => 'baker_day.stage_pack'] as $key => $labelKey): ?>
                 <?php
                 $stageQuery = ['date' => $selectedDate, 'stage' => $key];
-                if ($key === 'pack' && $packView === 'driver') {
-                    $stageQuery['pack'] = 'driver';
+                if ($key === 'pack' && $packView !== 'product') {
+                    $stageQuery['pack'] = $packView;
                 }
                 $href = 'baker_day.php?' . http_build_query($stageQuery);
                 ?>
@@ -329,13 +329,22 @@ require_once 'includes/nav.php';
             </article>
         <?php endforeach; ?>
     <?php else: ?>
-        <p class="bd-stage-lead"><?php bakery_te($packView === 'driver' ? 'baker_day.pack_driver_lead' : 'baker_day.pack_lead'); ?></p>
+        <?php
+        $packLeadKey = 'baker_day.pack_lead';
+        if ($packView === 'driver') {
+            $packLeadKey = 'baker_day.pack_driver_lead';
+        } elseif ($packView === 'customer') {
+            $packLeadKey = 'baker_day.pack_customer_lead';
+        }
+        ?>
+        <p class="bd-stage-lead"><?php bakery_te($packLeadKey); ?></p>
         <nav class="bd-pack-view" aria-label="<?php bakery_te('baker_day.pack_view_aria'); ?>">
-            <?php foreach (['product' => 'baker_day.pack_by_product', 'driver' => 'baker_day.pack_by_driver'] as $packKey => $packLabel): ?>
+            <?php foreach (['product' => 'baker_day.pack_by_product', 'driver' => 'baker_day.pack_by_driver', 'customer' => 'baker_day.pack_by_customer'] as $packKey => $packLabel): ?>
                 <?php $packHref = 'baker_day.php?' . http_build_query(['date' => $selectedDate, 'stage' => 'pack', 'pack' => $packKey]); ?>
                 <a class="<?php echo $packView === $packKey ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $packView === $packKey ? ' aria-current="page"' : ''; ?>><?php bakery_te($packLabel); ?></a>
             <?php endforeach; ?>
         </nav>
+        <p class="bd-pack-extra"><a href="<?php echo htmlspecialchars('pack_list.php?' . http_build_query(['date' => $selectedDate, 'view' => 'customer']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('baker_day.open_pack_list'); ?></a></p>
         <details class="bd-card" open>
             <summary><?php bakery_te('baker_day.capp_counter'); ?></summary>
             <p class="bd-card__lead"><?php bakery_te('baker_day.capp_counter_lead'); ?></p>
@@ -390,7 +399,29 @@ require_once 'includes/nav.php';
             return strcasecmp($a['product_name'], $b['product_name']);
         });
         ?>
-        <?php if ($packView === 'driver'): ?>
+        <?php if ($packView === 'customer'): ?>
+            <?php $customerCards = is_array($view['customers'] ?? null) ? $view['customers'] : []; ?>
+            <?php if ($customerCards === []): ?>
+                <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>
+            <?php endif; ?>
+            <?php foreach ($customerCards as $customer): ?>
+                <article class="bd-batch bd-customer">
+                    <div class="bd-batch__row">
+                        <h2><?php echo htmlspecialchars((string)$customer['customer_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
+                        <p class="bd-batch__meta"><?php echo htmlspecialchars(bakery_pack_customer_route_label((string)($customer['route_name'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <p class="bd-batch__meta"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format((int)($customer['total'] ?? 0))]), ENT_QUOTES, 'UTF-8'); ?></p>
+                    </div>
+                    <ul>
+                        <?php foreach ($customer['products'] as $product): ?>
+                            <li>
+                                <span><?php echo htmlspecialchars((string)$product['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                <strong><?php echo number_format((int)$product['quantity']); ?></strong>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </article>
+            <?php endforeach; ?>
+        <?php elseif ($packView === 'driver'): ?>
             <?php $destinations = bakery_baker_day_pack_destinations($packRows); ?>
             <?php if ($destinations === []): ?>
                 <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>

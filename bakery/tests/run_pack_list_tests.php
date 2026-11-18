@@ -77,6 +77,18 @@ $assert(
     bakery_pack_customer_route_label('Maria Route') === bakery_t('pack_list.customer_route', ['route' => 'Maria Route']),
     'a customer card with a driver names that route'
 );
+$customerCards = bakery_pack_customer_cards($packLines, $packRoutes, [10 => 'French', 12 => 'White'], 'Not on a route yet');
+$cardsById = [];
+foreach ($customerCards as $card) {
+    $cardsById[(int)$card['customer_id']] = $card;
+}
+$assert(isset($cardsById[4]) && $cardsById[4]['route_name'] === '', 'baker day customer cards keep an unassigned store');
+$assert((int)$cardsById[2]['total'] === 7 && $cardsById[2]['route_name'] === 'Maria Route', 'baker day customer cards sum a store and keep its route');
+$assert(count($cardsById[2]['products']) === 3, 'baker day customer cards keep each product quantity');
+$bakerDaySrc = (string)file_get_contents($root . '/baker_day.php');
+$assert(strpos($bakerDaySrc, 'baker_day.pack_by_customer') !== false, 'baker day pack toggle includes By customer');
+$assert(strpos($bakerDaySrc, 'bakery_pack_customer_route_label') !== false, 'baker day customer cards use the pack list route line');
+$assert(strpos($bakerDaySrc, "view' => 'customer'") !== false || strpos($bakerDaySrc, "'view' => 'customer'") !== false, 'baker day links to the pack list customer view');
 $assert($grouped['by_route'][0]['driver_name'] === 'Not on a route yet' && (int)$grouped['by_route'][0]['total'] === 5, 'unassigned stops stay in their own route bucket');
 $assert(isset($grouped['all_line_keys']['c2_p10']) && isset($grouped['line_keys_by_driver'][8]['c1_p10']), 'line keys follow the customer and the route');
 $assert(!isset($grouped['all_line_keys']['c3_p10']), 'zero-quantity lines do not become pack keys');

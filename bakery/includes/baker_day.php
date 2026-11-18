@@ -11,6 +11,7 @@ require_once __DIR__ . '/baker_mix.php';
 require_once __DIR__ . '/demand_review.php';
 require_once __DIR__ . '/formula_structure.php';
 require_once __DIR__ . '/staff_driver_profile.php';
+require_once __DIR__ . '/pack_list.php';
 
 /**
  * @param array<int,int> $quantities product_id => pieces
@@ -746,7 +747,8 @@ function bakery_baker_day_view(PDO $db, string $date): array
         $batches[] = $batch;
     }
     $lines = bakery_operating_demand_lines($db, $date);
-    $pack = bakery_baker_day_pack_products($lines, bakery_baker_day_customer_routes($db, $date));
+    $routes = bakery_baker_day_customer_routes($db, $date);
+    $pack = bakery_baker_day_pack_products($lines, $routes);
     return [
         'date' => $date,
         'batches' => $batches,
@@ -754,6 +756,7 @@ function bakery_baker_day_view(PDO $db, string $date): array
         'pull' => bakery_baker_day_pull_list($batches),
         'addable' => bakery_baker_day_addable_doughs($db, $batches),
         'pack' => $pack,
+        'customers' => bakery_pack_customer_cards($lines, $routes),
         'produced' => bakery_baker_day_produced($db, $date),
         'counter' => bakery_baker_day_capp_counter($db, $date),
         'status' => bakery_baker_day_status($juan, $working),
