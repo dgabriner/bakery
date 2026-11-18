@@ -165,7 +165,8 @@ const document = {
   querySelectorAll: function (selector) {
     if (selector === '.photo-complete-btn') return [photoBtn];
     return [];
-  }
+  },
+  dispatchEvent: function () {}
 };
 
 function register(id) {
@@ -252,6 +253,7 @@ const sandbox = {
   innerHeight: 800,
   scrollTo: function () {},
   URL: { createObjectURL: function () { return 'blob:arrival'; }, revokeObjectURL: function () {} },
+  CustomEvent: typeof CustomEvent === 'function' ? CustomEvent : function CustomEvent(type) { this.type = type; },
   __DRIVER_PAGE_I18N__: {
     arrival_photo_failed: 'Arrival photo could not start. Use Skip photo to continue. Ref :ref',
     skip_photo: 'Skip photo',
@@ -342,8 +344,8 @@ async function main() {
   const dirtyAt = Number(sessionStorage.getItem('bakeryRouteDirtyAt') || 0);
   if (!(dirtyAt > 0)) fail('take-over did not mark the route dirty');
   else pass('take-over marks the route dirty');
-  if (reloadCount !== 1) fail('prep page did not ask to reload after take-over, saw ' + reloadCount);
-  else pass('prep page reloads after take-over');
+  if (reloadCount !== 0) fail('prep page reloaded after an in-place take-over, saw ' + reloadCount);
+  else pass('prep page stays on the updated list after take-over');
 
   const beforeBack = reloadCount;
   fireWindow('pageshow', { persisted: true });
