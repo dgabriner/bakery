@@ -48,6 +48,29 @@ function bakery_pack_customer_route_label(string $routeName): string
 }
 
 /**
+ * Customer cards for a pack sheet. Same grouping as the Pack List customer view.
+ *
+ * @param list<array<string,mixed>> $lineItems
+ * @param array<int,array<string,mixed>> $customerRouteById
+ * @param array<int,string> $doughByProduct
+ * @return list<array<string,mixed>>
+ */
+function bakery_pack_customer_cards(array $lineItems, array $customerRouteById, array $doughByProduct = [], string $unassignedLabel = ''): array
+{
+    if ($unassignedLabel === '') {
+        $unassignedLabel = bakery_t('pack_list.unassigned_route');
+    }
+    $grouped = bakery_pack_group_lines($lineItems, $customerRouteById, $doughByProduct, $unassignedLabel);
+    $sorted = bakery_pack_sort_grouped(
+        $grouped['by_product'],
+        $grouped['by_customer'],
+        $grouped['by_route'],
+        false
+    );
+    return $sorted['by_customer'];
+}
+
+/**
  * Group operating-demand lines into the product, customer, and route sheets.
  * Zero quantities are dropped. Repeated customer × product lines stay separate.
  * Customer groups carry the route (driver) name when one is assigned.
