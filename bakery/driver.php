@@ -8,6 +8,7 @@ require_once 'includes/database.php';
 require_once 'includes/zones_catalog.php';
 require_once 'includes/google_maps_config.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/route_autoclose.php';
 require_once 'includes/customer_account.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
@@ -122,6 +123,29 @@ if ($isAuthenticatedDriver) {
     $selectedDriverId = bakery_get_selected_driver_id();
 } else {
     $selectedDriverId = 0;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'nothing_left') {
+    try {
+        if (function_exists('bakery_require_csrf')) {
+            bakery_require_csrf();
+        }
+        $finishDriverId = (int)$selectedDriverId;
+        if (!$isAuthenticatedDriver) {
+            $postedDriverId = (int)($_POST['driver_id'] ?? 0);
+            if ($postedDriverId > 0) {
+                $finishDriverId = $postedDriverId;
+            }
+        }
+        if ($finishDriverId <= 0) {
+            throw new RuntimeException('Choose a driver.');
+        }
+        bakery_route_finish_nothing_left($db, (string)$selectedDate, $finishDriverId);
+        header('Location: driver.php?date=' . rawurlencode((string)$selectedDate) . '&notice=' . rawurlencode(bakery_t('driver.nothing_left_saved')));
+        exit;
+    } catch (Throwable $e) {
+        $driverDeskError = $e->getMessage();
+    }
 }
 
 // Get driver information
@@ -1077,11 +1101,26 @@ document.body.classList.add('driver-route-prep');
             </details>
 
             <?php if ($remainingStops === 0 && $totalStops > 0): ?>
-                <p class="route-closeout-cta">
-                    <a class="route-btn route-btn--primary" href="route_closeout.php?date=<?php echo urlencode($selectedDate); ?>&amp;driver_id=<?php echo (int)$selectedDriverId; ?>">
-                        <?php bakery_te('driver.close_route'); ?>
-                    </a>
-                </p>
+                <?php $finishSnap = bakery_route_finish_snapshot($db, (string)$selectedDate, (int)$selectedDriverId); ?>
+                <section class="route-closeout-cta">
+                    <p><?php echo htmlspecialchars(bakery_t('driver.finish_counts', [
+                        'loaded' => number_format((int)$finishSnap['loaded_units']),
+                        'delivered' => number_format((int)$finishSnap['delivered_units']),
+                    ])); ?></p>
+                    <?php if (!empty($finishSnap['all_terminal']) && empty($finishSnap['reconciled'])): ?>
+                        <form method="post" action="driver.php?date=<?php echo urlencode((string)$selectedDate); ?>">
+                            <?php echo bakery_csrf_field(); ?>
+                            <input type="hidden" name="action" value="nothing_left">
+                            <input type="hidden" name="driver_id" value="<?php echo (int)$selectedDriverId; ?>">
+                            <button class="route-btn route-btn--primary" type="submit"><?php bakery_te('driver.nothing_left'); ?></button>
+                        </form>
+                    <?php endif; ?>
+                    <p>
+                        <a class="route-btn route-btn--primary" href="route_closeout.php?date=<?php echo urlencode($selectedDate); ?>&amp;driver_id=<?php echo (int)$selectedDriverId; ?>">
+                            <?php bakery_te('driver.close_route'); ?>
+                        </a>
+                    </p>
+                </section>
             <?php endif; ?>
 
         </div>

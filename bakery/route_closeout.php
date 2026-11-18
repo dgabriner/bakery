@@ -3,6 +3,7 @@ define('ACCESS_ALLOWED', true);
 require_once 'includes/config.php';
 require_once 'includes/database.php';
 require_once 'includes/product_inventory.php';
+require_once 'includes/route_autoclose.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/route_summary.php';
@@ -66,6 +67,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lines,
                 trim((string)($_POST['notes'] ?? ''))
             );
+            $loadRow = bakery_route_autoclose_load_row($db, $selectedDate, $postDriverId);
+            if ($loadRow) {
+                bakery_route_autoclose_set_closeout_source(
+                    $db,
+                    (int)$loadRow['id'],
+                    $isDriverOnly ? 'driver' : 'manager'
+                );
+            }
             $returnKey = trim((string)($_POST['return'] ?? $_GET['return'] ?? ''));
             if ($returnKey === 'manager' && empty($_POST['stay'])) {
                 $dest = (defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes';
@@ -73,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             $notice = 'Route closed. Loaded units are reconciled as delivered, returned, waste, and door credits.';
+            $focusDriverId = $postDriverId;
+        } elseif ($action === 'nothing_left') {
+            bakery_route_finish_nothing_left($db, $selectedDate, $postDriverId);
+            $notice = bakery_t('driver.nothing_left_saved');
             $focusDriverId = $postDriverId;
         } elseif ($action === 'reopen_route') {
             if ($isDriverOnly) {
@@ -221,6 +234,12 @@ require_once 'includes/nav.php';
                 <div class="closeout-driver-title">
                     <h2><?php echo htmlspecialchars($sheet['driver_name']); ?></h2>
                     <span class="closeout-ready closeout-ready-<?php echo htmlspecialchars($statusKey); ?>"><?php echo htmlspecialchars($statusLabel); ?></span>
+                    <?php if (($sheet['closeout_source'] ?? '') === 'auto'): ?>
+                        <span class="closeout-ready closeout-ready-closed"><?php bakery_te('closeout.chip_auto'); ?></span>
+                    <?php endif; ?>
+                    <?php if (($sheet['load_source'] ?? '') === 'implicit'): ?>
+                        <span class="closeout-ready"><?php bakery_te('closeout.chip_implicit'); ?></span>
+                    <?php endif; ?>
                 </div>
                 <div class="closeout-driver-meta">
                     <span><?php echo (int)$sheet['stop_count']; ?> stop<?php echo (int)$sheet['stop_count'] === 1 ? '' : 's'; ?></span>

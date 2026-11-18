@@ -394,11 +394,16 @@ if ($inventoryReady) {
     $invExtraStmt->execute([$selectedDate]);
     $inventoryExtras = $invExtraStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $notesStmt = $db->prepare('SELECT driver_id, notes FROM driver_loads WHERE delivery_date = ?');
+    $sourceSelect = function_exists('column_exists') && column_exists($db, 'driver_loads', 'load_source')
+        ? ', load_source'
+        : '';
+    $notesStmt = $db->prepare('SELECT driver_id, notes' . $sourceSelect . ' FROM driver_loads WHERE delivery_date = ?');
     $notesStmt->execute([$selectedDate]);
     $notesByDriver = [];
+    $loadSourceByDriver = [];
     foreach ($notesStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $notesByDriver[(int)$row['driver_id']] = (string)($row['notes'] ?? '');
+        $loadSourceByDriver[(int)$row['driver_id']] = (string)($row['load_source'] ?? '');
     }
 
     $driverIds = [];
@@ -529,6 +534,7 @@ if ($inventoryReady) {
             'stops' => $stopsByDriver[$driverId] ?? [],
             'products' => $enriched,
             'notes' => $loadNotes,
+            'load_source' => $loadSourceByDriver[$driverId] ?? '',
             'readiness' => $readiness,
             'remaining_units' => $driverRemaining,
             'inventory_blocked' => $driverBlocked,
@@ -745,6 +751,9 @@ try {
                     <span class="load-ready load-ready-<?php echo htmlspecialchars($readyKey); ?>" title="<?php echo htmlspecialchars($sheet['readiness']['detail']); ?>">
                         <?php echo htmlspecialchars($sheet['readiness']['label']); ?>
                     </span>
+                    <?php if (($sheet['load_source'] ?? '') === 'implicit'): ?>
+                        <span class="load-ready"><?php bakery_te('driver_load.implicit_chip'); ?></span>
+                    <?php endif; ?>
                 </div>
                 <div class="load-driver-meta">
                     <span><strong><?php echo (int)$sheet['stop_count']; ?></strong> stop(s)</span>

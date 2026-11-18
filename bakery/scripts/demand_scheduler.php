@@ -23,6 +23,7 @@ require_once $root . '/includes/daily_order_generation.php';
 require_once $root . '/includes/operational_timeline.php';
 require_once $root . '/includes/cron_run.php';
 require_once $root . '/includes/pan_carry.php';
+require_once $root . '/includes/route_autoclose.php';
 
 $force = in_array('--force', $argv, true);
 $json = in_array('--json', $argv, true);
@@ -46,8 +47,10 @@ try {
         }
     }
     $routeStats = bakery_route_load_rebuild($db);
+    $auto = bakery_route_autoclose_past($db);
     $result['pan_carry'] = $carry;
     $result['route_load'] = $routeStats;
+    $result['route_autoclose'] = $auto;
     bakery_cron_record_run($db, 'demand_scheduler', 'ok', [
         'from_date' => $result['from_date'] ?? null,
         'through_date' => $result['through_date'] ?? null,
@@ -61,7 +64,7 @@ try {
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
     } else {
         echo sprintf(
-            "horizon=%s..%s generated_days=%d orders=%d items=%d preserved=%d routes=%d carried=%d restored=%d db=%s\n",
+            "horizon=%s..%s generated_days=%d orders=%d items=%d preserved=%d routes=%d carried=%d restored=%d auto_closed=%d db=%s\n",
             $result['from_date'],
             $result['through_date'],
             (int)$result['ran_count'],
@@ -71,6 +74,7 @@ try {
             (int)$result['drivers_assigned'],
             (int)$carry['carried'],
             (int)$carry['restored'],
+            (int)($auto['closed'] ?? 0),
             (string)$db->query('SELECT DATABASE()')->fetchColumn()
         );
     }

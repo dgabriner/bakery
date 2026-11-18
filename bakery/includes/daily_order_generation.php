@@ -18,6 +18,7 @@ require_once __DIR__ . '/customer_portal.php';
 require_once __DIR__ . '/customer_order_mutations.php';
 require_once __DIR__ . '/operational_timeline.php';
 require_once __DIR__ . '/cron_run.php';
+require_once __DIR__ . '/route_autoclose.php';
 
 /**
  * Next free dated position for one standing stop.
@@ -1489,9 +1490,12 @@ function bakery_demand_self_heal_dispatch(PDO $db, ?DateTimeImmutable $now = nul
             'body' => bakery_demand_self_heal_result(false, 'role', ''),
         ];
     }
+    $body = bakery_demand_self_heal_if_stale($db, $now);
+    $closed = bakery_route_autoclose_past($db, $now);
+    $body['routes_auto_closed'] = (int)($closed['closed'] ?? 0);
     return [
         'status' => 200,
-        'body' => bakery_demand_self_heal_if_stale($db, $now),
+        'body' => $body,
     ];
 }
 
