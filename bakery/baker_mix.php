@@ -193,7 +193,7 @@ $page_title = bakery_t('page.baker_mix');
                         <?php endif; ?>
                         <p class="bm-batch__meta"><?php echo htmlspecialchars(bakery_t('baker_mix.batch_meta', [
                             'units' => number_format((int)$batch['planned_units']),
-                            'grams' => number_format((int)$batch['total_weight_grams']),
+                            'grams' => number_format((float)($batch['formula_dough_grams'] ?? $batch['total_weight_grams']), 0),
                         ]), ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php if (!empty($batch['batch_multiplier_applied'])): ?>
                             <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_multiplier', [
@@ -212,9 +212,16 @@ $page_title = bakery_t('page.baker_mix');
                                 'batches' => rtrim(rtrim(number_format((float) $batchesFromPieces, 2), '0'), '.'),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
-                        <?php if (!empty($batch['dough_loss_applied_grams'])): ?>
-                            <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('formula_structure.mix_loss', [
-                                'grams' => number_format((float) $batch['dough_loss_applied_grams'], 0),
+                        <?php
+                        $mixTotal = is_array($batch['mix_total'] ?? null) ? $batch['mix_total'] : null;
+                        if ($mixTotal !== null && (float)($mixTotal['piece_grams'] ?? 0) > 0):
+                            $lossKey = !empty($mixTotal['loss_is_default'])
+                                ? 'formula.mix_loss_line_default'
+                                : 'formula.mix_loss_line';
+                        ?>
+                            <p class="bm-batch__hint bm-batch__loss"><?php echo htmlspecialchars(bakery_t($lossKey, [
+                                'piece' => number_format((float)$mixTotal['piece_grams'], 0),
+                                'loss' => number_format((float)$mixTotal['loss_grams'], 0),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
                         <?php if (!empty($batch['pan_dulce_hint'])): ?>
@@ -238,7 +245,8 @@ $page_title = bakery_t('page.baker_mix');
                             $doughForFormula,
                             true,
                             $batch['formula_structure'] ?? null,
-                            $batch['add_in_rows'] ?? []
+                            $batch['add_in_rows'] ?? [],
+                            is_array($batch['mix_total'] ?? null) ? $batch['mix_total'] : null
                         );
                     else: ?>
                         <p class="bm-batch__empty"><?php bakery_te('baker_mix.no_formula'); ?></p>

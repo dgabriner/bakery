@@ -18,6 +18,7 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/production_plan.php';
 require_once __DIR__ . '/product_pack_yields.php';
 require_once __DIR__ . '/product_inventory.php';
+require_once __DIR__ . '/formula_structure.php';
 
 /** @var list<string> */
 define('BAKERY_PMD_VIEWS', ['batches', 'week', 'routes', 'supply']);
@@ -425,6 +426,13 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
     $sumDoughGrams = 0;
     $sumPrior = 0;
     $productCount = 0;
+    $mixStructureIds = [];
+    foreach ($doughBuckets as $mixKey => $mixBucket) {
+        if ((int)$mixKey > 0) {
+            $mixStructureIds[] = (int)$mixKey;
+        }
+    }
+    $mixStructures = bakery_formula_structure_load_map($db, $mixStructureIds);
 
     foreach ($doughBuckets as $bucket) {
         $pieces = 0;
@@ -480,6 +488,14 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
             }
         }
 
+        $storedLoss = 0;
+        if ($doughTypeId) {
+            $storedLoss = $mixStructures[(int)$doughTypeId]['dough_loss_grams'] ?? null;
+        }
+        $mixTotal = bakery_formula_mix_total_grams((float)$doughGrams, $storedLoss);
+        $pieceDoughGrams = (int)round((float)$mixTotal['piece_grams']);
+        $doughGrams = (int)round((float)$mixTotal['total_grams']);
+
         $standard = bakery_pmd_standard_batches(
             $bucket['standard_batch_dough_grams'] > 0 ? (int)$bucket['standard_batch_dough_grams'] : null,
             $doughGrams
@@ -508,6 +524,10 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
             'left_pieces' => max(0, $pieces - $produced),
             'prior_pieces' => $prior,
             'delta_vs_prior' => $pieces - $prior,
+            'piece_dough_grams' => $pieceDoughGrams,
+            'dough_loss_grams' => (float)$mixTotal['loss_grams'],
+            'dough_loss_is_default' => !empty($mixTotal['loss_is_default']),
+            'mix_total' => $mixTotal,
             'dough_grams' => $doughGrams,
             'dough_weight' => bakery_pmd_format_dough_weight($doughGrams),
             'batch' => $batch,

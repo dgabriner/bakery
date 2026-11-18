@@ -13,6 +13,7 @@ require_once 'includes/kitchen_segments.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/formula_units.php';
+require_once 'includes/formula_structure.php';
 require_once 'includes/product_pack_yields.php';
 
 // Days of the week for display
@@ -65,8 +66,7 @@ if (!function_exists('bakery_production_pan_dulce_product_hint')) {
 
 if (!function_exists('bakery_production_echo_formula_items')) {
     /** Shared baker mix list: ingredient name + scaled amount. */
-    function bakery_production_echo_formula_items(array $ingredients, float $totalFlourGrams, float $totalDoughGrams, bool $isBaker): void {
-        $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
+    function bakery_production_echo_formula_items(array $ingredients, float $totalFlourGrams, float $totalDoughGrams, bool $isBaker, ?array $mixTotal = null): void {
         echo '<ul class="bp-formula__list" data-formula-units data-unit-mode="'
             . htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8')
             . '">';
@@ -82,9 +82,13 @@ if (!function_exists('bakery_production_echo_formula_items')) {
             echo '><span>' . htmlspecialchars((string)$ingredient['name'], ENT_QUOTES, 'UTF-8') . '</span>'
                 . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($amount, $classification) . '</strong></li>';
         }
-        echo '<li class="bp-formula-total" data-grams="' . htmlspecialchars((string) $totalDoughGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'
-            . '<span>' . htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8') . '</span>'
-            . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($totalDoughGrams, $doughClassification) . '</strong></li>';
+        $mixLines = is_array($mixTotal) ? $mixTotal : [
+            'piece_grams' => $totalDoughGrams,
+            'loss_grams' => 0.0,
+            'total_grams' => $totalDoughGrams,
+            'loss_is_default' => false,
+        ];
+        bakery_formula_echo_mix_loss_lines($mixLines, 'bp-formula-loss', 'bp-formula-total');
         echo '</ul>';
     }
 }
@@ -465,6 +469,24 @@ try {
         $bName = !empty($b['formula']) ? $b['formula']['name'] : 'Unclassified';
         return strcmp($aName, $bName);
     });
+
+    $mixLossIds = [];
+    foreach ($groupedData as $mixGroup) {
+        $mixId = (int)($mixGroup['dough_type_id'] ?? 0);
+        if ($mixId > 0) {
+            $mixLossIds[] = $mixId;
+        }
+    }
+    $mixStructures = bakery_formula_structure_load_map($db, $mixLossIds);
+    foreach ($groupedData as &$mixGroup) {
+        $mixId = (int)($mixGroup['dough_type_id'] ?? 0);
+        $storedLoss = $mixId > 0 ? ($mixStructures[$mixId]['dough_loss_grams'] ?? null) : 0;
+        $mixGroup['mix_total'] = bakery_formula_mix_total_grams(
+            (float)($mixGroup['total_weight_grams'] ?? 0),
+            $storedLoss
+        );
+    }
+    unset($mixGroup);
     
     // Calculate starter feeding requirements
     $starterNeeds = [
@@ -510,8 +532,9 @@ try {
                 }
                 $starterIngredients = $starterByDoughType[(int)$data['dough_type_id']] ?? [];
                 
-                // Calculate total flour weight for this dough type
-                $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
+                // Flour uses the mix total, including dough loss, so the feeding matches the sheet.
+                $doughForMix = (float)($data['mix_total']['total_grams'] ?? $data['total_weight_grams']);
+                $totalFlour = $doughForMix / ($data['formula']['total_percentage'] / 100);
                 
                 foreach ($starterIngredients as $ingredient) {
                     $amount = $totalFlour * ($ingredient['percentage'] / 100);
@@ -1028,12 +1051,16 @@ if (!empty($groupedData) && is_array($groupedData)) {
                                 'left' => number_format($overviewLeft),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
                             <?php if ($overviewHasFormula):
-                                $overviewFlour = $overviewData['total_weight_grams'] / ($overviewData['formula']['total_percentage'] / 100);
+                                $overviewMix = is_array($overviewData['mix_total'] ?? null)
+                                    ? $overviewData['mix_total']
+                                    : bakery_formula_mix_total_grams((float)$overviewData['total_weight_grams'], 0);
+                                $overviewFlour = (float)$overviewMix['total_grams'] / ($overviewData['formula']['total_percentage'] / 100);
                                 bakery_production_echo_formula_items(
                                     $overviewData['ingredients'],
                                     (float)$overviewFlour,
-                                    (float)$overviewData['total_weight_grams'],
-                                    $isBaker
+                                    (float)$overviewMix['total_grams'],
+                                    $isBaker,
+                                    $overviewMix
                                 );
                             else: ?>
                                 <p class="bp-mix-card__empty"><?php bakery_te('production.mix_no_formula'); ?> <?php echo htmlspecialchars(bakery_t('production.formula_next'), ENT_QUOTES, 'UTF-8'); ?></p>
@@ -1086,11 +1113,14 @@ if (!empty($groupedData) && is_array($groupedData)) {
                     </summary>
 
                     <?php if (!empty($data['ingredients']) && (float)($data['formula']['total_percentage'] ?? 0) > 0 && !empty($doughTypeId)):
-                        $totalFlour = $data['total_weight_grams'] / ($data['formula']['total_percentage'] / 100);
+                        $lineMix = is_array($data['mix_total'] ?? null)
+                            ? $data['mix_total']
+                            : bakery_formula_mix_total_grams((float)$data['total_weight_grams'], 0);
+                        $totalFlour = (float)$lineMix['total_grams'] / ($data['formula']['total_percentage'] / 100);
                     ?>
                         <details class="bp-formula" open>
-                            <summary><?php echo htmlspecialchars(bakery_t('production.dough_formula', ['grams' => number_format($data['total_weight_grams'], 0)]), ENT_QUOTES, 'UTF-8'); ?></summary>
-                            <?php bakery_production_echo_formula_items($data['ingredients'], (float)$totalFlour, (float)$data['total_weight_grams'], $isBaker); ?>
+                            <summary><?php echo htmlspecialchars(bakery_t('production.dough_formula', ['grams' => number_format((float)$lineMix['total_grams'], 0)]), ENT_QUOTES, 'UTF-8'); ?></summary>
+                            <?php bakery_production_echo_formula_items($data['ingredients'], (float)$totalFlour, (float)$lineMix['total_grams'], $isBaker, $lineMix); ?>
                         </details>
                     <?php endif; ?>
 
@@ -1291,6 +1321,7 @@ button.bp-pack-link { font: inherit; cursor: pointer; }
 .bp-batch-hint strong { display: block; margin-bottom: 2px; }
 .bp-formula__list { list-style: none; margin: 0; padding: 0 16px 14px; display: grid; gap: 8px; }
 .bp-formula__list li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; background: #fff; border: 1px solid #e3ece7; border-radius: 8px; }
+.bp-formula-loss { background: #e7f3ec; border-color: #8db59a; }
 .bp-products { display: grid; gap: 12px; padding: 14px; }
 .bp-product { display: grid; gap: 14px; padding: 14px; border: 1px solid #e3ece7; border-radius: 12px; background: #fcfefd; }
 .bp-product--complete { background: #f3fbf5; border-color: #b8d9c2; }

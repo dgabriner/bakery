@@ -150,6 +150,34 @@ fs_assert_near(
     'two mixes carry 100 g loss'
 );
 
+echo "\n=== Mix sheet total adds dough loss once ===\n";
+$concha = bakery_formula_mix_total_grams(855 * 45, null);
+fs_assert_near(38475, $concha['piece_grams'], 'Concha piece dough is 855 x 45 g');
+fs_assert_near(50, $concha['loss_grams'], 'blank dough loss counts as 50 g');
+fs_assert_near(38525, $concha['total_grams'], 'Concha mix total is pieces x weight + 50 g');
+fs_assert_true($concha['loss_is_default'] === true, 'blank loss is marked as the default');
+$blankString = bakery_formula_mix_total_grams(855 * 45, '');
+fs_assert_near(38525, $blankString['total_grams'], 'empty dough loss string counts as 50 g');
+$savedLoss = bakery_formula_mix_total_grams(855 * 45, 80);
+fs_assert_near(80, $savedLoss['loss_grams'], 'a saved dough loss replaces the default');
+fs_assert_near(38555, $savedLoss['total_grams'], 'saved loss is added once, not per piece');
+fs_assert_true($savedLoss['loss_is_default'] === false, 'a saved loss is not the default');
+$zeroLoss = bakery_formula_mix_total_grams(855 * 45, 0);
+fs_assert_near(0, $zeroLoss['loss_grams'], 'explicit zero loss stays zero');
+fs_assert_near(38475, $zeroLoss['total_grams'], 'explicit zero does not add 50 g');
+$negative = bakery_formula_mix_total_grams(855 * 45, -5);
+fs_assert_near(50, $negative['loss_grams'], 'negative loss falls back to 50 g');
+$noPieces = bakery_formula_mix_total_grams(0, null);
+fs_assert_near(0, $noPieces['total_grams'], 'a mix with no pieces does not invent dough');
+fs_assert_near(0, $noPieces['loss_grams'], 'no pieces means no loss line');
+ob_start();
+bakery_formula_echo_mix_loss_lines($concha, 'bp-formula-loss', 'bp-formula-total');
+$lossHtml = ob_get_clean();
+fs_assert_true(strpos($lossHtml, 'bp-formula-loss') !== false, 'mix total renders a separate loss line');
+fs_assert_true(strpos($lossHtml, '38,475') !== false, 'loss line shows the piece-dough grams');
+fs_assert_true(strpos($lossHtml, '38,525') !== false, 'total line shows pieces x weight + loss');
+fs_assert_true(strpos($lossHtml, 'bp-formula-total') !== false, 'total dough stays its own line');
+
 echo "\n=== Starter folding ===\n";
 $formula = [
     ['ingredient_id' => 1, 'ingredient_name' => 'Bread Flour', 'unit' => 'g', 'percentage' => 100],
@@ -398,6 +426,26 @@ $formulasSrc = (string) file_get_contents($root . '/formulas.php');
 fs_assert_true(strpos($formulasSrc, 'bakery_formula_structure_render_card') !== false, 'formulas page renders the structure section');
 $mapSrc = (string) file_get_contents($root . '/includes/agent_work_map.php');
 fs_assert_true(strpos($mapSrc, 'run_formula_structure_tests.php') !== false, 'work map registers the formula structure suite');
+$uiSrc = (string) file_get_contents($root . '/includes/formula_structure_ui.php');
+fs_assert_true(
+    strpos($uiSrc, '$loss === null ? bakery_formula_default_dough_loss_grams() : $loss') !== false,
+    'formula form prefills the shared 50 g default'
+);
+fs_assert_true(strpos($en['formula_structure.dough_loss_hint'], 'blank') !== false, 'English hint says a blank save still counts');
+fs_assert_true(strpos($es['formula_structure.dough_loss_hint'], 'blanco') !== false, 'Spanish hint says a blank save still counts');
+fs_assert_true(isset($en['formula.mix_loss_line'], $es['formula.mix_loss_line']), 'mix loss line exists in both languages');
+fs_assert_true(isset($en['formula.mix_loss_line_default'], $es['formula.mix_loss_line_default']), 'default mix loss line exists in both languages');
+foreach ([
+    'production.php' => 'bakery_formula_mix_total_grams',
+    'includes/baker_mix.php' => 'bakery_formula_mix_total_grams',
+    'includes/production_manager_dashboard.php' => 'bakery_formula_mix_total_grams',
+    'baker_mix.php' => 'formula.mix_loss_line',
+    'production_manager.php' => 'formula.mix_loss_line',
+] as $rel => $needle) {
+    $pageSrc = (string) file_get_contents($root . '/' . $rel);
+    fs_assert_true(strpos($pageSrc, $needle) !== false, $rel . ' uses the shared mix loss total');
+}
+fs_assert_true(!is_file($root . '/database/schema/118_dough_loss_default.sql'), 'blank loss does not need a backfill migration');
 
 echo "\n=== Summary ===\n";
 echo "$pass passed, $fail failed\n";
