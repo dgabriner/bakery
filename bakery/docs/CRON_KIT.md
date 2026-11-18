@@ -29,10 +29,10 @@ The Live tree is `/home/dh_dp755h/bakery.sourflour.org/bake`. Add this line if i
 0 6 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/staff_alert_digest.php >> /home/dh_dp755h/cron_digest.log 2>&1
 
 # Next-day dual survey, 17:00 America/Los_Angeles
-0 17 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/survey_dual_open.php
+0 17 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/survey_dual_open.php
 ```
 
-On this Live host, `YOUR_USER` is `dh_dp755h`. The 5:00 PM line is also in the script header. Do not open the dual survey from a GET.
+The 5:00 PM line is also in the script header. Do not open the dual survey from a GET.
 
 Log paths on the shell host:
 - `/home/dh_dp755h/cron_demand.log`

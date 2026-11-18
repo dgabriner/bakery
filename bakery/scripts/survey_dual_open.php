@@ -8,7 +8,7 @@
  * Does not run from a web GET. Survey Center and survey.php only look up rows.
  *
  * DreamHost, 5:00 PM America/Los_Angeles:
- *   0 17 * * * /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/survey_dual_open.php
+ *   0 17 * * * /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/survey_dual_open.php
  */
 define('ACCESS_ALLOWED', true);
 
