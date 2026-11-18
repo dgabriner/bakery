@@ -6119,6 +6119,8 @@ return [
 
     // UX audit 2026-10 staff copy. Keep this block together at the end of the catalog.
     // Baker day and craft nav. Restored from Staging promotion export stage-20261118-025502-cf4daa.
+    'nav.driving_manager_home' => 'Manager tools',
+    'nav.driving_admin_home' => 'Admin tools',
     'nav.baker_day' => 'Baker day',
     'nav.baker_day_short' => 'Baker',
     'nav.baker_day_aria' => 'Baker day',

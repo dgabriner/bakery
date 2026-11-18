@@ -382,4 +382,76 @@ i18n_assert(
         && ($bdEs['pack_list.unassigned_route'] ?? '') !== ''
 );
 
+/**
+ * Literal translation keys in the Staging baker-day pages, plus the keys those
+ * files build with a prefix (admin mode, formula units, sales short labels).
+ *
+ * @return list<string>
+ */
+function i18n_baker_day_file_keys(string $path): array
+{
+    $src = (string)file_get_contents($path);
+    $keys = [];
+    if (preg_match_all("/bakery_t(?:e)?\\(\\s*'([a-z][a-z0-9_.]*[a-z0-9_])'/", $src, $calls)) {
+        foreach ($calls[1] as $key) {
+            if (substr($key, -1) === '.') {
+                continue;
+            }
+            $keys[$key] = true;
+        }
+    }
+    if (preg_match_all("/'([a-z][a-z0-9_]*(\\.[a-z0-9_]+)+)'/", $src, $quoted)) {
+        foreach ($quoted[1] as $key) {
+            if (substr($key, -4) === '.php' || substr($key, -1) === '.') {
+                continue;
+            }
+            $keys[$key] = true;
+        }
+    }
+    if (strpos($src, "'mode.' . \$mode") !== false) {
+        foreach (['full', 'driver', 'production'] as $mode) {
+            $keys['mode.' . $mode] = true;
+            $keys['mode.' . $mode . '_short'] = true;
+        }
+    }
+    if (strpos($src, "'formula.units.'") !== false) {
+        foreach (['g', 'lb', 'gal', 'all', 'g_aria', 'lb_aria', 'gal_aria', 'all_aria'] as $unit) {
+            $keys['formula.units.' . $unit] = true;
+        }
+    }
+    if (strpos($src, "'nav.sales_short.'") !== false) {
+        foreach (['sales_home', 'sales_leads', 'sales_customers'] as $page) {
+            $keys['nav.sales_short.' . $page] = true;
+        }
+    }
+    $out = array_keys($keys);
+    sort($out);
+    return $out;
+}
+
+$bakerDayFiles = [
+    $root . '/baker_day.php',
+    $root . '/includes/baker_day.php',
+    $root . '/includes/staff_driver_profile.php',
+    $root . '/includes/nav.php',
+    $root . '/includes/admin_workspace_mode.php',
+];
+$seenBakerDayKey = false;
+foreach ($bakerDayFiles as $bakerDayFile) {
+    i18n_assert('Baker day source is present: ' . basename($bakerDayFile), is_file($bakerDayFile));
+    if (!is_file($bakerDayFile)) {
+        continue;
+    }
+    foreach (i18n_baker_day_file_keys($bakerDayFile) as $bdFileKey) {
+        $seenBakerDayKey = true;
+        $enText = (string)($bdEn[$bdFileKey] ?? '');
+        $esText = (string)($bdEs[$bdFileKey] ?? '');
+        i18n_assert(
+            "Staging baker day file key $bdFileKey exists in en and es",
+            $enText !== '' && $esText !== '' && $enText !== $bdFileKey && $esText !== $bdFileKey
+        );
+    }
+}
+i18n_assert('Baker day files use at least one language key', $seenBakerDayKey);
+
 exit($failures > 0 ? 1 : 0);
