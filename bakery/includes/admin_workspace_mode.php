@@ -435,11 +435,18 @@ function bakery_admin_workspace_mode_enforce(string $script): void
     if (!bakery_admin_workspace_mode_is_admin()) {
         return;
     }
+    bakery_admin_craft_preview_consume_post();
+    $script = strtolower(basename($script));
+    if (bakery_admin_craft_preview_enforce($script)) {
+        return;
+    }
+    if ($script === 'baker_day.php' && bakery_admin_craft_preview_allowed(function_exists('bakery_current_user') ? bakery_current_user() : null)) {
+        return;
+    }
     $mode = bakery_admin_workspace_mode();
     if ($mode === 'full') {
         return;
     }
-    $script = strtolower(basename($script));
     $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     if ($script === 'text_comms.php' && in_array($method, ['GET', 'HEAD'], true) && (string)($_GET['view'] ?? '') !== 'surveys') {
         $base = defined('BASE_URL') ? BASE_URL : '/';
@@ -523,4 +530,208 @@ function bakery_admin_workspace_mode_shortcuts(string $mode): array
         ];
     }
     return [];
+}
+
+/**
+ * Danny's admin profile can open a baker day and a driver phone.
+ * The session flag only changes which bar he sees. It does not change his role.
+ */
+function bakery_admin_craft_preview_allowed(?array $user): bool
+{
+    if ($user === null || (string)($user['role_slug'] ?? '') !== 'administrator') {
+        return false;
+    }
+    if (!function_exists('bakery_staff_name_key')) {
+        require_once __DIR__ . '/staff_driver_profile.php';
+    }
+    $key = bakery_staff_name_key((string)($user['display_name'] ?? ''));
+    if ($key === '') {
+        return false;
+    }
+    $first = explode(' ', $key)[0];
+    return $key === 'danny' || $first === 'danny';
+}
+
+function bakery_admin_craft_preview(): string
+{
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    if (!bakery_admin_craft_preview_allowed($user)) {
+        return '';
+    }
+    $mode = (string)($_SESSION['admin_craft_preview'] ?? '');
+    return in_array($mode, ['baker', 'driver'], true) ? $mode : '';
+}
+
+function bakery_admin_craft_preview_set(string $mode): void
+{
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    if (!bakery_admin_craft_preview_allowed($user) || !in_array($mode, ['baker', 'driver'], true)) {
+        unset($_SESSION['admin_craft_preview']);
+        return;
+    }
+    $_SESSION['admin_craft_preview'] = $mode;
+}
+
+function bakery_admin_craft_preview_clear(): void
+{
+    unset($_SESSION['admin_craft_preview']);
+}
+
+/**
+ * @return list<array{id:int,name:string}>
+ */
+function bakery_admin_craft_preview_drivers(PDO $db): array
+{
+    try {
+        $rows = $db->query('SELECT id, name FROM drivers WHERE COALESCE(archived, 0) = 0 ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $out = [];
+    foreach ($rows ?: [] as $row) {
+        $id = (int)($row['id'] ?? 0);
+        $name = trim((string)($row['name'] ?? ''));
+        if ($id <= 0 || $name === '') {
+            continue;
+        }
+        $out[] = ['id' => $id, 'name' => $name];
+    }
+    return $out;
+}
+
+/**
+ * @return list<string>
+ */
+function bakery_admin_craft_preview_driver_scripts(): array
+{
+    return [
+        'driver.php',
+        'driver_stops.php',
+        'pack_list.php',
+        'driver_list.php',
+        'complete_delivery.php',
+        'driver_session_ping.php',
+        'upload_driver_photo.php',
+        'driver_photo.php',
+        'get_customer_order_details.php',
+        'get_driver_orders.php',
+        'global_gps_handler.php',
+        'call_headquarters.php',
+        'qr_login.php',
+        'logout.php',
+        'time_clock.php',
+        'survey.php',
+        'client_error_api.php',
+        'login_audit_api.php',
+    ];
+}
+
+function bakery_admin_craft_preview_db(): ?PDO
+{
+    if (isset($GLOBALS['db']) && $GLOBALS['db'] instanceof PDO) {
+        return $GLOBALS['db'];
+    }
+    return null;
+}
+
+function bakery_admin_craft_preview_redirect(string $target): void
+{
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+    header('Location: ' . $base . ltrim($target, '/'));
+    exit;
+}
+
+function bakery_admin_craft_preview_consume_post(): void
+{
+    if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
+        return;
+    }
+    if (!isset($_POST['admin_craft_preview'])) {
+        return;
+    }
+    if (!bakery_admin_craft_preview_allowed(function_exists('bakery_current_user') ? bakery_current_user() : null)) {
+        return;
+    }
+    if (function_exists('bakery_require_csrf')) {
+        bakery_require_csrf();
+    }
+    $action = (string)$_POST['admin_craft_preview'];
+    if ($action === 'exit') {
+        bakery_admin_craft_preview_clear();
+        $mode = bakery_admin_workspace_mode();
+        bakery_admin_craft_preview_redirect(bakery_admin_workspace_mode_home($mode));
+    }
+    if ($action === 'baker') {
+        bakery_admin_craft_preview_set('baker');
+        $date = bakery_admin_craft_preview_date((string)($_POST['date'] ?? ''));
+        bakery_admin_craft_preview_redirect('baker_day.php?date=' . rawurlencode($date));
+    }
+    if ($action !== 'driver') {
+        return;
+    }
+    $db = bakery_admin_craft_preview_db();
+    $driverId = (int)($_POST['driver_id'] ?? 0);
+    if (!$db || $driverId <= 0) {
+        bakery_admin_craft_preview_redirect('index.php');
+    }
+    $driverName = '';
+    foreach (bakery_admin_craft_preview_drivers($db) as $driver) {
+        if ((int)$driver['id'] === $driverId) {
+            $driverName = (string)$driver['name'];
+            break;
+        }
+    }
+    if ($driverName === '') {
+        bakery_admin_craft_preview_redirect('index.php');
+    }
+    if (function_exists('bakery_set_selected_driver')) {
+        bakery_set_selected_driver($driverId, $driverName);
+    } else {
+        $_SESSION['selected_driver_id'] = $driverId;
+        $_SESSION['selected_driver_name'] = $driverName;
+    }
+    bakery_admin_craft_preview_set('driver');
+    $date = bakery_admin_craft_preview_date((string)($_POST['date'] ?? ''));
+    bakery_admin_craft_preview_redirect('driver.php?driver_id=' . $driverId . '&date=' . rawurlencode($date));
+}
+
+function bakery_admin_craft_preview_date(string $raw): string
+{
+    $raw = trim($raw);
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+    if ($dt && $dt->format('Y-m-d') === $raw) {
+        return $raw;
+    }
+    return date('Y-m-d');
+}
+
+/**
+ * True when a craft preview is on and this script may stay open.
+ * Redirects and exits when the preview is on and the script is outside it.
+ */
+function bakery_admin_craft_preview_enforce(string $script): bool
+{
+    $preview = bakery_admin_craft_preview();
+    if ($preview === '') {
+        return false;
+    }
+    $script = strtolower(basename($script));
+    if ($preview === 'baker') {
+        $allowed = ['baker_day.php', 'logout.php', 'time_clock.php', 'client_error_api.php', 'login_audit_api.php'];
+        if (in_array($script, $allowed, true)) {
+            return true;
+        }
+        $date = bakery_admin_craft_preview_date((string)($_GET['date'] ?? ''));
+        bakery_admin_craft_preview_redirect('baker_day.php?date=' . rawurlencode($date));
+    }
+    if (in_array($script, bakery_admin_craft_preview_driver_scripts(), true)) {
+        return true;
+    }
+    $driverId = function_exists('bakery_get_selected_driver_id') ? bakery_get_selected_driver_id() : (int)($_SESSION['selected_driver_id'] ?? 0);
+    $date = bakery_admin_craft_preview_date((string)($_GET['date'] ?? ''));
+    $target = 'driver.php?date=' . rawurlencode($date);
+    if ($driverId > 0) {
+        $target .= '&driver_id=' . $driverId;
+    }
+    bakery_admin_craft_preview_redirect($target);
 }
