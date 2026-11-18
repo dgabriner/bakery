@@ -165,7 +165,8 @@ const document = {
   querySelectorAll: function (selector) {
     if (selector === '.photo-complete-btn') return [photoBtn];
     return [];
-  }
+  },
+  dispatchEvent: function () {}
 };
 
 function register(id) {
@@ -261,6 +262,10 @@ const sandbox = {
   bakeryReportClientError: function (kind, message, stack, reference) {
     reports.push({ kind: kind, message: message, stack: stack, reference: reference });
   },
+  CustomEvent: function CustomEvent(type, params) {
+    this.type = type;
+    this.detail = params && params.detail;
+  },
   fetch: function () {
     const payload = {
       success: true,
@@ -342,8 +347,8 @@ async function main() {
   const dirtyAt = Number(sessionStorage.getItem('bakeryRouteDirtyAt') || 0);
   if (!(dirtyAt > 0)) fail('take-over did not mark the route dirty');
   else pass('take-over marks the route dirty');
-  if (reloadCount !== 1) fail('prep page did not ask to reload after take-over, saw ' + reloadCount);
-  else pass('prep page reloads after take-over');
+  if (reloadCount !== 0) fail('prep page reloaded after take-over, saw ' + reloadCount);
+  else pass('prep page stays up after take-over');
 
   const beforeBack = reloadCount;
   fireWindow('pageshow', { persisted: true });

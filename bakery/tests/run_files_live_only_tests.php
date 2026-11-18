@@ -205,6 +205,11 @@ except SystemExit:
     pass
 else:
     raise SystemExit("accepted a duplicate")
+newer = mod.staging_newer_than_main_line(["includes/header.php", "lang/en.php", "lang/es.php"])
+if newer != "Staging newer than main: includes/header.php, lang/en.php, lang/es.php":
+    raise SystemExit("unexpected newer line: " + newer)
+if mod.staging_newer_than_main_line([]) != "Staging newer than main: none":
+    raise SystemExit("unexpected none line")
 digest = mod.git_file_sha256("HEAD", "route_photo_journey.php")
 disk = hashlib.sha256((root / "route_photo_journey.php").read_bytes()).hexdigest()
 if digest != disk:
