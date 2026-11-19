@@ -7,10 +7,23 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/staff_driver_profile.php';
+if (is_file(__DIR__ . '/includes/sandbox.php')) {
+    require_once __DIR__ . '/includes/sandbox.php';
+}
 
-// Already logged in → home
+// Already logged in → home. Jasmine's practice login opens the Sandbox.
+// A manager who drives (Laura) opens her route; other roles keep their home.
 if ($existingUser = bakery_current_user()) {
-    header('Location: ' . BASE_URL . bakery_role_home($existingUser['role_slug'] ?? ''));
+    $existingDb = null;
+    try {
+        $existingDb = check_mysql_connection();
+    } catch (Throwable $e) {
+        $existingDb = null;
+    }
+    $sandboxHome = function_exists('bakery_sandbox_home_for_user') ? bakery_sandbox_home_for_user($existingUser) : null;
+    $existingHome = $sandboxHome ?? bakery_staff_login_home($existingDb, $existingUser);
+    header('Location: ' . BASE_URL . $existingHome);
     exit;
 }
 
@@ -57,7 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user = bakery_current_user();
                 $role = $user['role_slug'] ?? '';
                 if ($user && bakery_role_uses_dedicated_home($role)) {
-                    $dest = BASE_URL . bakery_role_home($role);
+                    $dest = BASE_URL . bakery_staff_login_home($db, $user);
+                }
+                $sandboxHome = function_exists('bakery_sandbox_home_for_user') ? bakery_sandbox_home_for_user($user) : null;
+                if ($sandboxHome !== null) {
+                    $dest = BASE_URL . $sandboxHome;
                 }
                 header('Location: ' . $dest);
                 exit;

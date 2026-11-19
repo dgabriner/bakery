@@ -345,7 +345,7 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
     $stmt = $db->prepare(
         "SELECT p.id, p.name, p.weight_grams, p.dough_type_id,
                 dt.name AS dough_type_name, {$standardSelect},
-                pl.name AS product_line_name
+                pl.id AS product_line_id, pl.name AS product_line_name
          FROM products p
          LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
          LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
@@ -371,6 +371,9 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
             $doughBuckets[$doughKey] = [
                 'dough_type_id' => $doughKey > 0 ? $doughKey : null,
                 'dough_type_name' => $doughName,
+                'product_line_id' => (int)($product['product_line_id'] ?? 0) > 0
+                    ? (int)$product['product_line_id']
+                    : null,
                 'product_line_name' => (string)($product['product_line_name'] ?? ''),
                 'standard_batch_dough_grams' => isset($product['standard_batch_dough_grams'])
                     ? (int)$product['standard_batch_dough_grams']
@@ -500,6 +503,7 @@ function bakery_pmd_build(PDO $db, string $date, array $options = []): array
         $doughs[] = [
             'dough_type_id' => $doughTypeId,
             'dough_type_name' => $bucket['dough_type_name'],
+            'product_line_id' => $bucket['product_line_id'] ?? null,
             'product_line_name' => $bucket['product_line_name'],
             'product_count' => count($bucket['products']),
             'pieces' => $pieces,
@@ -1100,5 +1104,759 @@ function bakery_pmd_demand_vs_supply(PDO $db, string $date): array
         ],
         'incomplete' => !$inventoryReady || ($sumProduced === 0 && $sumOnHand === 0 && $sumDemand > 0),
         'links' => bakery_pmd_links($date),
+    ];
+}
+
+/**
+ * Bake day on the Production Manager page. Invalid input is today.
+ */
+function bakery_pmd_resolve_bake_date(string $raw): string
+{
+    $raw = trim($raw);
+    $dt = DateTime::createFromFormat('!Y-m-d', $raw);
+    if ($dt && $dt->format('Y-m-d') === $raw) {
+        return $raw;
+    }
+    return date('Y-m-d');
+}
+
+/**
+ * @param list<string> $coverDates
+ */
+function bakery_pmd_resolve_cover(string $raw, array $coverDates, string $bakeDate): string
+{
+    $raw = trim($raw);
+    if (in_array($raw, $coverDates, true)) {
+        return $raw;
+    }
+    return $coverDates[0] ?? $bakeDate;
+}
+
+/**
+ * @return list<array{family:string,cover_dates:list<string>,active:bool}>
+ */
+function bakery_pmd_bake_families(string $bakeDate): array
+{
+    if (!function_exists('bakery_production_cadence_cover_dates')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    $bakeDate = bakery_pmd_resolve_bake_date($bakeDate);
+    $families = [];
+    foreach ([BAKERY_PRODUCTION_CADENCE_DAILY, BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR] as $family) {
+        $covers = bakery_production_cadence_cover_dates($family, $bakeDate);
+        $families[] = [
+            'family' => $family,
+            'cover_dates' => $covers,
+            'active' => $covers !== [],
+        ];
+    }
+    return $families;
+}
+
+/**
+ * @return list<string>
+ */
+function bakery_pmd_bake_cover_dates(string $bakeDate): array
+{
+    $dates = [];
+    foreach (bakery_pmd_bake_families($bakeDate) as $family) {
+        foreach ($family['cover_dates'] as $date) {
+            $dates[$date] = true;
+        }
+    }
+    $out = array_keys($dates);
+    sort($out);
+    return $out;
+}
+
+/**
+ * @param list<string> $dates
+ */
+function bakery_pmd_format_cover_dates(array $dates): string
+{
+    $out = [];
+    foreach ($dates as $date) {
+        $ts = strtotime((string)$date);
+        if ($ts) {
+            $out[] = date('D n/j', $ts);
+        }
+    }
+    return implode(', ', $out);
+}
+
+function bakery_pmd_bake_cover_label(string $bakeDate): string
+{
+    if (!function_exists('bakery_production_cadence_cover_dates')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    $bakeDate = bakery_pmd_resolve_bake_date($bakeDate);
+    $parts = [];
+    foreach (bakery_pmd_bake_families($bakeDate) as $family) {
+        if ($family['cover_dates'] === []) {
+            continue;
+        }
+        $days = bakery_pmd_format_cover_dates($family['cover_dates']);
+        $familyLabel = function_exists('bakery_t')
+            ? bakery_t('production_cadence.family.' . $family['family'])
+            : $family['family'];
+        $bakeLabel = date('l, F j', strtotime($bakeDate));
+        if (function_exists('bakery_t')) {
+            $parts[] = bakery_t('production_cadence.day_chip', [
+                'family' => $familyLabel,
+                'bake' => $bakeLabel,
+                'days' => $days,
+            ]);
+        } else {
+            $parts[] = $familyLabel . ' ' . $days;
+        }
+    }
+    return implode(' · ', $parts);
+}
+
+/**
+ * @param list<int> $values newest first or any order
+ */
+function bakery_pmd_median(array $values): int
+{
+    $nums = array_map('intval', array_values($values));
+    sort($nums);
+    $count = count($nums);
+    if ($count === 0) {
+        return 0;
+    }
+    $mid = intdiv($count, 2);
+    if ($count % 2 === 1) {
+        return (int)$nums[$mid];
+    }
+    return (int)round(($nums[$mid - 1] + $nums[$mid]) / 2);
+}
+
+/**
+ * @param list<int> $samples newest first
+ * @return array{last:?int,median:?int,samples:int}
+ */
+function bakery_pmd_usual_summary(array $samples): array
+{
+    $samples = array_values(array_map('intval', $samples));
+    return [
+        'last' => $samples === [] ? null : (int)$samples[0],
+        'median' => count($samples) >= 3 ? bakery_pmd_median($samples) : null,
+        'samples' => count($samples),
+    ];
+}
+
+/**
+ * @param list<int> $productIds
+ * @return array<int, array{product_line_name:string,product_line_id:?int,dough_type_id:?int}>
+ */
+function bakery_pmd_product_line_names(PDO $db, array $productIds): array
+{
+    static $cache = [];
+    $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds))));
+    $missing = [];
+    foreach ($productIds as $id) {
+        if (!array_key_exists($id, $cache)) {
+            $missing[] = $id;
+        }
+    }
+    if ($missing !== []) {
+        $placeholders = implode(',', array_fill(0, count($missing), '?'));
+        $stmt = $db->prepare(
+            "SELECT p.id, pl.id AS product_line_id, pl.name AS product_line_name, p.dough_type_id
+             FROM products p
+             LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
+             LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+             WHERE p.id IN ({$placeholders})"
+        );
+        $stmt->execute($missing);
+        $found = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $found[(int)$row['id']] = $row;
+        }
+        foreach ($missing as $id) {
+            $row = $found[$id] ?? null;
+            $lineId = (int)($row['product_line_id'] ?? 0);
+            $doughId = (int)($row['dough_type_id'] ?? 0);
+            $cache[$id] = [
+                'product_line_name' => (string)($row['product_line_name'] ?? ''),
+                'product_line_id' => $lineId > 0 ? $lineId : null,
+                'dough_type_id' => $doughId > 0 ? $doughId : null,
+            ];
+        }
+    }
+    $out = [];
+    foreach ($productIds as $id) {
+        $out[$id] = $cache[$id];
+    }
+    return $out;
+}
+
+/**
+ * Previous same weekdays of operating demand, newest first.
+ * A sample is one bake day's cover window. Dated beats standing inside each cover date.
+ *
+ * @return list<array{date:string,by_product:array<int,int>}>
+ */
+function bakery_pmd_bake_day_history(PDO $db, string $bakeDate, int $weeks = 8): array
+{
+    if (!function_exists('bakery_operating_demand_by_product')) {
+        require_once __DIR__ . '/demand_review.php';
+    }
+    if (!function_exists('bakery_production_cadence_family')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    $weeks = max(0, min(8, $weeks));
+    $bakeDate = bakery_pmd_resolve_bake_date($bakeDate);
+    $demandCache = [];
+    $demandFor = static function (string $date) use ($db, &$demandCache): array {
+        if (!isset($demandCache[$date])) {
+            $built = bakery_operating_demand_by_product($db, $date);
+            $byProduct = is_array($built['by_product'] ?? null) ? $built['by_product'] : [];
+            $demandCache[$date] = $byProduct;
+        }
+        return $demandCache[$date];
+    };
+    $history = [];
+    $lineNames = [];
+    for ($i = 1; $i <= $weeks; $i++) {
+        $past = date('Y-m-d', strtotime($bakeDate . ' -' . (7 * $i) . ' days'));
+        $coversByFamily = [];
+        $seenProducts = [];
+        foreach (bakery_pmd_bake_families($past) as $family) {
+            $coversByFamily[$family['family']] = $family['cover_dates'];
+            foreach ($family['cover_dates'] as $cover) {
+                foreach ($demandFor($cover) as $pid => $qty) {
+                    if ((int)$qty > 0) {
+                        $seenProducts[(int)$pid] = true;
+                    }
+                }
+            }
+        }
+        $ids = array_keys($seenProducts);
+        $unknown = [];
+        foreach ($ids as $pid) {
+            if (!isset($lineNames[$pid])) {
+                $unknown[] = $pid;
+            }
+        }
+        if ($unknown !== []) {
+            $lineNames += bakery_pmd_product_line_names($db, $unknown);
+        }
+        $byProduct = [];
+        foreach ($ids as $pid) {
+            $family = bakery_production_cadence_family($lineNames[$pid]['product_line_name'] ?? '');
+            $qty = 0;
+            foreach ($coversByFamily[$family] ?? [] as $cover) {
+                $qty += (int)($demandFor($cover)[$pid] ?? 0);
+            }
+            if ($qty > 0) {
+                $byProduct[$pid] = $qty;
+            }
+        }
+        $history[] = [
+            'date' => $past,
+            'by_product' => $byProduct,
+        ];
+    }
+    return $history;
+}
+
+/**
+ * @param list<array<string,mixed>> $doughs
+ * @return list<array<string,mixed>>
+ */
+function bakery_pmd_attach_formulas(PDO $db, array $doughs): array
+{
+    if ($doughs === [] || !function_exists('table_exists') || !table_exists($db, 'formula_ingredients')) {
+        return $doughs;
+    }
+    if (!function_exists('bakery_formula_structure_load_map')) {
+        require_once __DIR__ . '/formula_structure.php';
+    }
+    $doughIds = [];
+    $productIds = [];
+    foreach ($doughs as $dough) {
+        $doughId = (int)($dough['dough_type_id'] ?? 0);
+        if ($doughId > 0) {
+            $doughIds[] = $doughId;
+        }
+        foreach ($dough['products'] ?? [] as $product) {
+            $productIds[] = (int)($product['product_id'] ?? 0);
+        }
+    }
+    $doughIds = array_values(array_unique(array_filter($doughIds)));
+    if ($doughIds === []) {
+        return $doughs;
+    }
+    $placeholders = implode(',', array_fill(0, count($doughIds), '?'));
+    $percentStmt = $db->prepare(
+        "SELECT dough_type_id, SUM(percentage) AS total_percentage
+         FROM formula_ingredients
+         WHERE dough_type_id IN ({$placeholders})
+         GROUP BY dough_type_id"
+    );
+    $percentStmt->execute($doughIds);
+    $percentages = $percentStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    $ingredientStmt = $db->prepare(
+        "SELECT fi.dough_type_id, i.id AS ingredient_id, i.name, i.unit, fi.percentage
+         FROM formula_ingredients fi
+         JOIN ingredients i ON i.id = fi.ingredient_id
+         WHERE fi.dough_type_id IN ({$placeholders})
+         ORDER BY fi.dough_type_id, fi.percentage DESC"
+    );
+    $ingredientStmt->execute($doughIds);
+    $ingredientsByDough = [];
+    foreach ($ingredientStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $ingredientsByDough[(int)$row['dough_type_id']][] = $row;
+    }
+    $structures = bakery_formula_structure_load_map($db, $doughIds);
+    $partsByProduct = bakery_formula_parts_load_map($db, $productIds);
+    $catalog = function_exists('bakery_formula_subformula_catalog')
+        ? bakery_formula_subformula_catalog($db)
+        : [];
+    foreach ($doughs as &$dough) {
+        $doughId = (int)($dough['dough_type_id'] ?? 0);
+        $totalPct = (float)($percentages[$doughId] ?? 0);
+        $ingredients = $ingredientsByDough[$doughId] ?? [];
+        if ($doughId <= 0 || $totalPct <= 0 || $ingredients === []) {
+            $dough['formula'] = null;
+            continue;
+        }
+        $structure = $structures[$doughId] ?? (function_exists('bakery_formula_normalize_structure')
+            ? bakery_formula_normalize_structure([])
+            : null);
+        if ($catalog !== [] && function_exists('bakery_formula_decorate_subformulas')) {
+            $ingredients = bakery_formula_decorate_subformulas($ingredients, $catalog);
+        }
+        $lossRows = [];
+        foreach ($dough['products'] as $product) {
+            $lossRows[] = [
+                'weight_grams' => $product['weight_grams'] ?? null,
+                'quantity' => (int)($product['bake_quantity'] ?? 0),
+            ];
+        }
+        $loss = function_exists('bakery_formula_mix_loss_grams')
+            ? (float)bakery_formula_mix_loss_grams(is_array($structure) ? $structure : [], $lossRows)
+            : 0.0;
+        $doughGrams = (float)($dough['dough_grams'] ?? 0) + $loss;
+        $flour = $doughGrams / ($totalPct / 100);
+        $addProducts = [];
+        foreach ($dough['products'] as $product) {
+            $product['quantity'] = (int)($product['bake_quantity'] ?? 0);
+            $addProducts[] = $product;
+        }
+        $addIns = function_exists('bakery_formula_mix_add_in_rows')
+            ? bakery_formula_mix_add_in_rows($addProducts, $partsByProduct)
+            : [];
+        $dough['formula'] = [
+            'total_percentage' => $totalPct,
+            'ingredients' => $ingredients,
+            'structure' => $structure,
+            'add_in_rows' => $addIns,
+            'total_flour_grams' => $flour,
+            'total_dough_grams' => $doughGrams,
+            'loss_grams' => $loss,
+        ];
+    }
+    unset($dough);
+    return $doughs;
+}
+
+/**
+ * Pieces mixed on a bake day, split by family. Uses the bake list (committed snapshot or demand).
+ *
+ * @return array{pieces:int,by_family:array<string,int>,family_active:array<string,bool>}
+ */
+function bakery_pmd_bake_day_family_pieces(PDO $db, string $bakeDate): array
+{
+    if (!function_exists('bakery_production_bake_list')) {
+        require_once __DIR__ . '/production_plan.php';
+    }
+    if (!function_exists('bakery_production_cadence_family')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    $byFamily = [
+        BAKERY_PRODUCTION_CADENCE_DAILY => 0,
+        BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR => 0,
+    ];
+    $active = [
+        BAKERY_PRODUCTION_CADENCE_DAILY => false,
+        BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR => false,
+    ];
+    $lineCache = [];
+    foreach (bakery_pmd_bake_families($bakeDate) as $family) {
+        $active[$family['family']] = $family['active'];
+        if ($family['cover_dates'] === []) {
+            continue;
+        }
+        foreach ($family['cover_dates'] as $cover) {
+            $list = bakery_production_bake_list($db, $cover);
+            $ids = [];
+            foreach ($list['items'] as $item) {
+                $ids[] = (int)$item['product_id'];
+            }
+            $missing = [];
+            foreach ($ids as $pid) {
+                if (!isset($lineCache[$pid])) {
+                    $missing[] = $pid;
+                }
+            }
+            if ($missing !== []) {
+                $lineCache += bakery_pmd_product_line_names($db, $missing);
+            }
+            foreach ($list['items'] as $item) {
+                $pid = (int)$item['product_id'];
+                $lineFamily = bakery_production_cadence_family($lineCache[$pid]['product_line_name'] ?? '');
+                if ($lineFamily !== $family['family']) {
+                    continue;
+                }
+                $byFamily[$family['family']] += (int)$item['bake_quantity'];
+            }
+        }
+    }
+    return [
+        'pieces' => $byFamily[BAKERY_PRODUCTION_CADENCE_DAILY] + $byFamily[BAKERY_PRODUCTION_CADENCE_SOUR_FLOUR],
+        'by_family' => $byFamily,
+        'family_active' => $active,
+    ];
+}
+
+/**
+ * Monday-Sunday kitchen week around a bake day.
+ *
+ * @return array{bake_date:string,days:list<array<string,mixed>>}
+ */
+function bakery_pmd_bake_week(PDO $db, string $bakeDate): array
+{
+    $bakeDate = bakery_pmd_resolve_bake_date($bakeDate);
+    $anchor = new DateTimeImmutable($bakeDate);
+    $monday = $anchor->modify('-' . ((int)$anchor->format('N') - 1) . ' days');
+    $days = [];
+    for ($i = 0; $i < 7; $i++) {
+        $day = $monday->modify('+' . $i . ' days')->format('Y-m-d');
+        $pieces = bakery_pmd_bake_day_family_pieces($db, $day);
+        $crew = function_exists('bakery_production_crew_for_day')
+            ? bakery_production_crew_for_day($db, $day)
+            : ['people' => []];
+        $days[] = [
+            'date' => $day,
+            'label' => date('D n/j', strtotime($day)),
+            'is_selected' => $day === $bakeDate,
+            'pieces' => (int)$pieces['pieces'],
+            'by_family' => $pieces['by_family'],
+            'family_active' => $pieces['family_active'],
+            'crew' => is_array($crew['people'] ?? null) ? $crew['people'] : [],
+        ];
+    }
+    return [
+        'bake_date' => $bakeDate,
+        'days' => $days,
+    ];
+}
+
+/**
+ * What the kitchen mixes on $bakeDate, summed across the delivery dates that run covers.
+ *
+ * @param array{source?:string,entered_date?:string,usual_weeks?:int} $options
+ * @return array<string,mixed>
+ */
+function bakery_pmd_bake_day(PDO $db, string $bakeDate, array $options = []): array
+{
+    if (!function_exists('bakery_production_cadence_family')) {
+        require_once __DIR__ . '/production_cadence.php';
+    }
+    if (!function_exists('bakery_operating_demand_lines')) {
+        require_once __DIR__ . '/demand_review.php';
+    }
+    $bakeDate = bakery_pmd_resolve_bake_date($bakeDate);
+    $sourceMode = bakery_pmd_resolve_source((string)($options['source'] ?? 'bake_list'));
+    $usualWeeks = max(0, min(8, (int)($options['usual_weeks'] ?? 1)));
+    $families = bakery_pmd_bake_families($bakeDate);
+    $coversByFamily = [];
+    $coverDates = [];
+    $anyActive = false;
+    foreach ($families as $family) {
+        $coversByFamily[$family['family']] = $family['cover_dates'];
+        if ($family['active']) {
+            $anyActive = true;
+        }
+        foreach ($family['cover_dates'] as $date) {
+            $coverDates[$date] = true;
+        }
+    }
+    $coverDates = array_keys($coverDates);
+    sort($coverDates);
+
+    $boards = [];
+    foreach ($coverDates as $cover) {
+        $child = ['source' => 'bake_list'];
+        if ($sourceMode === 'last_entered') {
+            $child = ['source' => 'last_entered', 'entered_date' => $cover];
+        }
+        $boards[$cover] = bakery_pmd_build($db, $cover, $child);
+    }
+
+    $destinations = [];
+    foreach ($coverDates as $cover) {
+        foreach (bakery_operating_demand_lines($db, $cover) as $line) {
+            $pid = (int)($line['product_id'] ?? 0);
+            if ($pid <= 0 || (int)($line['quantity'] ?? 0) <= 0) {
+                continue;
+            }
+            $destinations[$pid][] = [
+                'date' => $cover,
+                'customer_id' => (int)($line['customer_id'] ?? 0),
+                'customer_name' => (string)($line['customer_name'] ?? ''),
+                'zone' => (string)($line['customer_zone'] ?? ''),
+                'quantity' => (int)$line['quantity'],
+                'source' => (string)($line['source'] ?? 'standing'),
+                'leads' => [],
+            ];
+        }
+    }
+
+    $merged = [];
+    foreach ($boards as $cover => $board) {
+        foreach ($board['doughs'] as $dough) {
+            $family = bakery_production_cadence_family((string)($dough['product_line_name'] ?? ''));
+            if (!in_array($cover, $coversByFamily[$family] ?? [], true)) {
+                continue;
+            }
+            $key = (int)($dough['dough_type_id'] ?? 0);
+            if (!isset($merged[$key])) {
+                $merged[$key] = $dough;
+                $merged[$key]['family'] = $family;
+                $merged[$key]['cover_dates'] = $coversByFamily[$family];
+                $merged[$key]['products'] = [];
+                $merged[$key]['leads'] = [];
+            }
+            foreach ($dough['products'] as $product) {
+                $pid = (int)$product['product_id'];
+                $slice = [
+                    'date' => $cover,
+                    'bake_quantity' => (int)$product['bake_quantity'],
+                    'demand_quantity' => (int)$product['demand_quantity'],
+                    'committed' => !empty($board['committed']),
+                    'source' => (string)$product['source'],
+                ];
+                if (!isset($merged[$key]['products'][$pid])) {
+                    $product['deliveries'] = [$slice];
+                    $product['destinations'] = [];
+                    $merged[$key]['products'][$pid] = $product;
+                } else {
+                    foreach (['bake_quantity', 'demand_quantity', 'planned_quantity', 'produced_quantity', 'dough_grams'] as $field) {
+                        $merged[$key]['products'][$pid][$field] = (int)$merged[$key]['products'][$pid][$field] + (int)($product[$field] ?? 0);
+                    }
+                    $merged[$key]['products'][$pid]['deliveries'][] = $slice;
+                }
+            }
+        }
+    }
+
+    $history = $usualWeeks > 0 ? bakery_pmd_bake_day_history($db, $bakeDate, $usualWeeks) : [];
+    $doughs = [];
+    $sumPieces = 0;
+    $sumDemand = 0;
+    $sumPlanned = 0;
+    $sumProduced = 0;
+    $sumDoughGrams = 0;
+    $sumUsual = 0;
+    $driftCount = 0;
+    $productCount = 0;
+    $anyCommit = false;
+    $anyOpen = false;
+    $anyEntered = false;
+    foreach ($coverDates as $cover) {
+        $board = $boards[$cover];
+        if (!empty($board['committed'])) {
+            $anyCommit = true;
+        } else {
+            $anyOpen = true;
+        }
+        if (($board['bake_source'] ?? '') === 'last_entered') {
+            $anyEntered = true;
+        }
+        $driftCount += (int)($board['changed_since']['count'] ?? 0);
+    }
+    if ($coverDates === []) {
+        $anyOpen = true;
+    }
+
+    foreach ($merged as $bucket) {
+        $pieces = 0;
+        $demand = 0;
+        $produced = 0;
+        $doughGrams = 0;
+        $products = [];
+        $series = array_fill(0, count($history), 0);
+        foreach ($bucket['products'] as $product) {
+            $pid = (int)$product['product_id'];
+            $productSeries = [];
+            foreach ($history as $index => $sample) {
+                $qty = (int)($sample['by_product'][$pid] ?? 0);
+                $productSeries[] = $qty;
+                $series[$index] += $qty;
+            }
+            $usual = bakery_pmd_usual_summary($productSeries);
+            $bakeQty = (int)$product['bake_quantity'];
+            $weight = (int)($product['weight_grams'] ?? 0);
+            $doughGramsProduct = ($bakeQty > 0 && $weight > 0) ? $bakeQty * $weight : (int)$product['dough_grams'];
+            $producedQty = (int)$product['produced_quantity'];
+            $product['dough_grams'] = $doughGramsProduct;
+            $product['dough_weight'] = bakery_pmd_format_dough_weight($doughGramsProduct);
+            $product['left'] = max(0, $bakeQty - $producedQty);
+            $product['usual_last'] = (int)($usual['last'] ?? 0);
+            $product['usual_median'] = $usual['median'];
+            $product['prior_bake_quantity'] = $product['usual_last'];
+            $product['delta_vs_prior'] = $bakeQty - $product['usual_last'];
+            $product['batch_label'] = bakery_pack_batch_label($db, $pid, $bakeQty);
+            $scale = bakery_pack_input_scale($db, $pid);
+            $product['batch_unit'] = $scale['unit'];
+            $product['pcs_per_batch_unit'] = $scale['pcs_per'];
+            $product['batch_quantity'] = ($bakeQty > 0 && $scale['pcs_per'] > 0 && $scale['unit'] !== 'piece')
+                ? round($bakeQty / $scale['pcs_per'], 3)
+                : null;
+            $kept = [];
+            foreach ($product['deliveries'] as $delivery) {
+                if (in_array($delivery['date'], $bucket['cover_dates'], true)) {
+                    $kept[] = $delivery;
+                }
+            }
+            $product['deliveries'] = $kept;
+            $where = [];
+            foreach ($destinations[$pid] ?? [] as $dest) {
+                if (in_array($dest['date'], $bucket['cover_dates'], true)) {
+                    $where[] = $dest;
+                }
+            }
+            usort($where, static function (array $a, array $b): int {
+                return [$a['date'], $a['customer_name']] <=> [$b['date'], $b['customer_name']];
+            });
+            $product['destinations'] = $where;
+            $products[] = $product;
+            $pieces += $bakeQty;
+            $demand += (int)$product['demand_quantity'];
+            $sumPlanned += (int)($product['planned_quantity'] ?? 0);
+            $produced += $producedQty;
+            $doughGrams += $doughGramsProduct;
+        }
+        usort($products, static function (array $a, array $b): int {
+            return strcasecmp((string)$a['name'], (string)$b['name']);
+        });
+        $doughUsual = bakery_pmd_usual_summary($series);
+        $doughTypeId = $bucket['dough_type_id'];
+        $doughYield = $doughTypeId ? bakery_pack_dough_yield($db, (int)$doughTypeId) : null;
+        $batch = bakery_pmd_dough_batch($doughYield, $pieces);
+        $standard = bakery_pmd_standard_batches(
+            !empty($bucket['standard_batches']['standard_batch_grams'])
+                ? (int)$bucket['standard_batches']['standard_batch_grams']
+                : null,
+            $doughGrams
+        );
+        $statuses = [];
+        if ($pieces > 0 && $produced === 0) {
+            $statuses[] = ['code' => 'not_started', 'label' => 'Not started', 'tone' => 'warn'];
+        } elseif ($pieces > 0 && $produced > 0 && $produced < $pieces) {
+            $statuses[] = ['code' => 'partial', 'label' => number_format($produced) . ' made', 'tone' => 'info'];
+        } elseif ($pieces > 0 && $produced >= $pieces) {
+            $statuses[] = ['code' => 'done', 'label' => 'Made', 'tone' => 'ok'];
+        }
+        $usualLast = (int)($doughUsual['last'] ?? 0);
+        $doughs[] = [
+            'dough_type_id' => $doughTypeId,
+            'dough_type_name' => $bucket['dough_type_name'],
+            'product_line_id' => $bucket['product_line_id'] ?? null,
+            'product_line_name' => $bucket['product_line_name'],
+            'family' => $bucket['family'],
+            'cover_dates' => $bucket['cover_dates'],
+            'leads' => [],
+            'product_count' => count($products),
+            'pieces' => $pieces,
+            'demand_pieces' => $demand,
+            'produced_pieces' => $produced,
+            'left_pieces' => max(0, $pieces - $produced),
+            'prior_pieces' => $usualLast,
+            'usual_last' => $usualLast,
+            'usual_median' => $doughUsual['median'],
+            'delta_vs_prior' => $pieces - $usualLast,
+            'dough_grams' => $doughGrams,
+            'dough_weight' => bakery_pmd_format_dough_weight($doughGrams),
+            'batch' => $batch,
+            'standard_batches' => $standard,
+            'statuses' => $statuses,
+            'products' => $products,
+            'links' => bakery_pmd_links($bucket['cover_dates'][0] ?? $bakeDate),
+        ];
+        $sumPieces += $pieces;
+        $sumDemand += $demand;
+        $sumProduced += $produced;
+        $sumDoughGrams += $doughGrams;
+        $sumUsual += $usualLast;
+        $productCount += count($products);
+    }
+
+    usort($doughs, static function (array $a, array $b): int {
+        return $b['pieces'] <=> $a['pieces'] ?: strcasecmp((string)$a['dough_type_name'], (string)$b['dough_type_name']);
+    });
+    $doughs = bakery_pmd_attach_formulas($db, $doughs);
+
+    if ($anyEntered) {
+        $bakeSource = 'last_entered';
+    } elseif ($anyCommit && !$anyOpen) {
+        $bakeSource = 'committed_plan';
+    } elseif ($anyCommit && $anyOpen) {
+        $bakeSource = 'mixed';
+    } else {
+        $bakeSource = 'demand';
+    }
+    $linkDate = $bakeDate;
+    foreach ($families as $family) {
+        if ($family['family'] === BAKERY_PRODUCTION_CADENCE_DAILY && $family['cover_dates'] !== []) {
+            $linkDate = $family['cover_dates'][0];
+            break;
+        }
+    }
+    if ($linkDate === $bakeDate) {
+        foreach ($families as $family) {
+            if ($family['cover_dates'] !== []) {
+                $linkDate = $family['cover_dates'][0];
+                break;
+            }
+        }
+    }
+
+    return [
+        'date' => $bakeDate,
+        'bake_date' => $bakeDate,
+        'prior_date' => date('Y-m-d', strtotime($bakeDate . ' -7 days')),
+        'date_display' => date('l, F j, Y', strtotime($bakeDate)),
+        'quantity_date' => $bakeDate,
+        'quantity_date_display' => date('l, F j, Y', strtotime($bakeDate)),
+        'date_mismatch' => false,
+        'cover_dates' => $coverDates,
+        'cover_label' => bakery_pmd_bake_cover_label($bakeDate),
+        'families' => $families,
+        'any_family_active' => $anyActive,
+        'committed' => $bakeSource === 'committed_plan',
+        'bake_source' => $bakeSource,
+        'entered_plan' => null,
+        'has_daily' => false,
+        'inventory_ready' => $boards === [] ? false : !empty(reset($boards)['inventory_ready']),
+        'commit' => null,
+        'changed_since' => ['count' => $driftCount, 'latest' => null, 'examples' => []],
+        'summary' => [
+            'dough_types' => count($doughs),
+            'products' => $productCount,
+            'pieces' => $sumPieces,
+            'demand_pieces' => $sumDemand,
+            'planned_pieces' => $sumPlanned,
+            'produced_pieces' => $sumProduced,
+            'dough_grams' => $sumDoughGrams,
+            'dough_weight' => bakery_pmd_format_dough_weight($sumDoughGrams),
+            'prior_pieces' => $sumUsual,
+            'delta_vs_prior' => $sumPieces - $sumUsual,
+        ],
+        'doughs' => $doughs,
+        'links' => bakery_pmd_links($linkDate),
     ];
 }

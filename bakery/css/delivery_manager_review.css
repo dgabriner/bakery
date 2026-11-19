@@ -44,6 +44,11 @@
   font-weight: 700;
 }
 
+.delivery-review a.sf-btn--primary,
+.delivery-review a.sf-btn--primary:hover {
+  color: #fff;
+}
+
 .delivery-review__sub,
 .delivery-review__note,
 .delivery-review__empty,
@@ -782,6 +787,280 @@ p.delivery-review__day-facts {
   padding-left: 1.1rem;
 }
 
+/* Morning brief */
+
+.delivery-review__dates {
+  align-self: end;
+}
+
+.delivery-review__dates summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--dr-line);
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.delivery-review__dates[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.delivery-review__brief {
+  margin: 0 0 1.25rem;
+}
+
+.delivery-review__hero {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  background: var(--dr-soft);
+  font-size: clamp(1.45rem, 2.6vw, 2.05rem);
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.delivery-review__hero.is-bad {
+  background: #fde8e6;
+  color: var(--dr-bad);
+}
+
+.delivery-review__hero.is-warn {
+  background: #fff4dc;
+  color: var(--dr-warn);
+}
+
+.delivery-review__hero.is-good {
+  background: #e5f6ec;
+  color: var(--dr-good);
+}
+
+.delivery-review__hero.is-info {
+  background: #eef3f8;
+  color: #2c4a6e;
+}
+
+.delivery-review__score {
+  margin: 0.7rem 0 0;
+  color: var(--dr-muted);
+  font-size: 0.98rem;
+}
+
+.delivery-review__score strong {
+  color: var(--dr-ink);
+  font-weight: 800;
+}
+
+.delivery-review__score .delivery-review__muted {
+  display: inline;
+  margin-left: 0.35rem;
+}
+
+.delivery-review__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delivery-review__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--dr-line);
+  border-left: 6px solid var(--dr-bad);
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.delivery-review__card.is-warn {
+  border-left-color: var(--dr-warn-bg);
+}
+
+.delivery-review__card.is-info {
+  border-left-color: #7ea0c4;
+}
+
+.delivery-review__card p {
+  margin: 0;
+}
+
+.delivery-review__eyebrow {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dr-muted);
+}
+
+.delivery-review__card-title {
+  font-size: 1.45rem;
+  line-height: 1.15;
+  font-weight: 800;
+}
+
+.delivery-review__card-title a {
+  color: var(--dr-ink);
+  text-decoration: none;
+}
+
+.delivery-review__card-title a:hover,
+.delivery-review__card-title a:focus-visible {
+  text-decoration: underline;
+}
+
+.delivery-review__card-when {
+  font-weight: 700;
+}
+
+.delivery-review__card .delivery-review__thumb {
+  width: 7.5rem;
+  height: 7.5rem;
+  margin-top: 0.35rem;
+  border-radius: 0.6rem;
+}
+
+.delivery-review__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  align-items: center;
+  margin-top: 0.45rem;
+}
+
+.delivery-review__card-actions a {
+  text-decoration: none;
+}
+
+.delivery-review__more {
+  margin: 0.75rem 0 0;
+}
+
+.delivery-review__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: 0.4rem 0 0.7rem;
+  padding: 0;
+  list-style: none;
+  color: var(--dr-muted);
+  font-size: 0.92rem;
+}
+
+.delivery-review__key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.delivery-review__wall {
+  margin-top: 1.25rem;
+}
+
+.delivery-review__wall-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+
+.delivery-review__wall-row {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 12rem) max-content;
+  gap: 0.55rem;
+  align-items: center;
+  margin: 0 0 0.35rem;
+  min-width: max-content;
+}
+
+.delivery-review__wall-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: 0.2rem 0.45rem 0.2rem 0;
+  background: #fff;
+  color: var(--dr-ink);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.delivery-review__wall-row.is-head .delivery-review__wall-name {
+  background: transparent;
+}
+
+.delivery-review__strip--wall {
+  gap: 4px;
+}
+
+.delivery-review__strip--wall {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.delivery-review__strip--wall .delivery-review__cell {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.45rem;
+  font-size: 0.85rem;
+}
+
+.delivery-review__key .delivery-review__cell {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 0.2rem;
+}
+
+.delivery-review__strip--wall .delivery-review__cell.is-monday {
+  margin-left: 0;
+}
+
+.delivery-review__strip--wall .delivery-review__cell.is-label {
+  height: 1.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--dr-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.delivery-review__brief.is-solo .delivery-review__strip--wall .delivery-review__cell {
+  width: 3.25rem;
+  height: 3.25rem;
+}
+
+.delivery-review__calm {
+  margin-top: 0.6rem;
+}
+
+.delivery-review__calm summary,
+.delivery-review__record > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.delivery-review__record {
+  margin: 0.5rem 0 1rem;
+  padding: 0.2rem 0.9rem 0.9rem;
+  border: 1px solid var(--dr-line);
+  border-radius: 0.9rem;
+  background: #fff;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36rem;
+}
+
+.delivery-review__record > summary {
+  font-size: 1.05rem;
+}
+
 @media (max-width: 640px) {
   .delivery-review__table .is-num {
     text-align: left;
@@ -796,8 +1075,21 @@ p.delivery-review__day-facts {
     white-space: normal;
   }
 
+  .delivery-review__strip--wall {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
   .delivery-review__kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.45rem;
+  }
+
+  .delivery-review__cards {
+    grid-template-columns: 1fr;
+  }
+
+  .delivery-review__hero {
+    font-size: 1.45rem;
   }
 }

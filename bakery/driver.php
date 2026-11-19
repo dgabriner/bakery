@@ -94,14 +94,18 @@ if ($routeDayDiff < -1) {
     $routeDateRelative = bakery_t('driver.route_upcoming');
 }
 $routeView = strtolower(trim((string)($_GET['view'] ?? '')));
-$routePrepMode = $routeDateKind !== 'past'
-    && (
-        $routeView === 'prep'
-        || ($routeDateKind === 'future' && $routeView !== 'drive')
-    );
+// Tomorrow and every past day open the same drive route. Prep stays a choice.
+$routePrepMode = $routeView === 'prep' && $routeDateKind !== 'past';
+$routeLatestDate = $todayDateObject->modify('+1 day')->format('Y-m-d');
+$routeForwardDate = $selectedDate < $routeLatestDate ? $nextDate : '';
+$dateInputMax = $selectedDate > $routeLatestDate ? $selectedDate : $routeLatestDate;
 $routeDayChoices = [];
 for ($dayOffset = -3; $dayOffset <= 3; $dayOffset++) {
     $choiceDate = $selectedDateObject->modify(($dayOffset >= 0 ? '+' : '') . $dayOffset . ' days');
+    $choiceKey = $choiceDate->format('Y-m-d');
+    if ($choiceKey > $routeLatestDate && $choiceKey !== $selectedDate) {
+        continue;
+    }
     $routeDayChoices[] = [
         'date' => $choiceDate->format('Y-m-d'),
         'weekday' => bakery_day_names(true)[(int)$choiceDate->format('N')],
@@ -110,8 +114,16 @@ for ($dayOffset = -3; $dayOffset <= 3; $dayOffset++) {
     ];
 }
 
+// A manager/administrator who also drives gets a direct way into their own route.
+require_once 'includes/staff_driver_profile.php';
+$meRequested = isset($_GET['me']) && (string)$_GET['me'] === '1';
+$staffOwnDriverId = $isAuthenticatedDriver ? 0 : bakery_staff_own_driver_id($db, $routeUser);
+
 if ($isAuthenticatedDriver) {
     $selectedDriverId = bakery_route_worker_driver_id($db, $routeUser, $selectedDate);
+    $changeDriver = false;
+} elseif ($meRequested && $staffOwnDriverId > 0) {
+    $selectedDriverId = $staffOwnDriverId;
     $changeDriver = false;
 } elseif (isset($_GET['driver_id'])) {
     $selectedDriverId = (int)$_GET['driver_id'];
@@ -120,9 +132,13 @@ if ($isAuthenticatedDriver) {
     }
 } elseif (!$changeDriver && function_exists('bakery_get_selected_driver_id')) {
     $selectedDriverId = bakery_get_selected_driver_id();
+    if ($selectedDriverId <= 0 && $staffOwnDriverId > 0) {
+        $selectedDriverId = $staffOwnDriverId;
+    }
 } else {
     $selectedDriverId = 0;
 }
+$staffDrivingAsSelf = $staffOwnDriverId > 0 && $selectedDriverId === $staffOwnDriverId;
 
 // Get driver information
 $driver = null;
@@ -381,6 +397,17 @@ function bakery_render_driver_stop_item(
         </div>
         <?php if (!$isPastList && !$isDone): ?>
         <div class="stop-row-actions">
+            <button type="button"
+                class="stop-open-delivery photo-complete-btn"
+                data-start-step="delivery"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.confirm'); ?></button>
             <button type="button"
                 class="stop-go-next"
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
@@ -696,7 +723,7 @@ document.body.classList.add('driver-route-prep');
 .driver-pickup-manifest{margin:0;padding:0;border:0;background:transparent}.driver-pickup-manifest summary{list-style:none;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:14px 16px;border:1px solid #b8d8c2;border-radius:14px;background:#f2fbf4;cursor:pointer;-webkit-tap-highlight-color:transparent}.driver-pickup-manifest summary::-webkit-details-marker{display:none}.driver-pickup-manifest summary strong{font-size:1.05rem;color:#1f6637}.driver-pickup-manifest-body{padding:0 16px 14px;border:1px solid #b8d8c2;border-top:0;border-radius:0 0 14px 14px;margin-top:-8px;background:#f2fbf4}.driver-pickup-manifest-body p{margin:0;color:#536258}.driver-pickup-manifest-body ul{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;padding:0;list-style:none}.driver-pickup-manifest-body li{padding:7px 10px;background:#fff;border-radius:8px;color:#34483a}.driver-pickup-manifest-body li strong{color:#1f6637}
 </style>
 
-<div class="driver-route" id="driverRouteRoot"
+<div class="driver-route" id="driverRouteRoot"<?php echo ($selectedDriverId > 0 && !empty($driver) && empty($showSelector) && empty($routePrepMode)) ? ' data-route-view="now"' : ''; ?>
     data-driver-id="<?php echo (int)$selectedDriverId; ?>"
     data-driver-name="<?php echo htmlspecialchars($driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
     data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
@@ -731,7 +758,7 @@ document.body.classList.add('driver-route-prep');
                 <span class="route-live-dot" aria-hidden="true"></span>
                 <div class="route-driver-label"><?php echo htmlspecialchars($driver['name']); ?></div>
             </div>
-            <?php if (!$isAuthenticatedDriver): ?>
+            <?php if (!$isAuthenticatedDriver && empty($staffDrivingAsSelf)): ?>
             <a class="route-change-link" href="?change_driver=1&amp;date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('driver.change_driver'); ?></a>
             <?php endif; ?>
         </div>
@@ -773,12 +800,19 @@ document.body.classList.add('driver-route-prep');
             <strong class="route-day-nav-date"><?php echo htmlspecialchars(bakery_localized_date_label($selectedDateObject)); ?></strong>
             <span class="route-day-nav-picker-hint"><?php bakery_te('driver.change_date'); ?></span>
         </button>
+        <?php if ($routeForwardDate !== ''): ?>
         <a class="route-day-nav-arrow route-day-nav-next js-day-link"
-           href="<?php echo htmlspecialchars(bakery_driver_route_day_url((int)$selectedDriverId, $nextDate), ENT_QUOTES, 'UTF-8'); ?>"
+           href="<?php echo htmlspecialchars(bakery_driver_route_day_url((int)$selectedDriverId, $routeForwardDate), ENT_QUOTES, 'UTF-8'); ?>"
            aria-label="<?php echo htmlspecialchars(bakery_t('driver.next_day_aria'), ENT_QUOTES, 'UTF-8'); ?>">
             <span class="route-day-nav-arrow-label"><?php bakery_te('driver.next_short'); ?></span>
             <span class="route-day-nav-arrow-icon" aria-hidden="true">›</span>
         </a>
+        <?php else: ?>
+        <span class="route-day-nav-arrow route-day-nav-next route-day-nav-arrow--end" aria-disabled="true">
+            <span class="route-day-nav-arrow-label"><?php bakery_te('driver.next_short'); ?></span>
+            <span class="route-day-nav-arrow-icon" aria-hidden="true">›</span>
+        </span>
+        <?php endif; ?>
     </nav>
     <?php if ($selectedDate !== $todayDate): ?>
     <div class="route-day-nav-today-wrap">
@@ -816,7 +850,11 @@ document.body.classList.add('driver-route-prep');
                     </a>
                     <?php endforeach; ?>
                 </div>
-                <a class="route-day-arrow js-day-link" href="<?php echo htmlspecialchars(bakery_driver_route_day_url((int)$selectedDriverId, $nextDate), ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.next_day_aria'), ENT_QUOTES, 'UTF-8'); ?>">&rsaquo;</a>
+                <?php if ($routeForwardDate !== ''): ?>
+                <a class="route-day-arrow js-day-link" href="<?php echo htmlspecialchars(bakery_driver_route_day_url((int)$selectedDriverId, $routeForwardDate), ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.next_day_aria'), ENT_QUOTES, 'UTF-8'); ?>">&rsaquo;</a>
+                <?php else: ?>
+                <span class="route-day-arrow route-day-arrow--end" aria-disabled="true">&rsaquo;</span>
+                <?php endif; ?>
             </div>
             <div class="route-date-tools">
                 <?php if ($selectedDate !== $todayDate): ?>
@@ -824,7 +862,7 @@ document.body.classList.add('driver-route-prep');
                 <?php endif; ?>
                 <label class="route-calendar-label" for="routeDateInput">
                     <?php bakery_te('driver.pick_date'); ?>
-                    <input type="date" id="routeDateInput" value="<?php echo htmlspecialchars($selectedDate); ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>">
+                    <input type="date" id="routeDateInput" value="<?php echo htmlspecialchars($selectedDate); ?>" max="<?php echo htmlspecialchars($dateInputMax); ?>" data-latest="<?php echo htmlspecialchars($routeLatestDate); ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>">
                 </label>
             </div>
         </div>
@@ -1283,7 +1321,8 @@ document.body.classList.add('driver-route-prep');
                     <div class="photo-upload-controls delivery-camera-controls">
                         <button type="button" class="btn btn-primary delivery-shutter-btn" id="deliveryCaptureBtn"><?php bakery_te('driver.activate_camera'); ?></button>
                         <button type="button" class="btn btn-outline hidden" id="deliveryRetakeBtn"><?php bakery_te('driver.retake_photo'); ?></button>
-                        <button type="button" class="btn btn-outline delivery-picker-btn" id="deliveryFilePickerBtn"><?php bakery_te('driver.phone_camera'); ?></button>
+                        <button type="button" class="btn btn-outline delivery-picker-btn" id="deliveryFilePickerBtn"><?php bakery_te('driver.use_phone_camera'); ?></button>
+                        <button type="button" class="btn btn-outline delivery-inapp-btn" id="deliveryInAppCameraBtn" hidden><?php bakery_te('driver.use_in_app_camera'); ?></button>
                         <button type="button" class="btn btn-outline delivery-gallery-btn" id="deliveryGalleryPickerBtn"><?php bakery_te('driver.choose_photo'); ?></button>
                         <button type="button" class="delivery-skip-inline" id="deliverySkipPhotoInlineBtn"><?php bakery_te('driver.skip_photo'); ?></button>
                         <input type="file" id="deliveryFileInput" accept="image/*" capture="environment" hidden>
@@ -1320,10 +1359,21 @@ document.body.classList.add('driver-route-prep');
             </div>
 
             <div class="delivery-step-panel" id="deliveryStepDelivery" data-step-panel="delivery" hidden>
-                <div class="delivery-inline-proof" id="deliveryInlineProof" data-proof-state="" hidden>
-                    <img id="deliveryInlineThumb" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
-                    <span class="delivery-inline-proof-label" id="deliveryInlineProofLabel" aria-live="polite"></span>
-                    <button type="button" class="delivery-inline-retake" id="deliveryInlineRetake"><?php bakery_te('driver.retake'); ?></button>
+                <div class="delivery-photo-strip" id="deliveryPhotoStrip">
+                    <div class="delivery-inline-proof" id="deliveryInlineProof" data-proof-state="" hidden>
+                        <img id="deliveryInlineThumb" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
+                        <span class="delivery-inline-proof-text">
+                            <span class="delivery-inline-proof-label" id="deliveryInlineProofLabel" aria-live="polite"></span>
+                            <button type="button" class="delivery-inline-retake" id="deliveryInlineRetake"><?php bakery_te('driver.retake'); ?></button>
+                        </span>
+                    </div>
+                    <div class="delivery-inline-proof delivery-inline-proof--second" id="deliveryInlineProof2" data-proof-state="" hidden>
+                        <img id="deliveryInlineThumb2" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
+                        <span class="delivery-inline-proof-text">
+                            <span class="delivery-inline-proof-label" id="deliveryInlineProofLabel2" aria-live="polite"></span>
+                            <button type="button" class="delivery-inline-retake" id="deliveryInlineRetake2"><?php bakery_te('driver.retake'); ?></button>
+                        </span>
+                    </div>
                 </div>
                 <p class="delivery-totals-line" id="deliveryTotalsLine">
                     <span id="deliveryTotalsText"></span>
@@ -1348,7 +1398,7 @@ document.body.classList.add('driver-route-prep');
                     </div>
                     <div class="delivery-ordered-ref" id="deliveryOrderedRef" aria-live="polite"></div>
                     <p class="delivery-confirmation-breakdown" id="deliveryConfirmationBreakdown" aria-live="polite"></p>
-                    <details class="delivery-adjust" id="deliveryAdjustDetails">
+                    <details class="delivery-adjust" id="deliveryAdjustDetails" open>
                         <summary class="delivery-adjust-summary"><?php bakery_te('driver.adjust_delivery'); ?></summary>
                         <div class="delivery-adjust-body">
                             <div class="delivery-confirmation-fields">
@@ -1432,6 +1482,7 @@ document.body.classList.add('driver-route-prep');
                 <button type="button" class="btn btn-outline delivery-wizard-back" id="deliveryWizardBackBtn" hidden><?php bakery_te('driver.back'); ?></button>
                 <button type="button" class="btn btn-outline delivery-wizard-skip" id="deliveryWizardSkipBtn"><?php bakery_te('driver.skip_photo'); ?></button>
                 <button type="button" class="btn btn-outline fail-stop-btn" id="deliveryWizardFailBtn"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
+                <button type="button" class="btn btn-outline delivery-second-photo-btn" id="deliverySecondPhotoBtn" hidden><?php bakery_te('driver.second_photo'); ?></button>
                 <button type="button" class="complete-delivery-btn delivery-wizard-primary" id="deliveryWizardPrimaryBtn" aria-busy="false"><?php bakery_te('driver.delivered'); ?></button>
             </div>
 
@@ -1807,9 +1858,21 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'data_saver_off' => bakery_t('driver.data_saver_off'),
     'maps_app_google' => bakery_t('driver.maps_app_google'),
     'maps_app_apple' => bakery_t('driver.maps_app_apple'),
+    'second_photo' => bakery_t('driver.second_photo'),
+    'second_photo_title' => bakery_t('driver.second_photo_title'),
+    'second_photo_hint' => bakery_t('driver.second_photo_hint'),
+    'second_photo_saving' => bakery_t('driver.second_photo_saving'),
+    'second_photo_saved' => bakery_t('driver.second_photo_saved'),
+    'first_photo_saved' => bakery_t('driver.first_photo_saved'),
+    'second_photo_added' => bakery_t('driver.second_photo_added'),
+    'second_photo_toast_action' => bakery_t('driver.second_photo_toast_action'),
+    'take_second_photo' => bakery_t('driver.take_second_photo'),
+    'back' => bakery_t('driver.back'),
+    'use_phone_camera' => bakery_t('driver.use_phone_camera'),
+    'use_in_app_camera' => bakery_t('driver.use_in_app_camera'),
 ], JSON_UNESCAPED_UNICODE); ?>;
 window.__DRIVER_ROUTE_BOOT__ = <?php echo json_encode([
-    'nextDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$nextDate),
+    'nextDayUrl' => $routeForwardDate !== '' ? bakery_driver_route_day_url((int)$selectedDriverId, (string)$routeForwardDate) : '',
     'previousDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$previousDate),
     'isToday' => $selectedDate === $todayDate,
     'prepMode' => !empty($routePrepMode),

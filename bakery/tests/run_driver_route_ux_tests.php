@@ -182,6 +182,25 @@ driver_ux_assert(
         && strpos($routeJs, "window.addEventListener('popstate'") !== false
 );
 driver_ux_assert(
+    'Now keeps the coming stores beside the current stop',
+    strpos($styles, '.driver-route[data-route-view="now"] .route-secondary-column {') !== false
+        && strpos($styles, '.driver-route[data-route-view="now"] .route-secondary-column,') === false
+        && strpos($page, 'stop-open-delivery') !== false
+);
+driver_ux_assert(
+    'the phone day switch stays on screen and stops after tomorrow',
+    strpos($styles, "body.driver-workflow-page .route-day-nav,\n") === false
+        && strpos($page, 'data-latest') !== false
+        && strpos($page, 'route-day-nav-arrow--end') !== false
+        && strpos($page, "if (latest && chosen > latest) chosen = latest;") !== false
+);
+driver_ux_assert(
+    'inline capture keeps the amount, credit, and photo steps tappable',
+    strpos($styles, '.photo-modal.is-inline #deliveryWizardSteps {') !== false
+        && strpos($styles, '.photo-modal.is-inline #deliveryWizardSteps,') === false
+        && strpos((string)file_get_contents($root . '/includes/driver_delivery.js'), 'var show = onCharge && !state.secondState && !state.submitting;') !== false
+);
+driver_ux_assert(
     'Suggest order previews and never saves until the driver accepts',
     strpos($routeJs, 'function suggestRouteOrder') !== false
         && strpos($routeJs, 'function acceptSuggestedOrder') !== false
