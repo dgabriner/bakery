@@ -65,7 +65,7 @@
 
 .bd-pack-view {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin: 8px 0 12px;
 }
@@ -87,6 +87,30 @@
     background: #1f6637;
     border-color: #1f6637;
     color: #fff;
+}
+
+.bd-classic {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 12px;
+}
+
+.bd-classic p {
+    margin: 0;
+    flex: 1 1 180px;
+}
+
+.bd-classic button {
+    min-height: 44px;
+    border: 1px solid #8db59a;
+    border-radius: 10px;
+    background: #fff;
+    color: #173f3c;
+    font: inherit;
+    font-weight: 700;
+    padding: 0 12px;
 }
 
 .bd-stages__link,

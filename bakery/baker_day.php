@@ -1,7 +1,8 @@
 <?php
 /**
- * Baker day for Danny's admin profile.
- * Juan's Mix, Bake, and Pack screens are separate and are not rendered here.
+ * Baker day: Mix, Shape, and Pack.
+ * Bakers land here. The classic Mix / Bake / Pack screens stay available
+ * when an administrator stores the classic view.
  */
 define('ACCESS_ALLOWED', true);
 
@@ -12,20 +13,31 @@ require_once 'includes/kitchen_segments.php';
 require_once 'includes/admin_workspace_mode.php';
 
 $craftUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
-if (!bakery_admin_craft_preview_allowed($craftUser)) {
+$craftRole = (string)($craftUser['role_slug'] ?? '');
+$isBaker = $craftRole === 'baker';
+$isDanny = bakery_admin_craft_preview_allowed($craftUser);
+if (!$isBaker && !$isDanny) {
     http_response_code(403);
     header('Content-Type: text/plain; charset=utf-8');
     echo function_exists('bakery_t') ? bakery_t('baker_day.forbidden') : "Forbidden\n";
     exit;
 }
-bakery_admin_craft_preview_set('baker');
+if ($isBaker && bakery_baker_classic_nav() && in_array(strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')), ['GET', 'HEAD'], true)) {
+    $classicDate = bakery_staff_selected_date($_GET['date'] ?? null, bakery_baker_home_delivery_date());
+    header('Location: ' . BASE_URL . 'production.php?date=' . rawurlencode($classicDate));
+    exit;
+}
+if ($isDanny) {
+    bakery_admin_craft_preview_set('baker');
+}
+$bakerLineIds = $isBaker ? bakery_baker_product_ids($db) : null;
 
 $stage = (string)($_GET['stage'] ?? $_POST['stage'] ?? 'mix');
 if (!in_array($stage, ['mix', 'shape', 'pack'], true)) {
     $stage = 'mix';
 }
 $packView = (string)($_GET['pack'] ?? $_POST['pack'] ?? 'product');
-if (!in_array($packView, ['product', 'driver'], true)) {
+if (!in_array($packView, ['product', 'driver', 'customer'], true)) {
     $packView = 'product';
 }
 $selectedDate = bakery_staff_selected_date($_GET['date'] ?? ($_POST['date'] ?? null), bakery_baker_home_delivery_date());
@@ -49,7 +61,7 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
             } else {
                 $batches = bakery_baker_day_normalize_batches((float)($_POST['batches'] ?? 0));
             }
-            bakery_baker_day_apply_batches($db, $postDate, (int)($_POST['dough_type_id'] ?? 0), $batches, $userId);
+            bakery_baker_day_apply_batches($db, $postDate, (int)($_POST['dough_type_id'] ?? 0), $batches, $userId, $bakerLineIds);
             $noticeCode = 'saved';
         } elseif ($action === 'set_shape') {
             bakery_baker_day_apply_shape(
@@ -57,13 +69,23 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
                 $postDate,
                 (int)($_POST['product_id'] ?? 0),
                 (int)($_POST['quantity'] ?? 0),
-                $userId
+                $userId,
+                $bakerLineIds
             );
             $noticeCode = 'saved';
         } elseif ($action === 'add_dough') {
-            bakery_baker_day_add_dough($db, $postDate, (int)($_POST['dough_type_id'] ?? 0), $userId);
+            bakery_baker_day_add_dough($db, $postDate, (int)($_POST['dough_type_id'] ?? 0), $userId, $bakerLineIds);
             $noticeCode = 'saved';
+        } elseif ($action === 'set_classic') {
+            if ($craftRole !== 'administrator') {
+                throw new RuntimeException(bakery_t('baker_day.forbidden'));
+            }
+            bakery_baker_classic_nav_set((string)($_POST['classic'] ?? '') === '1');
+            $noticeCode = 'classic';
         } elseif ($action === 'publish') {
+            if ($craftRole !== 'administrator') {
+                throw new RuntimeException(bakery_t('baker_day.publish_baker'));
+            }
             bakery_baker_day_publish($db, $postDate, $userId);
             $noticeCode = 'published';
         } else {
@@ -75,8 +97,8 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
                 'stage' => $postStage,
                 'notice' => $noticeCode,
             ];
-            if ($postStage === 'pack' && $packView === 'driver') {
-                $returnQuery['pack'] = 'driver';
+            if ($postStage === 'pack' && $packView !== 'product') {
+                $returnQuery['pack'] = $packView;
             }
             header('Location: ' . BASE_URL . 'baker_day.php?' . http_build_query($returnQuery));
             exit;
@@ -91,7 +113,7 @@ if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
     }
 }
 
-$view = bakery_baker_day_view($db, $selectedDate);
+$view = bakery_baker_day_view($db, $selectedDate, $bakerLineIds);
 $batches = $view['batches'];
 $status = $view['status'];
 $working = $view['working'];
@@ -116,8 +138,8 @@ require_once 'includes/nav.php';
         <p class="bd-lead"><?php bakery_te('baker_day.lead'); ?></p>
         <form method="get" action="baker_day.php" class="bd-date">
             <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
-            <?php if ($stage === 'pack' && $packView === 'driver'): ?>
-            <input type="hidden" name="pack" value="driver">
+            <?php if ($stage === 'pack' && $packView !== 'product'): ?>
+            <input type="hidden" name="pack" value="<?php echo htmlspecialchars($packView, ENT_QUOTES, 'UTF-8'); ?>">
             <?php endif; ?>
             <label for="baker-day-date"><?php bakery_te('baker_mix.bake_for_delivery'); ?></label>
             <input id="baker-day-date" type="date" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" onchange="this.form.submit()">
@@ -126,8 +148,8 @@ require_once 'includes/nav.php';
             <?php foreach (['mix' => 'baker_day.stage_mix', 'shape' => 'baker_day.stage_shape', 'pack' => 'baker_day.stage_pack'] as $key => $labelKey): ?>
                 <?php
                 $stageQuery = ['date' => $selectedDate, 'stage' => $key];
-                if ($key === 'pack' && $packView === 'driver') {
-                    $stageQuery['pack'] = 'driver';
+                if ($key === 'pack' && $packView !== 'product') {
+                    $stageQuery['pack'] = $packView;
                 }
                 $href = 'baker_day.php?' . http_build_query($stageQuery);
                 ?>
@@ -142,10 +164,21 @@ require_once 'includes/nav.php';
         <p class="bd-note" role="status"><?php bakery_te('baker_day.published'); ?></p>
     <?php elseif ($noticeCode === 'saved'): ?>
         <p class="bd-note" role="status"><?php bakery_te('baker_day.saved'); ?></p>
+    <?php elseif ($noticeCode === 'classic'): ?>
+        <p class="bd-note" role="status"><?php bakery_te(bakery_baker_classic_nav() ? 'baker_day.classic_on' : 'baker_day.classic_off'); ?></p>
     <?php endif; ?>
 
     <p class="bd-status">
-        <?php if ($status['matches'] && $status['committed']): ?>
+        <?php if ($isBaker): ?>
+            <?php if ($status['matches']): ?>
+                <?php bakery_te('baker_day.status_baker_match'); ?>
+            <?php else: ?>
+                <?php echo htmlspecialchars(bakery_t('baker_day.status_baker_draft', [
+                    'draft' => number_format((int)$status['draft_pieces']),
+                    'juan' => number_format((int)$status['juan_pieces']),
+                ]), ENT_QUOTES, 'UTF-8'); ?>
+            <?php endif; ?>
+        <?php elseif ($status['matches'] && $status['committed']): ?>
             <?php bakery_te('baker_day.status_match_committed'); ?>
         <?php elseif ($status['matches']): ?>
             <?php echo htmlspecialchars(bakery_t('baker_day.status_match_open', ['count' => number_format((int)$status['juan_pieces'])]), ENT_QUOTES, 'UTF-8'); ?>
@@ -156,6 +189,23 @@ require_once 'includes/nav.php';
             ]), ENT_QUOTES, 'UTF-8'); ?>
         <?php endif; ?>
     </p>
+    <?php if ($craftRole === 'administrator'): ?>
+    <form method="post" action="baker_day.php" class="bd-classic">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="set_classic">
+        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
+        <?php if (bakery_baker_classic_nav()): ?>
+        <input type="hidden" name="classic" value="0">
+        <p><?php bakery_te('baker_day.classic_on'); ?></p>
+        <button type="submit"><?php bakery_te('baker_day.use_new'); ?></button>
+        <?php else: ?>
+        <input type="hidden" name="classic" value="1">
+        <p><?php bakery_te('baker_day.classic_off'); ?></p>
+        <button type="submit"><?php bakery_te('baker_day.use_classic'); ?></button>
+        <?php endif; ?>
+    </form>
+    <?php endif; ?>
 
     <?php if ($stage === 'mix'): ?>
         <p class="bd-stage-lead"><?php bakery_te('baker_day.mix_lead'); ?></p>
@@ -329,13 +379,22 @@ require_once 'includes/nav.php';
             </article>
         <?php endforeach; ?>
     <?php else: ?>
-        <p class="bd-stage-lead"><?php bakery_te($packView === 'driver' ? 'baker_day.pack_driver_lead' : 'baker_day.pack_lead'); ?></p>
+        <?php
+        $packLeadKey = 'baker_day.pack_lead';
+        if ($packView === 'driver') {
+            $packLeadKey = 'baker_day.pack_driver_lead';
+        } elseif ($packView === 'customer') {
+            $packLeadKey = 'baker_day.pack_customer_lead';
+        }
+        ?>
+        <p class="bd-stage-lead"><?php bakery_te($packLeadKey); ?></p>
         <nav class="bd-pack-view" aria-label="<?php bakery_te('baker_day.pack_view_aria'); ?>">
-            <?php foreach (['product' => 'baker_day.pack_by_product', 'driver' => 'baker_day.pack_by_driver'] as $packKey => $packLabel): ?>
+            <?php foreach (['product' => 'baker_day.pack_by_product', 'driver' => 'baker_day.pack_by_driver', 'customer' => 'baker_day.pack_by_customer'] as $packKey => $packLabel): ?>
                 <?php $packHref = 'baker_day.php?' . http_build_query(['date' => $selectedDate, 'stage' => 'pack', 'pack' => $packKey]); ?>
                 <a class="<?php echo $packView === $packKey ? 'is-active' : ''; ?>" href="<?php echo htmlspecialchars($packHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $packView === $packKey ? ' aria-current="page"' : ''; ?>><?php bakery_te($packLabel); ?></a>
             <?php endforeach; ?>
         </nav>
+        <p class="bd-pack-extra"><a href="<?php echo htmlspecialchars('pack_list.php?' . http_build_query(['date' => $selectedDate, 'view' => 'customer']), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('baker_day.open_pack_list'); ?></a></p>
         <details class="bd-card" open>
             <summary><?php bakery_te('baker_day.capp_counter'); ?></summary>
             <p class="bd-card__lead"><?php bakery_te('baker_day.capp_counter_lead'); ?></p>
@@ -390,7 +449,29 @@ require_once 'includes/nav.php';
             return strcasecmp($a['product_name'], $b['product_name']);
         });
         ?>
-        <?php if ($packView === 'driver'): ?>
+        <?php if ($packView === 'customer'): ?>
+            <?php $customerCards = is_array($view['customers'] ?? null) ? $view['customers'] : []; ?>
+            <?php if ($customerCards === []): ?>
+                <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>
+            <?php endif; ?>
+            <?php foreach ($customerCards as $customer): ?>
+                <article class="bd-batch bd-customer">
+                    <div class="bd-batch__row">
+                        <h2><?php echo htmlspecialchars((string)$customer['customer_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
+                        <p class="bd-batch__meta"><?php echo htmlspecialchars(bakery_pack_customer_route_label((string)($customer['route_name'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <p class="bd-batch__meta"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format((int)($customer['total'] ?? 0))]), ENT_QUOTES, 'UTF-8'); ?></p>
+                    </div>
+                    <ul>
+                        <?php foreach ($customer['products'] as $product): ?>
+                            <li>
+                                <span><?php echo htmlspecialchars((string)$product['product_name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                <strong><?php echo number_format((int)$product['quantity']); ?></strong>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </article>
+            <?php endforeach; ?>
+        <?php elseif ($packView === 'driver'): ?>
             <?php $destinations = bakery_baker_day_pack_destinations($packRows); ?>
             <?php if ($destinations === []): ?>
                 <p class="bd-empty"><?php bakery_te('baker_day.pack_summary_empty'); ?></p>
@@ -496,16 +577,18 @@ require_once 'includes/nav.php';
         </form>
     <?php endif; ?>
 
+    <?php if ($craftRole === 'administrator'): ?>
     <form method="post" action="baker_day.php" class="bd-publish">
         <?php echo bakery_csrf_field(); ?>
         <input type="hidden" name="action" value="publish">
         <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="stage" value="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
-        <?php if ($stage === 'pack' && $packView === 'driver'): ?>
-        <input type="hidden" name="pack" value="driver">
+        <?php if ($stage === 'pack' && $packView !== 'product'): ?>
+        <input type="hidden" name="pack" value="<?php echo htmlspecialchars($packView, ENT_QUOTES, 'UTF-8'); ?>">
         <?php endif; ?>
         <button type="submit"<?php echo $canPublish ? '' : ' disabled'; ?>><?php echo htmlspecialchars($publishLabel, ENT_QUOTES, 'UTF-8'); ?></button>
     </form>
+    <?php endif; ?>
 </div>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

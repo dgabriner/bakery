@@ -233,7 +233,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     </div>
   </div>
 </nav>
-<?php elseif ($navCraftPreview === 'baker'): ?>
+<?php elseif ($navCraftPreview === 'baker' || ($navRole === 'baker' && !bakery_baker_classic_nav())): ?>
 <?php
   $navCraftBakerDate = bakery_baker_nav_workspace_date($_GET['date'] ?? null);
   $navCraftStage = (string)($_GET['stage'] ?? 'mix');
@@ -243,7 +243,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
 ?>
 <nav class="bakery-nav bakery-nav--focused bakery-nav--craft-baker" aria-label="<?php bakery_te('nav.baker_day_aria'); ?>">
   <div class="bakery-nav__inner">
-    <?php if (function_exists('bakery_csrf_field')): ?>
+    <?php if ($navCraftPreview === 'baker' && function_exists('bakery_csrf_field')): ?>
     <form method="post" action="<?php echo htmlspecialchars(BASE_URL . 'index.php', ENT_QUOTES, 'UTF-8'); ?>">
       <?php echo bakery_csrf_field(); ?>
       <input type="hidden" name="admin_craft_preview" value="exit">
@@ -259,6 +259,30 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te($navCraftLabel); ?></span>
         </a>
       <?php endforeach; ?>
+      <?php if ($navRole === 'baker'): ?>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php?' . http_build_query(['view' => 'pending', 'date' => $navCraftBakerDate]), ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
+      </a>
+      <?php
+        $navBakerClockOpen = null;
+        if (isset($db) && $db instanceof PDO && bakery_time_clock_ready($db) && $navUser) {
+            $navBakerClockOpen = bakery_time_clock_open_punch($db, (int)($navUser['id'] ?? 0));
+        }
+      ?>
+      <?php if (function_exists('bakery_csrf_field')): ?>
+      <form class="bakery-nav__clock" method="post" action="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
+        <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
+          <?php echo htmlspecialchars($navBakerClockOpen
+              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
+              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+        </button>
+      </form>
+      <?php endif; ?>
+      <?php endif; ?>
       <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
       <?php echo $navLogoutForm; ?>
     </div>

@@ -462,7 +462,7 @@ function &bakery_navigation_script_registry(): array
             $boot($registry, $script, $managerApiRoles);
         }
         $boot($registry, 'baker.php', ['baker', 'administrator', 'manager']);
-        $boot($registry, 'baker_day.php', ['administrator']);
+        $boot($registry, 'baker_day.php', ['baker', 'administrator']);
         $boot($registry, 'demand_self_heal.php', ['administrator', 'manager', 'driver', 'driver_assistant']);
         $boot($registry, 'sales_home.php', ['sales', 'administrator', 'manager']);
         $adminOnly = ['administrator'];

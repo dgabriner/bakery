@@ -11,6 +11,7 @@ require_once __DIR__ . '/baker_mix.php';
 require_once __DIR__ . '/demand_review.php';
 require_once __DIR__ . '/formula_structure.php';
 require_once __DIR__ . '/staff_driver_profile.php';
+require_once __DIR__ . '/pack_list.php';
 
 /**
  * @param array<int,int> $quantities product_id => pieces
@@ -732,11 +733,14 @@ function bakery_baker_day_status(array $bakeList, array $working): array
  *   working:array<int,int>
  * }
  */
-function bakery_baker_day_view(PDO $db, string $date): array
+function bakery_baker_day_view(PDO $db, string $date, ?array $bakerProductIds = null): array
 {
     $juan = bakery_production_bake_list($db, $date);
     $working = bakery_baker_day_working_quantities($db, $date);
-    $sheet = bakery_baker_mix_sheet($db, $date, null, $working);
+    if (is_array($bakerProductIds)) {
+        $working = array_intersect_key($working, array_flip($bakerProductIds));
+    }
+    $sheet = bakery_baker_mix_sheet($db, $date, $bakerProductIds, $working);
     $batches = [];
     foreach ($sheet['batches'] as $batch) {
         if ((int)($batch['planned_units'] ?? 0) <= 0) {
@@ -746,14 +750,37 @@ function bakery_baker_day_view(PDO $db, string $date): array
         $batches[] = $batch;
     }
     $lines = bakery_operating_demand_lines($db, $date);
-    $pack = bakery_baker_day_pack_products($lines, bakery_baker_day_customer_routes($db, $date));
+    if (is_array($bakerProductIds)) {
+        $allowed = array_flip($bakerProductIds);
+        $lines = array_values(array_filter($lines, static function ($row) use ($allowed): bool {
+            return is_array($row) && isset($allowed[(int)($row['product_id'] ?? 0)]);
+        }));
+    }
+    $routes = bakery_baker_day_customer_routes($db, $date);
+    $pack = bakery_baker_day_pack_products($lines, $routes);
+    $addable = bakery_baker_day_addable_doughs($db, $batches);
+    if (is_array($bakerProductIds)) {
+        $doughIds = [];
+        if ($bakerProductIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($bakerProductIds), '?'));
+            $doughStmt = $db->prepare("SELECT DISTINCT dough_type_id FROM products WHERE id IN ($placeholders)");
+            $doughStmt->execute(array_values($bakerProductIds));
+            foreach ($doughStmt->fetchAll(PDO::FETCH_COLUMN) as $doughId) {
+                $doughIds[(int)$doughId] = true;
+            }
+        }
+        $addable = array_values(array_filter($addable, static function (array $dough) use ($doughIds): bool {
+            return isset($doughIds[(int)$dough['id']]);
+        }));
+    }
     return [
         'date' => $date,
         'batches' => $batches,
         'starter_feedings' => is_array($sheet['starter_feedings'] ?? null) ? $sheet['starter_feedings'] : [],
         'pull' => bakery_baker_day_pull_list($batches),
-        'addable' => bakery_baker_day_addable_doughs($db, $batches),
+        'addable' => $addable,
         'pack' => $pack,
+        'customers' => bakery_pack_customer_cards($lines, $routes),
         'produced' => bakery_baker_day_produced($db, $date),
         'counter' => bakery_baker_day_capp_counter($db, $date),
         'status' => bakery_baker_day_status($juan, $working),
@@ -761,7 +788,20 @@ function bakery_baker_day_view(PDO $db, string $date): array
     ];
 }
 
-function bakery_baker_day_apply_batches(PDO $db, string $date, int $doughTypeId, float $newBatches, ?int $userId): void
+function bakery_baker_day_guard_products(array $productIds, ?array $allowedProductIds): void
+{
+    if ($allowedProductIds === null) {
+        return;
+    }
+    $allowed = array_flip($allowedProductIds);
+    foreach ($productIds as $productId) {
+        if (!isset($allowed[(int)$productId])) {
+            throw new InvalidArgumentException('That dough is not on your sheet.');
+        }
+    }
+}
+
+function bakery_baker_day_apply_batches(PDO $db, string $date, int $doughTypeId, float $newBatches, ?int $userId, ?array $allowedProductIds = null): void
 {
     if ($doughTypeId <= 0) {
         throw new InvalidArgumentException('Choose a dough.');
@@ -783,6 +823,7 @@ function bakery_baker_day_apply_batches(PDO $db, string $date, int $doughTypeId,
     foreach ($batch['products'] as $product) {
         $current[(int)$product['product_id']] = (int)$product['planned_quantity'];
     }
+    bakery_baker_day_guard_products(array_keys($current), $allowedProductIds);
     $pieces = $batch['batch_math']['pieces_per_batch'] ?? null;
     $scaled = bakery_baker_day_scale_quantities(
         $current,
@@ -793,20 +834,22 @@ function bakery_baker_day_apply_batches(PDO $db, string $date, int $doughTypeId,
     bakery_baker_day_save_products($db, $date, $scaled, $userId);
 }
 
-function bakery_baker_day_apply_shape(PDO $db, string $date, int $productId, int $quantity, ?int $userId): void
+function bakery_baker_day_apply_shape(PDO $db, string $date, int $productId, int $quantity, ?int $userId, ?array $allowedProductIds = null): void
 {
     if ($productId <= 0 || $quantity < 0) {
         throw new InvalidArgumentException('Piece counts must be zero or more.');
     }
+    bakery_baker_day_guard_products([$productId], $allowedProductIds);
     bakery_baker_day_save_products($db, $date, [$productId => $quantity], $userId);
 }
 
-function bakery_baker_day_add_dough(PDO $db, string $date, int $doughTypeId, ?int $userId): void
+function bakery_baker_day_add_dough(PDO $db, string $date, int $doughTypeId, ?int $userId, ?array $allowedProductIds = null): void
 {
     $quantities = bakery_baker_day_standard_batch_quantities($db, $doughTypeId);
     if ($quantities === []) {
         throw new InvalidArgumentException('That dough has no products to bake.');
     }
+    bakery_baker_day_guard_products(array_keys($quantities), $allowedProductIds);
     bakery_baker_day_save_products($db, $date, $quantities, $userId);
 }
 
