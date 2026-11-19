@@ -88,8 +88,8 @@ manager_phone_assert(
 );
 
 $login = (string)file_get_contents($root . '/login.php');
-manager_phone_assert(strpos($login, 'bakery_role_home(') !== false, 'login.php resolves the landing page through bakery_role_home');
-manager_phone_assert(bakery_role_home('manager') === 'manager.php', 'manager login lands on manager.php');
+manager_phone_assert(strpos($login, 'bakery_staff_login_home') !== false, 'login resolves a driving manager onto her route');
+manager_phone_assert(bakery_role_home('manager') === 'manager.php', 'manager role home stays the manager phone');
 
 $header = (string)file_get_contents($root . '/includes/header.php');
 manager_phone_assert(strpos($header, 'workspace-manager') !== false, 'header sets workspace-manager');
