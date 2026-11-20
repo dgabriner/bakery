@@ -408,6 +408,10 @@ $countedCard = bakery_baker_set_dough_card([
 ]);
 $assert(abs((float) $countedPack['usable_grams'] - 9600) < 0.01, 'with pack grams on, 80 Bolillo plus 4 Dinner Rolls is 9600 g usable');
 $assert(abs((float) $countedPack['dough_grams'] - 9650) < 0.01, 'with pack grams on, the card total is 9650 g');
+$assert($countedCard['batches'] === '1 batch + 2,400 g', 'with pack grams on, the card is 1 batch + 2,400 g');
+$countedFlour = 9650 * 100 / $rollTotal;
+$assert(abs((float) $countedPack['ingredients'][0]['grams'] - $countedFlour) < 0.05, 'with pack grams on, flour follows the 9650 g card');
+$assert(abs((float) $countedPack['ingredients'][0]['grams'] - 5508) < 0.05, 'with pack grams on, flour is about 5508 g');
 $assert($countedCard['pack_warnings'] === [] && $countedCard['pack_short'] === '', 'a counted pack does not say the grams were left out');
 $assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $mixedFlour) < 0.05, 'the pull follows the Bolillo dough plus the 50 g loss');
 $assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $rollsIncluded) > 1, 'the pull does not include the Dinner Roll pack grams');
