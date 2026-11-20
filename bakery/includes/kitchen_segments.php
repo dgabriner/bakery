@@ -8,12 +8,14 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 /**
- * @return 'mix'|'bake'|'pack'|''
+ * @return 'set'|'mix'|'bake'|'pack'|''
  */
 function bakery_kitchen_segment_for_page(?string $page = null): string
 {
     $page = $page ?? basename((string)($_SERVER['PHP_SELF'] ?? ''), '.php');
     switch ($page) {
+        case 'baker_set':
+            return 'set';
         case 'baker_mix':
             return 'mix';
         case 'production':
@@ -115,6 +117,7 @@ function bakery_kitchen_segments_html(?string $active = null, ?string $date = nu
     $q = bakery_kitchen_segment_query($date);
     $base = defined('BASE_URL') ? BASE_URL : '';
     $segments = [
+        'set' => ['href' => $base . 'baker_set.php?' . $q, 'label' => bakery_t('kitchen.segment_set')],
         'mix' => ['href' => $base . 'baker_mix.php?' . $q, 'label' => bakery_t('kitchen.segment_mix')],
         'bake' => ['href' => $base . 'production.php?' . $q, 'label' => bakery_t('kitchen.segment_bake')],
         'pack' => ['href' => $base . 'pack_list.php?' . $q, 'label' => bakery_t('kitchen.segment_pack')],

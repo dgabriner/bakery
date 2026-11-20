@@ -1,0 +1,386 @@
+<?php
+/**
+ * Set the day: standard order, autosave and undo, shape split, lock.
+ * Usage: php tests/run_baker_set_tests.php
+ * Local bakerysf_test only.
+ */
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "CLI only\n");
+    exit(1);
+}
+
+define('ACCESS_ALLOWED', true);
+$root = dirname(__DIR__);
+require_once $root . '/tests/isolate_test_db.php';
+require_once $root . '/includes/config.php';
+require_once $root . '/includes/database.php';
+require_once $root . '/includes/test_target_guard.php';
+require_once $root . '/includes/auth.php';
+require_once $root . '/includes/baker_set.php';
+require_once $root . '/includes/i18n.php';
+
+if (!IS_LOCAL) {
+    fwrite(STDERR, "Refusing: tests must run with APP_ENV=local\n");
+    exit(1);
+}
+
+$db = check_mysql_connection();
+bakery_assert_local_test_target($db);
+
+$pass = 0;
+$fail = 0;
+$assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
+    if ($ok) {
+        echo "PASS  $msg\n";
+        $pass++;
+    } else {
+        echo "FAIL  $msg\n";
+        $fail++;
+    }
+};
+
+$assert(bakery_baker_set_default_date('2026-11-19') === '2026-11-20', 'default date is the next sell day');
+$assert(bakery_baker_set_default_date('2026-11-19') === bakery_next_sell_date('2026-11-19'), 'default date matches the sell-day helper');
+
+$_SESSION['user_id'] = 1;
+$_SESSION['user_role_slug'] = 'cashier';
+$assert(!bakery_baker_set_can_edit(), 'cashier cannot edit');
+$_SESSION['user_role_slug'] = 'sales';
+$assert(!bakery_baker_set_can_edit(), 'sales cannot edit');
+$_SESSION['user_role_slug'] = 'baker';
+$assert(bakery_baker_set_can_edit() && !bakery_baker_set_can_unlock(), 'baker can edit and cannot unlock');
+$_SESSION['user_role_slug'] = 'manager';
+$assert(bakery_baker_set_can_edit() && bakery_baker_set_can_unlock(), 'manager can edit and unlock');
+$_SESSION['user_role_slug'] = 'administrator';
+
+$mantecada = [
+    'batch_size_mode' => 'grams',
+    'standard_batch_dough_grams' => 22062,
+    'batch_multiplier' => 1.5,
+    'pieces_per_batch' => null,
+    'dough_loss_grams' => null,
+];
+$mantecadaIngredients = [
+    ['name' => 'Bread Flour', 'percentage' => 100],
+    ['name' => 'Sugar', 'percentage' => 91.67],
+    ['name' => 'Milk', 'percentage' => 71.67],
+    ['name' => 'Eggs', 'percentage' => 72.08],
+    ['name' => 'Oil', 'percentage' => 64.17],
+    ['name' => 'Baking Powder', 'percentage' => 5.73],
+];
+$mantecadaTotal = 405.32;
+$mantecadaShapes = [
+    ['product_id' => 1, 'name' => 'Barras', 'quantity' => 25, 'weight_grams' => 662, 'demand_quantity' => 20],
+    ['product_id' => 2, 'name' => 'Quequitos', 'quantity' => 200, 'weight_grams' => 83, 'demand_quantity' => 200],
+];
+$shape = bakery_baker_set_shape_math($mantecadaShapes, $mantecada, $mantecadaTotal, $mantecadaIngredients);
+$flourBasis = 33150 * 100 / $mantecadaTotal;
+$sharedPull = bakery_baker_mix_percentage_amounts($flourBasis, $mantecadaIngredients);
+$assert(abs((float) $shape['effective_batch_grams'] - 33093) < 0.001, 'Mantecada batch is 1.5 x 22062 g = 33093 g');
+$assert(abs((float) $shape['dough_grams'] - 33150) < 0.001, 'shape split sums catalog piece weights');
+$assert(abs((float) $shape['batches'] - (33150 / 33093)) < 0.0001, 'batches use the scaled batch weight');
+$assert(abs((float) $shape['ingredients'][0]['grams'] - (float) $sharedPull[0]['grams']) < 0.001, 'ingredient pull uses the mix percentage helper');
+$assert(abs((float) $sharedPull[0]['grams'] - $flourBasis) < 0.02, 'flour grams follow the formula total');
+$assert($shape['balances'][0]['balance'] === 'over', 'Barras over the order is marked over');
+$assert($shape['balances'][1]['balance'] === 'match', 'Quequitos on the order is a match');
+
+$barras = bakery_baker_set_shape_math(
+    [['product_id' => 3, 'name' => 'Barras', 'quantity' => 250, 'weight_grams' => 662, 'demand_quantity' => 250]],
+    [
+        'batch_size_mode' => 'pieces',
+        'standard_batch_pieces' => 100,
+        'pieces_per_batch' => 100,
+        'standard_batch_dough_grams' => null,
+        'batch_multiplier' => null,
+    ],
+    0,
+    []
+);
+$assert($barras['batches'] === 2.5, '100 per batch counts whole barras');
+$assert($barras['effective_batch_grams'] === null, 'piece batches do not invent a gram batch');
+$assert(abs((float) $barras['kg'] - 165.5) < 0.001, 'kilograms still use the catalog piece weight');
+
+$missing = bakery_baker_set_shape_math(
+    [['product_id' => 4, 'name' => 'Mystery', 'quantity' => 10, 'weight_grams' => null, 'demand_quantity' => 10]],
+    ['batch_size_mode' => 'grams', 'standard_batch_dough_grams' => 33093, 'batch_multiplier' => null],
+    100,
+    [['name' => 'Bread Flour', 'percentage' => 100]]
+);
+$assert($missing['kg'] === null && $missing['dough_grams'] === null && $missing['batches'] === null, 'missing piece weight does not invent grams or batches');
+$assert($missing['missing_weights'] !== [], 'missing piece weight is reported');
+
+$page = (string) file_get_contents($root . '/baker_set.php');
+$css = (string) file_get_contents($root . '/css/baker_set.css');
+$js = (string) file_get_contents($root . '/includes/baker_set.js');
+$manifest = (string) file_get_contents($root . '/scripts/deploy_manifest.ps1');
+$segments = (string) file_get_contents($root . '/includes/kitchen_segments.php');
+$assert(strpos($page, 'inputmode="numeric"') !== false, 'quantity uses a numeric keyboard');
+$assert(strpos($page, 'name="action" value="save"') === false, 'there is no separate Save action');
+$assert(strpos($page, 'value="lock"') !== false, 'Done locks the day');
+$assert(strpos($page, 'value="undo"') !== false, 'undo is one control');
+$assert(strpos($js, 'localStorage') !== false, 'saves queue in localStorage');
+$assert(strpos($js, 'ajax=revision') !== false, 'the screen polls for a stale plan');
+$assert(strpos($css, '48px') !== false, 'touch targets are at least 48px');
+$assert(strpos($manifest, "'baker_set.php'") !== false, 'deploy whitelist includes baker_set.php');
+$assert(strpos($segments, 'baker_set.php') !== false, 'kitchen nav includes Set');
+$assert(in_array('baker_set.php', bakery_baker_scripts(), true), 'bakers can open Set the day');
+$assert(in_array('baker_set.php', bakery_navigation_scripts_for_role('driver'), true), 'drivers can open Set the day to view');
+$assert(in_array('baker_set.php', bakery_navigation_scripts_for_role('cashier'), true), 'cashiers can open Set the day to view');
+$assert(strpos((string) file_get_contents($root . '/products.php'), 'baker_set') === false, 'products.php is untouched');
+
+$en = include $root . '/lang/en.php';
+$es = include $root . '/lang/es.php';
+$keys = [
+    'page.baker_set',
+    'nav.item.baker_set',
+    'nav.item_desc.baker_set',
+    'kitchen.segment_set',
+    'baker_set.title',
+    'baker_set.saved',
+    'baker_set.undo',
+    'baker_set.stale',
+    'baker_set.queued',
+    'baker_set.lock',
+    'baker_set.unlock',
+    'baker_set.copy_last',
+    'baker_set.reset',
+    'baker_set.short',
+    'baker_set.over',
+    'baker_set.batch_scaled',
+    'baker_set.per_batch',
+    'baker_set.missing_weight',
+    'baker_set.view_only',
+];
+foreach ($keys as $key) {
+    $assert(isset($en[$key], $es[$key]) && $en[$key] !== '' && $es[$key] !== '', "en and es have $key");
+    $assert($en[$key] !== $es[$key], "es translates $key");
+}
+
+$stamp = 'bs' . substr(str_replace('.', '', uniqid('', true)), -8);
+$date = '2099-06-07';
+$previous = '2099-05-31';
+$day = bakery_standing_day_from_date($date);
+$userIds = [];
+$customerIds = [];
+$productIds = [];
+$doughIds = [];
+$lineIds = [];
+$ingredientIds = [];
+
+$cleanup = static function () use ($db, &$userIds, &$customerIds, &$productIds, &$doughIds, &$lineIds, &$ingredientIds, $date, $previous): void {
+    $entity = (int) str_replace('-', '', $date);
+    $prevEntity = (int) str_replace('-', '', $previous);
+    if (table_exists($db, 'field_audit')) {
+        $db->prepare('DELETE FROM field_audit WHERE entity_type = ? AND entity_id IN (?, ?)')->execute(['baker_set', $entity, $prevEntity]);
+    }
+    foreach ([$date, $previous] as $when) {
+        if (table_exists($db, 'production_plan_commit_items')) {
+            $db->prepare('DELETE FROM production_plan_commit_items WHERE delivery_date = ?')->execute([$when]);
+        }
+        if (table_exists($db, 'production_plan_commits')) {
+            $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date = ?')->execute([$when]);
+        }
+        if (table_exists($db, 'production_plan_items')) {
+            $db->prepare('DELETE FROM production_plan_items WHERE delivery_date = ?')->execute([$when]);
+        }
+        $db->prepare('DELETE FROM daily_order_items WHERE daily_order_id IN (SELECT id FROM daily_orders WHERE order_date = ?)')->execute([$when]);
+        $db->prepare('DELETE FROM daily_orders WHERE order_date = ?')->execute([$when]);
+    }
+    if ($customerIds !== []) {
+        $in = implode(',', array_map('intval', $customerIds));
+        $db->exec('DELETE FROM standing_orders WHERE customer_id IN (' . $in . ')');
+        $db->exec('DELETE FROM daily_order_items WHERE daily_order_id IN (SELECT id FROM daily_orders WHERE customer_id IN (' . $in . '))');
+        $db->exec('DELETE FROM daily_orders WHERE customer_id IN (' . $in . ')');
+        $db->exec('DELETE FROM customers WHERE id IN (' . $in . ')');
+    }
+    if ($productIds !== []) {
+        $in = implode(',', array_map('intval', $productIds));
+        if (table_exists($db, 'formula_ingredients')) {
+            $db->exec('DELETE FROM formula_ingredients WHERE dough_type_id IN (SELECT dough_type_id FROM products WHERE id IN (' . $in . '))');
+        }
+        $db->exec('DELETE FROM production_plan_items WHERE product_id IN (' . $in . ')');
+        $db->exec('DELETE FROM products WHERE id IN (' . $in . ')');
+    }
+    if ($doughIds !== []) {
+        $in = implode(',', array_map('intval', $doughIds));
+        $db->exec('DELETE FROM formula_ingredients WHERE dough_type_id IN (' . $in . ')');
+        $db->exec('DELETE FROM dough_types WHERE id IN (' . $in . ')');
+    }
+    if ($lineIds !== []) {
+        $in = implode(',', array_map('intval', $lineIds));
+        $db->exec('DELETE FROM product_lines WHERE id IN (' . $in . ')');
+    }
+    if ($ingredientIds !== []) {
+        $in = implode(',', array_map('intval', $ingredientIds));
+        $db->exec('DELETE FROM ingredients WHERE id IN (' . $in . ')');
+    }
+    if ($userIds !== []) {
+        $in = implode(',', array_map('intval', $userIds));
+        $db->exec('DELETE FROM users WHERE id IN (' . $in . ')');
+    }
+};
+
+try {
+    $cleanup();
+    $adminRole = (int) $db->query("SELECT id FROM roles WHERE slug = 'administrator' LIMIT 1")->fetchColumn();
+    $assert($adminRole > 0, 'administrator role exists');
+    $insertUser = $db->prepare(
+        'INSERT INTO users (email, password_hash, login_code, display_name, role_id, is_active) VALUES (?, ?, NULL, ?, ?, 1)'
+    );
+    $insertUser->execute([$stamp . '@example.test', 'x', $stamp, $adminRole]);
+    $adminId = (int) $db->lastInsertId();
+    $userIds[] = $adminId;
+    $_SESSION['user_id'] = $adminId;
+    $_SESSION['user_role_slug'] = 'administrator';
+    $_SESSION['user_display_name'] = $stamp;
+
+    $insertCustomer = $db->prepare(
+        'INSERT INTO customers (name, zone, email, address, phone, payment_collection, is_active, pricing_tier)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+    );
+    $insertCustomer->execute([$stamp . ' dated', 'North Zone', $stamp . '-a@example.test', '1 Test', '555-0100', 'signature', 'retail']);
+    $datedCustomer = (int) $db->lastInsertId();
+    $customerIds[] = $datedCustomer;
+    $insertCustomer->execute([$stamp . ' standing', 'North Zone', $stamp . '-b@example.test', '2 Test', '555-0101', 'signature', 'retail']);
+    $standingCustomer = (int) $db->lastInsertId();
+    $customerIds[] = $standingCustomer;
+
+    $insertLine = $db->prepare('INSERT INTO product_lines (name) VALUES (?)');
+    $insertLine->execute([$stamp . ' line']);
+    $lineId = (int) $db->lastInsertId();
+    $lineIds[] = $lineId;
+    $insertDough = $db->prepare('INSERT INTO dough_types (name, product_line_id) VALUES (?, ?)');
+    $insertDough->execute([$stamp . ' dough', $lineId]);
+    $doughId = (int) $db->lastInsertId();
+    $doughIds[] = $doughId;
+    if (function_exists('column_exists') && column_exists($db, 'dough_types', 'standard_batch_dough_grams')) {
+        $sets = ['standard_batch_dough_grams = 22062'];
+        if (column_exists($db, 'dough_types', 'batch_multiplier')) {
+            $sets[] = 'batch_multiplier = 1.5';
+        }
+        if (column_exists($db, 'dough_types', 'batch_size_mode')) {
+            $sets[] = "batch_size_mode = 'grams'";
+        }
+        $db->exec('UPDATE dough_types SET ' . implode(', ', $sets) . ' WHERE id = ' . $doughId);
+    }
+
+    $insertIngredient = $db->prepare('INSERT INTO ingredients (name, unit) VALUES (?, ?)');
+    $insertFormula = $db->prepare('INSERT INTO formula_ingredients (dough_type_id, ingredient_id, percentage) VALUES (?, ?, ?)');
+    foreach ([['Flour ' . $stamp, 100], ['Water ' . $stamp, 70], ['Salt ' . $stamp, 2], ['Levain ' . $stamp, 20]] as $ingredient) {
+        $insertIngredient->execute([$ingredient[0], 'g']);
+        $ingredientId = (int) $db->lastInsertId();
+        $ingredientIds[] = $ingredientId;
+        $insertFormula->execute([$doughId, $ingredientId, $ingredient[1]]);
+    }
+
+    $insertProduct = $db->prepare('INSERT INTO products (name, dough_type_id, price, wholesale_price, weight_grams) VALUES (?, ?, 0, NULL, ?)');
+    $insertProduct->execute([$stamp . ' barras', $doughId, 662]);
+    $barrasId = (int) $db->lastInsertId();
+    $productIds[] = $barrasId;
+    $insertProduct->execute([$stamp . ' rolls', $doughId, 83]);
+    $rollsId = (int) $db->lastInsertId();
+    $productIds[] = $rollsId;
+    $insertProduct->execute([$stamp . ' zero', $doughId, 50]);
+    $zeroId = (int) $db->lastInsertId();
+    $productIds[] = $zeroId;
+
+    $db->prepare('INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)')
+        ->execute([$datedCustomer, $barrasId, $day, 4]);
+    $db->prepare('INSERT INTO standing_orders (customer_id, product_id, day_of_week, quantity) VALUES (?, ?, ?, ?)')
+        ->execute([$standingCustomer, $rollsId, $day, 3]);
+    $db->prepare('INSERT INTO daily_orders (customer_id, order_date, status) VALUES (?, ?, ?)')
+        ->execute([$datedCustomer, $date, 'pending']);
+    $orderId = (int) $db->lastInsertId();
+    $item = $db->prepare('INSERT INTO daily_order_items (daily_order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, ?, 0, 0)');
+    $item->execute([$orderId, $barrasId, 9]);
+    $item->execute([$orderId, $zeroId, 0]);
+
+    $standard = bakery_baker_set_standard_order($db, $date);
+    $assert(($standard['by_product'][$barrasId] ?? null) === 9, 'dated order beats standing for the same customer');
+    $assert(($standard['by_product'][$rollsId] ?? null) === 3, 'standing fills a customer with no dated order');
+    $assert(array_key_exists($zeroId, $standard['by_product']) && $standard['by_product'][$zeroId] === 0, 'an explicit zero line still shows');
+    $expectedLines = 0;
+    foreach (bakery_operating_demand_lines($db, $date) as $line) {
+        $source = (string) ($line['source'] ?? '');
+        if (($source === 'daily' || $source === 'standing') && (int) ($line['quantity'] ?? 0) > 0) {
+            $expectedLines++;
+        }
+    }
+    $assert($standard['real_order_lines'] === $expectedLines, 'line count includes real dated and standing lines only');
+    $assert($expectedLines >= 2, 'the fixture has at least two real order lines');
+
+    $sheet = bakery_baker_set_sheet($db, $date, null);
+    $foundZero = false;
+    foreach ($sheet['batches'] as $batch) {
+        foreach ($batch['products'] as $product) {
+            if ((int) $product['product_id'] === $zeroId && (int) $product['planned_quantity'] === 0) {
+                $foundZero = true;
+            }
+        }
+    }
+    $assert($foundZero, 'the sheet keeps the zero line');
+
+    $saved = bakery_baker_set_save_quantity($db, $date, $barrasId, 10, false, 0, $adminId, null);
+    $assert(($saved['patch']['quantity'] ?? null) === 10, 'autosave stores the tapped quantity');
+    $assert(bakery_production_plan_draft_quantities($db, $date)[$barrasId] === 10, 'draft plan has the autosaved quantity');
+    $conflicted = false;
+    try {
+        bakery_baker_set_save_quantity($db, $date, $barrasId, 11, false, 0, $adminId, null);
+    } catch (RuntimeException $e) {
+        $conflicted = str_starts_with($e->getMessage(), 'production_plan_conflict:');
+    }
+    $assert($conflicted, 'a stale tab cannot overwrite a newer quantity');
+    $undone = bakery_baker_set_undo($db, $date, $adminId, null);
+    $assert(($undone['patch']['quantity'] ?? null) === 9, 'undo restores the previous quantity');
+    $audit = $db->prepare('SELECT actor_user_id FROM field_audit WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY id ASC LIMIT 1');
+    $audit->execute(['baker_set', (int) str_replace('-', '', $date), 'qty:' . $barrasId]);
+    $assert((int) $audit->fetchColumn() === $adminId, 'the change log stores the user');
+
+    $db->prepare('INSERT INTO production_plan_items (delivery_date, product_id, planned_quantity, created_by_user_id) VALUES (?, ?, ?, ?)')
+        ->execute([$previous, $barrasId, 42, $adminId]);
+    bakery_baker_set_copy_previous($db, $date, $adminId, null);
+    $assert((bakery_production_plan_draft_quantities($db, $date)[$barrasId] ?? null) === 42, 'copy last weekday brings that plan forward');
+
+    bakery_baker_set_reset($db, $date, $adminId, null);
+    $assert(!array_key_exists($barrasId, bakery_production_plan_draft_quantities($db, $date)), 'reset clears the draft back to the standard order');
+
+    bakery_baker_set_save_quantity($db, $date, $barrasId, 10, false, 0, $adminId, null);
+    bakery_baker_set_lock($db, $date, $adminId);
+    $bake = bakery_production_bake_list($db, $date);
+    $baked = null;
+    foreach ($bake['items'] as $itemRow) {
+        if ((int) $itemRow['product_id'] === $barrasId) {
+            $baked = $itemRow;
+        }
+    }
+    $assert($bake['committed'] === true && $baked !== null && (int) $baked['bake_quantity'] === 10, 'lock commits the plan onto the bake list');
+
+    $_SESSION['user_role_slug'] = 'baker';
+    $bakerBlocked = false;
+    try {
+        bakery_baker_set_unlock($db, $date);
+    } catch (RuntimeException $e) {
+        $bakerBlocked = $e->getMessage() === 'baker_set_forbidden';
+    }
+    $assert($bakerBlocked, 'a baker cannot unlock');
+    $assert(bakery_baker_set_is_locked($db, $date), 'a refused unlock leaves the day locked');
+
+    $_SESSION['user_role_slug'] = 'administrator';
+    bakery_baker_set_unlock($db, $date);
+    $open = bakery_production_bake_list($db, $date);
+    $opened = null;
+    foreach ($open['items'] as $itemRow) {
+        if ((int) $itemRow['product_id'] === $barrasId) {
+            $opened = $itemRow;
+        }
+    }
+    $assert($open['committed'] === false && $opened !== null && (int) $opened['bake_quantity'] === 9, 'unlock returns Mix and Daily Production to demand');
+} catch (Throwable $e) {
+    echo 'FAIL  fixture crashed: ' . $e->getMessage() . "\n";
+    $fail++;
+} finally {
+    $cleanup();
+}
+
+echo $fail === 0 ? "\n$pass passed, 0 failed\n" : "\n$pass passed, $fail failed\n";
+exit($fail > 0 ? 1 : 0);

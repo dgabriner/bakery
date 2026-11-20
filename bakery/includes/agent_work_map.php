@@ -60,6 +60,10 @@ function bakery_agent_work_map_core(): array
                 'includes/production_manager_print.php',
                 'css/production_manager.css',
                 'baker_mix.php',
+                'baker_set.php',
+                'includes/baker_set.php',
+                'includes/baker_set.js',
+                'css/baker_set.css',
                 'production.php',
                 'pack_list.php',
                 'pan_dulce_quantities.php',
@@ -94,6 +98,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_product_manager_plan_tests.php',
                 'tests/run_production_manager_dashboard_tests.php',
                 'tests/run_baker_mix_tests.php',
+                'tests/run_baker_set_tests.php',
                 'tests/run_daily_run_core_tests.php',
             ],
             'invariants' => [

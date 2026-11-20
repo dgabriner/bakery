@@ -11,7 +11,7 @@ function Get-BakeryDeployRootFiles {
         'products.php', 'catalog_gaps.php', 'cost_margin.php', 'product_photos.php', 'cashier_add_product.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
         'daily_orders.php', 'daily_orders_api.php', 'zazie_weekly_sheet.php', 'standing_orders.php', 'standing_orders_manager.php', 'standing_orders_manager_api.php', 'special_orders.php', 'orders.php',
         'bread_distribution.php', 'product_distribution.php',
-        'production.php', 'baker_mix.php', 'pack_list.php',
+        'production.php', 'baker_mix.php', 'baker_set.php', 'pack_list.php',
         'standing_routes.php', 'daily_route.php',
         'drivers.php', 'driver.php', 'driver_list.php', 'driver_assignment.php', 'driver_assignment_api.php', 'driver_overview.php',
         'route_manager.php', 'route_summary.php', 'map.php', 'call_headquarters.php',

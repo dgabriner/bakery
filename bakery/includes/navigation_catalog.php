@@ -82,6 +82,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'production_center.php', 'label' => 'Production Center', 'description' => 'Production Manager hub: plan one delivery day, assign short bakes to stores, commit for bakers.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'product_manager_plan.php', 'label' => 'Product Manager Plan', 'description' => 'Standards, standing, cover-window demand, and finished goods for the bake horizon.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'ingredient_requirements.php', 'label' => 'Ingredient Planner', 'description' => 'Material requirements from the production plan through formulas to stock and purchase hints.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
+                ['href' => 'baker_set.php', 'label' => 'Set the day', 'description' => 'Set today\'s production in a few taps. Opens on the standard order.', 'roles' => ['administrator', 'manager', 'baker'], 'usage' => 'everyday'],
                 ['href' => 'baker_mix.php', 'label' => 'Mix Today', 'description' => 'Simple baker view of starter feedings and dough batches to mix.', 'roles' => ['administrator', 'manager', 'baker'], 'usage' => 'everyday'],
                 ['href' => 'production.php', 'label' => 'Daily Production', 'description' => 'The bake schedule and daily production quantities.', 'roles' => ['administrator', 'manager', 'baker'], 'usage' => 'everyday'],
                 ['href' => 'pack_list.php', 'label' => 'Pack List', 'description' => 'Packing checklist grouped for the selected production day.', 'roles' => ['administrator', 'manager', 'baker'], 'usage' => 'everyday'],
@@ -445,9 +446,10 @@ function &bakery_navigation_script_registry(): array
         }
         $boot($registry, 'time_clock.php', ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager']);
         $bakerRoles = ['baker', 'administrator', 'manager'];
-        foreach (['production.php', 'baker_mix.php', 'pack_list.php'] as $script) {
+        foreach (['production.php', 'baker_mix.php', 'pack_list.php', 'baker_set.php'] as $script) {
             $boot($registry, $script, $bakerRoles);
         }
+        $boot($registry, 'baker_set.php', ['baker', 'administrator', 'manager', 'driver', 'driver_assistant', 'cashier', 'sales']);
         $managerApiRoles = ['administrator', 'manager'];
         foreach ([
             'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'daily_status_api.php', 'sales_leads_api.php', 'text_comms_api.php', 'service_issues_api.php',
