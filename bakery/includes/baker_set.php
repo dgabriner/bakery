@@ -28,15 +28,16 @@ function bakery_baker_set_count_pack_grams(): bool
 }
 
 /**
- * Danny 2026-11-19: one Dinner Roll order is a pack of 6 at 75 g, 450 g of dough.
- * The catalog weight is still 600 g. Delete this when Danny approves a catalog change.
+ * Danny 2026-11-19: one Dinner Roll order is a dozen, 12 rolls at 75 g, 900 g of dough.
+ * He first said a pack of 6, then corrected it to a dozen. The catalog weight is still 600 g.
+ * Delete this when Danny approves a catalog change.
  * Keyed to the Dinner Roll product name. Other packs stay on BAKERY_BAKER_SET_COUNT_PACK_GRAMS.
  */
 function bakery_baker_set_dinner_roll_dough_grams(string $name): ?int
 {
     $name = strtolower(trim(preg_replace('/\s+/', ' ', $name) ?? ''));
     if ($name === 'dinner roll' || $name === 'dinner rolls') {
-        return 450;
+        return 900;
     }
     return null;
 }
