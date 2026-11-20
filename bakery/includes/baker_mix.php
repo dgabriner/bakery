@@ -57,6 +57,12 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
             : ' AND p.id IN (' . implode(',', array_map('intval', $bakerProductIds)) . ')';
     }
 
+    $packJoin = table_exists($db, 'product_pack_yields')
+        ? 'LEFT JOIN product_pack_yields y ON y.product_id = p.id'
+        : '';
+    $packSelect = $packJoin === ''
+        ? 'NULL AS input_unit, NULL AS pieces_per_input'
+        : 'y.input_unit AS input_unit, y.pieces_per_input AS pieces_per_input';
     $orders = $db->prepare("
         SELECT
             p.id AS product_id,
@@ -64,10 +70,12 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
             p.weight_grams,
             p.dough_type_id,
             dt.name AS dough_type_name,
-            pl.name AS product_line_name
+            pl.name AS product_line_name,
+            {$packSelect}
         FROM products p
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
         LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
+        {$packJoin}
         WHERE p.id IN ({$placeholders}) {$bakerClause}
         ORDER BY dt.name, p.name
     ");
@@ -87,11 +95,39 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         }
         $row['planned_quantity'] = $qty;
         $row['demand_quantity'] = $demandQty;
-        $row['total_weight_grams'] = $qty * (int)($row['weight_grams'] ?? 0);
+        $pieceWeight = bakery_formula_piece_weight_grams(
+            $row['weight_grams'] ?? null,
+            $row['input_unit'] ?? null,
+            (string) ($row['product_name'] ?? ''),
+            $row['pieces_per_input'] ?? null
+        );
+        $row['weight_grams'] = $pieceWeight === null ? null : (int) round($pieceWeight);
+        $row['total_weight_grams'] = $qty * (int) ($row['weight_grams'] ?? 0);
         $productionRows[] = $row;
         $unitCount += $qty;
     }
 
+    $built = bakery_baker_mix_batches_from_rows($db, $productionRows);
+
+    return [
+        'date' => $date,
+        'bake_list' => $bakeList,
+        'batches' => $built['batches'],
+        'starter_feedings' => $built['starter_feedings'],
+        'batch_count' => count($built['batches']),
+        'unit_count' => $unitCount,
+    ];
+}
+
+/**
+ * Group production rows into dough batches using the Mix sheet formula load.
+ *
+ * @param list<array<string, mixed>> $productionRows
+ * @return array{batches: array<string, array<string, mixed>>, starter_feedings: array<string, array>}
+ */
+function bakery_baker_mix_batches_from_rows(PDO $db, array $productionRows): array
+{
+    $batches = [];
     $doughTypeFormulas = [];
     $doughTypeIds = array_values(array_unique(array_filter(array_map(
         static fn($r) => (int)($r['dough_type_id'] ?? 0),
@@ -191,23 +227,24 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         foreach ($batches as &$batch) {
             $structure = $structures[(int) ($batch['dough_type_id'] ?? 0)] ?? bakery_formula_normalize_structure([]);
             $batch['formula_structure'] = $structure;
-            $lossRows = [];
-            foreach ($batch['products'] as $product) {
-                $lossRows[] = [
-                    'weight_grams' => $product['weight_grams'],
-                    'quantity' => $product['planned_quantity'],
-                ];
-            }
-            $loss = bakery_formula_mix_loss_grams($structure, $lossRows);
-            $batch['dough_loss_applied_grams'] = $loss;
-            $batch['formula_dough_grams'] = (float) $batch['total_weight_grams'] + $loss;
+            $doughId = (int) ($batch['dough_type_id'] ?? 0);
+            $storedLoss = $doughId > 0 ? ($structure['dough_loss_grams'] ?? null) : 0;
+            $mixTotal = bakery_formula_mix_total_grams((float) $batch['total_weight_grams'], $storedLoss);
+            $batch['mix_total'] = $mixTotal;
+            $batch['dough_loss_applied_grams'] = $mixTotal['loss_grams'];
+            $batch['formula_dough_grams'] = $mixTotal['total_grams'];
+            $resolved = bakery_formula_resolve_batch_grams($structure);
+            $batch['batch_scale_conflict'] = $resolved['conflict'];
+            $batch['effective_batch_grams'] = $resolved['grams'];
             $reference = bakery_formula_batch_reference($structure, null);
-            $batch['batch_multiplier_applied'] = $reference['multiplier_applied'];
-            $batch['batch_multiplier'] = $reference['multiplier'];
+            $batch['batch_multiplier_applied'] = $resolved['multiplier_applied'];
+            $batch['batch_multiplier'] = $resolved['multiplier_applied']
+                ? $resolved['multiplier']
+                : ($reference['multiplier'] ?? 1);
             $batch['batch_math'] = bakery_formula_mix_batch_math(
-                $structure['standard_batch_dough_grams'] ?? null,
-                $structure['pieces_per_batch'] ?? null,
-                (float) ($batch['formula_dough_grams'] ?? $batch['total_weight_grams']),
+                $resolved['grams'],
+                null,
+                (float) $batch['total_weight_grams'],
                 (float) $batch['planned_units']
             );
             $batch['ingredients'] = bakery_formula_decorate_subformulas($batch['ingredients'], $subformulaCatalog);
@@ -219,12 +256,8 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
     $starterFeedings = bakery_baker_mix_starter_feedings($db, $batches);
 
     return [
-        'date' => $date,
-        'bake_list' => $bakeList,
         'batches' => $batches,
         'starter_feedings' => $starterFeedings,
-        'batch_count' => count($batches),
-        'unit_count' => $unitCount,
     ];
 }
 
@@ -353,41 +386,71 @@ function bakery_baker_mix_starter_feedings(PDO $db, array $batches): array
     return $feedings;
 }
 
-/** Echo a scaled ingredient list for one mix card. */
-function bakery_baker_mix_echo_formula(
-    array $ingredients,
-    float $totalFlourGrams,
-    float $totalDoughGrams,
-    bool $isBaker,
-    ?array $structure = null,
-    array $addInRows = []
-): void {
+/**
+ * Baker's-percent grams. Flour basis is the caller's total flour, already
+ * derived from dough grams and the formula total.
+ *
+ * @param list<array<string, mixed>> $ingredients
+ * @return list<array{name:string, unit:string, grams:float, folded_percent:?float}>
+ */
+function bakery_baker_mix_percentage_amounts(float $totalFlourGrams, array $ingredients): array
+{
+    $rows = [];
+    foreach ($ingredients as $ingredient) {
+        if (!is_array($ingredient)) {
+            continue;
+        }
+        $rows[] = [
+            'name' => (string) ($ingredient['name'] ?? $ingredient['ingredient_name'] ?? ''),
+            'unit' => (string) ($ingredient['unit'] ?? ''),
+            'grams' => $totalFlourGrams * (((float) ($ingredient['percentage'] ?? 0)) / 100),
+            'folded_percent' => null,
+        ];
+    }
+    return $rows;
+}
+
+function bakery_baker_mix_formula_is_foldable(array $ingredients, ?array $structure): bool
+{
     $normalized = is_array($structure) ? bakery_formula_normalize_structure($structure) : null;
-    $foldable = false;
     if ($normalized !== null) {
         foreach ($normalized['starters'] as $starter) {
-            if (bakery_formula_starter_parts($starter) !== null) {
-                $foldable = true;
-                break;
+            if (is_array($starter) && bakery_formula_starter_parts($starter) !== null) {
+                return true;
             }
         }
     }
     foreach ($ingredients as $ingredient) {
-        if (!empty($ingredient['subformula']['lines'])) {
-            $foldable = true;
-            break;
+        if (is_array($ingredient) && !empty($ingredient['subformula']['lines'])) {
+            return true;
         }
     }
-    if ($foldable) {
-        echo '<p class="bm-batch__hint">' . htmlspecialchars(bakery_t('formula_structure.mix_folded'), ENT_QUOTES, 'UTF-8') . '</p>';
-    }
-    $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
-    echo '<ul class="bm-formula" data-formula-units data-unit-mode="'
-        . htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8')
-        . '">';
+    return false;
+}
+
+/**
+ * Scaled ingredient rows for one dough. Folded starters use the formula
+ * fold; everything else uses baker's percent. Add-ins stay per piece.
+ *
+ * @param list<array<string, mixed>> $ingredients
+ * @param list<array<string, mixed>> $addInRows
+ * @return list<array{name:string, unit:string, grams:float, folded_percent:?float}>
+ */
+function bakery_baker_mix_formula_rows(
+    array $ingredients,
+    float $totalFlourGrams,
+    float $totalDoughGrams,
+    ?array $structure = null,
+    array $addInRows = []
+): array {
+    $normalized = is_array($structure) ? bakery_formula_normalize_structure($structure) : null;
+    $foldable = bakery_baker_mix_formula_is_foldable($ingredients, $structure);
     if ($foldable && $normalized !== null) {
         $lines = [];
         foreach ($ingredients as $ingredient) {
+            if (!is_array($ingredient)) {
+                continue;
+            }
             $line = [
                 'ingredient_id' => (int) ($ingredient['ingredient_id'] ?? 0),
                 'ingredient_name' => (string) ($ingredient['name'] ?? $ingredient['ingredient_name'] ?? ''),
@@ -400,40 +463,63 @@ function bakery_baker_mix_echo_formula(
             $lines[] = $line;
         }
         $folded = bakery_formula_fold_formula($lines, $normalized['starters'], $totalDoughGrams);
+        $rows = [];
         foreach ($folded['ingredients'] as $ingredient) {
-            bakery_baker_mix_echo_amount_row(
-                (string) $ingredient['ingredient_name'],
-                (string) ($ingredient['unit'] ?? ''),
-                (float) $ingredient['grams'],
-                (float) $ingredient['folded_bakers_percent']
-            );
+            $rows[] = [
+                'name' => (string) $ingredient['ingredient_name'],
+                'unit' => (string) ($ingredient['unit'] ?? ''),
+                'grams' => (float) $ingredient['grams'],
+                'folded_percent' => (float) $ingredient['folded_bakers_percent'],
+            ];
         }
         foreach ($folded['prep'] as $prep) {
-            bakery_baker_mix_echo_amount_row(
-                (string) $prep['ingredient_name'] . ' - ' . bakery_t('formula_structure.starter_folded_note'),
-                (string) ($prep['unit'] ?? ''),
-                (float) $prep['grams'],
-                null
-            );
+            $rows[] = [
+                'name' => (string) $prep['ingredient_name'] . ' - ' . bakery_t('formula_structure.starter_folded_note'),
+                'unit' => (string) ($prep['unit'] ?? ''),
+                'grams' => (float) $prep['grams'],
+                'folded_percent' => null,
+            ];
         }
     } else {
-        foreach ($ingredients as $ingredient) {
-            $amount = $totalFlourGrams * (((float)($ingredient['percentage'] ?? 0)) / 100);
-            bakery_baker_mix_echo_amount_row(
-                (string) ($ingredient['name'] ?? ''),
-                (string) ($ingredient['unit'] ?? ''),
-                $amount,
-                null
-            );
-        }
+        $rows = bakery_baker_mix_percentage_amounts($totalFlourGrams, $ingredients);
     }
     foreach ($addInRows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
         $kindKey = ($row['source'] ?? '') === 'filling' ? 'formula_structure.kind_filling' : 'formula_structure.kind_topping';
+        $rows[] = [
+            'name' => (string) ($row['ingredient_name'] ?? '') . ' - ' . bakery_t($kindKey),
+            'unit' => (string) ($row['unit'] ?? ''),
+            'grams' => (float) ($row['grams'] ?? 0),
+            'folded_percent' => null,
+        ];
+    }
+    return $rows;
+}
+
+/** Echo a scaled ingredient list for one mix card. */
+function bakery_baker_mix_echo_formula(
+    array $ingredients,
+    float $totalFlourGrams,
+    float $totalDoughGrams,
+    bool $isBaker,
+    ?array $structure = null,
+    array $addInRows = []
+): void {
+    if (bakery_baker_mix_formula_is_foldable($ingredients, $structure)) {
+        echo '<p class="bm-batch__hint">' . htmlspecialchars(bakery_t('formula_structure.mix_folded'), ENT_QUOTES, 'UTF-8') . '</p>';
+    }
+    $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
+    echo '<ul class="bm-formula" data-formula-units data-unit-mode="'
+        . htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8')
+        . '">';
+    foreach (bakery_baker_mix_formula_rows($ingredients, $totalFlourGrams, $totalDoughGrams, $structure, $addInRows) as $row) {
         bakery_baker_mix_echo_amount_row(
-            (string) ($row['ingredient_name'] ?? '') . ' - ' . bakery_t($kindKey),
-            (string) ($row['unit'] ?? ''),
-            (float) ($row['grams'] ?? 0),
-            null
+            $row['name'],
+            $row['unit'],
+            (float) $row['grams'],
+            $row['folded_percent']
         );
     }
     echo '<li class="bm-formula__total" data-grams="' . htmlspecialchars((string)$totalDoughGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'

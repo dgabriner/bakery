@@ -645,3 +645,40 @@ function bakery_production_commit_diff(PDO $db, string $date): array
     });
     return $diff;
 }
+
+/**
+ * Drop the committed bake snapshot for a delivery date.
+ * Draft targets in production_plan_items stay. Daily Production and Mix
+ * read demand again until the next commit.
+ */
+function bakery_production_plan_unlock(PDO $db, string $date): void
+{
+    $dateObject = DateTime::createFromFormat('!Y-m-d', $date);
+    if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
+        throw new InvalidArgumentException('Invalid delivery date');
+    }
+    if (!bakery_production_plan_commits_ready($db)) {
+        throw new RuntimeException('Production plan commit is not installed. Run database migrations.');
+    }
+    if (bakery_production_plan_commit_get($db, $date) === null) {
+        throw new RuntimeException('baker_set_not_locked');
+    }
+    $ownTransaction = !$db->inTransaction();
+    if ($ownTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        if (bakery_production_plan_commit_items_ready($db)) {
+            $db->prepare('DELETE FROM production_plan_commit_items WHERE delivery_date = ?')->execute([$date]);
+        }
+        $db->prepare('DELETE FROM production_plan_commits WHERE delivery_date = ?')->execute([$date]);
+        if ($ownTransaction) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+}

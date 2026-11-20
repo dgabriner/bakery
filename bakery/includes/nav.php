@@ -217,7 +217,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       ? bakery_t('nav.baker_today_short')
       : date('M j', strtotime($navBakerWorkspaceDate));
   $navBakerTabAria = $navBakerOnHomeDate ? bakery_t('nav.baker_today') : bakery_baker_delivery_aria($navBakerWorkspaceDate);
-  $navBakerKitchenActive = in_array($currentPage, ['baker_mix', 'production', 'pack_list'], true);
+  $navBakerKitchenActive = in_array($currentPage, ['baker_set', 'baker_mix', 'production', 'pack_list'], true);
 ?>
 <nav class="bakery-nav bakery-nav--focused bakery-nav--baker" aria-label="<?php bakery_te('nav.baker_workspace_aria'); ?>">
   <div class="bakery-nav__inner">

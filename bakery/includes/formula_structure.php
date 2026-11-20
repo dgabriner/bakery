@@ -11,10 +11,146 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/formula_units.php';
 
-/** Suggested dough loss once a baker types it in. Blank stays unset. */
+/** Shared dough loss for a mix when the formula field is blank. */
 function bakery_formula_default_dough_loss_grams(): float
 {
     return 50.0;
+}
+
+/**
+ * Mix total = pieces x piece weight + dough loss, once per mix.
+ * Blank, NULL, and negative loss use the shared 50 g default.
+ * Zero is an explicit choice and stays zero. No piece weight means no mix.
+ *
+ * Same helper as draft dgabriner/bakery#114. Carried here so Set the day
+ * and that branch do not invent a second loss rule.
+ *
+ * @param mixed $stored
+ * @return array{piece_grams:float,loss_grams:float,total_grams:float,loss_is_default:bool}
+ */
+function bakery_formula_mix_total_grams(float $pieceGrams, $stored): array
+{
+    $pieceGrams = $pieceGrams > 0 ? $pieceGrams : 0.0;
+    $normalized = bakery_formula_normalize_optional_number($stored);
+    $lossIsDefault = $normalized === null || $normalized < 0;
+    $loss = $lossIsDefault ? bakery_formula_default_dough_loss_grams() : $normalized;
+    if ($pieceGrams <= 0) {
+        return [
+            'piece_grams' => 0.0,
+            'loss_grams' => 0.0,
+            'total_grams' => 0.0,
+            'loss_is_default' => $lossIsDefault,
+        ];
+    }
+    return [
+        'piece_grams' => $pieceGrams,
+        'loss_grams' => $loss,
+        'total_grams' => $pieceGrams + $loss,
+        'loss_is_default' => $lossIsDefault,
+    ];
+}
+
+/**
+ * Gram batch the mix should use. A stored weight that already includes the
+ * multiplier (33,093 g with 1.5, which divides back to the 22,062 g base)
+ * is not multiplied again. 22,062 x 1.5 still becomes 33,093.
+ *
+ * @return array{grams:?float,conflict:bool,multiplier:float,multiplier_applied:bool,base_grams:?float}
+ */
+function bakery_formula_resolve_batch_grams(array $structure): array
+{
+    $structure = bakery_formula_normalize_structure($structure);
+    $stored = $structure['standard_batch_dough_grams'];
+    $factor = $structure['batch_multiplier'] === null ? 1.0 : (float) $structure['batch_multiplier'];
+    $applied = $structure['batch_multiplier'] !== null && $factor > 0;
+    $conflict = false;
+    $grams = null;
+    if ($stored !== null && $stored > 0 && $factor > 0) {
+        if ($factor > 1) {
+            $implied = $stored / $factor;
+            if ($implied >= 21000 && abs(($implied * $factor) - $stored) < 1) {
+                $conflict = true;
+                $grams = (float) $stored;
+                $applied = false;
+            } else {
+                $grams = (float) $stored * $factor;
+            }
+        } else {
+            $grams = (float) $stored * $factor;
+        }
+    }
+    return [
+        'grams' => ($grams !== null && $grams > 0) ? $grams : null,
+        'conflict' => $conflict,
+        'multiplier' => $factor,
+        'multiplier_applied' => $applied && !$conflict,
+        'base_grams' => $stored,
+    ];
+}
+
+/** Tray, pack, box, and similar units. Gallon is an order unit and is not one of these. */
+function bakery_formula_weight_unit_is_pack(?string $unit): bool
+{
+    $unit = strtolower(trim((string) $unit));
+    return in_array($unit, ['tray', 'trays', 'pack', 'packs', 'box', 'boxes', 'bag', 'bags', 'dozen', 'case', 'cases'], true);
+}
+
+/** Dinner Roll's catalog grams are a pack. The seeds never give that product a pack-yield row. */
+function bakery_formula_known_pack_product(string $name): bool
+{
+    $name = strtolower(trim(preg_replace('/\s+/', ' ', $name) ?? ''));
+    return preg_match('/\bdinner rolls?\b/', $name) === 1;
+}
+
+/** pc, piece, and the same words are one piece. A blank unit is not. */
+function bakery_formula_weight_unit_is_piece(?string $unit): bool
+{
+    $unit = strtolower(trim((string) $unit));
+    return in_array($unit, ['pc', 'pcs', 'piece', 'pieces'], true);
+}
+
+/**
+ * True when the catalog grams are a pack, not one piece.
+ * A known pack such as Dinner Roll is excluded even when the yield row is missing or the unit is blank or pc.
+ * A tray or pack unit, or a pack-yield row with that unit, is a pack unless the yield says it holds more than one piece.
+ * Above 2500 g is a pack only when the unit and the yield row did not already decide.
+ *
+ * @param mixed $piecesPerInput
+ */
+function bakery_formula_weight_is_pack($grams, ?string $unit, string $name = '', $piecesPerInput = null, ?string $yieldUnit = null): bool
+{
+    if (bakery_formula_known_pack_product($name)) {
+        return true;
+    }
+    if (is_numeric($piecesPerInput) && (float) $piecesPerInput > 1) {
+        return false;
+    }
+    if (bakery_formula_weight_unit_is_pack($unit) || bakery_formula_weight_unit_is_pack($yieldUnit)) {
+        return true;
+    }
+    if (bakery_formula_weight_unit_is_piece($unit)) {
+        return false;
+    }
+    if (is_numeric($grams) && (float) $grams > 2500) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * A tray, pack, or box weight is not one piece. Blank, pc, piece, and barra are.
+ *
+ * @param mixed $piecesPerInput
+ */
+function bakery_formula_piece_weight_grams($grams, ?string $unit, string $name = '', $piecesPerInput = null): ?float
+{
+    if ($grams === null || $grams === '' || !is_numeric($grams) || (float) $grams <= 0) {
+        return null;
+    }
+    if (bakery_formula_weight_is_pack($grams, $unit, $name, $piecesPerInput)) {
+        return null;
+    }
+    return (float) $grams;
 }
 
 function bakery_formula_normalize_optional_number($value): ?float
