@@ -102,29 +102,39 @@ function bakery_formula_known_pack_product(string $name): bool
     return preg_match('/\bdinner rolls?\b/', $name) === 1;
 }
 
+/** pc, piece, and the same words are one piece. A blank unit is not. */
+function bakery_formula_weight_unit_is_piece(?string $unit): bool
+{
+    $unit = strtolower(trim((string) $unit));
+    return in_array($unit, ['pc', 'pcs', 'piece', 'pieces'], true);
+}
+
 /**
  * True when the catalog grams are a pack, not one piece.
- * A tray or pack unit still counts as a piece when the yield says that unit holds more than one piece
- * (Quequitos is a tray of 20, and 83 g is one piece). A known pack such as Dinner Roll is excluded
- * even when the yield row is missing or the unit is blank or pc. Above 2500 g is not one piece.
+ * A known pack such as Dinner Roll is excluded even when the yield row is missing or the unit is blank or pc.
+ * A tray or pack unit, or a pack-yield row with that unit, is a pack unless the yield says it holds more than one piece.
+ * Above 2500 g is a pack only when the unit and the yield row did not already decide.
  *
  * @param mixed $piecesPerInput
  */
-function bakery_formula_weight_is_pack($grams, ?string $unit, string $name = '', $piecesPerInput = null): bool
+function bakery_formula_weight_is_pack($grams, ?string $unit, string $name = '', $piecesPerInput = null, ?string $yieldUnit = null): bool
 {
     if (bakery_formula_known_pack_product($name)) {
         return true;
     }
-    if (is_numeric($grams) && (float) $grams > 2500) {
-        return true;
-    }
-    if (!bakery_formula_weight_unit_is_pack($unit)) {
-        return false;
-    }
     if (is_numeric($piecesPerInput) && (float) $piecesPerInput > 1) {
         return false;
     }
-    return true;
+    if (bakery_formula_weight_unit_is_pack($unit) || bakery_formula_weight_unit_is_pack($yieldUnit)) {
+        return true;
+    }
+    if (bakery_formula_weight_unit_is_piece($unit)) {
+        return false;
+    }
+    if (is_numeric($grams) && (float) $grams > 2500) {
+        return true;
+    }
+    return false;
 }
 
 /**

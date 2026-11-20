@@ -321,13 +321,67 @@ $loaf = bakery_baker_set_shape_math(
     []
 );
 $assert(abs((float) $loaf['dough_grams'] - 1400) < 0.01, 'a 700 g loaf with a blank unit is still a piece');
-$huge = bakery_baker_set_shape_math(
+$pieceUnitHeavy = bakery_baker_set_shape_math(
     [['product_id' => 22, 'name' => 'Bulk dough', 'quantity' => 1, 'weight_grams' => 2600, 'weight_unit' => 'pc', 'demand_quantity' => 1]],
     ['standard_batch_dough_grams' => 2600, 'dough_loss_grams' => 0],
     100,
     []
 );
-$assert($huge['dough_grams'] === null && $huge['pack_weights'] === ['Bulk dough'], 'a weight over 2500 g is not one piece');
+$assert(abs((float) $pieceUnitHeavy['dough_grams'] - 2600) < 0.01 && $pieceUnitHeavy['pack_weights'] === [], 'a pc unit stays a piece above 2500 g');
+$heavyYield = bakery_baker_set_shape_math(
+    [[
+        'product_id' => 24,
+        'name' => 'Quequitos',
+        'quantity' => 1,
+        'weight_grams' => 2600,
+        'weight_unit' => 'tray',
+        'pieces_per_input' => 20,
+        'demand_quantity' => 1,
+    ]],
+    ['standard_batch_dough_grams' => 2600, 'dough_loss_grams' => 0],
+    100,
+    []
+);
+$assert(abs((float) $heavyYield['dough_grams'] - 2600) < 0.01 && $heavyYield['pack_weights'] === [], 'a tray yield of more than one piece beats the 2500 g fallback');
+$huge = bakery_baker_set_shape_math(
+    [['product_id' => 25, 'name' => 'Bulk dough', 'quantity' => 1, 'weight_grams' => 2600, 'demand_quantity' => 1]],
+    ['standard_batch_dough_grams' => 2600, 'dough_loss_grams' => 0],
+    100,
+    []
+);
+$assert($huge['dough_grams'] === null && $huge['pack_weights'] === ['Bulk dough'], 'above 2500 g is a pack only when the unit and yield row do not decide');
+$rollTotal = 175.2;
+$rollIngredients = [
+    ['name' => 'Bread Flour', 'percentage' => 100],
+    ['name' => 'Water', 'percentage' => 58],
+    ['name' => 'Salt', 'percentage' => 2],
+    ['name' => 'Instant Yeast', 'percentage' => 1.2],
+    ['name' => 'Sugar', 'percentage' => 2],
+    ['name' => 'Lard', 'percentage' => 4],
+    ['name' => 'Milk', 'percentage' => 8],
+];
+$mixedPack = bakery_baker_set_shape_math(
+    [
+        ['product_id' => 30, 'name' => 'Bolillo', 'quantity' => 80, 'weight_grams' => 90, 'demand_quantity' => 80],
+        ['product_id' => 14, 'name' => 'Dinner Roll', 'quantity' => 4, 'weight_grams' => 600, 'weight_unit' => 'pc', 'demand_quantity' => 4],
+    ],
+    ['standard_batch_dough_grams' => 7200, 'dough_loss_grams' => null],
+    $rollTotal,
+    $rollIngredients
+);
+$mixedFlour = 7250 * 100 / $rollTotal;
+$rollsIncluded = (7200 + (4 * 600) + 50) * 100 / $rollTotal;
+$mixedCard = bakery_baker_set_dough_card([
+    'dough_type_id' => 2,
+    'dough_type_name' => 'Dinner Rolls',
+    'shape' => $mixedPack,
+]);
+$assert(abs((float) $mixedPack['usable_grams'] - 7200) < 0.01, '80 Bolillo and 4 Dinner Rolls use only the 90 g pieces');
+$assert(abs((float) $mixedPack['dough_grams'] - 7250) < 0.01, 'the mixed roll card adds 50 g once to the Bolillo grams');
+$assert($mixedPack['pack_weights'] === ['Dinner Roll'], 'Dinner Roll is flagged and left out of the dough');
+$assert($mixedCard['batches'] === '1 batch', '80 Bolillo is 1 batch against the 7200 g mix');
+$assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $mixedFlour) < 0.05, 'the pull follows the Bolillo dough plus the 50 g loss');
+$assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $rollsIncluded) > 1, 'the pull does not include the Dinner Roll pack grams');
 $trayPiece = bakery_baker_set_shape_math(
     [[
         'product_id' => 2,
