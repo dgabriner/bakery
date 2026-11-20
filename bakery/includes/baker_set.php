@@ -13,7 +13,6 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/baker_mix.php';
 require_once __DIR__ . '/audit_log.php';
 require_once __DIR__ . '/kitchen_segments.php';
-require_once __DIR__ . '/production_cadence.php';
 
 /**
  * Count pack catalog grams in the dough total.
@@ -61,9 +60,47 @@ function bakery_baker_set_can_unlock(): bool
     return function_exists('bakery_user_has_role') && bakery_user_has_role(bakery_baker_set_unlock_roles());
 }
 
+/** A manager or administrator can unlock any day. A baker can unlock only a day that baker marked Done. */
+function bakery_baker_set_can_unlock_date(PDO $db, string $date): bool
+{
+    if (!function_exists('bakery_user_has_role') || !bakery_current_user()) {
+        return false;
+    }
+    if (bakery_baker_set_can_unlock()) {
+        return true;
+    }
+    if (!bakery_user_has_role(['baker'])) {
+        return false;
+    }
+    $commit = bakery_production_plan_commit_get($db, $date);
+    if ($commit === null) {
+        return false;
+    }
+    $userId = bakery_baker_set_user_id();
+    return $userId !== null && (int) ($commit['committed_by_user_id'] ?? 0) === $userId;
+}
+
+function bakery_baker_set_actor_role(): string
+{
+    $slug = $_SESSION['user_role_slug'] ?? '';
+    return is_string($slug) ? $slug : '';
+}
+
 function bakery_baker_set_default_date(?string $today = null): string
 {
     return bakery_baker_home_delivery_date($today);
+}
+
+/** The screen is one sell day. Friday does not pull Saturday, Sunday, and Monday into the mix. */
+function bakery_baker_set_screen_dates(string $date): array
+{
+    return [$date];
+}
+
+function bakery_baker_set_step_date(string $date, int $days): string
+{
+    $sign = $days >= 0 ? '+' : '';
+    return date('Y-m-d', strtotime($date . ' ' . $sign . $days . ' day'));
 }
 
 function bakery_baker_set_balance(int $planned, int $demand): string
@@ -319,36 +356,39 @@ function bakery_baker_set_is_locked(PDO $db, string $date): bool
     return bakery_production_plan_commit_get($db, $date) !== null;
 }
 
+function bakery_baker_set_order_source(string $source): bool
+{
+    return $source === 'daily' || $source === 'standing';
+}
+
 /**
  * @param list<int>|null $limitProductIds
  * @return array{by_product: array<int, int>, real_order_lines: int, explicit_zeros: array<int, true>}
  */
 function bakery_baker_set_standard_order(PDO $db, string $date, ?array $limitProductIds = null): array
 {
-    $demand = bakery_operating_demand_by_product($db, $date);
     $lines = bakery_operating_demand_lines($db, $date);
     $limit = null;
     if (is_array($limitProductIds)) {
         $limit = array_fill_keys(array_map('intval', $limitProductIds), true);
     }
     $real = 0;
+    $byProduct = [];
     foreach ($lines as $line) {
         $productId = (int) ($line['product_id'] ?? 0);
         if ($limit !== null && !isset($limit[$productId])) {
             continue;
         }
         $source = (string) ($line['source'] ?? '');
-        if (($source === 'daily' || $source === 'standing') && (int) ($line['quantity'] ?? 0) > 0) {
-            $real++;
-        }
-    }
-    $byProduct = [];
-    foreach ($demand['by_product'] as $productId => $qty) {
-        $productId = (int) $productId;
-        if ($limit !== null && !isset($limit[$productId])) {
+        if (!bakery_baker_set_order_source($source)) {
             continue;
         }
-        $byProduct[$productId] = (int) $qty;
+        $qty = (int) ($line['quantity'] ?? 0);
+        if ($qty <= 0) {
+            continue;
+        }
+        $real++;
+        $byProduct[$productId] = ($byProduct[$productId] ?? 0) + $qty;
     }
     $explicitZeros = [];
     if (table_exists($db, 'daily_order_items') && table_exists($db, 'daily_orders')) {
@@ -1128,17 +1168,24 @@ function bakery_baker_set_lock(PDO $db, string $date, ?int $userId): array
         bakery_production_plan_save_targets($db, [$date => $fill], $allowed, $userId);
     }
     $result = bakery_production_plan_commit($db, $date, $userId);
-    bakery_baker_set_audit($db, $date, 'lock', 'plan', null, (string) ($result['units_count'] ?? 0));
+    bakery_baker_set_audit(
+        $db,
+        $date,
+        'lock',
+        'plan',
+        null,
+        'role:' . bakery_baker_set_actor_role() . ' units:' . (string) ($result['units_count'] ?? 0)
+    );
     return ['ok' => true, 'reload' => true, 'revision' => bakery_baker_set_revision($db, $date), 'commit' => $result];
 }
 
 function bakery_baker_set_unlock(PDO $db, string $date): array
 {
-    if (!bakery_baker_set_can_unlock()) {
+    if (!bakery_baker_set_can_unlock_date($db, $date)) {
         throw new RuntimeException('baker_set_forbidden');
     }
     bakery_production_plan_unlock($db, $date);
-    bakery_baker_set_audit($db, $date, 'unlock', 'plan', 'locked', 'open');
+    bakery_baker_set_audit($db, $date, 'unlock', 'plan', 'locked', 'role:' . bakery_baker_set_actor_role());
     return ['ok' => true, 'reload' => true, 'revision' => bakery_baker_set_revision($db, $date)];
 }
 

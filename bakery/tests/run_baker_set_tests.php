@@ -39,8 +39,12 @@ $assert = static function (bool $ok, string $msg) use (&$pass, &$fail): void {
     }
 };
 
-$assert(bakery_baker_set_default_date('2026-11-19') === '2026-11-20', 'default date is the next sell day');
+$assert(bakery_baker_set_default_date('2026-11-19') === '2026-11-20', 'default date is tomorrow, one sell day');
 $assert(bakery_baker_set_default_date('2026-11-19') === bakery_next_sell_date('2026-11-19'), 'default date matches the sell-day helper');
+$friday = '2026-11-20';
+$assert(bakery_baker_set_screen_dates($friday) === [$friday], 'Friday is one sell day and does not roll up Saturday through Monday');
+$assert(bakery_baker_set_step_date($friday, 1) === '2026-11-21', 'the next step is the next single day');
+$assert(bakery_baker_set_step_date($friday, -1) === '2026-11-19', 'the previous step is the previous single day');
 
 $_SESSION['user_id'] = 1;
 $_SESSION['user_role_slug'] = 'cashier';
@@ -48,7 +52,7 @@ $assert(!bakery_baker_set_can_edit(), 'cashier cannot edit');
 $_SESSION['user_role_slug'] = 'sales';
 $assert(!bakery_baker_set_can_edit(), 'sales cannot edit');
 $_SESSION['user_role_slug'] = 'baker';
-$assert(bakery_baker_set_can_edit() && !bakery_baker_set_can_unlock(), 'baker can edit and cannot unlock');
+$assert(bakery_baker_set_can_edit() && !bakery_baker_set_can_unlock(), 'baker can edit and does not unlock every day');
 $_SESSION['user_role_slug'] = 'manager';
 $assert(bakery_baker_set_can_edit() && bakery_baker_set_can_unlock(), 'manager can edit and unlock');
 $_SESSION['user_role_slug'] = 'administrator';
@@ -520,6 +524,10 @@ $manifest = (string) file_get_contents($root . '/scripts/deploy_manifest.ps1');
 $segments = (string) file_get_contents($root . '/includes/kitchen_segments.php');
 $assert(strpos($page, 'inputmode="numeric"') !== false, 'quantity uses a numeric keyboard');
 $assert(strpos($page, 'name="action" value="save"') === false, 'there is no separate Save action');
+$assert(strpos($page, 'bakery_production_cadence_bake_date_for_delivery') === false, 'the screen does not combine Friday with Saturday through Monday');
+$assert(strpos($page, 'baker_set.orders') !== false, 'the default is labeled Orders');
+$assert(bakery_baker_set_order_source('daily') && bakery_baker_set_order_source('standing'), 'dated orders and standing orders are the default');
+$assert(!bakery_baker_set_order_source('pan_dulce_standard') && !bakery_baker_set_order_source('retail') && !bakery_baker_set_order_source('par'), 'par and retail quantities are not a fallback');
 $assert(strpos($page, 'value="lock"') !== false, 'Done locks the day');
 $assert(strpos($page, 'value="undo"') !== false, 'undo is one control');
 $assert(strpos($js, 'localStorage') !== false, 'saves queue in localStorage');
@@ -548,6 +556,7 @@ $keys = [
     'baker_set.unlock',
     'baker_set.copy_last',
     'baker_set.reset',
+    'baker_set.orders',
     'baker_set.short',
     'baker_set.over',
     'baker_set.batch_scaled',
@@ -761,6 +770,7 @@ try {
     }
     $assert($bake['committed'] === true && $baked !== null && (int) $baked['bake_quantity'] === 10, 'lock commits the plan onto the bake list');
 
+    $_SESSION['user_id'] = $adminId + 100000;
     $_SESSION['user_role_slug'] = 'baker';
     $bakerBlocked = false;
     try {
@@ -768,11 +778,25 @@ try {
     } catch (RuntimeException $e) {
         $bakerBlocked = $e->getMessage() === 'baker_set_forbidden';
     }
-    $assert($bakerBlocked, 'a baker cannot unlock');
+    $assert($bakerBlocked, 'a baker cannot unlock a day someone else marked Done');
     $assert(bakery_baker_set_is_locked($db, $date), 'a refused unlock leaves the day locked');
 
+    $_SESSION['user_role_slug'] = 'sales';
+    $salesBlocked = false;
+    try {
+        bakery_baker_set_unlock($db, $date);
+    } catch (RuntimeException $e) {
+        $salesBlocked = $e->getMessage() === 'baker_set_forbidden';
+    }
+    $assert($salesBlocked && bakery_baker_set_is_locked($db, $date), 'sales cannot unlock');
+
+    $_SESSION['user_id'] = $adminId;
     $_SESSION['user_role_slug'] = 'administrator';
     bakery_baker_set_unlock($db, $date);
+    $adminUnlock = $db->prepare("SELECT actor_user_id, new_value, created_at FROM field_audit WHERE entity_type = ? AND entity_id = ? AND action = 'unlock' ORDER BY id DESC LIMIT 1");
+    $adminUnlock->execute(['baker_set', (int) str_replace('-', '', $date)]);
+    $adminUnlockRow = $adminUnlock->fetch(PDO::FETCH_ASSOC);
+    $assert(is_array($adminUnlockRow) && (int) $adminUnlockRow['actor_user_id'] === $adminId && strpos((string) $adminUnlockRow['new_value'], 'role:administrator') !== false && (string) $adminUnlockRow['created_at'] !== '', 'an admin unlock is logged with who, when, and role');
     $open = bakery_production_bake_list($db, $date);
     $opened = null;
     foreach ($open['items'] as $itemRow) {
@@ -781,6 +805,58 @@ try {
         }
     }
     $assert($open['committed'] === false && $opened !== null && (int) $opened['bake_quantity'] === 9, 'unlock returns Mix and Daily Production to demand');
+
+    $roleId = static function (PDO $db, string $slug): int {
+        return (int) $db->query("SELECT id FROM roles WHERE slug = " . $db->quote($slug) . " LIMIT 1")->fetchColumn();
+    };
+    $bakerRole = $roleId($db, 'baker');
+    $managerRole = $roleId($db, 'manager');
+    $assert($bakerRole > 0 && $managerRole > 0, 'baker and manager roles exist');
+    $insertUser->execute([$stamp . '-baker@example.test', 'x', $stamp . ' baker', $bakerRole]);
+    $bakerId = (int) $db->lastInsertId();
+    $userIds[] = $bakerId;
+    $insertUser->execute([$stamp . '-baker2@example.test', 'x', $stamp . ' baker2', $bakerRole]);
+    $otherBakerId = (int) $db->lastInsertId();
+    $userIds[] = $otherBakerId;
+    $insertUser->execute([$stamp . '-manager@example.test', 'x', $stamp . ' manager', $managerRole]);
+    $managerId = (int) $db->lastInsertId();
+    $userIds[] = $managerId;
+
+    $_SESSION['user_id'] = $bakerId;
+    $_SESSION['user_role_slug'] = 'baker';
+    bakery_baker_set_save_quantity($db, $date, $barrasId, 8, true, 10, $bakerId, null);
+    bakery_baker_set_lock($db, $date, $bakerId);
+    $assert(bakery_baker_set_can_unlock_date($db, $date), 'the baker who marked Done can unlock that day');
+    bakery_baker_set_unlock($db, $date);
+    $bakerUnlock = $db->prepare("SELECT actor_user_id, new_value, created_at FROM field_audit WHERE entity_type = ? AND entity_id = ? AND action = 'unlock' ORDER BY id DESC LIMIT 1");
+    $bakerUnlock->execute(['baker_set', (int) str_replace('-', '', $date)]);
+    $bakerUnlockRow = $bakerUnlock->fetch(PDO::FETCH_ASSOC);
+    $bakerLock = $db->prepare("SELECT actor_user_id, new_value, created_at FROM field_audit WHERE entity_type = ? AND entity_id = ? AND action = 'lock' ORDER BY id DESC LIMIT 1");
+    $bakerLock->execute(['baker_set', (int) str_replace('-', '', $date)]);
+    $bakerLockRow = $bakerLock->fetch(PDO::FETCH_ASSOC);
+    $assert(is_array($bakerUnlockRow) && (int) $bakerUnlockRow['actor_user_id'] === $bakerId && strpos((string) $bakerUnlockRow['new_value'], 'role:baker') !== false && (string) $bakerUnlockRow['created_at'] !== '', 'a baker self-unlock is logged with who, when, and role');
+    $assert(is_array($bakerLockRow) && (int) $bakerLockRow['actor_user_id'] === $bakerId && strpos((string) $bakerLockRow['new_value'], 'role:baker') !== false, 'a lock is logged with who and role');
+    $assert(!bakery_baker_set_is_locked($db, $date), 'the baker unlock opens the day');
+
+    bakery_baker_set_lock($db, $date, $bakerId);
+    $_SESSION['user_id'] = $otherBakerId;
+    $otherBlocked = false;
+    try {
+        bakery_baker_set_unlock($db, $date);
+    } catch (RuntimeException $e) {
+        $otherBlocked = $e->getMessage() === 'baker_set_forbidden';
+    }
+    $assert($otherBlocked && bakery_baker_set_is_locked($db, $date), 'another baker cannot unlock that day');
+
+    $_SESSION['user_id'] = $managerId;
+    $_SESSION['user_role_slug'] = 'manager';
+    $assert(bakery_baker_set_can_unlock_date($db, $date), 'a manager can unlock a day a baker marked Done');
+    bakery_baker_set_unlock($db, $date);
+    $managerUnlock = $db->prepare("SELECT actor_user_id, new_value FROM field_audit WHERE entity_type = ? AND entity_id = ? AND action = 'unlock' ORDER BY id DESC LIMIT 1");
+    $managerUnlock->execute(['baker_set', (int) str_replace('-', '', $date)]);
+    $managerUnlockRow = $managerUnlock->fetch(PDO::FETCH_ASSOC);
+    $assert(is_array($managerUnlockRow) && (int) $managerUnlockRow['actor_user_id'] === $managerId && strpos((string) $managerUnlockRow['new_value'], 'role:manager') !== false, 'a manager unlock is logged with who and role');
+    $assert(!bakery_baker_set_is_locked($db, $date), 'the manager unlock opens the day');
 } catch (Throwable $e) {
     echo 'FAIL  fixture crashed: ' . $e->getMessage() . "\n";
     $fail++;

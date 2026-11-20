@@ -15,7 +15,7 @@ $defaultDate = bakery_baker_set_default_date();
 $selectedDate = bakery_staff_selected_date($_GET['date'] ?? '', $defaultDate);
 $limit = bakery_baker_set_limit($db);
 $canEdit = bakery_baker_set_can_edit();
-$canUnlock = bakery_baker_set_can_unlock();
+$canUnlock = bakery_baker_set_can_unlock_date($db, $selectedDate);
 $wantsJson = (function_exists('is_ajax_request') && is_ajax_request())
     || (function_exists('bakery_wants_json') && bakery_wants_json());
 $contentType = (string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
@@ -86,14 +86,6 @@ $searchHits = $live && $searchQuery !== '' ? bakery_baker_set_search($db, $searc
 $days = bakery_day_names();
 $weekday = (int) date('N', strtotime($selectedDate));
 $dayName = $days[$weekday] ?? '';
-$bakeDate = bakery_production_cadence_bake_date_for_delivery(BAKERY_PRODUCTION_CADENCE_DAILY, $selectedDate);
-$bakeLabel = '';
-if ($bakeDate !== null && function_exists('bakery_localized_date_label')) {
-    $bakeObject = DateTime::createFromFormat('!Y-m-d', $bakeDate);
-    if ($bakeObject instanceof DateTime) {
-        $bakeLabel = bakery_localized_date_label($bakeObject, false);
-    }
-}
 $notice = (string) ($_GET['notice'] ?? '');
 $errorKey = (string) ($_GET['error_key'] ?? '');
 $statusText = '';
@@ -102,8 +94,8 @@ if ($notice === 'saved') {
 } elseif ($notice === 'error' && $errorKey !== '') {
     $statusText = bakery_t($errorKey, ['weekday' => $dayName]);
 }
-$prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day'));
-$nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day'));
+$prevDate = bakery_baker_set_step_date($selectedDate, -1);
+$nextDate = bakery_baker_set_step_date($selectedDate, 1);
 $showSegments = function_exists('bakery_user_has_role') && bakery_user_has_role(['baker', 'manager', 'administrator']);
 $isBakerOnly = function_exists('bakery_user_has_role') && bakery_user_has_role(['baker']) && !bakery_user_has_role(['manager', 'administrator']);
 
@@ -138,10 +130,8 @@ require_once 'includes/nav.php';
             </div>
             <p class="bs-date-context">
                 <strong><?php echo htmlspecialchars($dayName, ENT_QUOTES, 'UTF-8'); ?></strong>
+                <span class="bs-chip"><?php bakery_te('baker_set.orders'); ?></span>
                 <span class="bs-chip"><?php echo htmlspecialchars(bakery_t('baker_set.lines', ['count' => (string) (int) $sheet['real_order_lines']]), ENT_QUOTES, 'UTF-8'); ?></span>
-                <?php if ($bakeLabel !== ''): ?>
-                    <span><?php echo htmlspecialchars(bakery_t('baker_set.bake_for', ['bake' => $bakeLabel]), ENT_QUOTES, 'UTF-8'); ?></span>
-                <?php endif; ?>
             </p>
         </form>
         <?php if (!$isBakerOnly): ?>
