@@ -812,11 +812,19 @@ try {
     $assert($open['committed'] === false && $opened !== null && (int) $opened['bake_quantity'] === 9, 'unlock returns Mix and Daily Production to demand');
 
     $roleId = static function (PDO $db, string $slug): int {
-        return (int) $db->query("SELECT id FROM roles WHERE slug = " . $db->quote($slug) . " LIMIT 1")->fetchColumn();
+        $stmt = $db->prepare('SELECT id FROM roles WHERE slug = ? LIMIT 1');
+        $stmt->execute([$slug]);
+        return (int) $stmt->fetchColumn();
     };
+    if ($roleId($db, 'baker') <= 0) {
+        $db->exec("INSERT INTO roles (slug, name, description) VALUES ('baker', 'Baker', 'Production and pack list only') ON DUPLICATE KEY UPDATE name = VALUES(name)");
+    }
     $bakerRole = $roleId($db, 'baker');
     $managerRole = $roleId($db, 'manager');
     $assert($bakerRole > 0 && $managerRole > 0, 'baker and manager roles exist');
+    if ($bakerRole <= 0 || $managerRole <= 0) {
+        throw new RuntimeException('baker or manager role missing');
+    }
     $insertUser->execute([$stamp . '-baker@example.test', 'x', $stamp . ' baker', $bakerRole]);
     $bakerId = (int) $db->lastInsertId();
     $userIds[] = $bakerId;
