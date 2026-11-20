@@ -200,6 +200,11 @@ $page_title = bakery_t('page.baker_mix');
                                 'multiplier' => rtrim(rtrim(number_format((float) $batch['batch_multiplier'], 3), '0'), '.'),
                             ]), ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
+                        <?php if (!empty($batch['effective_batch_grams'])): ?>
+                            <p class="bm-batch__hint"><?php echo htmlspecialchars(bakery_t('baker_set.batch_plain', [
+                                'grams' => number_format((float) $batch['effective_batch_grams'], 0),
+                            ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
                         <?php
                         $batchMath = is_array($batch['batch_math'] ?? null) ? $batch['batch_math'] : [];
                         $yieldPieces = $batchMath['pieces_per_batch'] ?? null;

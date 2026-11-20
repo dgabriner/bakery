@@ -57,6 +57,10 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
             : ' AND p.id IN (' . implode(',', array_map('intval', $bakerProductIds)) . ')';
     }
 
+    $packJoin = table_exists($db, 'product_pack_yields')
+        ? 'LEFT JOIN product_pack_yields y ON y.product_id = p.id'
+        : '';
+    $packSelect = $packJoin === '' ? 'NULL AS input_unit' : 'y.input_unit AS input_unit';
     $orders = $db->prepare("
         SELECT
             p.id AS product_id,
@@ -64,10 +68,12 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
             p.weight_grams,
             p.dough_type_id,
             dt.name AS dough_type_name,
-            pl.name AS product_line_name
+            pl.name AS product_line_name,
+            {$packSelect}
         FROM products p
         LEFT JOIN dough_types dt ON p.dough_type_id = dt.id
         LEFT JOIN product_lines pl ON dt.product_line_id = pl.id
+        {$packJoin}
         WHERE p.id IN ({$placeholders}) {$bakerClause}
         ORDER BY dt.name, p.name
     ");
@@ -87,7 +93,9 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         }
         $row['planned_quantity'] = $qty;
         $row['demand_quantity'] = $demandQty;
-        $row['total_weight_grams'] = $qty * (int)($row['weight_grams'] ?? 0);
+        $pieceWeight = bakery_formula_piece_weight_grams($row['weight_grams'] ?? null, $row['input_unit'] ?? null);
+        $row['weight_grams'] = $pieceWeight === null ? null : (int) round($pieceWeight);
+        $row['total_weight_grams'] = $qty * (int) ($row['weight_grams'] ?? 0);
         $productionRows[] = $row;
         $unitCount += $qty;
     }
@@ -212,22 +220,23 @@ function bakery_baker_mix_batches_from_rows(PDO $db, array $productionRows): arr
         foreach ($batches as &$batch) {
             $structure = $structures[(int) ($batch['dough_type_id'] ?? 0)] ?? bakery_formula_normalize_structure([]);
             $batch['formula_structure'] = $structure;
-            $lossRows = [];
-            foreach ($batch['products'] as $product) {
-                $lossRows[] = [
-                    'weight_grams' => $product['weight_grams'],
-                    'quantity' => $product['planned_quantity'],
-                ];
-            }
-            $loss = bakery_formula_mix_loss_grams($structure, $lossRows);
-            $batch['dough_loss_applied_grams'] = $loss;
-            $batch['formula_dough_grams'] = (float) $batch['total_weight_grams'] + $loss;
+            $doughId = (int) ($batch['dough_type_id'] ?? 0);
+            $storedLoss = $doughId > 0 ? ($structure['dough_loss_grams'] ?? null) : 0;
+            $mixTotal = bakery_formula_mix_total_grams((float) $batch['total_weight_grams'], $storedLoss);
+            $batch['mix_total'] = $mixTotal;
+            $batch['dough_loss_applied_grams'] = $mixTotal['loss_grams'];
+            $batch['formula_dough_grams'] = $mixTotal['total_grams'];
+            $resolved = bakery_formula_resolve_batch_grams($structure);
+            $batch['batch_scale_conflict'] = $resolved['conflict'];
+            $batch['effective_batch_grams'] = $resolved['grams'];
             $reference = bakery_formula_batch_reference($structure, null);
-            $batch['batch_multiplier_applied'] = $reference['multiplier_applied'];
-            $batch['batch_multiplier'] = $reference['multiplier'];
+            $batch['batch_multiplier_applied'] = $resolved['multiplier_applied'];
+            $batch['batch_multiplier'] = $resolved['multiplier_applied']
+                ? $resolved['multiplier']
+                : ($reference['multiplier'] ?? 1);
             $batch['batch_math'] = bakery_formula_mix_batch_math(
-                $structure['standard_batch_dough_grams'] ?? null,
-                $structure['pieces_per_batch'] ?? null,
+                $resolved['grams'],
+                null,
                 (float) ($batch['formula_dough_grams'] ?? $batch['total_weight_grams']),
                 (float) $batch['planned_units']
             );

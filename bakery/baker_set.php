@@ -247,6 +247,15 @@ require_once 'includes/nav.php';
                                 <?php endif; ?>
                             </p>
                             <p class="bs-balance" data-balance data-kind="<?php echo htmlspecialchars($balance, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($balanceText, ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php
+                            $weightCheck = is_array($product['weight_check'] ?? null) ? $product['weight_check'] : null;
+                            if ($weightCheck !== null && !empty($weightCheck['mismatch'])):
+                            ?>
+                                <p class="bs-warn"><?php echo htmlspecialchars(bakery_t('baker_set.weight_mismatch', [
+                                    'catalog' => bakery_baker_set_format_count((float) $weightCheck['catalog_grams']),
+                                    'formula' => bakery_baker_set_format_count((float) $weightCheck['formula_grams']),
+                                ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php endif; ?>
                         </div>
                         <?php if ($live): ?>
                             <form method="post" action="baker_set.php" class="bs-stepper">

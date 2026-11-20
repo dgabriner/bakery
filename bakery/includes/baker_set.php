@@ -86,6 +86,8 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
     $knownGrams = 0.0;
     $pieces = 0.0;
     $missing = [];
+    $packWeights = [];
+    $hidePieceYield = false;
     $lossRows = [];
     $balances = [];
     foreach ($shapes as $shape) {
@@ -93,20 +95,20 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
             continue;
         }
         $qty = (int) ($shape['quantity'] ?? 0);
-        $weight = $shape['weight_grams'] ?? null;
-        if ($weight === '' || $weight === null) {
-            $weight = null;
-        } else {
-            $weight = (int) $weight;
-            if ($weight <= 0) {
-                $weight = null;
-            }
-        }
+        $name = (string) ($shape['name'] ?? '');
+        $unit = isset($shape['weight_unit']) ? (string) $shape['weight_unit'] : null;
+        $pieceWeight = bakery_formula_piece_weight_grams($shape['weight_grams'] ?? null, $unit);
+        $weight = $pieceWeight === null ? null : (int) round($pieceWeight);
         $pieces += $qty;
-        if ($qty > 0 && $weight === null) {
-            $missing[] = (string) ($shape['name'] ?? '');
+        if ($qty > 0 && $weight === null && $unit !== null && bakery_formula_piece_weight_grams(1, $unit) === null && is_numeric($shape['weight_grams'] ?? null)) {
+            $packWeights[] = $name !== '' ? $name : (string) ($shape['product_id'] ?? '');
+        } elseif ($qty > 0 && $weight === null) {
+            $missing[] = $name;
         } elseif ($weight !== null) {
             $knownGrams += $qty * $weight;
+        }
+        if ($name !== '' && preg_match('/\bbarras?\b/i', $name) === 1) {
+            $hidePieceYield = true;
         }
         $lossRows[] = [
             'weight_grams' => $weight,
@@ -122,32 +124,58 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
 
     $doughGrams = null;
     $loss = null;
+    $lossIsDefault = false;
     $kg = null;
-    if ($missing === []) {
-        $loss = bakery_formula_mix_loss_grams($structure, $lossRows);
-        $doughGrams = $knownGrams + $loss;
-        $kg = $doughGrams / 1000;
+    if ($missing === [] && $packWeights === []) {
+        $mixTotal = bakery_formula_mix_total_grams($knownGrams, $structure['dough_loss_grams'] ?? null);
+        $loss = $mixTotal['loss_grams'];
+        $lossIsDefault = $mixTotal['loss_is_default'];
+        $doughGrams = $mixTotal['total_grams'];
+        $kg = $doughGrams > 0 || $knownGrams > 0 ? $doughGrams / 1000 : null;
+        if ($knownGrams <= 0) {
+            $kg = null;
+            $doughGrams = null;
+            $loss = null;
+        }
     }
 
-    $reference = bakery_formula_batch_reference($structure, null);
+    $resolved = bakery_formula_resolve_batch_grams($structure);
     $pieceYield = $structure['pieces_per_batch'];
-    if ($pieceYield === null && $reference['mode'] === 'pieces') {
-        $pieceYield = $reference['pieces'];
+    if ($pieceYield === null && ($structure['batch_size_mode'] ?? null) === 'pieces') {
+        $pieceYield = $structure['standard_batch_pieces'] ?? null;
     }
-    $effectiveGrams = ($reference['mode'] === 'pieces') ? null : $reference['grams'];
+    $effectiveGrams = $resolved['grams'];
     $batches = null;
     $mode = 'none';
-    if ($reference['mode'] === 'pieces' && $pieceYield !== null && $pieceYield > 0) {
-        $batches = $pieces / (float) $pieceYield;
-        $mode = 'pieces';
-    } elseif ($effectiveGrams !== null && $effectiveGrams > 0 && $missing === []) {
-        $batches = ($doughGrams !== null && $doughGrams > 0) ? $doughGrams / (float) $effectiveGrams : 0.0;
+    if ($effectiveGrams !== null && $effectiveGrams > 0 && $missing === [] && $packWeights === [] && $doughGrams !== null) {
+        $batches = $doughGrams > 0 ? $doughGrams / (float) $effectiveGrams : 0.0;
         $mode = 'grams';
-    } elseif ($pieceYield !== null && $pieceYield > 0 && $effectiveGrams === null) {
+    } elseif (!$hidePieceYield && $pieceYield !== null && $pieceYield > 0 && $effectiveGrams === null) {
         $batches = $pieces / (float) $pieceYield;
         $mode = 'pieces';
     }
-    $pieceBatches = ($pieceYield !== null && $pieceYield > 0) ? $pieces / (float) $pieceYield : null;
+    $pieceBatches = (!$hidePieceYield && $pieceYield !== null && $pieceYield > 0) ? $pieces / (float) $pieceYield : null;
+    $formulaPiece = null;
+    if ($effectiveGrams !== null && $effectiveGrams > 0 && $pieceYield !== null && (float) $pieceYield > 0) {
+        $formulaPiece = (float) $effectiveGrams / (float) $pieceYield;
+    }
+    $weightChecks = [];
+    foreach ($shapes as $shape) {
+        if (!is_array($shape)) {
+            continue;
+        }
+        $catalog = bakery_formula_piece_weight_grams($shape['weight_grams'] ?? null, isset($shape['weight_unit']) ? (string) $shape['weight_unit'] : null);
+        if ($catalog === null || $formulaPiece === null || $formulaPiece <= 0) {
+            continue;
+        }
+        $diff = abs($catalog - $formulaPiece);
+        $weightChecks[] = [
+            'product_id' => (int) ($shape['product_id'] ?? 0),
+            'catalog_grams' => $catalog,
+            'formula_grams' => $formulaPiece,
+            'mismatch' => $diff >= 4 || ($diff / $formulaPiece) >= 0.01,
+        ];
+    }
 
     $pull = [];
     if ($doughGrams !== null && $doughGrams > 0 && ($totalPercentage > 0 || bakery_baker_mix_formula_is_foldable($ingredients, $structure))) {
@@ -161,13 +189,18 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
         'loss_grams' => $loss,
         'missing_weights' => $missing,
         'effective_batch_grams' => $effectiveGrams,
-        'base_grams' => $structure['standard_batch_dough_grams'],
-        'batch_multiplier' => $reference['multiplier'],
-        'multiplier_applied' => $reference['multiplier_applied'],
-        'pieces_per_batch' => $pieceYield,
+        'base_grams' => $resolved['base_grams'],
+        'batch_multiplier' => $resolved['multiplier'],
+        'multiplier_applied' => $resolved['multiplier_applied'],
+        'batch_scale_conflict' => $resolved['conflict'],
+        'pieces_per_batch' => $hidePieceYield ? null : $pieceYield,
+        'hide_piece_yield' => $hidePieceYield,
         'batches' => $batches,
         'piece_batches' => $pieceBatches,
         'batch_mode' => $mode,
+        'loss_is_default' => $lossIsDefault,
+        'pack_weights' => $packWeights,
+        'weight_checks' => $weightChecks,
         'ingredients' => $pull,
         'balances' => $balances,
     ];
@@ -268,6 +301,18 @@ function bakery_baker_set_standard_order(PDO $db, string $date, ?array $limitPro
     ];
 }
 
+/** @return array{select:string,join:string} */
+function bakery_baker_set_pack_sql(PDO $db): array
+{
+    if (table_exists($db, 'product_pack_yields')) {
+        return [
+            'select' => 'y.input_unit AS weight_unit',
+            'join' => 'LEFT JOIN product_pack_yields y ON y.product_id = p.id',
+        ];
+    }
+    return ['select' => 'NULL AS weight_unit', 'join' => ''];
+}
+
 function bakery_baker_set_active_sql(PDO $db, string $alias = 'p'): string
 {
     if (function_exists('column_exists') && column_exists($db, 'products', 'is_active')) {
@@ -287,6 +332,7 @@ function bakery_baker_set_load_products(PDO $db, array $productIds): array
         return [];
     }
     $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $pack = bakery_baker_set_pack_sql($db);
     $stmt = $db->prepare("
         SELECT
             p.id AS product_id,
@@ -294,10 +340,12 @@ function bakery_baker_set_load_products(PDO $db, array $productIds): array
             p.weight_grams,
             p.dough_type_id,
             dt.name AS dough_type_name,
-            pl.name AS product_line_name
+            pl.name AS product_line_name,
+            {$pack['select']}
         FROM products p
         LEFT JOIN dough_types dt ON dt.id = p.dough_type_id
         LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+        {$pack['join']}
         WHERE p.id IN ($placeholders)
     ");
     $stmt->execute($productIds);
@@ -321,6 +369,7 @@ function bakery_baker_set_sibling_shapes(PDO $db, array $doughIds, array $skip):
     }
     $placeholders = implode(',', array_fill(0, count($doughIds), '?'));
     $active = bakery_baker_set_active_sql($db, 'p');
+    $pack = bakery_baker_set_pack_sql($db);
     $stmt = $db->prepare("
         SELECT
             p.id AS product_id,
@@ -328,10 +377,12 @@ function bakery_baker_set_sibling_shapes(PDO $db, array $doughIds, array $skip):
             p.weight_grams,
             p.dough_type_id,
             dt.name AS dough_type_name,
-            pl.name AS product_line_name
+            pl.name AS product_line_name,
+            {$pack['select']}
         FROM products p
         JOIN dough_types dt ON dt.id = p.dough_type_id
         LEFT JOIN product_lines pl ON pl.id = dt.product_line_id
+        {$pack['join']}
         WHERE p.dough_type_id IN ($placeholders) {$active}
         ORDER BY dt.name, p.name
     ");
@@ -396,11 +447,14 @@ function bakery_baker_set_sheet(PDO $db, string $date, ?array $limitProductIds =
     foreach ($loaded as $productId => $row) {
         $productId = (int) $productId;
         $qty = (int) ($quantities[$productId] ?? 0);
-        $weight = $row['weight_grams'];
+        $unit = isset($row['weight_unit']) ? (string) $row['weight_unit'] : null;
+        $piece = bakery_formula_piece_weight_grams($row['weight_grams'] ?? null, $unit);
         $rows[] = [
             'product_id' => $productId,
             'product_name' => (string) ($row['product_name'] ?? ''),
-            'weight_grams' => ($weight === null || $weight === '') ? null : (int) $weight,
+            'weight_grams' => $piece === null ? null : (int) round($piece),
+            'catalog_weight_grams' => ($row['weight_grams'] === null || $row['weight_grams'] === '') ? null : (int) $row['weight_grams'],
+            'weight_unit' => $unit,
             'dough_type_id' => (int) ($row['dough_type_id'] ?? 0),
             'dough_type_name' => (string) ($row['dough_type_name'] ?? ''),
             'product_line_name' => (string) ($row['product_line_name'] ?? ''),
@@ -436,17 +490,32 @@ function bakery_baker_set_sheet(PDO $db, string $date, ?array $limitProductIds =
                 'product_id' => $productId,
                 'name' => (string) ($product['product_name'] ?? ''),
                 'quantity' => $planned,
-                'weight_grams' => $product['weight_grams'] ?? null,
+                'weight_grams' => $info['catalog_weight_grams'] ?? $product['weight_grams'] ?? null,
+                'weight_unit' => $info['weight_unit'] ?? null,
                 'demand_quantity' => $demandQty,
             ];
         }
         unset($product);
+        $shapeStructure = is_array($batch['formula_structure'] ?? null) ? $batch['formula_structure'] : [];
+        if ((int) ($batch['dough_type_id'] ?? 0) <= 0) {
+            $shapeStructure['dough_loss_grams'] = 0;
+        }
         $batch['shape'] = bakery_baker_set_shape_math(
             $shapes,
-            is_array($batch['formula_structure'] ?? null) ? $batch['formula_structure'] : [],
+            $shapeStructure,
             (float) ($batch['formula']['total_percentage'] ?? 0),
             is_array($batch['ingredients'] ?? null) ? $batch['ingredients'] : []
         );
+        $checks = [];
+        foreach ($batch['shape']['weight_checks'] ?? [] as $check) {
+            if (is_array($check)) {
+                $checks[(int) ($check['product_id'] ?? 0)] = $check;
+            }
+        }
+        foreach ($batch['products'] as &$checked) {
+            $checked['weight_check'] = $checks[(int) ($checked['product_id'] ?? 0)] ?? null;
+        }
+        unset($checked);
         $addIns = is_array($batch['add_in_rows'] ?? null) ? $batch['add_in_rows'] : [];
         if ($addIns !== [] && ($batch['shape']['dough_grams'] ?? null) !== null) {
             $doughGrams = (float) $batch['shape']['dough_grams'];
@@ -490,10 +559,18 @@ function bakery_baker_set_dough_card(array $batch): array
             'grams' => number_format((float) $effective, 0),
         ]);
     }
-    if (!empty($shape['pieces_per_batch'])) {
+    if (empty($shape['hide_piece_yield']) && !empty($shape['pieces_per_batch']) && ($shape['batch_mode'] ?? '') !== 'grams') {
         $notes[] = bakery_t('baker_set.per_batch', [
             'count' => bakery_baker_set_format_count((float) $shape['pieces_per_batch']),
         ]);
+    }
+    if (!empty($shape['batch_scale_conflict'])) {
+        $notes[] = bakery_t('baker_set.scale_conflict', [
+            'multiplier' => bakery_baker_set_format_count((float) ($shape['batch_multiplier'] ?? 1)),
+        ]);
+    }
+    foreach ($shape['pack_weights'] ?? [] as $packName) {
+        $notes[] = bakery_t('baker_set.pack_weight', ['product' => (string) $packName]);
     }
     $ingredients = [];
     foreach ($shape['ingredients'] ?? [] as $row) {
@@ -511,11 +588,27 @@ function bakery_baker_set_dough_card(array $batch): array
     }
     $kg = $shape['kg'] ?? null;
     $batches = $shape['batches'] ?? null;
+    $batchLabel = '';
+    $effectiveBatch = $shape['effective_batch_grams'] ?? null;
+    $doughGrams = $shape['dough_grams'] ?? null;
+    if ($batches !== null && $effectiveBatch !== null && (float) $effectiveBatch > 0 && $doughGrams !== null && ($shape['batch_mode'] ?? '') === 'grams') {
+        $whole = (int) floor((float) $batches + 1e-6);
+        $leftover = (float) $doughGrams - ($whole * (float) $effectiveBatch);
+        if ($whole >= 1 && $leftover >= 1) {
+            $batchLabel = bakery_t($whole === 1 ? 'baker_set.batch_plus_one' : 'baker_set.batch_plus_many', [
+                'count' => (string) $whole,
+                'grams' => number_format($leftover, 0),
+            ]);
+        }
+    }
+    if ($batchLabel === '' && $batches !== null) {
+        $batchLabel = bakery_t('baker_set.batches', ['count' => bakery_baker_set_format_count((float) $batches)]);
+    }
     return [
         'dough_type_id' => (int) ($batch['dough_type_id'] ?? 0),
         'name' => (string) ($batch['dough_type_name'] ?? ''),
         'kg' => $kg === null ? '' : bakery_t('baker_set.kg', ['kg' => bakery_baker_set_format_count((float) $kg)]),
-        'batches' => $batches === null ? '' : bakery_t('baker_set.batches', ['count' => bakery_baker_set_format_count((float) $batches)]),
+        'batches' => $batchLabel,
         'notes' => $notes,
         'missing' => ($shape['missing_weights'] ?? []) !== [],
         'ingredients' => $ingredients,

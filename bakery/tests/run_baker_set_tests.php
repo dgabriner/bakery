@@ -74,31 +74,160 @@ $mantecadaShapes = [
     ['product_id' => 2, 'name' => 'Quequitos', 'quantity' => 200, 'weight_grams' => 83, 'demand_quantity' => 200],
 ];
 $shape = bakery_baker_set_shape_math($mantecadaShapes, $mantecada, $mantecadaTotal, $mantecadaIngredients);
-$flourBasis = 33150 * 100 / $mantecadaTotal;
+$pieceGrams = 33150.0;
+$doughWithLoss = $pieceGrams + 50;
+$flourBasis = $doughWithLoss * 100 / $mantecadaTotal;
 $sharedPull = bakery_baker_mix_percentage_amounts($flourBasis, $mantecadaIngredients);
 $assert(abs((float) $shape['effective_batch_grams'] - 33093) < 0.001, 'Mantecada batch is 1.5 x 22062 g = 33093 g');
-$assert(abs((float) $shape['dough_grams'] - 33150) < 0.001, 'shape split sums catalog piece weights');
-$assert(abs((float) $shape['batches'] - (33150 / 33093)) < 0.0001, 'batches use the scaled batch weight');
+$assert(abs((float) $shape['dough_grams'] - $doughWithLoss) < 0.001, 'blank dough loss adds 50 g once');
+$assert($shape['loss_is_default'] === true, 'a blank loss field uses the 50 g default');
+$assert(abs((float) $shape['batches'] - ($doughWithLoss / 33093)) < 0.0001, 'batches use the scaled batch weight');
 $assert(abs((float) $shape['ingredients'][0]['grams'] - (float) $sharedPull[0]['grams']) < 0.001, 'ingredient pull uses the mix percentage helper');
 $assert(abs((float) $sharedPull[0]['grams'] - $flourBasis) < 0.02, 'flour grams follow the formula total');
+$assert($shape['hide_piece_yield'] === true, 'a Barra on the card hides the per-batch piece count');
 $assert($shape['balances'][0]['balance'] === 'over', 'Barras over the order is marked over');
 $assert($shape['balances'][1]['balance'] === 'match', 'Quequitos on the order is a match');
+if (function_exists('bakery_set_locale')) {
+    bakery_set_locale('en', false);
+}
+$card = bakery_baker_set_dough_card([
+    'dough_type_id' => 1,
+    'dough_type_name' => 'Mantecada',
+    'shape' => $shape,
+    'formula' => ['total_percentage' => $mantecadaTotal],
+]);
+$assert(strpos($card['batches'], '1 batch +') === 0, 'a near batch shows the leftover grams');
 
-$barras = bakery_baker_set_shape_math(
-    [['product_id' => 3, 'name' => 'Barras', 'quantity' => 250, 'weight_grams' => 662, 'demand_quantity' => 250]],
+$plain = bakery_formula_resolve_batch_grams([
+    'standard_batch_dough_grams' => 22062,
+    'batch_multiplier' => null,
+]);
+$assert(abs((float) $plain['grams'] - 22062) < 0.001 && $plain['conflict'] === false, 'a blank multiplier counts as 1');
+$scaled = bakery_formula_resolve_batch_grams($mantecada);
+$assert(abs((float) $scaled['grams'] - 33093) < 0.001 && $scaled['conflict'] === false, '22062 x 1.5 stays 33093');
+$double = bakery_formula_resolve_batch_grams([
+    'standard_batch_dough_grams' => 33093,
+    'batch_multiplier' => 1.5,
+    'batch_size_mode' => 'grams',
+]);
+$assert($double['conflict'] === true && abs((float) $double['grams'] - 33093) < 0.001, '33093 g plus a 1.5 multiplier is not scaled again');
+
+$bagelPct = [
+    'flour' => 100.0,
+    'water' => 2141 / 4109 * 100,
+    'starter' => 748 / 4109 * 100,
+    'liquido' => 374 / 4109 * 100,
+    'salt' => 103 / 4109 * 100,
+];
+$bagelTotal = array_sum($bagelPct);
+$bagel = bakery_baker_set_shape_math(
+    [['product_id' => 10, 'name' => 'Bagel', 'quantity' => 55, 'weight_grams' => 135, 'demand_quantity' => 55]],
+    ['standard_batch_dough_grams' => 22062, 'batch_multiplier' => null, 'dough_loss_grams' => null],
+    $bagelTotal,
     [
-        'batch_size_mode' => 'pieces',
-        'standard_batch_pieces' => 100,
-        'pieces_per_batch' => 100,
-        'standard_batch_dough_grams' => null,
-        'batch_multiplier' => null,
+        ['name' => 'High gluten', 'percentage' => $bagelPct['flour']],
+        ['name' => 'Water', 'percentage' => $bagelPct['water']],
+        ['name' => 'Starter', 'percentage' => $bagelPct['starter']],
+        ['name' => 'Liquido', 'percentage' => $bagelPct['liquido']],
+        ['name' => 'Salt', 'percentage' => $bagelPct['salt']],
+    ]
+);
+$assert(abs((float) $bagel['dough_grams'] - 7475) < 0.01, '55 bagels are 7475 g with the 50 g loss');
+$bagelByName = [];
+foreach ($bagel['ingredients'] as $row) {
+    $bagelByName[$row['name']] = (float) $row['grams'];
+}
+$assert(abs($bagelByName['High gluten'] - 4109) < 0.6, 'bagel flour is 4109 g');
+$assert(abs($bagelByName['Water'] - 2141) < 0.6, 'bagel water is 2141 g');
+$assert(abs($bagelByName['Starter'] - 748) < 0.6, 'bagel starter is 748 g');
+$assert(abs($bagelByName['Liquido'] - 374) < 0.6, 'bagel liquido is 374 g');
+$assert(abs($bagelByName['Salt'] - 103) < 0.6, 'bagel salt is 103 g');
+
+$conchaTotal = 15350 / 7271 * 100;
+$concha = bakery_baker_set_shape_math(
+    [['product_id' => 11, 'name' => 'Concha', 'quantity' => 340, 'weight_grams' => 45, 'demand_quantity' => 340]],
+    [
+        'standard_batch_dough_grams' => 22062,
+        'batch_multiplier' => 1.5,
+        'dough_loss_grams' => null,
+    ],
+    $conchaTotal,
+    [
+        ['name' => 'Flour', 'percentage' => 100],
+        ['name' => 'Rest', 'percentage' => $conchaTotal - 100],
+    ]
+);
+$assert(abs((float) $concha['dough_grams'] - 15350) < 0.01, '340 conchas are 15350 g with the 50 g loss');
+$assert(abs((float) $concha['ingredients'][0]['grams'] - 7271) < 0.6, 'concha flour is 7271 g');
+$conchaWeight = bakery_baker_set_shape_math(
+    [['product_id' => 16, 'name' => 'Concha', 'quantity' => 1, 'weight_grams' => 340, 'demand_quantity' => 1]],
+    [
+        'standard_batch_dough_grams' => 22062,
+        'batch_multiplier' => 1.5,
+        'pieces_per_batch' => 96,
+        'dough_loss_grams' => 0,
     ],
     0,
     []
 );
-$assert($barras['batches'] === 2.5, '100 per batch counts whole barras');
-$assert($barras['effective_batch_grams'] === null, 'piece batches do not invent a gram batch');
-$assert(abs((float) $barras['kg'] - 165.5) < 0.001, 'kilograms still use the catalog piece weight');
+$conchaCheck = $conchaWeight['weight_checks'][0] ?? [];
+$assert(!empty($conchaCheck['mismatch']) && abs((float) $conchaCheck['formula_grams'] - (33093 / 96)) < 0.01, 'concha flags about 344.7 g formula weight against 340 g catalog');
+
+$barras = bakery_baker_set_shape_math(
+    [['product_id' => 3, 'name' => 'Barras', 'quantity' => 50, 'weight_grams' => 662, 'demand_quantity' => 50]],
+    [
+        'batch_size_mode' => 'grams',
+        'standard_batch_dough_grams' => 22062,
+        'batch_multiplier' => 1.5,
+        'pieces_per_batch' => 100,
+        'dough_loss_grams' => null,
+    ],
+    100,
+    [['name' => 'Flour', 'percentage' => 100]]
+);
+$assert(abs((float) $barras['dough_grams'] - 33150) < 0.01, '50 barras are catalog weight plus 50 g loss');
+$assert($barras['batch_mode'] === 'grams' && $barras['hide_piece_yield'] === true, 'barra batches come from grams, not 100 per batch');
+$assert($barras['pieces_per_batch'] === null, 'the barra card does not publish a per-batch piece count');
+$assert(abs((float) $barras['effective_batch_grams'] - 33093) < 0.001, 'one scaled barra batch is 33093 g before the 50 g loss');
+$assert(abs(33093 + 50 - 33143) < 0.001, '33093 g plus the 50 g loss is 33143 g');
+
+$mondo = bakery_baker_set_shape_math(
+    [['product_id' => 12, 'name' => 'Mondo', 'quantity' => 1, 'weight_grams' => 2000, 'demand_quantity' => 1]],
+    ['standard_batch_dough_grams' => 2000, 'batch_multiplier' => null, 'dough_loss_grams' => null],
+    100,
+    [['name' => 'Flour', 'percentage' => 100]]
+);
+$assert(abs((float) $mondo['dough_grams'] - 2050) < 0.01, 'Mondo is 2050 g with the 50 g loss');
+
+$explicitZero = bakery_baker_set_shape_math(
+    [['product_id' => 13, 'name' => 'Mondo', 'quantity' => 1, 'weight_grams' => 2000, 'demand_quantity' => 1]],
+    ['standard_batch_dough_grams' => 2000, 'dough_loss_grams' => 0],
+    100,
+    []
+);
+$assert(abs((float) $explicitZero['dough_grams'] - 2000) < 0.01 && $explicitZero['loss_grams'] === 0.0, 'a saved loss of 0 adds nothing');
+
+$pack = bakery_baker_set_shape_math(
+    [['product_id' => 14, 'name' => 'Dinner Roll', 'quantity' => 4, 'weight_grams' => 600, 'weight_unit' => 'tray', 'demand_quantity' => 4]],
+    ['standard_batch_dough_grams' => 22062, 'dough_loss_grams' => null],
+    100,
+    []
+);
+$assert($pack['dough_grams'] === null && $pack['pack_weights'] === ['Dinner Roll'], 'a tray unit is not a piece weight');
+
+$guayaba = bakery_baker_set_shape_math(
+    [['product_id' => 15, 'name' => 'Guayaba', 'quantity' => 10, 'weight_grams' => 500, 'demand_quantity' => 10]],
+    [
+        'standard_batch_dough_grams' => 22062,
+        'batch_multiplier' => 1.5,
+        'pieces_per_batch' => 105.4,
+        'dough_loss_grams' => 0,
+    ],
+    100,
+    []
+);
+$guayabaCheck = $guayaba['weight_checks'][0] ?? [];
+$assert(!empty($guayabaCheck['mismatch']) && abs((float) $guayabaCheck['formula_grams'] - (33093 / 105.4)) < 0.05, 'guayaba flags a formula piece near 314 g against 500 g');
 
 $missing = bakery_baker_set_shape_math(
     [['product_id' => 4, 'name' => 'Mystery', 'quantity' => 10, 'weight_grams' => null, 'demand_quantity' => 10]],

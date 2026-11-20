@@ -204,6 +204,13 @@
     min-block-size: 1.3rem;
 }
 
+.bs-warn {
+    color: var(--sf-danger, #a83232);
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0.2rem 0 0;
+}
+
 .bs-balance[data-kind="short"] {
     color: var(--sf-danger, #a83232);
     font-weight: 800;
