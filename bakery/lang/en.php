@@ -6156,6 +6156,8 @@ return [
     'baker_set.scale_conflict' => 'These batch grams already include the :multiplier mix, so they are not multiplied again.',
     'baker_set.weight_mismatch' => 'Catalog :catalog g, formula :formula g',
     'baker_set.pack_weight' => ':product is a pack or tray, so its weight is not one piece',
+    'baker_set.pack_excluded' => ':product: unit unclear, :grams g not counted',
+    'baker_set.pack_short' => 'Dough total may be short',
     'baker_set.per_batch' => ':count per batch',
     'baker_set.missing_weight' => 'No piece weight in the catalog',
     'baker_set.no_formula' => 'No formula for this dough',

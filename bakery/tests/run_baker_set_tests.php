@@ -379,7 +379,36 @@ $mixedCard = bakery_baker_set_dough_card([
 $assert(abs((float) $mixedPack['usable_grams'] - 7200) < 0.01, '80 Bolillo and 4 Dinner Rolls use only the 90 g pieces');
 $assert(abs((float) $mixedPack['dough_grams'] - 7250) < 0.01, 'the mixed roll card adds 50 g once to the Bolillo grams');
 $assert($mixedPack['pack_weights'] === ['Dinner Roll'], 'Dinner Roll is flagged and left out of the dough');
+$assert(bakery_baker_set_count_pack_grams() === false, 'pack grams stay out of the dough until the switch is on');
+if (function_exists('bakery_set_locale')) {
+    bakery_set_locale('en', false);
+}
+$assert(($mixedCard['pack_warnings'][0] ?? '') === 'Dinner Roll: unit unclear, 2,400 g not counted', 'the card names the 2400 g left out');
+$assert($mixedCard['pack_short'] === 'Dough total may be short', 'the dough card badges that the total may be short');
+if (function_exists('bakery_set_locale')) {
+    bakery_set_locale('es', false);
+    $assert(bakery_baker_set_pack_excluded_text('Dinner Roll', 2400) === 'Dinner Roll: unidad no clara, 2,400 g no contados', 'Spanish names the grams left out');
+    bakery_set_locale('en', false);
+}
 $assert($mixedCard['batches'] === '1 batch', '80 Bolillo is 1 batch against the 7200 g mix');
+$countedPack = bakery_baker_set_shape_math(
+    [
+        ['product_id' => 30, 'name' => 'Bolillo', 'quantity' => 80, 'weight_grams' => 90, 'demand_quantity' => 80],
+        ['product_id' => 14, 'name' => 'Dinner Roll', 'quantity' => 4, 'weight_grams' => 600, 'weight_unit' => 'pc', 'demand_quantity' => 4],
+    ],
+    ['standard_batch_dough_grams' => 7200, 'dough_loss_grams' => null],
+    $rollTotal,
+    $rollIngredients,
+    true
+);
+$countedCard = bakery_baker_set_dough_card([
+    'dough_type_id' => 2,
+    'dough_type_name' => 'Dinner Rolls',
+    'shape' => $countedPack,
+]);
+$assert(abs((float) $countedPack['usable_grams'] - 9600) < 0.01, 'with pack grams on, 80 Bolillo plus 4 Dinner Rolls is 9600 g usable');
+$assert(abs((float) $countedPack['dough_grams'] - 9650) < 0.01, 'with pack grams on, the card total is 9650 g');
+$assert($countedCard['pack_warnings'] === [] && $countedCard['pack_short'] === '', 'a counted pack does not say the grams were left out');
 $assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $mixedFlour) < 0.05, 'the pull follows the Bolillo dough plus the 50 g loss');
 $assert(abs((float) $mixedPack['ingredients'][0]['grams'] - $rollsIncluded) > 1, 'the pull does not include the Dinner Roll pack grams');
 $trayPiece = bakery_baker_set_shape_math(
@@ -520,6 +549,8 @@ $keys = [
     'baker_set.batch_scaled',
     'baker_set.per_batch',
     'baker_set.missing_weight',
+    'baker_set.pack_excluded',
+    'baker_set.pack_short',
     'baker_set.view_only',
 ];
 foreach ($keys as $key) {

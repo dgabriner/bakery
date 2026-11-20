@@ -15,6 +15,27 @@ require_once __DIR__ . '/audit_log.php';
 require_once __DIR__ . '/kitchen_segments.php';
 require_once __DIR__ . '/production_cadence.php';
 
+/**
+ * Count pack catalog grams in the dough total.
+ * Off until Danny confirms a pack weight is dough (Dinner Roll 600 g).
+ * This is the only switch. Flip it to true and the total becomes packs x pack grams.
+ * No migration.
+ */
+const BAKERY_BAKER_SET_COUNT_PACK_GRAMS = false;
+
+function bakery_baker_set_count_pack_grams(): bool
+{
+    return BAKERY_BAKER_SET_COUNT_PACK_GRAMS;
+}
+
+function bakery_baker_set_pack_excluded_text(string $name, float $grams): string
+{
+    return bakery_t('baker_set.pack_excluded', [
+        'product' => $name,
+        'grams' => number_format($grams, 0),
+    ]);
+}
+
 function bakery_baker_set_edit_roles(): array
 {
     return ['baker', 'manager', 'administrator'];
@@ -117,13 +138,14 @@ function bakery_baker_set_implied_piece_grams(array $structure, array $shape): ?
     return (float) $grams / $yield;
 }
 
-function bakery_baker_set_shape_math(array $shapes, array $structure, float $totalPercentage, array $ingredients): array
+function bakery_baker_set_shape_math(array $shapes, array $structure, float $totalPercentage, array $ingredients, ?bool $countPackGrams = null): array
 {
     $structure = bakery_formula_normalize_structure($structure);
+    $countPackGrams = $countPackGrams ?? bakery_baker_set_count_pack_grams();
     $knownGrams = 0.0;
     $pieces = 0.0;
     $missing = [];
-    $packWeights = [];
+    $packLines = [];
     $hidePieceYield = false;
     $lossRows = [];
     $balances = [];
@@ -142,7 +164,15 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
         $pieceWeight = $isPack ? null : bakery_formula_piece_weight_grams($shape['weight_grams'] ?? null, $unit, $name, $piecesPerInput);
         $weight = $pieceWeight === null ? null : (int) round($pieceWeight);
         if ($qty > 0 && $isPack && $rawGrams !== null) {
-            $packWeights[] = $name !== '' ? $name : (string) ($shape['product_id'] ?? '');
+            $packGrams = $qty * (int) round($rawGrams);
+            $packLines[] = [
+                'product_id' => (int) ($shape['product_id'] ?? 0),
+                'name' => $name !== '' ? $name : (string) ($shape['product_id'] ?? ''),
+                'grams' => $packGrams,
+            ];
+            if ($countPackGrams) {
+                $knownGrams += $packGrams;
+            }
         } elseif ($qty > 0 && $weight === null) {
             $missing[] = $name;
         } elseif ($weight !== null) {
@@ -245,7 +275,9 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
         'piece_batches' => $pieceBatches,
         'batch_mode' => $mode,
         'loss_is_default' => $lossIsDefault,
-        'pack_weights' => $packWeights,
+        'pack_grams_counted' => $countPackGrams,
+        'pack_lines' => $packLines,
+        'pack_weights' => array_map(static fn(array $line): string => (string) $line['name'], $packLines),
         'weight_checks' => $weightChecks,
         'ingredients' => $pull,
         'balances' => $balances,
@@ -572,8 +604,18 @@ function bakery_baker_set_sheet(PDO $db, string $date, ?array $limitProductIds =
                 $checks[(int) ($check['product_id'] ?? 0)] = $check;
             }
         }
+        $excluded = [];
+        if (empty($batch['shape']['pack_grams_counted'])) {
+            foreach ($batch['shape']['pack_lines'] ?? [] as $packLine) {
+                if (is_array($packLine)) {
+                    $excluded[(int) ($packLine['product_id'] ?? 0)] = $packLine;
+                }
+            }
+        }
         foreach ($batch['products'] as &$checked) {
-            $checked['weight_check'] = $checks[(int) ($checked['product_id'] ?? 0)] ?? null;
+            $productId = (int) ($checked['product_id'] ?? 0);
+            $checked['weight_check'] = $checks[$productId] ?? null;
+            $checked['pack_excluded'] = $excluded[$productId] ?? null;
         }
         unset($checked);
         $addIns = is_array($batch['add_in_rows'] ?? null) ? $batch['add_in_rows'] : [];
@@ -629,8 +671,21 @@ function bakery_baker_set_dough_card(array $batch): array
             'multiplier' => bakery_baker_set_format_count((float) ($shape['batch_multiplier'] ?? 1)),
         ]);
     }
-    foreach ($shape['pack_weights'] ?? [] as $packName) {
-        $notes[] = bakery_t('baker_set.pack_weight', ['product' => (string) $packName]);
+    $packWarnings = [];
+    $packShort = '';
+    if (empty($shape['pack_grams_counted'])) {
+        foreach ($shape['pack_lines'] ?? [] as $packLine) {
+            if (!is_array($packLine)) {
+                continue;
+            }
+            $packWarnings[] = bakery_baker_set_pack_excluded_text(
+                (string) ($packLine['name'] ?? ''),
+                (float) ($packLine['grams'] ?? 0)
+            );
+        }
+        if ($packWarnings !== []) {
+            $packShort = bakery_t('baker_set.pack_short');
+        }
     }
     $ingredients = [];
     foreach ($shape['ingredients'] ?? [] as $row) {
@@ -677,6 +732,8 @@ function bakery_baker_set_dough_card(array $batch): array
         'kg' => $kg === null ? '' : bakery_t('baker_set.kg', ['kg' => bakery_baker_set_format_count((float) $kg)]),
         'batches' => $batchLabel,
         'notes' => $notes,
+        'pack_warnings' => $packWarnings,
+        'pack_short' => $packShort,
         'missing' => ($shape['missing_weights'] ?? []) !== [],
         'ingredients' => $ingredients,
     ];

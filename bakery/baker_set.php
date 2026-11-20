@@ -208,6 +208,12 @@ require_once 'includes/nav.php';
                 <h2><?php echo htmlspecialchars($card['name'], ENT_QUOTES, 'UTF-8'); ?></h2>
                 <p class="bs-dough__kg" data-dough-kg><?php echo htmlspecialchars($card['kg'], ENT_QUOTES, 'UTF-8'); ?></p>
                 <p class="bs-dough__batches" data-dough-batches><?php echo htmlspecialchars($card['batches'], ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php if (($card['pack_short'] ?? '') !== ''): ?>
+                    <p class="bs-warn bs-dough__badge"><?php echo htmlspecialchars((string) $card['pack_short'], ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endif; ?>
+                <?php foreach ($card['pack_warnings'] ?? [] as $packWarning): ?>
+                    <p class="bs-warn"><?php echo htmlspecialchars((string) $packWarning, ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endforeach; ?>
                 <?php foreach ($card['notes'] as $note): ?>
                     <p class="bs-dough__note"><?php echo htmlspecialchars($note, ENT_QUOTES, 'UTF-8'); ?></p>
                 <?php endforeach; ?>
@@ -247,6 +253,12 @@ require_once 'includes/nav.php';
                                 <?php endif; ?>
                             </p>
                             <p class="bs-balance" data-balance data-kind="<?php echo htmlspecialchars($balance, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($balanceText, ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php
+                            $excludedPack = is_array($product['pack_excluded'] ?? null) ? $product['pack_excluded'] : null;
+                            if ($excludedPack !== null):
+                            ?>
+                                <p class="bs-warn"><?php echo htmlspecialchars(bakery_baker_set_pack_excluded_text($name, (float) ($excludedPack['grams'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php endif; ?>
                             <?php
                             $weightCheck = is_array($product['weight_check'] ?? null) ? $product['weight_check'] : null;
                             if ($weightCheck !== null && !empty($weightCheck['mismatch'])):

@@ -6153,6 +6153,8 @@ return [
     'baker_set.scale_conflict' => 'Estos gramos de bacha ya incluyen la mezcla de :multiplier, así que no se vuelven a multiplicar.',
     'baker_set.weight_mismatch' => 'Catálogo :catalog g, fórmula :formula g',
     'baker_set.pack_weight' => ':product es un paquete o charola, así que su peso no es una pieza',
+    'baker_set.pack_excluded' => ':product: unidad no clara, :grams g no contados',
+    'baker_set.pack_short' => 'El total de masa puede quedar corto',
     'baker_set.per_batch' => ':count por bacha',
     'baker_set.missing_weight' => 'El catálogo no tiene el peso de la pieza',
     'baker_set.no_formula' => 'Esta masa no tiene fórmula',

@@ -211,6 +211,15 @@
     margin: 0.2rem 0 0;
 }
 
+.bs-dough__badge {
+    background: var(--sf-warning-bg, #fef6e4);
+    border: 1px solid var(--sf-warning, #9a6b12);
+    border-radius: 999px;
+    color: var(--sf-warning, #9a6b12);
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+}
+
 .bs-balance[data-kind="short"] {
     color: var(--sf-danger, #a83232);
     font-weight: 800;
