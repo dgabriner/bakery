@@ -60,7 +60,9 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
     $packJoin = table_exists($db, 'product_pack_yields')
         ? 'LEFT JOIN product_pack_yields y ON y.product_id = p.id'
         : '';
-    $packSelect = $packJoin === '' ? 'NULL AS input_unit' : 'y.input_unit AS input_unit';
+    $packSelect = $packJoin === ''
+        ? 'NULL AS input_unit, NULL AS pieces_per_input'
+        : 'y.input_unit AS input_unit, y.pieces_per_input AS pieces_per_input';
     $orders = $db->prepare("
         SELECT
             p.id AS product_id,
@@ -93,7 +95,12 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         }
         $row['planned_quantity'] = $qty;
         $row['demand_quantity'] = $demandQty;
-        $pieceWeight = bakery_formula_piece_weight_grams($row['weight_grams'] ?? null, $row['input_unit'] ?? null);
+        $pieceWeight = bakery_formula_piece_weight_grams(
+            $row['weight_grams'] ?? null,
+            $row['input_unit'] ?? null,
+            (string) ($row['product_name'] ?? ''),
+            $row['pieces_per_input'] ?? null
+        );
         $row['weight_grams'] = $pieceWeight === null ? null : (int) round($pieceWeight);
         $row['total_weight_grams'] = $qty * (int) ($row['weight_grams'] ?? 0);
         $productionRows[] = $row;
@@ -237,7 +244,7 @@ function bakery_baker_mix_batches_from_rows(PDO $db, array $productionRows): arr
             $batch['batch_math'] = bakery_formula_mix_batch_math(
                 $resolved['grams'],
                 null,
-                (float) ($batch['formula_dough_grams'] ?? $batch['total_weight_grams']),
+                (float) $batch['total_weight_grams'],
                 (float) $batch['planned_units']
             );
             $batch['ingredients'] = bakery_formula_decorate_subformulas($batch['ingredients'], $subformulaCatalog);

@@ -6150,6 +6150,7 @@ return [
     'baker_set.batches' => ':count batches',
     'baker_set.batch_scaled' => ':multiplier x :base g = :effective g',
     'baker_set.batch_plain' => ':grams g per batch',
+    'baker_set.batch_one' => '1 batch',
     'baker_set.batch_plus_one' => ':count batch + :grams g',
     'baker_set.batch_plus_many' => ':count batches + :grams g',
     'baker_set.scale_conflict' => 'These batch grams already include the :multiplier mix, so they are not multiplied again.',

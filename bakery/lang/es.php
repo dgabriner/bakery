@@ -6147,6 +6147,7 @@ return [
     'baker_set.batches' => ':count bachas',
     'baker_set.batch_scaled' => ':multiplier por :base g = :effective g',
     'baker_set.batch_plain' => ':grams g por bacha',
+    'baker_set.batch_one' => '1 bacha',
     'baker_set.batch_plus_one' => ':count bacha + :grams g',
     'baker_set.batch_plus_many' => ':count bachas + :grams g',
     'baker_set.scale_conflict' => 'Estos gramos de bacha ya incluyen la mezcla de :multiplier, así que no se vuelven a multiplicar.',

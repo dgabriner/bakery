@@ -88,15 +88,56 @@ function bakery_formula_resolve_batch_grams(array $structure): array
     ];
 }
 
-/** A tray, pack, or box weight is not one piece. Blank and piece/barra units are. */
-function bakery_formula_piece_weight_grams($grams, ?string $unit): ?float
+/** Tray, pack, box, and similar units. Gallon is an order unit and is not one of these. */
+function bakery_formula_weight_unit_is_pack(?string $unit): bool
+{
+    $unit = strtolower(trim((string) $unit));
+    return in_array($unit, ['tray', 'trays', 'pack', 'packs', 'box', 'boxes', 'bag', 'bags', 'dozen', 'case', 'cases'], true);
+}
+
+/** Dinner Roll's catalog grams are a pack. The seeds never give that product a pack-yield row. */
+function bakery_formula_known_pack_product(string $name): bool
+{
+    $name = strtolower(trim(preg_replace('/\s+/', ' ', $name) ?? ''));
+    return preg_match('/\bdinner rolls?\b/', $name) === 1;
+}
+
+/**
+ * True when the catalog grams are a pack, not one piece.
+ * A tray or pack unit still counts as a piece when the yield says that unit holds more than one piece
+ * (Quequitos is a tray of 20, and 83 g is one piece). A known pack such as Dinner Roll is excluded
+ * even when the yield row is missing or the unit is blank or pc. Above 2500 g is not one piece.
+ *
+ * @param mixed $piecesPerInput
+ */
+function bakery_formula_weight_is_pack($grams, ?string $unit, string $name = '', $piecesPerInput = null): bool
+{
+    if (bakery_formula_known_pack_product($name)) {
+        return true;
+    }
+    if (is_numeric($grams) && (float) $grams > 2500) {
+        return true;
+    }
+    if (!bakery_formula_weight_unit_is_pack($unit)) {
+        return false;
+    }
+    if (is_numeric($piecesPerInput) && (float) $piecesPerInput > 1) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * A tray, pack, or box weight is not one piece. Blank, pc, piece, and barra are.
+ *
+ * @param mixed $piecesPerInput
+ */
+function bakery_formula_piece_weight_grams($grams, ?string $unit, string $name = '', $piecesPerInput = null): ?float
 {
     if ($grams === null || $grams === '' || !is_numeric($grams) || (float) $grams <= 0) {
         return null;
     }
-    $unit = strtolower(trim((string) $unit));
-    $pack = ['tray', 'trays', 'pack', 'packs', 'box', 'boxes', 'bag', 'bags', 'dozen', 'case', 'cases', 'gallon', 'gallons', 'gal'];
-    if (in_array($unit, $pack, true)) {
+    if (bakery_formula_weight_is_pack($grams, $unit, $name, $piecesPerInput)) {
         return null;
     }
     return (float) $grams;
