@@ -6156,6 +6156,8 @@ return [
     'baker_set.pack_weight' => ':product es un paquete o charola, así que su peso no es una pieza',
     'baker_set.pack_excluded' => ':product: unidad no clara, :grams g no contados',
     'baker_set.pack_short' => 'El total de masa puede quedar corto',
+    'baker_set.dinner_roll_pack' => '450 g por paquete (6 x 75 g), el catálogo dice 600 g',
+    'baker_set.barras_unconfirmed' => 'Barras por bacha sin confirmar',
     'baker_set.per_batch' => ':count por bacha',
     'baker_set.missing_weight' => 'El catálogo no tiene el peso de la pieza',
     'baker_set.no_formula' => 'Esta masa no tiene fórmula',

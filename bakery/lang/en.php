@@ -6159,6 +6159,8 @@ return [
     'baker_set.pack_weight' => ':product is a pack or tray, so its weight is not one piece',
     'baker_set.pack_excluded' => ':product: unit unclear, :grams g not counted',
     'baker_set.pack_short' => 'Dough total may be short',
+    'baker_set.dinner_roll_pack' => '450 g per pack (6 x 75 g), catalog says 600 g',
+    'baker_set.barras_unconfirmed' => 'Barras per batch unconfirmed',
     'baker_set.per_batch' => ':count per batch',
     'baker_set.missing_weight' => 'No piece weight in the catalog',
     'baker_set.no_formula' => 'No formula for this dough',

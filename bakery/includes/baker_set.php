@@ -27,6 +27,20 @@ function bakery_baker_set_count_pack_grams(): bool
     return BAKERY_BAKER_SET_COUNT_PACK_GRAMS;
 }
 
+/**
+ * Danny 2026-11-19: one Dinner Roll order is a pack of 6 at 75 g, 450 g of dough.
+ * The catalog weight is still 600 g. Delete this when Danny approves a catalog change.
+ * Keyed to the Dinner Roll product name. Other packs stay on BAKERY_BAKER_SET_COUNT_PACK_GRAMS.
+ */
+function bakery_baker_set_dinner_roll_dough_grams(string $name): ?int
+{
+    $name = strtolower(trim(preg_replace('/\s+/', ' ', $name) ?? ''));
+    if ($name === 'dinner roll' || $name === 'dinner rolls') {
+        return 450;
+    }
+    return null;
+}
+
 function bakery_baker_set_pack_excluded_text(string $name, float $grams): string
 {
     return bakery_t('baker_set.pack_excluded', [
@@ -183,6 +197,7 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
     $pieces = 0.0;
     $missing = [];
     $packLines = [];
+    $dinnerRollNotes = [];
     $hidePieceYield = false;
     $lossRows = [];
     $balances = [];
@@ -198,9 +213,15 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
         $piecesPerInput = $packYield['pieces_per_input'] ?? $shape['pieces_per_input'] ?? null;
         $yieldUnit = isset($packYield['input_unit']) ? (string) $packYield['input_unit'] : null;
         $isPack = bakery_formula_weight_is_pack($rawGrams, $unit, $name, $piecesPerInput, $yieldUnit);
-        $pieceWeight = $isPack ? null : bakery_formula_piece_weight_grams($shape['weight_grams'] ?? null, $unit, $name, $piecesPerInput);
+        $dinnerRollEach = bakery_baker_set_dinner_roll_dough_grams($name);
+        $pieceWeight = $isPack || $dinnerRollEach !== null
+            ? null
+            : bakery_formula_piece_weight_grams($shape['weight_grams'] ?? null, $unit, $name, $piecesPerInput);
         $weight = $pieceWeight === null ? null : (int) round($pieceWeight);
-        if ($qty > 0 && $isPack && $rawGrams !== null) {
+        if ($qty > 0 && $dinnerRollEach !== null) {
+            $knownGrams += $qty * $dinnerRollEach;
+            $dinnerRollNotes[] = $name;
+        } elseif ($qty > 0 && $isPack && $rawGrams !== null) {
             $packGrams = $qty * (int) round($rawGrams);
             $packLines[] = [
                 'product_id' => (int) ($shape['product_id'] ?? 0),
@@ -314,6 +335,7 @@ function bakery_baker_set_shape_math(array $shapes, array $structure, float $tot
         'loss_is_default' => $lossIsDefault,
         'pack_grams_counted' => $countPackGrams,
         'pack_lines' => $packLines,
+        'dinner_roll_notes' => $dinnerRollNotes,
         'pack_weights' => array_map(static fn(array $line): string => (string) $line['name'], $packLines),
         'weight_checks' => $weightChecks,
         'ingredients' => $pull,
@@ -727,6 +749,10 @@ function bakery_baker_set_dough_card(array $batch): array
             $packShort = bakery_t('baker_set.pack_short');
         }
     }
+    $dinnerRollNote = ($shape['dinner_roll_notes'] ?? []) !== []
+        ? bakery_t('baker_set.dinner_roll_pack')
+        : '';
+    $barrasFlag = !empty($shape['hide_piece_yield']) ? bakery_t('baker_set.barras_unconfirmed') : '';
     $ingredients = [];
     foreach ($shape['ingredients'] ?? [] as $row) {
         if (!is_array($row)) {
@@ -774,6 +800,8 @@ function bakery_baker_set_dough_card(array $batch): array
         'notes' => $notes,
         'pack_warnings' => $packWarnings,
         'pack_short' => $packShort,
+        'dinner_roll_note' => $dinnerRollNote,
+        'barras_flag' => $barrasFlag,
         'missing' => ($shape['missing_weights'] ?? []) !== [],
         'ingredients' => $ingredients,
     ];

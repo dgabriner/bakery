@@ -204,6 +204,12 @@ require_once 'includes/nav.php';
                 <?php foreach ($card['pack_warnings'] ?? [] as $packWarning): ?>
                     <p class="bs-warn"><?php echo htmlspecialchars((string) $packWarning, ENT_QUOTES, 'UTF-8'); ?></p>
                 <?php endforeach; ?>
+                <?php if (($card['dinner_roll_note'] ?? '') !== ''): ?>
+                    <p class="bs-dough__note"><?php echo htmlspecialchars((string) $card['dinner_roll_note'], ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endif; ?>
+                <?php if (($card['barras_flag'] ?? '') !== ''): ?>
+                    <p class="bs-warn bs-dough__badge"><?php echo htmlspecialchars((string) $card['barras_flag'], ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endif; ?>
                 <?php foreach ($card['notes'] as $note): ?>
                     <p class="bs-dough__note"><?php echo htmlspecialchars($note, ENT_QUOTES, 'UTF-8'); ?></p>
                 <?php endforeach; ?>
