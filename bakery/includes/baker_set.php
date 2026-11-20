@@ -27,7 +27,7 @@ function bakery_baker_set_unlock_roles(): array
 
 function bakery_baker_set_view_roles(): array
 {
-    return ['baker', 'manager', 'administrator', 'driver', 'driver_assistant', 'cashier', 'sales'];
+    return ['baker', 'manager', 'administrator', 'driver', 'driver_assistant', 'cashier'];
 }
 
 function bakery_baker_set_can_edit(): bool

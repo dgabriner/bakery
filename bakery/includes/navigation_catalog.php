@@ -449,7 +449,7 @@ function &bakery_navigation_script_registry(): array
         foreach (['production.php', 'baker_mix.php', 'pack_list.php', 'baker_set.php'] as $script) {
             $boot($registry, $script, $bakerRoles);
         }
-        $boot($registry, 'baker_set.php', ['baker', 'administrator', 'manager', 'driver', 'driver_assistant', 'cashier', 'sales']);
+        $boot($registry, 'baker_set.php', ['baker', 'administrator', 'manager', 'driver', 'driver_assistant', 'cashier']);
         $managerApiRoles = ['administrator', 'manager'];
         foreach ([
             'billing_api.php', 'daily_orders_api.php', 'standing_orders_manager_api.php', 'driver_assignment_api.php', 'production_center_api.php', 'daily_run_api.php', 'daily_status_api.php', 'sales_leads_api.php', 'text_comms_api.php', 'service_issues_api.php',
