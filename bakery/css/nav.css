@@ -62,7 +62,7 @@
   font-size: 0.78rem;
   font-weight: 750;
   line-height: 1.1;
-  min-height: 36px;
+  min-height: var(--sf-touch-min);
   padding: 0.3rem 0.7rem;
 }
 

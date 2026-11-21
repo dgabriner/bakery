@@ -471,6 +471,7 @@ function &bakery_navigation_script_registry(): array
             'products_new.php',
             'driver_pages_probe.php', 'trace_driver_list.php',
             'build_id.php', 'deploy_status.php', 'migration_status.php', 'schema_status.php',
+            'closeout_radar.php', 'playground.php',
             'health_deploy.php', 'health_driver.php', 'health_prod.php',
             'sfb_admin_batch.php', 'sfb_admin_impersonate.php', 'sfb_admin_learn.php', 'sfb_admin_intensive.php',
             'sfb_admin_studio_baker.php',
