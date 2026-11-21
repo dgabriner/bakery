@@ -46,7 +46,7 @@ if ($asJson) {
 echo $id . PHP_EOL;
 echo 'Write ' . $payload['file'] . PHP_EOL;
 echo 'Do not reuse Live-only ledger numbers: ' . implode(', ', $payload['live_only_ledger_numbers']) . PHP_EOL;
-echo '114 and 115 are taken by Live ledger rows that are not in git. The next schema file starts at 116.' . PHP_EOL;
+echo '114 and 115 are Live-only ledger rows with no git file. 116_production_day_crew is already in git and on Live. The next schema file starts at 117.' . PHP_EOL;
 if ($payload['live_ledger_reuse'] !== []) {
     fwrite(STDERR, "Schema files reuse Live-only ledger numbers 114 or 115: " . implode(', ', $payload['live_ledger_reuse']) . "\n");
     exit(1);

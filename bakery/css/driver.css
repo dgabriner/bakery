@@ -2525,6 +2525,12 @@ html {
     transform: scale(0.98);
 }
 
+.route-day-nav-arrow--end,
+.route-day-arrow--end {
+    opacity: 0.38;
+    pointer-events: none;
+}
+
 .route-day-nav-current {
     display: flex;
     flex-direction: column;
@@ -6756,6 +6762,13 @@ body.driver-workflow-page .route-btn--problem {
     margin-right: auto;
 }
 
+.stop-row-actions .stop-open-delivery {
+    flex: 1 1 auto;
+    border-color: #0f766e;
+    background: #0f766e;
+    color: #fff;
+}
+
 .stop-adjust-moves {
     display: none;
     gap: 6px;
@@ -6938,6 +6951,103 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     font-weight: 750;
 }
 
+/* Photo 1 and Photo 2 sit as compact one-line rows so two photos never push Delivered down. */
+.delivery-photo-strip {
+    display: grid;
+    gap: 6px;
+    margin: 0 0 10px;
+}
+
+.delivery-photo-strip .delivery-inline-proof {
+    margin: 0;
+    gap: 10px;
+}
+
+.delivery-photo-strip .delivery-inline-proof img {
+    width: 64px;
+    height: 48px;
+}
+
+.delivery-inline-proof-text {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.delivery-inline-proof-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.95rem;
+    font-weight: 750;
+    line-height: 1.2;
+}
+
+.delivery-photo-strip .delivery-inline-proof .delivery-inline-retake {
+    flex: 0 0 auto;
+    margin-left: 0;
+}
+
+.delivery-inline-proof--second[data-proof-state="uploading"] img {
+    opacity: 0.6;
+}
+
+/* Optional Photo 2 sits beside Delivered on the charge screen. */
+.delivery-wizard-actions .delivery-second-photo-btn {
+    flex: 0 0 auto;
+    min-height: 56px;
+    padding-inline: 16px;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.delivery-second-photo-btn::before {
+    content: "+";
+    margin-right: 6px;
+    font-weight: 900;
+}
+
+.delivery-second-photo-btn[hidden] {
+    display: none !important;
+}
+
+.delivery-inapp-btn {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+/* Toast with a follow-up action (Add photo 2 after Delivered). */
+.route-success-toast.has-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+}
+
+.route-success-toast.has-action.is-visible {
+    pointer-events: auto;
+}
+
+.route-success-toast[hidden] {
+    display: none;
+}
+
+.route-toast-action {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 6px 14px;
+    border: 1px solid #0f766e;
+    border-radius: 999px;
+    background: #fff;
+    color: #0f766e;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+}
+
 .delivery-totals-line {
     display: flex;
     flex-wrap: wrap;
@@ -7073,6 +7183,11 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         font-size: 16px;
     }
 
+    body.driver-workflow-page .route-day-nav {
+        top: 44px;
+        z-index: 25;
+    }
+
     .now-strip {
         position: sticky;
         top: 0;
@@ -7093,8 +7208,6 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     }
 
     body.driver-workflow-page .route-topbar,
-    body.driver-workflow-page .route-day-nav,
-    body.driver-workflow-page .route-day-nav-today-wrap,
     body.driver-workflow-page .route-mobile-progress {
         display: none !important;
     }
@@ -7150,9 +7263,17 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         min-height: 0;
     }
 
-    /* Now view: the next stop, a small map, and the dock */
+    /* Now view: the current store, the stores still coming, and a small map */
+    .driver-route[data-route-view="now"] .route-secondary-column {
+        display: block;
+        order: 2;
+    }
+
+    .driver-route[data-route-view="now"] .route-map {
+        order: 3;
+    }
+
     .driver-route[data-route-view="now"] .route-section-overview,
-    .driver-route[data-route-view="now"] .route-secondary-column,
     .driver-route[data-route-view="now"] .route-map-horizon,
     .driver-route[data-route-view="now"] .route-map-unmapped,
     .driver-route[data-route-view="now"] .route-map-toolbar .route-map-scope,
@@ -7273,7 +7394,22 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         overflow: visible !important;
     }
 
-    .photo-modal.is-inline #deliveryWizardSteps,
+    .photo-modal.is-inline #deliveryWizardSteps {
+        display: flex;
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        background: #fff;
+    }
+
+    .photo-modal.is-inline #deliveryWizardSteps[hidden] {
+        display: none !important;
+    }
+
+    .photo-modal.is-inline .delivery-wizard-step {
+        pointer-events: auto;
+    }
+
     .photo-modal.is-inline #deliveryArriveOrders,
     .photo-modal.is-inline #deliveryPhotoType,
     .photo-modal.is-inline #deliveryPhotoNotes,
@@ -7320,6 +7456,71 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         min-height: 56px;
     }
 
+    /* Photo 2 and Delivered share the sticky footer; Delivered stays the bigger target. */
+    #deliveryPhotoModal .delivery-wizard-actions.has-photo2 {
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+    }
+
+    #deliveryPhotoModal .delivery-wizard-actions.has-photo2 #deliverySecondPhotoBtn {
+        grid-column: 1;
+        min-height: 56px;
+    }
+
+    #deliveryPhotoModal .delivery-wizard-actions.has-photo2 #deliveryWizardPrimaryBtn {
+        grid-column: 2;
+    }
+
+    /* Camera choices on one compact row: phone camera, library, skip. */
+    #deliveryPhotoModal.is-inline.delivery-step-photo:not(.native-camera-mode):not(.camera-unavailable) .delivery-camera-controls {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    #deliveryPhotoModal.is-inline.delivery-step-photo:not(.native-camera-mode):not(.camera-unavailable) .delivery-camera-controls .delivery-picker-btn {
+        display: inline-flex;
+        grid-column: 1;
+        min-height: 48px;
+        margin: 0;
+        padding: 6px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #0f172a;
+        font-size: 0.85rem;
+        font-weight: 700;
+        line-height: 1.1;
+        align-items: center;
+        justify-content: center;
+        white-space: normal;
+        text-align: center;
+    }
+
+    #deliveryPhotoModal.is-inline.delivery-step-photo:not(.native-camera-mode):not(.camera-unavailable) .delivery-camera-controls .delivery-gallery-btn {
+        grid-column: 2;
+        padding: 6px;
+        font-size: 0.85rem;
+        line-height: 1.1;
+        align-items: center;
+        justify-content: center;
+        white-space: normal;
+        text-align: center;
+    }
+
+    #deliveryPhotoModal.is-inline.delivery-step-photo:not(.native-camera-mode):not(.camera-unavailable) .delivery-camera-controls #deliverySkipPhotoInlineBtn {
+        grid-column: 3;
+        padding: 6px;
+        font-size: 0.85rem;
+        white-space: normal;
+    }
+
+    /* Phone-camera mode: the big button is the phone camera; a small way back to the in-app viewfinder. */
+    #deliveryPhotoModal.is-inline.delivery-step-photo.native-camera-mode .delivery-camera-controls .delivery-inapp-btn:not([hidden]) {
+        display: inline-flex;
+        grid-column: 1 / -1;
+        min-height: 44px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #0f172a;
+    }
+
     .photo-modal.is-inline #deliveryPhotoStatus.is-success,
     .photo-modal.is-inline #deliverySubmitNote,
     .photo-modal.is-inline #deliveryWizardReviewBtn,
@@ -7328,8 +7529,12 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         display: none !important;
     }
 
-    .photo-modal.is-inline.delivery-step-delivery #deliveryConfirmation:not(:has(#deliveryAdjustDetails[open])) {
-        display: none;
+    .photo-modal.is-inline.delivery-step-delivery #deliveryAdjustDetails {
+        display: block;
+    }
+
+    .photo-modal.is-inline.delivery-step-delivery #deliveryConfirmation {
+        display: block;
     }
 
     /* Problem sheet docks to the bottom like a sheet */

@@ -176,6 +176,19 @@ function bakery_client_errors_recent(PDO $db, int $limit = 20): array
 }
 
 /**
+ * App-calendar instant as a MySQL session wall time.
+ * created_at is CURRENT_TIMESTAMP in the session zone. Staff dates are America/Los_Angeles.
+ */
+function bakery_client_error_session_wall(PDO $db, DateTimeImmutable $moment): string
+{
+    $offset = (int)$db->query('SELECT TIME_TO_SEC(TIMEDIFF(NOW(), UTC_TIMESTAMP()))')->fetchColumn();
+    $sign = $offset >= 0 ? '+' : '-';
+    $abs = abs($offset);
+    $zone = new DateTimeZone(sprintf('%s%02d:%02d', $sign, intdiv($abs, 3600), intdiv($abs % 3600, 60)));
+    return $moment->setTimezone($zone)->format('Y-m-d H:i:s');
+}
+
+/**
  * Read-only admin list. Filters: user_id, page_path (substring), from, until (Y-m-d).
  *
  * @param array{user_id?:int,page_path?:string,from?:string,until?:string} $filters
@@ -190,13 +203,15 @@ function bakery_client_errors_search(PDO $db, array $filters, int $limit = 100):
     $params = [];
     $from = (string)($filters['from'] ?? '');
     $until = (string)($filters['until'] ?? '');
+    $appTz = new DateTimeZone(date_default_timezone_get());
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
         $where[] = 'ce.created_at >= ?';
-        $params[] = $from . ' 00:00:00';
+        $params[] = bakery_client_error_session_wall($db, new DateTimeImmutable($from . ' 00:00:00', $appTz));
     }
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
-        $where[] = 'ce.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
-        $params[] = $until . ' 00:00:00';
+        $end = (new DateTimeImmutable($until . ' 00:00:00', $appTz))->modify('+1 day');
+        $where[] = 'ce.created_at < ?';
+        $params[] = bakery_client_error_session_wall($db, $end);
     }
     $userId = (int)($filters['user_id'] ?? 0);
     if ($userId > 0) {

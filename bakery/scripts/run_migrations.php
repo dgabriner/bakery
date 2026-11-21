@@ -1189,7 +1189,7 @@ try {
         }
         if (in_array($number, bakery_schema_live_only_ledger_numbers(), true)) {
             throw new RuntimeException(
-                'Refusing migration ' . $file . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. The next schema file starts at 116.'
+                'Refusing migration ' . $file . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. 116_production_day_crew is already used. The next schema file starts at 117.'
             );
         }
         $idRefusal = bakery_hosted_migration_id_refusal($file, $root . '/database/schema', true);

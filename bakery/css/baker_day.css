@@ -1,0 +1,375 @@
+.bd-screen {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 12px 14px 120px;
+    color: #173f3c;
+}
+
+.bd-header {
+    background: linear-gradient(160deg, #1a4a45 0%, #2d6a4f 100%);
+    color: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.bd-title {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.bd-lead,
+.bd-stage-lead,
+.bd-status,
+.bd-card__lead {
+    margin: 6px 0 0;
+    line-height: 1.4;
+}
+
+.bd-lead,
+.bd-date label {
+    opacity: 0.92;
+}
+
+.bd-date {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+}
+
+.bd-date input,
+.bd-stepper__input,
+.bd-shape input,
+.bd-add select {
+    min-height: 44px;
+    border: 1px solid #c5d8cc;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 16px;
+}
+
+.bd-date input {
+    background: #fff;
+    color: #173f3c;
+}
+
+.bd-stages {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.bd-pack-view {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 8px 0 12px;
+}
+
+.bd-pack-view a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1px solid #8db59a;
+    background: #f3fbf5;
+    color: #173f3c;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.bd-pack-view a.is-active {
+    background: #1f6637;
+    border-color: #1f6637;
+    color: #fff;
+}
+
+.bd-classic {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 12px;
+}
+
+.bd-classic p {
+    margin: 0;
+    flex: 1 1 180px;
+}
+
+.bd-classic button {
+    min-height: 44px;
+    border: 1px solid #8db59a;
+    border-radius: 10px;
+    background: #fff;
+    color: #173f3c;
+    font: inherit;
+    font-weight: 700;
+    padding: 0 12px;
+}
+
+.bd-stages__link,
+.bd-stepper__btn,
+.bd-shape button,
+.bd-add button,
+.bd-publish button {
+    min-height: 44px;
+    border-radius: 10px;
+    border: 0;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.bd-stages__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    color: #173f3c;
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.bd-stages__link.is-active {
+    background: #f3b23a;
+}
+
+.bd-status,
+.bd-note,
+.bd-alert,
+.bd-gap,
+.bd-made {
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.bd-status,
+.bd-note {
+    background: #e7f3ec;
+}
+
+.bd-alert,
+.bd-gap {
+    background: #fff4e5;
+}
+
+.bd-made {
+    margin: 4px 0 0;
+    color: #4b6351;
+    font-size: 0.92rem;
+}
+
+.bd-card,
+.bd-batch {
+    background: #fff;
+    border: 1px solid #dbe7df;
+    border-radius: 14px;
+    padding: 12px;
+    margin: 10px 0;
+}
+
+.bd-card summary,
+.bd-batch summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.bd-batch__row h2,
+.bd-feed h2,
+.bd-pile h3 {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.bd-batch__meta {
+    margin: 4px 0 0;
+    color: #4b6351;
+}
+
+.bd-stepper {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.bd-stepper__btn,
+.bd-shape button,
+.bd-add button,
+.bd-publish button {
+    background: #1f6637;
+    color: #fff;
+    padding: 0 14px;
+}
+
+.bd-stepper__btn {
+    width: 44px;
+    padding: 0;
+    font-size: 1.4rem;
+}
+
+.bd-stepper__input {
+    width: 5.5rem;
+    text-align: center;
+}
+
+.bd-publish button:disabled {
+    background: #9bb5a6;
+    cursor: default;
+}
+
+.bd-feeds,
+.bd-shapes,
+.bd-counter {
+    display: grid;
+    gap: 8px;
+}
+
+.bd-feed ul,
+.bd-pile ul,
+.bm-formula,
+.bd-counter {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
+.bd-feed li,
+.bd-pile li,
+.bm-formula li,
+.bd-counter li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #f8faf9;
+    border: 1px solid #e3ece7;
+    border-radius: 8px;
+}
+
+.bd-feed__total,
+.bm-formula__total {
+    background: #e8f7ec;
+    font-weight: 700;
+}
+
+.bd-shape,
+.bd-add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.bd-shape label {
+    flex: 1 1 140px;
+}
+
+.bd-shape input {
+    width: 5.5rem;
+}
+
+.bd-add,
+.bd-publish {
+    margin-top: 14px;
+}
+
+.bd-publish button,
+.bd-add button {
+    min-width: 44px;
+}
+
+.bd-publish {
+    position: sticky;
+    bottom: 76px;
+}
+
+.bd-publish button {
+    width: 100%;
+}
+
+.bd-empty {
+    margin: 8px 0 0;
+    color: #4b6351;
+}
+
+.bd-pile em {
+    color: #4b6351;
+    font-style: normal;
+}
+
+.bd-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.formula-unit-switch {
+    display: flex;
+    border: 1px solid #8db59a;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #f3fbf5;
+}
+
+.formula-unit-btn {
+    min-height: 44px;
+    min-width: 44px;
+    border: 0;
+    border-right: 1px solid #8db59a;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.formula-unit-btn:last-child {
+    border-right: 0;
+}
+
+.formula-unit-btn.is-active {
+    background: #1f6b35;
+    color: #fff;
+}
+
+.ingredient-amount {
+    display: flex;
+    justify-content: flex-end;
+    text-align: right;
+}
+
+[data-unit-mode="g"] .qty-lb,
+[data-unit-mode="g"] .qty-gal,
+[data-unit-mode="g"] .qty-sep,
+[data-unit-mode="lb"] .qty-g,
+[data-unit-mode="lb"] .qty-gal,
+[data-unit-mode="lb"] .qty-sep,
+[data-unit-mode="gal"] .qty-g,
+[data-unit-mode="gal"] .qty-sep {
+    display: none;
+}
+
+[data-unit-mode="gal"] .qty-gal {
+    display: inline;
+}
+
+[data-unit-mode="gal"] li:not(.is-liquid) .qty-gal {
+    display: none;
+}
+
+[data-unit-mode="gal"] li:not(.is-liquid) .qty-lb {
+    display: inline;
+}

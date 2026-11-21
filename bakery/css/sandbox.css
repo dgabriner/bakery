@@ -1,0 +1,94 @@
+.sandbox {
+  margin: 0 auto;
+  max-width: 52rem;
+  padding: 1.25rem 1rem 3rem;
+}
+
+.sandbox__kicker {
+  color: var(--sf-accent);
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+}
+
+.sandbox h1 {
+  font-size: clamp(1.7rem, 4vw, 2.2rem);
+  margin: 0 0 0.75rem;
+}
+
+.sandbox__intro,
+.sandbox__note,
+.sandbox__area p {
+  color: var(--sf-text-secondary);
+  line-height: 1.5;
+}
+
+.sandbox__rules {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-md);
+  margin: 1rem 0 1.5rem;
+  padding: 0.9rem 1rem;
+}
+
+.sandbox__rules p {
+  margin: 0.35rem 0;
+}
+
+.sandbox__seats {
+  margin: 0.4rem 0 0.6rem;
+  padding-left: 1.2rem;
+}
+
+.sandbox__seats li {
+  margin: 0.35rem 0;
+}
+
+.sandbox__areas {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.sandbox__area {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-md);
+  padding: 0.95rem 1rem 1rem;
+}
+
+.sandbox__area h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.35rem;
+}
+
+.sandbox__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+}
+
+.sandbox__links a {
+  background: var(--sf-brand);
+  border-radius: var(--sf-radius-sm);
+  color: var(--sf-text-inverse);
+  display: inline-block;
+  font-weight: 700;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.9rem;
+  text-decoration: none;
+}
+
+.sandbox__links a:focus-visible {
+  outline: 3px solid var(--sf-accent);
+  outline-offset: 2px;
+}
+
+.sandbox__check {
+  margin: 0;
+}

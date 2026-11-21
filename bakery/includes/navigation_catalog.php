@@ -66,7 +66,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'text_comms.php', 'label' => 'Text Command Center', 'description' => 'See every customer, test, and general text: conversations, activity, delivery, and send from one command center.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'text_comms.php?view=surveys', 'nav_key' => 'survey_center', 'label' => 'Survey Center', 'description' => 'Lock stores and set order for tomorrow. Manager HQ plus each driver.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'index.php', 'label' => 'Operations Dashboard', 'description' => 'Today\'s order, production, and delivery snapshot.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
-                ['href' => 'time_clock.php', 'nav_key' => 'time_clock', 'label' => 'Time Clock', 'description' => 'Clock in and out. Managers see who is working and today\'s punches.', 'roles' => ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'time_clock.php', 'nav_key' => 'time_clock', 'label' => 'Time Clock', 'description' => 'Clock in and out. Managers see who is working and today\'s punches.', 'roles' => ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager', 'baker'], 'usage' => 'everyday'],
                 ['href' => 'cashier_shop_photos.php', 'nav_key' => 'cashier_shop_photos', 'label' => 'Shop Photos', 'description' => 'Capture window display and tray photos for the selected day.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
                 ['href' => 'cashier_add_product.php', 'nav_key' => 'cashier_add_product', 'label' => 'Add Product', 'description' => 'Quickly add a bakery or store item and take its photo.', 'roles' => ['cashier', 'administrator', 'manager'], 'usage' => 'moderate'],
             ],
@@ -78,7 +78,7 @@ function bakery_navigation_catalog() {
             'tier' => 'primary',
             'roles' => ['administrator', 'manager'],
             'items' => [
-                ['href' => 'production_manager.php', 'label' => 'Production Manager', 'description' => 'Sense board: dough batches, week order volume, route plan vs actual, and demand vs supply for one delivery day.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
+                ['href' => 'production_manager.php', 'label' => 'Production Manager', 'description' => 'Bake-day board: dough batches, formulas, where pieces go, and who is checked in.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'production_center.php', 'label' => 'Production Center', 'description' => 'Production Manager hub: plan one delivery day, assign short bakes to stores, commit for bakers.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'product_manager_plan.php', 'label' => 'Product Manager Plan', 'description' => 'Standards, standing, cover-window demand, and finished goods for the bake horizon.', 'roles' => ['administrator', 'manager'], 'usage' => 'everyday'],
                 ['href' => 'ingredient_requirements.php', 'label' => 'Ingredient Planner', 'description' => 'Material requirements from the production plan through formulas to stock and purchase hints.', 'roles' => ['administrator', 'manager'], 'usage' => 'moderate'],
@@ -180,6 +180,7 @@ function bakery_navigation_catalog() {
                 ['href' => 'sfb_admin_studio.php', 'label' => 'Synthetic Manager', 'description' => 'Pace the synthetic baker clock, read the action log, and inspect a baker.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'sfb_admin_learn.php', 'label' => 'Learning Center', 'description' => 'Author courses, lessons, and steps for SF Bakers.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'agent_homebase.php', 'label' => 'Agent Homebase', 'description' => 'Learning studio, whiteboard, bug watchlist, and agent session log for Cursor missions.', 'roles' => ['administrator'], 'usage' => 'occasional'],
+                ['href' => 'sandbox.php', 'nav_key' => 'sandbox', 'label' => 'Sandbox', 'description' => 'Starter map for Driver, orders, production, and sales practice.', 'roles' => ['administrator', 'manager'], 'usage' => 'occasional'],
                 ['href' => 'users.php', 'label' => 'Staff', 'description' => 'Manage staff identities, roles, and sign-in codes.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'login_history.php', 'label' => 'Login History', 'description' => 'Who is on the floor, which screens they use, and whether today looks unusual.', 'roles' => ['administrator'], 'usage' => 'occasional'],
                 ['href' => 'audit_log.php', 'label' => 'Audit Log', 'description' => 'Who changed an order, a price, or a user, and the value before and after.', 'roles' => ['administrator'], 'usage' => 'occasional'],
@@ -443,7 +444,7 @@ function &bakery_navigation_script_registry(): array
         ] as $script) {
             $boot($registry, $script, $cashierRoles);
         }
-        $boot($registry, 'time_clock.php', ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager']);
+        $boot($registry, 'time_clock.php', ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager', 'baker']);
         $bakerRoles = ['baker', 'administrator', 'manager'];
         foreach (['production.php', 'baker_mix.php', 'pack_list.php'] as $script) {
             $boot($registry, $script, $bakerRoles);
@@ -461,6 +462,7 @@ function &bakery_navigation_script_registry(): array
             $boot($registry, $script, $managerApiRoles);
         }
         $boot($registry, 'baker.php', ['baker', 'administrator', 'manager']);
+        $boot($registry, 'baker_day.php', ['baker', 'administrator']);
         $boot($registry, 'demand_self_heal.php', ['administrator', 'manager', 'driver', 'driver_assistant']);
         $boot($registry, 'sales_home.php', ['sales', 'administrator', 'manager']);
         $adminOnly = ['administrator'];
