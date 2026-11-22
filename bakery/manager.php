@@ -170,6 +170,8 @@ try {
     $managerError = bakery_dashboard_safe_error_message($e);
 }
 
+bakery_stop_reliability_handle_post($db);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         bakery_require_csrf();

@@ -15,6 +15,7 @@ require_once __DIR__ . '/sfb_origin.php';
 require_once __DIR__ . '/product_inventory.php';
 require_once __DIR__ . '/route_manager_cash.php';
 require_once __DIR__ . '/cod_turnins.php';
+require_once __DIR__ . '/stop_reliability.php';
 
 function bakery_manager_is_phone_workspace(): bool
 {
@@ -649,6 +650,7 @@ function bakery_manager_phone_render(array $ctx): void
     ?>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/exception_desk.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/manager_phone.css'); ?>">
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/stop_reliability.css'); ?>">
 <main class="manager-phone" data-view="<?php echo $h($view); ?>">
   <header class="manager-phone__hero">
     <p class="manager-phone__eyebrow"><?php bakery_te('manager_phone.eyebrow'); ?></p>
@@ -782,6 +784,12 @@ function bakery_manager_phone_render_routes(array $ctx): void
         foreach (bakery_route_missing_standing_by_driver($ctx['db'], $date) as $restoreGroup) {
             $restoreByDriver[(int)$restoreGroup['driver_id']] = $restoreGroup;
         }
+    }
+    if (($ctx['db'] ?? null) instanceof PDO) {
+        echo bakery_stop_reliability_render(
+            $ctx['db'],
+            'manager.php?date=' . rawurlencode($date) . '&view=routes'
+        );
     }
     ?>
   <?php if ($unassignedCount > 0): ?>

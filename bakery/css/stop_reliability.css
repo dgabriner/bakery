@@ -1,0 +1,124 @@
+.stop-reliability {
+  margin: 0.75rem 1rem 1rem;
+  padding: 0.75rem 0.85rem 0.85rem;
+  border: 1px solid #e4d3b8;
+  border-left: 4px solid #c4842d;
+  border-radius: 12px;
+  background: #fffaf3;
+  color: #3b2a1d;
+  max-width: 72rem;
+}
+
+.stop-reliability__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.stop-reliability__intro,
+.stop-reliability__empty,
+.stop-reliability__hidden,
+.stop-reliability__flash {
+  margin: 0.35rem 0 0;
+  color: #6d5a48;
+  font-size: 0.92rem;
+}
+
+.stop-reliability__flash {
+  color: #1f4f49;
+}
+
+.stop-reliability__flash.is-error {
+  color: #8a3b12;
+}
+
+.stop-reliability__list {
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stop-reliability__row {
+  margin: 0;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid #eadfce;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.stop-reliability__store {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stop-reliability__address,
+.stop-reliability__meta {
+  margin: 0.2rem 0 0;
+  color: #5c4a3a;
+  font-size: 0.92rem;
+}
+
+.stop-reliability__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+  margin-top: 0.65rem;
+}
+
+.stop-reliability__note,
+.stop-reliability__until {
+  display: grid;
+  gap: 0.2rem;
+  flex: 1 1 12rem;
+  font-size: 0.85rem;
+}
+
+.stop-reliability__note input,
+.stop-reliability__until input,
+.stop-reliability__btn,
+.stop-reliability__more {
+  min-height: var(--sf-touch-min, 44px);
+  min-width: var(--sf-touch-min, 44px);
+}
+
+.stop-reliability__note input,
+.stop-reliability__until input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #d7c7b0;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.stop-reliability__more {
+  display: flex;
+  align-items: center;
+  margin-top: 0.65rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #d7c7b0;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stop-reliability__extra {
+  margin-top: 0.65rem;
+}
+
+@media (max-width: 720px) {
+  .stop-reliability {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+
+  .stop-reliability__form {
+    display: grid;
+  }
+
+  .stop-reliability__btn {
+    width: 100%;
+  }
+}

@@ -13,10 +13,12 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/customer_record.php';
 require_once 'includes/route_load.php';
 require_once 'includes/pan_carry.php';
+require_once __DIR__ . '/includes/stop_reliability.php';
 
 $page_title = bakery_t('page.driver_assignment');
 bakery_ensure_standing_routes_order_column($db);
 
+bakery_stop_reliability_handle_post($db);
 bakery_try_build_from_standing_post($db);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -301,8 +303,15 @@ try {
 </div>
 <?php require_once 'includes/footer.php'; exit; endif; ?>
 
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/stop_reliability.css'); ?>">
 <div class="container<?php echo $filterUnassigned ? ' driver-assignment-filter-active' : ''; ?><?php echo $attentionFailed ? ' driver-assignment-failed-active' : ''; ?>">
-    <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
+    <?php
+    echo bakery_stop_reliability_render(
+        $db,
+        'driver_assignment.php?date=' . rawurlencode((string)($selectedDate ?? date('Y-m-d')))
+    );
+    echo bakery_ops_render_return_banner($returnTarget, $attentionLabel);
+    ?>
     <div class="page-header">
         <h1>🚚 Driver Assignment</h1>
         <div class="button-group">
