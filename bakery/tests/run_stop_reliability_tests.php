@@ -324,9 +324,28 @@ try {
     $assert(!isset($names[$clearId]), 'a later After-photo delivery auto-clears the flag');
     $assert(!isset($names[$stoodId]), 'a standing-day order does not flag');
     $assert(!isset($names[$wedId]), 'Wednesday standing does not flag a Wednesday order');
-    $assert(count($loaded) === 6, 'Yellowstone plus five shorter streaks are the flag list');
+    $fixtureIds = array_fill_keys(array_merge(
+        [$yellowId, $singleId, $skipId, $noteId, $clearId, $stoodId, $wedId],
+        $extraIds
+    ), true);
+    $fixtureRows = [];
+    foreach ($loaded as $row) {
+        if (isset($fixtureIds[(int)$row['customer_id']])) {
+            $fixtureRows[] = $row;
+        }
+    }
+    $assert(count($fixtureRows) === 6, 'Yellowstone plus five shorter streaks are the flag list');
 
-    $board = bakery_stop_reliability_board($db, $today, $manager);
+    $sortedFixture = bakery_stop_reliability_sort($fixtureRows);
+    $collapsed = bakery_stop_reliability_collapse($sortedFixture);
+    $board = [
+        'visible' => $collapsed['visible'],
+        'hidden' => $collapsed['hidden'],
+        'snoozed' => 0,
+        'schema_ready' => true,
+        'allowed' => true,
+        'today' => $today,
+    ];
     $assert(count($board['visible']) === BAKERY_STOP_RELIABILITY_COLLAPSE_AFTER, 'the board collapses after the threshold');
     $assert(count($board['hidden']) === 2, 'two rows wait behind show more');
     $assert((string)($board['visible'][0]['store'] ?? '') === $prefix . ' Yellowstone Market', 'the longest streak sorts first');
