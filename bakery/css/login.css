@@ -84,9 +84,10 @@
 
 .login-card {
   background: var(--sf-surface, #fffefb);
-  border: 1px solid var(--sf-border, #ddd4c6);
-  border-radius: var(--sf-radius-lg, 16px);
-  box-shadow: var(--sf-shadow-md, 0 4px 18px rgba(42, 32, 18, 0.08));
+  border: 1px solid var(--sf-border, #e4d8c6);
+  border-top: 3px solid var(--sf-accent, #b35f28);
+  border-radius: var(--sf-radius-lg, 18px);
+  box-shadow: var(--sf-shadow-lg, 0 24px 48px rgba(36, 24, 12, 0.14));
   padding: 22px 20px 18px;
 }
 
@@ -155,10 +156,11 @@
 }
 
 .login-submit {
-  background: var(--sf-brand, #153834);
-  border: 2px solid var(--sf-brand, #153834);
+  background: linear-gradient(180deg, var(--sf-brand-muted, #2f6a64) 0%, var(--sf-brand, #12332f) 100%);
+  border: 2px solid var(--sf-brand, #12332f);
   border-radius: var(--sf-radius-sm, 8px);
-  color: var(--sf-text-inverse, #f8faf9);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.16) inset, 0 10px 18px rgba(18, 51, 47, 0.18);
+  color: var(--sf-text-inverse, #fbf8f2);
   cursor: pointer;
   margin-top: 14px;
   min-height: 48px;
