@@ -213,34 +213,40 @@ $assert(
     'account_health keys stay one contiguous block'
 );
 
-$assert(bakery_account_health_internal_names() === ['Baker', 'Danny', 'House Baker', 'Bart front'], 'internal names are the known staff and house rows');
-foreach (['Baker', ' baker ', 'Danny', 'HOUSE BAKER', 'House  Baker', 'Bart front', 'BART   FRONT'] as $internalName) {
-    $assert(bakery_account_health_name_is_internal($internalName), 'internal name matches ' . $internalName);
-}
-foreach (['Capp', 'capp', 'Danny\'s Market', 'Bartender', 'Baker Street Cafe', 'House', ''] as $wholesaleName) {
-    $assert(!bakery_account_health_name_is_internal($wholesaleName), 'wholesale name stays ' . $wholesaleName);
-}
 $assert(
-    bakery_account_health_row_is_internal(['name' => 'Capp', 'is_internal' => 0]) === false,
-    'Capp is not an internal account health row'
+    bakery_account_health_row_is_internal(['name' => 'Bart front', 'is_internal' => 0]) === false,
+    'an unflagged Bart front row is not internal'
 );
 $assert(
-    bakery_account_health_row_is_internal(['name' => 'Real Cafe', 'is_internal' => 1]) === true,
-    'is_internal excludes a row whose name is not on the list'
+    bakery_account_health_row_is_internal(['name' => 'Danny']) === false,
+    'a missing flag does not exclude a customer by name'
 );
 $assert(
-    bakery_account_health_row_is_internal(['customer_name' => 'House Baker', 'is_internal' => 0]) === true,
-    'the name list still excludes House Baker when the flag is off'
+    bakery_account_health_row_is_internal(['name' => 'Capp', 'is_internal' => 1]) === true,
+    'the flag is what excludes a row'
 );
+$assert(function_exists('bakery_account_health_internal_names') === false, 'account health does not keep a name list');
 $migrationPath = $root . '/database/schema/119_internal_customers.sql';
 $migrationSql = (string)file_get_contents($migrationPath);
 [$migrationSafe, $migrationMessage] = bakery_hosted_migration_sql_safe($migrationSql);
 $assert($migrationSafe, '119 internal-customer migration is additive (' . $migrationMessage . ')');
 $assert(strpos($migrationSql, 'owner-approved-core-column') !== false, '119 marks the customers column as owner-approved');
-foreach (bakery_account_health_internal_names() as $internalName) {
-    $needle = "'" . bakery_account_health_normalize_customer_name($internalName) . "'";
-    $assert(strpos($migrationSql, $needle) !== false, '119 backfill includes ' . $internalName);
+$flaggedByMigration = [
+    192 => 'Baker 4152222222',
+    200 => 'Baker 4844101481',
+    197 => 'Danny',
+    198 => 'SourFlour House Baker',
+];
+foreach ($flaggedByMigration as $flaggedId => $flaggedName) {
+    $pattern = '/UPDATE\s+customers\s+SET\s+is_internal\s*=\s*1\s+WHERE\s+id\s*=\s*'
+        . $flaggedId
+        . '\s+AND\s+name\s*=\s*\''
+        . preg_quote($flaggedName, '/')
+        . '\'/i';
+    $assert(preg_match($pattern, $migrationSql) === 1, '119 flags id ' . $flaggedId . ' only while the name is ' . $flaggedName);
 }
+$assert(preg_match('/\bid\s*=\s*66\b/i', $migrationSql) !== 1, '119 does not flag customer 66 Bart front');
+$assert(stripos($migrationSql, 'LOWER(') === false, '119 does not match internal rows by a name pattern');
 $assert(stripos($migrationSql, 'capp') === false, '119 does not flag Capp');
 
 // ── Fixture rows on bakerysf_test ────────────────────────────────────────────
@@ -321,10 +327,6 @@ try {
         $db->exec('ALTER TABLE customers ADD COLUMN is_internal TINYINT(1) NOT NULL DEFAULT 0');
         bakery_forget_column_exists('customers', 'is_internal');
     }
-    $db->exec(
-        "UPDATE customers SET is_internal = 1
-         WHERE LOWER(TRIM(name)) IN ('baker', 'danny', 'house baker', 'bart front')"
-    );
 
     $db->prepare('INSERT INTO products (name, price) VALUES (?, 1.00)')->execute([$tag . ' loaf']);
     $productId = (int)$db->lastInsertId();
@@ -466,12 +468,77 @@ try {
     }
 
     $realLapsed = $insertCustomer($db, $tag . ' real lapsed', 1, 'human');
-    $internalNamed = $insertCustomer($db, 'House Baker', 1, 'human');
-    $internalFlagged = $insertCustomer($db, $tag . ' internal', 1, 'human');
-    $db->prepare('UPDATE customers SET is_internal = 1 WHERE id = ?')->execute([$internalFlagged]);
-    $db->prepare('UPDATE customers SET is_internal = 0 WHERE id = ?')->execute([$internalNamed]);
-    $internalPending = $insertOrder($db, $internalNamed, '2026-09-15', 'pending', null, null);
-    $insertItem($db, $internalPending, $productId, 6, null);
+    $insertFixed = static function (PDO $db, int $id, string $name) use (&$customerIds): void {
+        $existing = $db->prepare('SELECT name FROM customers WHERE id = ?');
+        $existing->execute([$id]);
+        $found = $existing->fetchColumn();
+        if ($found !== false) {
+            throw new RuntimeException('customer id ' . $id . ' already exists as ' . $found);
+        }
+        if (column_exists($db, 'customers', 'sfb_origin')) {
+            $db->prepare('INSERT INTO customers (id, name, zone, is_active, sfb_origin, is_internal) VALUES (?, ?, ?, 1, ?, 0)')
+                ->execute([$id, $name, 'Account Health', 'human']);
+        } else {
+            $db->prepare('INSERT INTO customers (id, name, zone, is_active, is_internal) VALUES (?, ?, ?, 1, 0)')
+                ->execute([$id, $name, 'Account Health']);
+        }
+        $customerIds[] = $id;
+    };
+    $applyInternalUpdates = static function (PDO $db, string $sql): void {
+        $stripped = preg_replace('/^\s*--.*$/m', '', $sql);
+        foreach (preg_split('/;\s*(?:\r?\n|$)/', (string)$stripped) ?: [] as $statement) {
+            $statement = trim((string)$statement);
+            if ($statement !== '' && stripos($statement, 'UPDATE ') === 0) {
+                $db->exec($statement);
+            }
+        }
+    };
+    $flagValue = static function (PDO $db, int $id): int {
+        $stmt = $db->prepare('SELECT is_internal FROM customers WHERE id = ?');
+        $stmt->execute([$id]);
+        return (int)$stmt->fetchColumn();
+    };
+    $reservedIds = [66, 192, 197, 198, 200];
+    $allowedLeftover = ['Bart front', 'Baker 4152222222', 'Baker 4844101481', 'Danny', 'SourFlour House Baker'];
+    $reservedPh = implode(',', array_fill(0, count($reservedIds), '?'));
+    $existingRows = $db->prepare("SELECT id, name FROM customers WHERE id IN ($reservedPh)");
+    $existingRows->execute($reservedIds);
+    foreach ($existingRows->fetchAll(PDO::FETCH_ASSOC) as $existingRow) {
+        $existingName = (string)$existingRow['name'];
+        $isLeftover = in_array($existingName, $allowedLeftover, true) || str_ends_with($existingName, ' not baker yet');
+        if (!$isLeftover) {
+            throw new RuntimeException('customer id ' . $existingRow['id'] . ' already exists as ' . $existingName);
+        }
+        $cid = (int)$existingRow['id'];
+        $orderStmt = $db->prepare('SELECT id FROM daily_orders WHERE customer_id = ?');
+        $orderStmt->execute([$cid]);
+        $oldOrders = array_map('intval', $orderStmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($oldOrders !== []) {
+            $orderPh = implode(',', array_fill(0, count($oldOrders), '?'));
+            $db->prepare("DELETE FROM daily_order_items WHERE daily_order_id IN ($orderPh)")->execute($oldOrders);
+            $db->prepare("DELETE FROM daily_orders WHERE id IN ($orderPh)")->execute($oldOrders);
+        }
+        $db->prepare('DELETE FROM customers WHERE id = ?')->execute([$cid]);
+    }
+    $insertFixed($db, 192, $tag . ' not baker yet');
+    $insertFixed($db, 200, 'Baker 4844101481');
+    $insertFixed($db, 197, 'Danny');
+    $insertFixed($db, 198, 'SourFlour House Baker');
+    $insertFixed($db, 66, 'Bart front');
+    $applyInternalUpdates($db, $migrationSql);
+    $assert($flagValue($db, 192) === 0, 'id 192 stays unflagged while the stored name differs');
+    $assert($flagValue($db, 200) === 1, 'id 200 is flagged when the stored name matches');
+    $assert($flagValue($db, 197) === 1, 'id 197 is flagged when the stored name matches');
+    $assert($flagValue($db, 198) === 1, 'id 198 is flagged when the stored name matches');
+    $assert($flagValue($db, 66) === 0, 'id 66 Bart front stays unflagged');
+    $db->prepare('UPDATE customers SET name = ? WHERE id = 192')->execute(['Baker 4152222222']);
+    $applyInternalUpdates($db, $migrationSql);
+    $assert($flagValue($db, 192) === 1, 'id 192 is flagged once the stored name matches');
+    $assert($flagValue($db, 66) === 0, 'id 66 stays unflagged after the guarded updates');
+    $housePending = $insertOrder($db, 198, '2026-09-15', 'pending', null, null);
+    $insertItem($db, $housePending, $productId, 6, null);
+    $bartPending = $insertOrder($db, 66, '2026-09-15', 'pending', null, null);
+    $insertItem($db, $bartPending, $productId, 4, null);
 
     $rows = bakery_account_health_rows($db, $asOf);
     $byId = [];
@@ -479,27 +546,35 @@ try {
         $byId[(int)$row['customer_id']] = $row;
     }
     $assert(isset($byId[$realLapsed]) && ($byId[$realLapsed]['status'] ?? '') === 'lapsed', 'a real customer with no recent delivery is still lapsed');
-    $assert(!isset($byId[$internalNamed]), 'House Baker is excluded from the account health list');
-    $assert(!isset($byId[$internalFlagged]), 'is_internal excludes a row that is not in the name list');
+    $assert(isset($byId[66]) && ($byId[66]['customer_name'] ?? '') === 'Bart front', 'unflagged Bart front stays on the list');
     $assert(isset($byId[$capp]), 'Capp stays on the account health list');
     $assert((int)($byId[$capp]['recent_delivered_units'] ?? -1) === 10, 'Capp recent units stay the Aug 20 completion');
     $lapsed = bakery_account_health_filter($rows, 'lapsed');
     $lapsedIds = array_map(static fn(array $row): int => (int)$row['customer_id'], $lapsed);
     $shrinking = bakery_account_health_filter($rows, 'shrinking');
+    $shrinkingIds = array_map(static fn(array $row): int => (int)$row['customer_id'], $shrinking);
     $okRows = bakery_account_health_filter($rows, 'ok');
+    $okIds = array_map(static fn(array $row): int => (int)$row['customer_id'], $okRows);
     $summary = bakery_account_health_summary($rows);
     $assert(in_array($realLapsed, $lapsedIds, true), 'the lapsed tally still includes the real customer');
-    $assert(!in_array($internalNamed, $lapsedIds, true), 'House Baker is not in the lapsed tally');
-    $assert(!in_array($internalFlagged, $lapsedIds, true), 'a flagged internal row is not in the lapsed tally');
+    $assert(in_array(66, $okIds, true), 'unflagged Bart front is still in a tally');
+    foreach ($flaggedByMigration as $flaggedId => $flaggedName) {
+        $assert(!isset($byId[$flaggedId]), 'flagged id ' . $flaggedId . ' is excluded from the list');
+        $assert(!in_array($flaggedId, $lapsedIds, true), 'flagged id ' . $flaggedId . ' is excluded from the lapsed tally');
+        $assert(!in_array($flaggedId, $shrinkingIds, true), 'flagged id ' . $flaggedId . ' is excluded from the shrinking tally');
+        $assert(!in_array($flaggedId, $okIds, true), 'flagged id ' . $flaggedId . ' is excluded from the ok tally');
+    }
     $assert($summary['all'] === count($rows), 'the total tally matches the list');
     $assert($summary['lapsed'] === count($lapsed), 'the lapsed tally matches the lapsed list');
     $assert($summary['shrinking'] === count($shrinking), 'the shrinking tally matches the shrinking list');
     $assert($summary['ok'] === count($okRows), 'the ok tally matches the ok list');
+    $assert($summary['all'] === $summary['lapsed'] + $summary['shrinking'] + $summary['ok'], 'every tally adds up to the list');
 
     $queue = bakery_account_health_cleanup_queue($db, $asOf);
     $queueIds = array_map(static fn(array $item): int => (int)$item['daily_order_id'], $queue);
     $assert(in_array($incidentStale, $queueIds, true), 'cleanup queue lists the past pending order');
-    $assert(!in_array($internalPending, $queueIds, true), 'cleanup queue omits the internal House Baker order');
+    $assert(!in_array($housePending, $queueIds, true), 'cleanup queue omits the flagged house order');
+    $assert(in_array($bartPending, $queueIds, true), 'cleanup queue keeps the unflagged Bart front order');
     $assert(in_array($cappPhotoOrder, $queueIds, true), 'cleanup queue lists Capp pending order');
     $assert(in_array($elevenPending, $queueIds, true), 'cleanup queue lists the inflated pending order');
     $assert(!in_array($incidentToday, $queueIds, true), 'the as-of date is not past');
@@ -585,8 +660,12 @@ try {
     $orderTimeline = bakery_account_health_order_timeline_url($cappPhotoOrder, '2026-09-01');
     $assert(strpos($html, htmlspecialchars($orderTimeline, ENT_QUOTES, 'UTF-8')) !== false, 'queue row links to that order timeline');
     $assert(strpos($html, 'daily_order_id=' . $incidentToday) === false, 'today pending order is not in the queue');
-    $assert(strpos($html, 'House Baker') === false, 'rendered account health omits House Baker');
-    $assert(strpos($html, htmlspecialchars($tag . ' internal', ENT_QUOTES, 'UTF-8')) === false, 'rendered account health omits the flagged internal row');
+    $assert(strpos($html, '>Bart front</a>') !== false, 'rendered account health lists unflagged Bart front');
+    foreach ($flaggedByMigration as $flaggedId => $flaggedName) {
+        $linkedName = '>' . htmlspecialchars($flaggedName, ENT_QUOTES, 'UTF-8') . '</a>';
+        $assert(strpos($html, $linkedName) === false, 'rendered account health omits flagged ' . $flaggedName);
+        $assert(strpos($html, 'customer_id=' . $flaggedId) === false, 'rendered account health omits flagged id ' . $flaggedId);
+    }
     $assert(strpos($html, htmlspecialchars($tag . ' real lapsed', ENT_QUOTES, 'UTF-8')) !== false, 'rendered account health lists the real lapsed customer');
     $renderedSummary = bakery_t('account_health.summary', [
         'count' => (string)$summary['all'],

@@ -18,10 +18,10 @@
  * queue. This page does not change them.
  *
  * Staff and house rows are not wholesale accounts. customers.is_internal
- * marks them, and bakery_account_health_internal_names() names the rows
- * already known. Both the list and the cleanup queue omit those rows, so
- * every tally on the page counts the same customers. Synthetic bakers stay
- * out through sfb_origin. Capp is not in the internal name list.
+ * is the only mark. Until that column exists, this page lists the same
+ * active human customers it lists today. Flagged rows drop out of the list,
+ * the cleanup queue, and every tally together. Synthetic bakers stay out
+ * through sfb_origin. Capp is not flagged here.
  *
  * Thresholds (one block):
  *   BAKERY_ACCOUNT_HEALTH_RECENT_DAYS — delivered units, inclusive, ending on as-of
@@ -330,79 +330,30 @@ function bakery_account_health_csv(array $rows): string
 }
 
 /**
- * Staff and house names that are stored as customers but are not wholesale accounts.
+ * True only when the stored is_internal flag is set. Names are not consulted.
  *
- * No older is_test, house, or customer-type flag covers these rows.
- * sfb_origin only separates synthetic SF Baker identities, and account health
- * already excludes those. customers.is_internal (migration 119) is the flag
- * for any further internal or test row. This list is the known Live set:
- * Baker, Danny, House Baker, and Bart front. Match ignores case and repeated
- * spaces. Capp is a wholesale stop and is not in this list. Check-in and
- * balance-flag behavior for Capp is unchanged because this helper is only
- * used by account health.
- *
- * @return list<string>
- */
-function bakery_account_health_internal_names(): array
-{
-    return ['Baker', 'Danny', 'House Baker', 'Bart front'];
-}
-
-function bakery_account_health_normalize_customer_name(string $name): string
-{
-    $collapsed = preg_replace('/\s+/u', ' ', trim($name));
-    $collapsed = is_string($collapsed) ? $collapsed : '';
-    if (function_exists('mb_strtolower')) {
-        return mb_strtolower($collapsed, 'UTF-8');
-    }
-    return strtolower($collapsed);
-}
-
-function bakery_account_health_name_is_internal(string $name): bool
-{
-    $normalized = bakery_account_health_normalize_customer_name($name);
-    if ($normalized === '') {
-        return false;
-    }
-    foreach (bakery_account_health_internal_names() as $internal) {
-        if ($normalized === bakery_account_health_normalize_customer_name($internal)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
  * @param array<string, mixed> $row
  */
 function bakery_account_health_row_is_internal(array $row): bool
 {
-    if ((int)($row['is_internal'] ?? 0) === 1) {
-        return true;
-    }
-    $name = (string)($row['name'] ?? $row['customer_name'] ?? '');
-    return bakery_account_health_name_is_internal($name);
+    return (int)($row['is_internal'] ?? 0) === 1;
 }
 
 /**
  * SQL fragment for every account-health customer query.
- * Empty of internal names, and of is_internal when that column exists.
+ * Empty until customers.is_internal exists, so an unmigrated database
+ * keeps today's list.
  */
 function bakery_account_health_real_customer_sql(string $alias, PDO $db): string
 {
+    if (!column_exists($db, 'customers', 'is_internal')) {
+        return '';
+    }
     $alias = preg_replace('/[^a-zA-Z0-9_]/', '', $alias);
     if (!is_string($alias) || $alias === '') {
         $alias = 'c';
     }
-    $quoted = [];
-    foreach (bakery_account_health_internal_names() as $name) {
-        $quoted[] = $db->quote(bakery_account_health_normalize_customer_name($name));
-    }
-    $sql = ' AND LOWER(TRIM(' . $alias . '.name)) NOT IN (' . implode(', ', $quoted) . ')';
-    if (column_exists($db, 'customers', 'is_internal')) {
-        $sql .= ' AND COALESCE(' . $alias . '.is_internal, 0) = 0';
-    }
-    return $sql;
+    return ' AND COALESCE(' . $alias . '.is_internal, 0) = 0';
 }
 
 /**

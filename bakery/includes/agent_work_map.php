@@ -1034,7 +1034,7 @@ function bakery_agent_work_map_core(): array
                 'Delivered units and the last completed date ignore photos. Last photo is a separate column',
                 'The cleanup queue lists past Pending orders and does not change them',
                 'Account health is read-only GET for administrator and manager',
-                'Internal and test rows are omitted from the account health list and every tally',
+                'customers.is_internal = 1 is omitted from the account health list and every tally',
                 'Do not add a top-level navigation module',
                 'i18n in lang/en.php and lang/es.php',
             ],
