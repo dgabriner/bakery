@@ -20,6 +20,7 @@ require_once $root . '/includes/database.php';
 require_once $root . '/includes/test_target_guard.php';
 require_once $root . '/includes/billing_aging.php';
 require_once $root . '/includes/account_health.php';
+require_once $root . '/includes/hosted_migration_runtime.php';
 require_once $root . '/includes/navigation_catalog.php';
 require_once $root . '/includes/agent_work_map.php';
 
@@ -212,6 +213,36 @@ $assert(
     'account_health keys stay one contiguous block'
 );
 
+$assert(bakery_account_health_internal_names() === ['Baker', 'Danny', 'House Baker', 'Bart front'], 'internal names are the known staff and house rows');
+foreach (['Baker', ' baker ', 'Danny', 'HOUSE BAKER', 'House  Baker', 'Bart front', 'BART   FRONT'] as $internalName) {
+    $assert(bakery_account_health_name_is_internal($internalName), 'internal name matches ' . $internalName);
+}
+foreach (['Capp', 'capp', 'Danny\'s Market', 'Bartender', 'Baker Street Cafe', 'House', ''] as $wholesaleName) {
+    $assert(!bakery_account_health_name_is_internal($wholesaleName), 'wholesale name stays ' . $wholesaleName);
+}
+$assert(
+    bakery_account_health_row_is_internal(['name' => 'Capp', 'is_internal' => 0]) === false,
+    'Capp is not an internal account health row'
+);
+$assert(
+    bakery_account_health_row_is_internal(['name' => 'Real Cafe', 'is_internal' => 1]) === true,
+    'is_internal excludes a row whose name is not on the list'
+);
+$assert(
+    bakery_account_health_row_is_internal(['customer_name' => 'House Baker', 'is_internal' => 0]) === true,
+    'the name list still excludes House Baker when the flag is off'
+);
+$migrationPath = $root . '/database/schema/119_internal_customers.sql';
+$migrationSql = (string)file_get_contents($migrationPath);
+[$migrationSafe, $migrationMessage] = bakery_hosted_migration_sql_safe($migrationSql);
+$assert($migrationSafe, '119 internal-customer migration is additive (' . $migrationMessage . ')');
+$assert(strpos($migrationSql, 'owner-approved-core-column') !== false, '119 marks the customers column as owner-approved');
+foreach (bakery_account_health_internal_names() as $internalName) {
+    $needle = "'" . bakery_account_health_normalize_customer_name($internalName) . "'";
+    $assert(strpos($migrationSql, $needle) !== false, '119 backfill includes ' . $internalName);
+}
+$assert(stripos($migrationSql, 'capp') === false, '119 does not flag Capp');
+
 // ── Fixture rows on bakerysf_test ────────────────────────────────────────────
 $tag = 'AH' . substr(bin2hex(random_bytes(4)), 0, 8);
 $customerIds = [];
@@ -286,6 +317,15 @@ $insertItem = static function (PDO $db, int $orderId, int $productId, int $qty, 
 };
 
 try {
+    if (!column_exists($db, 'customers', 'is_internal')) {
+        $db->exec('ALTER TABLE customers ADD COLUMN is_internal TINYINT(1) NOT NULL DEFAULT 0');
+        bakery_forget_column_exists('customers', 'is_internal');
+    }
+    $db->exec(
+        "UPDATE customers SET is_internal = 1
+         WHERE LOWER(TRIM(name)) IN ('baker', 'danny', 'house baker', 'bart front')"
+    );
+
     $db->prepare('INSERT INTO products (name, price) VALUES (?, 1.00)')->execute([$tag . ' loaf']);
     $productId = (int)$db->lastInsertId();
     $db->prepare('INSERT INTO drivers (name) VALUES (?)')->execute([$tag . ' driver']);
@@ -425,9 +465,41 @@ try {
         $assert(!isset($byId[$synthetic]), 'synthetic bakers are omitted from wholesale account health');
     }
 
+    $realLapsed = $insertCustomer($db, $tag . ' real lapsed', 1, 'human');
+    $internalNamed = $insertCustomer($db, 'House Baker', 1, 'human');
+    $internalFlagged = $insertCustomer($db, $tag . ' internal', 1, 'human');
+    $db->prepare('UPDATE customers SET is_internal = 1 WHERE id = ?')->execute([$internalFlagged]);
+    $db->prepare('UPDATE customers SET is_internal = 0 WHERE id = ?')->execute([$internalNamed]);
+    $internalPending = $insertOrder($db, $internalNamed, '2026-09-15', 'pending', null, null);
+    $insertItem($db, $internalPending, $productId, 6, null);
+
+    $rows = bakery_account_health_rows($db, $asOf);
+    $byId = [];
+    foreach ($rows as $row) {
+        $byId[(int)$row['customer_id']] = $row;
+    }
+    $assert(isset($byId[$realLapsed]) && ($byId[$realLapsed]['status'] ?? '') === 'lapsed', 'a real customer with no recent delivery is still lapsed');
+    $assert(!isset($byId[$internalNamed]), 'House Baker is excluded from the account health list');
+    $assert(!isset($byId[$internalFlagged]), 'is_internal excludes a row that is not in the name list');
+    $assert(isset($byId[$capp]), 'Capp stays on the account health list');
+    $assert((int)($byId[$capp]['recent_delivered_units'] ?? -1) === 10, 'Capp recent units stay the Aug 20 completion');
+    $lapsed = bakery_account_health_filter($rows, 'lapsed');
+    $lapsedIds = array_map(static fn(array $row): int => (int)$row['customer_id'], $lapsed);
+    $shrinking = bakery_account_health_filter($rows, 'shrinking');
+    $okRows = bakery_account_health_filter($rows, 'ok');
+    $summary = bakery_account_health_summary($rows);
+    $assert(in_array($realLapsed, $lapsedIds, true), 'the lapsed tally still includes the real customer');
+    $assert(!in_array($internalNamed, $lapsedIds, true), 'House Baker is not in the lapsed tally');
+    $assert(!in_array($internalFlagged, $lapsedIds, true), 'a flagged internal row is not in the lapsed tally');
+    $assert($summary['all'] === count($rows), 'the total tally matches the list');
+    $assert($summary['lapsed'] === count($lapsed), 'the lapsed tally matches the lapsed list');
+    $assert($summary['shrinking'] === count($shrinking), 'the shrinking tally matches the shrinking list');
+    $assert($summary['ok'] === count($okRows), 'the ok tally matches the ok list');
+
     $queue = bakery_account_health_cleanup_queue($db, $asOf);
     $queueIds = array_map(static fn(array $item): int => (int)$item['daily_order_id'], $queue);
     $assert(in_array($incidentStale, $queueIds, true), 'cleanup queue lists the past pending order');
+    $assert(!in_array($internalPending, $queueIds, true), 'cleanup queue omits the internal House Baker order');
     $assert(in_array($cappPhotoOrder, $queueIds, true), 'cleanup queue lists Capp pending order');
     $assert(in_array($elevenPending, $queueIds, true), 'cleanup queue lists the inflated pending order');
     $assert(!in_array($incidentToday, $queueIds, true), 'the as-of date is not past');
@@ -513,6 +585,15 @@ try {
     $orderTimeline = bakery_account_health_order_timeline_url($cappPhotoOrder, '2026-09-01');
     $assert(strpos($html, htmlspecialchars($orderTimeline, ENT_QUOTES, 'UTF-8')) !== false, 'queue row links to that order timeline');
     $assert(strpos($html, 'daily_order_id=' . $incidentToday) === false, 'today pending order is not in the queue');
+    $assert(strpos($html, 'House Baker') === false, 'rendered account health omits House Baker');
+    $assert(strpos($html, htmlspecialchars($tag . ' internal', ENT_QUOTES, 'UTF-8')) === false, 'rendered account health omits the flagged internal row');
+    $assert(strpos($html, htmlspecialchars($tag . ' real lapsed', ENT_QUOTES, 'UTF-8')) !== false, 'rendered account health lists the real lapsed customer');
+    $renderedSummary = bakery_t('account_health.summary', [
+        'count' => (string)$summary['all'],
+        'lapsed' => (string)$summary['lapsed'],
+        'shrinking' => (string)$summary['shrinking'],
+    ]);
+    $assert(strpos($html, htmlspecialchars($renderedSummary, ENT_QUOTES, 'UTF-8')) !== false, 'rendered tallies match the filtered list');
     $assert(stripos($html, '<form') === false, 'account health view has no form');
     $assert(stripos($html, 'checkbox') === false, 'cleanup queue has no selection controls');
     $assert(stripos($html, '<button') === false, 'cleanup queue has no actions');
