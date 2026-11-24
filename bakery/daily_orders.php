@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     try {
-        echo json_encode(bakery_daily_orders_dispatch($db, $_POST));
+        echo json_encode(bakery_daily_orders_dispatch($db, $_POST, bakery_current_user()));
     } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(['error' => bakery_error_message_for_user($e)]);
@@ -99,6 +99,20 @@ function daily_orders_filter_url($date, $driverId, $zone, $groupBy = 'driver', $
         $params['zone'] = $zone;
     }
     return '?' . http_build_query($params);
+}
+
+function daily_orders_render_skip_button(int $orderId, string $customerName, bool $undo, bool $advanced): void
+{
+    $label = bakery_t($undo ? 'daily_orders.skip_day_undo' : 'daily_orders.skip_day');
+    echo '<button type="button" class="btn btn-small btn-outline-danger"';
+    echo ' data-skip-order="' . $orderId . '"';
+    echo ' data-skip-mode="' . ($undo ? 'undo' : 'skip') . '"';
+    echo ' data-skip-advanced="' . ($advanced ? '1' : '0') . '"';
+    echo ' data-skip-customer="' . htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') . '"';
+    echo ' title="' . htmlspecialchars(bakery_t('daily_orders.skip_day_help'), ENT_QUOTES, 'UTF-8') . '"';
+    echo ' onclick="skipDatedDay(this)">';
+    echo htmlspecialchars($label);
+    echo '</button>';
 }
 
 // Get daily orders for selected date
@@ -242,7 +256,22 @@ try {
             $reviewByOrderId[(int)$reviewCustomer['daily_order_id']] = $reviewCustomer;
         }
     }
-    
+
+    $skipUndoIds = [];
+    $unassignedStops = [];
+    try {
+        $skipIds = array_map('intval', array_column($dailyOrders, 'id'));
+        foreach ($demandSummaryAll['customers'] as $reviewCustomer) {
+            if (!empty($reviewCustomer['daily_order_id'])) {
+                $skipIds[] = (int)$reviewCustomer['daily_order_id'];
+            }
+        }
+        $skipUndoIds = bakery_daily_order_skip_undo_ids($db, $skipIds);
+        $unassignedStops = bakery_daily_order_unassigned_stops($db, $selectedDate);
+    } catch (Throwable $skipListError) {
+        error_log('daily order skip list: ' . $skipListError->getMessage());
+    }
+
 } catch (Exception $e) {
     echo '<div class="alert alert-danger">Error loading daily orders: ' . htmlspecialchars(bakery_error_message_for_user($e)) . '</div>';
     exit;
@@ -295,12 +324,18 @@ $summary = $demandSummaryAll['summary'];
             <button type="button" class="btn btn-danger" onclick="clearSelectedDay()">
                 <?= htmlspecialchars(bakery_t('ux.daily_orders.clear_day')) ?>
             </button>
+            <?php if (!empty($unassignedStops)): ?>
+                <button type="button" class="btn btn-danger" id="skipUnassignedButton" onclick="showSkipUnassignedModal()">
+                    <?= htmlspecialchars(bakery_t('daily_orders.skip_unassigned')) ?>
+                </button>
+            <?php endif; ?>
             <a class="btn btn-outline" href="standing_orders_manager.php"><?= htmlspecialchars(bakery_t('ux.daily_orders.edit_standing')) ?></a>
             <a class="btn btn-outline" href="special_orders.php?date=<?= htmlspecialchars(rawurlencode($selectedDate)) ?>"><?= htmlspecialchars(bakery_t('special_order.open_page')) ?></a>
             <a class="btn btn-outline" href="pan_dulce_quantities.php"><?= htmlspecialchars(bakery_t('nav.item.pan_dulce_quantities')) ?></a>
             <a class="btn btn-outline" href="production.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.production_baker')) ?></a>
             <a class="btn btn-outline" href="driver_assignment.php?date=<?= urlencode($selectedDate) ?>"><?= htmlspecialchars(bakery_t('page.driver_assignment')) ?></a>
         </div>
+        <p id="dailyOrdersSkipNote" class="modal-note" hidden></p>
     </div>
 
     <div class="source-legend">
@@ -850,7 +885,7 @@ $summary = $demandSummaryAll['summary'];
                                                 <?php if ($d === null): ?>
  <span class="muted">-</span>
                                                 <?php else: ?>
-                                                    <span class="qty-daily" title="From daily_order_items for <?= htmlspecialchars($selectedDate) ?>"><?= (int)$d ?></span>
+                                                    <span class="qty-daily"<?php if (!empty($rc['daily_order_id'])): ?> data-review-order="<?= (int)$rc['daily_order_id'] ?>" data-review-product="<?= (int)$line['product_id'] ?>"<?php endif; ?> title="From daily_order_items for <?= htmlspecialchars($selectedDate) ?>"><?= (int)$d ?></span>
                                                 <?php endif; ?>
                                             </td>
                                             <td><?= htmlspecialchars($note) ?></td>
@@ -862,6 +897,23 @@ $summary = $demandSummaryAll['summary'];
 
                         <div class="review-card-actions">
                             <?php if (!empty($rc['daily_order_id'])): ?>
+                                <?php
+                                    $reviewPositive = 0;
+                                    foreach ($rc['line_map'] ?? [] as $reviewLine) {
+                                        if ($reviewLine['daily_qty'] !== null && (int)$reviewLine['daily_qty'] > 0) {
+                                            $reviewPositive++;
+                                        }
+                                    }
+                                    $reviewUndo = $reviewPositive === 0 && !empty($skipUndoIds[(int)$rc['daily_order_id']]);
+                                ?>
+                                <?php if ($reviewPositive > 0 || $reviewUndo): ?>
+                                    <?php daily_orders_render_skip_button(
+                                        (int)$rc['daily_order_id'],
+                                        (string)$rc['customer_name'],
+                                        $reviewUndo,
+                                        !empty($rc['is_advanced'])
+                                    ); ?>
+                                <?php endif; ?>
                                 <a class="btn btn-small btn-primary"
                                    href="<?= htmlspecialchars(daily_orders_filter_url($selectedDate, $selectedDriverId, $selectedZone, $groupBy, array_merge($filterExtra, ['view' => 'edit', 'review' => 'all']))) ?>#order-<?= (int)$rc['daily_order_id'] ?>">
                                     Edit dated order
@@ -956,12 +1008,29 @@ $summary = $demandSummaryAll['summary'];
                                     <?= htmlspecialchars(bakery_t('reprice.order_button')) ?>
                                 </button>
                             <?php endif; ?>
+                            <?php
+                                $skipPositive = 0;
+                                foreach ($orderItems[$order['id']] ?? [] as $skipLine) {
+                                    if ((int)$skipLine['quantity'] > 0) {
+                                        $skipPositive++;
+                                    }
+                                }
+                                $skipUndo = $skipPositive === 0 && !empty($skipUndoIds[(int)$order['id']]);
+                            ?>
+                            <?php if (($orderItems[$order['id']] ?? []) !== [] && ($skipPositive > 0 || $skipUndo)): ?>
+                                <?php daily_orders_render_skip_button(
+                                    (int)$order['id'],
+                                    (string)$order['customer_name'],
+                                    $skipUndo,
+                                    $isAdvanced
+                                ); ?>
+                            <?php endif; ?>
                             <span class="state-badge state-<?= htmlspecialchars($orderState) ?>">
                                 <?= htmlspecialchars(bakery_demand_review_state_label($orderState)) ?>
                             </span>
                         </div>
                         <div class="order-total">
-                            <strong>$<?= number_format($order['total_amount'], 2) ?></strong>
+                            <strong data-order-total="<?= (int)$order['id'] ?>">$<?= number_format((float)$order['total_amount'], 2) ?></strong>
                         </div>
                     </div>
                     
@@ -1021,7 +1090,8 @@ $summary = $demandSummaryAll['summary'];
                                                     <input type="number" 
                                                            value="<?= $item['quantity'] ?>" 
                                                            min="0" 
-                                                           class="quantity-input" 
+                                                           class="quantity-input"
+                                                           data-line-id="<?= (int)$item['id'] ?>"
                                                            title="Edits the dated daily order for <?= htmlspecialchars($selectedDate) ?> only"
                                                            onchange="updateQuantity(<?= $item['id'] ?>, this.value, <?= $isAdvanced ? 'true' : 'false' ?>)">
                                                 </td>
@@ -1070,7 +1140,7 @@ $summary = $demandSummaryAll['summary'];
                                                         <div class="source-tag"><?= htmlspecialchars(bakery_t('no_charge.reason.' . $lineReason)) ?></div>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td>$<?= number_format($item['line_total'], 2) ?></td>
+                                                <td data-line-total="<?= (int)$item['id'] ?>">$<?= number_format((float)$item['line_total'], 2) ?></td>
                                                 <td>
                                                     <?php if ($removedForDay): ?>
                                                         <button type="button" class="btn btn-small btn-outline"
@@ -1176,6 +1246,44 @@ $summary = $demandSummaryAll['summary'];
         </div>
     <?php endif; ?>
 </div>
+
+<?php if (!empty($unassignedStops)): ?>
+<div class="modal-overlay" id="skipUnassignedModal" style="display: none;">
+    <div class="modal modal-wide">
+        <div class="modal-header">
+            <h3><?= htmlspecialchars(bakery_t('daily_orders.skip_unassigned_title', ['date' => $selectedDateLabel])) ?></h3>
+            <button type="button" class="modal-close" onclick="hideSkipUnassignedModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <p><?= htmlspecialchars(bakery_t('daily_orders.skip_unassigned_help')) ?></p>
+            <ul id="skipUnassignedList">
+                <?php foreach ($unassignedStops as $stop): ?>
+                    <li data-unassigned-order="<?= (int)$stop['daily_order_id'] ?>">
+                        <?= htmlspecialchars(bakery_t('daily_orders.skip_unassigned_line', [
+                            'customer' => (string)$stop['customer_name'],
+                            'status' => str_replace('_', ' ', (string)$stop['status']),
+                            'lines' => (string)(int)$stop['line_count'],
+                            'positive' => (string)(int)$stop['positive_lines'],
+                        ])) ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="hideSkipUnassignedModal()">
+                <?= htmlspecialchars(bakery_t('daily_orders.cancel')) ?>
+            </button>
+            <button type="button" class="btn btn-danger" id="skipUnassignedConfirm"
+                    data-order-ids="<?= htmlspecialchars(implode(',', array_map(static function (array $row): string {
+                        return (string)(int)$row['daily_order_id'];
+                    }, $unassignedStops)), ENT_QUOTES, 'UTF-8') ?>"
+                    onclick="confirmSkipUnassigned(this)">
+                <?= htmlspecialchars(bakery_t('daily_orders.skip_unassigned_confirm')) ?>
+            </button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- One-Time Dated Order Modal -->
 <div class="modal-overlay" id="createDatedOrderModal" style="display: none;">
@@ -2014,6 +2122,172 @@ const selectedOrderDate = '<?= htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-
 const repriceZeroWarn = <?= json_encode(bakery_t('reprice.zero_warn'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 const repriceOrderConfirm = <?= json_encode(bakery_t('reprice.order_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 const dailyOrdersCsrf = <?= json_encode(bakery_csrf_token()) ?>;
+const skipDayDone = <?= json_encode(bakery_t('daily_orders.skip_day_done'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipDayUndoDone = <?= json_encode(bakery_t('daily_orders.skip_day_undo_done'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipDayLabel = <?= json_encode(bakery_t('daily_orders.skip_day'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipDayUndoLabel = <?= json_encode(bakery_t('daily_orders.skip_day_undo'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipDayAdvanced = <?= json_encode(bakery_t('daily_orders.skip_advanced_confirm'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipDayError = <?= json_encode(bakery_t('daily_orders.skip_day_error'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipUnassignedDone = <?= json_encode(bakery_t('daily_orders.skip_unassigned_done'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const skipUnassignedLeft = <?= json_encode(bakery_t('daily_orders.skip_unassigned_left'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+
+function skipDatedDay(button) {
+    if (!button || button.disabled) {
+        return;
+    }
+    const orderId = button.getAttribute('data-skip-order');
+    const mode = button.getAttribute('data-skip-mode') || 'skip';
+    if (mode === 'skip' && button.getAttribute('data-skip-advanced') === '1' && !confirm(skipDayAdvanced)) {
+        return;
+    }
+    button.disabled = true;
+    const action = mode === 'undo' ? 'undo_skip_dated_day' : 'skip_dated_day';
+    postDailyOrderSkip({
+        action: action,
+        order_id: orderId,
+        date: selectedOrderDate
+    }).then(function (data) {
+        applyDatedSkipResult(data);
+        const template = mode === 'undo' ? skipDayUndoDone : skipDayDone;
+        showSkipNote(fillSkipTemplate(template, {
+            customer: button.getAttribute('data-skip-customer') || '',
+            date: selectedOrderDate,
+            count: String(data.lines_changed || 0)
+        }));
+    }).catch(function (error) {
+        alert(error.message);
+    }).then(function () {
+        button.disabled = false;
+    });
+}
+
+function postDailyOrderSkip(fields) {
+    const params = new URLSearchParams(fields);
+    params.set('csrf_token', dailyOrdersCsrf);
+    return fetch('daily_orders.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: params.toString()
+    }).then(async function (response) {
+        const data = await response.json().catch(function () { return {}; });
+        if (!response.ok || data.success === false || data.error) {
+            throw new Error(data.error || skipDayError);
+        }
+        return data;
+    });
+}
+
+function confirmSkipUnassigned(button) {
+    if (!button || button.disabled) {
+        return;
+    }
+    button.disabled = true;
+    postDailyOrderSkip({
+        action: 'skip_unassigned_stops',
+        date: selectedOrderDate,
+        order_ids: button.getAttribute('data-order-ids') || ''
+    }).then(function (data) {
+        (data.skipped || []).forEach(applyDatedSkipResult);
+        (data.skipped || []).forEach(function (row) {
+            const item = document.querySelector('[data-unassigned-order="' + row.daily_order_id + '"]');
+            if (item) {
+                item.remove();
+            }
+        });
+        const list = document.getElementById('skipUnassignedList');
+        if (list && list.children.length === 0) {
+            const opener = document.getElementById('skipUnassignedButton');
+            if (opener) {
+                opener.hidden = true;
+            }
+            hideSkipUnassignedModal();
+        }
+        let note = fillSkipTemplate(skipUnassignedDone, {count: String(data.skipped_count || 0)});
+        const left = (data.left_assigned || []).length;
+        if (left > 0) {
+            note += ' ' + fillSkipTemplate(skipUnassignedLeft, {count: String(left)});
+        }
+        showSkipNote(note);
+    }).catch(function (error) {
+        alert(error.message);
+    }).then(function () {
+        button.disabled = false;
+    });
+}
+
+function applyDatedSkipResult(data) {
+    if (!data || !data.daily_order_id) {
+        return;
+    }
+    const orderId = String(data.daily_order_id);
+    const byId = {};
+    const byProduct = {};
+    (data.lines || []).forEach(function (line) {
+        byId[String(line.id)] = line;
+        byProduct[String(line.product_id)] = line;
+    });
+    const card = document.getElementById('order-' + orderId);
+    if (card) {
+        card.querySelectorAll('input.quantity-input[data-line-id]').forEach(function (input) {
+            const line = byId[input.getAttribute('data-line-id')];
+            if (line) {
+                input.value = String(line.quantity);
+            }
+        });
+        card.querySelectorAll('[data-line-total]').forEach(function (cell) {
+            const line = byId[cell.getAttribute('data-line-total')];
+            if (line) {
+                cell.textContent = '$' + Number(line.line_total || 0).toFixed(2);
+            }
+        });
+        const total = card.querySelector('[data-order-total]');
+        if (total) {
+            total.textContent = '$' + Number(data.total_amount || 0).toFixed(2);
+        }
+    }
+    document.querySelectorAll('[data-review-order="' + orderId + '"]').forEach(function (cell) {
+        const line = byProduct[cell.getAttribute('data-review-product')];
+        if (line) {
+            cell.textContent = String(line.quantity);
+        }
+    });
+    document.querySelectorAll('[data-skip-order="' + orderId + '"]').forEach(function (skipButton) {
+        const undo = !!data.can_undo;
+        skipButton.setAttribute('data-skip-mode', undo ? 'undo' : 'skip');
+        skipButton.textContent = undo ? skipDayUndoLabel : skipDayLabel;
+    });
+}
+
+function fillSkipTemplate(template, values) {
+    let text = String(template);
+    Object.keys(values).forEach(function (key) {
+        text = text.split(':' + key).join(String(values[key]));
+    });
+    return text;
+}
+
+function showSkipNote(text) {
+    const note = document.getElementById('dailyOrdersSkipNote');
+    if (!note) {
+        return;
+    }
+    note.hidden = false;
+    note.textContent = text;
+}
+
+function showSkipUnassignedModal() {
+    const modal = document.getElementById('skipUnassignedModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function hideSkipUnassignedModal() {
+    const modal = document.getElementById('skipUnassignedModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
 
 function showCreateDatedOrderModal() {
     document.getElementById('createDatedOrderModal').style.display = 'flex';
