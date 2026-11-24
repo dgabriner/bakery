@@ -8,13 +8,45 @@ require_once 'includes/google_maps_config.php';
 require_once 'includes/operational_timeline.php';
 require_once 'includes/driver_assignments.php';
 require_once 'includes/driver_assignment_actions.php';
+require_once 'includes/demand_review.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/customer_record.php';
+require_once 'includes/route_load.php';
+require_once 'includes/pan_carry.php';
 
 $page_title = bakery_t('page.driver_assignment');
 bakery_ensure_standing_routes_order_column($db);
 
 bakery_try_build_from_standing_post($db);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $pageAction = (string)$_POST['action'];
+    if (in_array($pageAction, ['save_route_load_settings', 'save_route_service_override', 'remove_pan_carry'], true)) {
+        $redirectDate = (string)($_POST['date'] ?? date('Y-m-d', strtotime('+1 day')));
+        try {
+            $redirectDate = bakery_driver_validate_delivery_date($redirectDate);
+        } catch (Throwable $e) {
+            $redirectDate = date('Y-m-d', strtotime('+1 day'));
+        }
+        try {
+            bakery_require_csrf();
+            bakery_require_role(['administrator', 'manager']);
+            if ($pageAction === 'save_route_load_settings') {
+                bakery_route_load_save_settings($db, $_POST);
+            } elseif ($pageAction === 'save_route_service_override') {
+                $minutes = (int)($_POST['minutes'] ?? 0);
+                bakery_route_load_save_override($db, (int)($_POST['customer_id'] ?? 0), $minutes > 0 ? $minutes : null);
+            } else {
+                bakery_pan_carry_remove($db, (int)($_POST['carry_id'] ?? 0), (int)(bakery_current_user()['id'] ?? 0) ?: null);
+            }
+            header('Location: driver_assignment.php?date=' . rawurlencode($redirectDate) . '&route_load=saved');
+            exit;
+        } catch (Throwable $e) {
+            header('Location: driver_assignment.php?date=' . rawurlencode($redirectDate) . '&route_load=error&msg=' . rawurlencode($e->getMessage()));
+            exit;
+        }
+    }
+}
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -68,6 +100,8 @@ $activeCustomers = [];
 $productsForStanding = [];
 $assignedCustomerIdsToday = [];
 $pageExceptions = [];
+$routedZeroCount = 0;
+$routedZeroHref = '';
 $driverColors = [
     '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1',
     '#20c997', '#ffc107', '#e83e8c', '#6c757d', '#17a2b8',
@@ -238,6 +272,17 @@ try {
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
+    try {
+        $routedZeroReview = bakery_demand_review_build($db, $selectedDate, []);
+        $routedZero = bakery_demand_review_routed_zero_stops($routedZeroReview['customers'] ?? []);
+        $routedZeroCount = (int)($routedZero['count'] ?? 0);
+        $routedZeroHref = 'daily_orders.php?' . http_build_query([
+            'date' => $selectedDate,
+            'review' => 'routed_zero',
+        ]);
+    } catch (Throwable $routedZeroError) {
+        error_log('driver_assignment routed zero count: ' . $routedZeroError->getMessage());
+    }
 } catch (Throwable $e) {
     $pageLoadError = bakery_error_message_for_user($e);
     error_log('driver_assignment.php load failed: ' . $e->getMessage());
@@ -278,7 +323,14 @@ try {
             </button>
         </div>
     </div>
-    
+
+    <?php if ($routedZeroCount > 0 && $routedZeroHref !== ''): ?>
+        <div class="ops-alert ops-alert-danger" role="alert" style="background:#f8d7da;color:#721c24;padding:0.85rem 1rem;border-radius:6px;margin:0.75rem 0;">
+            <?php echo htmlspecialchars(bakery_t('driver_assignment.routed_zero_count', ['count' => $routedZeroCount])); ?>
+            <a href="<?php echo htmlspecialchars($routedZeroHref); ?>"><?php bakery_te('driver_assignment.routed_zero_link'); ?></a>
+        </div>
+    <?php endif; ?>
+
     <!-- Date Navigation -->
     <div class="date-navigation">
         <div class="date-info">
@@ -320,6 +372,44 @@ try {
                    or configure standing routes first.</p>
             </div>
         <?php endif; ?>
+        <?php
+        $routeLoadNotice = (string)($_GET['route_load'] ?? '');
+        $routeLoadStops = [];
+        $panCarryLabels = function_exists('bakery_pan_carry_labels_for_date')
+            ? bakery_pan_carry_labels_for_date($db, $selectedDate)
+            : [];
+        $routeLoadReport = function_exists('bakery_route_load_report')
+            ? bakery_route_load_report($db, $selectedDate)
+            : ['drivers' => [], 'warnings' => []];
+        foreach ($routeLoadReport['drivers'] as $routeLoadDriver) {
+            foreach ($routeLoadDriver['stops'] as $routeLoadStop) {
+                $routeLoadStops[(int)$routeLoadStop['daily_order_id']] = $routeLoadStop;
+            }
+        }
+        $routeLoadStores = [];
+        foreach ($dailyOrders as $routeLoadOrder) {
+            $routeLoadStores[(int)$routeLoadOrder['customer_id']] = [
+                'id' => (int)$routeLoadOrder['customer_id'],
+                'name' => (string)$routeLoadOrder['customer_name'],
+            ];
+        }
+        ?>
+        <?php if ($routeLoadNotice === 'saved'): ?>
+            <div class="ops-alert ops-alert-success" role="status"><?= htmlspecialchars(bakery_t('route_load.saved')) ?></div>
+        <?php elseif ($routeLoadNotice === 'error'): ?>
+            <div class="ops-alert ops-alert-danger" role="alert"><?= htmlspecialchars((string)($_GET['msg'] ?? '')) ?></div>
+        <?php endif; ?>
+        <?php
+        if (function_exists('bakery_route_load_warning_html')) {
+            echo bakery_route_load_warning_html($db, $selectedDate, bakery_current_user());
+        }
+        if (function_exists('bakery_pan_carry_board_html')) {
+            echo bakery_pan_carry_board_html($db, $selectedDate, bakery_current_user());
+        }
+        if (function_exists('bakery_route_load_settings_panel_html')) {
+            echo bakery_route_load_settings_panel_html($db, $selectedDate, array_values($routeLoadStores), bakery_current_user());
+        }
+        ?>
         <div class="route-plan-heading">
             <h2>Route Plan for <?= htmlspecialchars(date('F j', strtotime($selectedDate))) ?></h2>
             <p>Each driver section is a delivery route. Reorder stops here; use Daily Orders separately to manage products and quantities.</p>
@@ -454,10 +544,26 @@ try {
                                                 ?>
                                                 </div>
                                                 <div class="customer-address"><?= htmlspecialchars($order['address']) ?></div>
+                                                <?php
+                                                $carryRow = $panCarryLabels[(int)$order['customer_id']] ?? null;
+                                                if (is_array($carryRow)) {
+                                                    echo bakery_pan_carry_stop_badge_html([
+                                                        'carry_label' => (string)($carryRow['label'] ?? ''),
+                                                        'carry_id' => (int)($carryRow['id'] ?? 0),
+                                                    ], $selectedDate, bakery_current_user());
+                                                }
+                                                $loadStop = $routeLoadStops[(int)$order['id']] ?? null;
+                                                ?>
                                                 <div class="order-details">
                                                     <span class="route-order">#<?= $order['route_order'] ?></span>
                                                     <span class="delivery-time"><?= $order['scheduled_delivery_time'] ?: 'TBD' ?></span>
                                                     <span class="order-amount">$<?= number_format($order['total_amount'], 2) ?></span>
+                                                    <?php if (is_array($loadStop) && bakery_route_load_viewer_may_see_warning(bakery_current_user())): ?>
+                                                        <span class="route-load-estimate"><?= htmlspecialchars(bakery_route_load_estimate_label((int)$loadStop['service'], (string)$loadStop['service_source'], (int)$loadStop['service_samples'])) ?></span>
+                                                        <?php if ((string)$loadStop['drive_source'] !== 'first'): ?>
+                                                            <span class="route-load-estimate"><?= htmlspecialchars(bakery_route_load_estimate_label((int)$loadStop['drive'], (string)$loadStop['drive_source'], (int)$loadStop['drive_samples'])) ?></span>
+                                                        <?php endif; ?>
+                                                    <?php endif; ?>
                                                     <?php if ($isLocked): ?>
                                                         <span class="delivery-status-badge"><?= htmlspecialchars($order['delivery_status']) ?></span>
                                                     <?php endif; ?>
@@ -692,6 +798,11 @@ try {
                 <input type="hidden" id="add-customer-apply-pan-dulce" value="0">
             </div>
             <div id="add-customer-status" class="add-customer-status" aria-live="polite"></div>
+            <div id="add-customer-empty-actions" hidden>
+                <p id="add-customer-empty-warning"></p>
+                <button type="button" class="btn btn-primary" id="add-customer-restore-btn"><?php bakery_te('driver_assignment.restore_standing'); ?></button>
+                <button type="button" class="btn btn-outline" id="add-customer-keep-empty-btn"><?php bakery_te('driver_assignment.add_without_restore'); ?></button>
+            </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-primary" onclick="submitAddCustomerToRoute()">Add Stop to Today’s Route</button>
@@ -732,7 +843,10 @@ window.__DRIVER_ASSIGNMENT__ = {
     productsForStanding: <?php echo bakery_json_for_html($productsForStanding, '[]'); ?>,
     assignedCustomerIdsToday: <?php echo bakery_json_for_html($assignedCustomerIdsToday, '{}'); ?>,
     buildConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.build_confirm'), '""'); ?>,
-    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>
+    unassignConfirm: <?php echo bakery_json_for_html(bakery_t('driver_assignment.unassign_confirm'), '""'); ?>,
+    emptyOrderWarning: <?php echo bakery_json_for_html(bakery_t('driver_assignment.empty_order_warning', ['customer' => '']), '""'); ?>,
+    restoreStanding: <?php echo bakery_json_for_html(bakery_t('driver_assignment.restore_standing'), '""'); ?>,
+    addWithoutRestore: <?php echo bakery_json_for_html(bakery_t('driver_assignment.add_without_restore'), '""'); ?>
 };
 </script>
 <script src="<?php echo bakery_asset_href('includes/driver_assignment.js'); ?>" defer></script>

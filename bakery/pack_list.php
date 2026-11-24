@@ -768,6 +768,9 @@ $productionCenterHref = function_exists('bakery_ops_link_production_center')
         $pageReturnKey ?: 'pack_list'
     )
     : ('production_center.php?date=' . rawurlencode($selectedDate));
+// Visible on every non-driver role: quantities are demand until a manager commits the bake.
+$planUncommitted = !$isDriver && bakery_pack_plan_uncommitted($db, $selectedDate);
+$unpackedLineCount = bakery_pack_unpacked_count(array_keys($allLineKeys), $checkedMap);
 $workflowStages = [];
 try {
     require_once __DIR__ . '/includes/production_workflow_strip.php';
@@ -1430,6 +1433,16 @@ require_once 'includes/nav.php';
     padding: 12px 14px;
 }
 .pack-produced-banner p { margin: 0 0 10px; color: #8a5a12; font-weight: 700; }
+.pack-plan-note {
+    background: #fff6e5;
+    border: 1px solid #efd7a8;
+    border-radius: 8px;
+    color: #8a5a12;
+    font-size: .9rem;
+    font-weight: 650;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+}
 .pack-produced-banner__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .pack-prod-warn {
     background: #fff6e5;
@@ -1550,16 +1563,21 @@ require_once 'includes/nav.php';
                     <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.driver_loads'); ?></a>
                 <?php endif; ?>
                 <?php if ($packProgressReady && !empty($allLineKeys) && !$packComplete): ?>
-                    <form method="post" class="pack-all-form">
+                    <form method="post" class="pack-all-form"<?php echo bakery_pack_confirm_attr(bakery_t('pack_list.pack_all_confirm', [
+                        'count' => number_format($unpackedLineCount),
+                    ])); ?>>
                         <?php echo bakery_csrf_field(); ?>
                         <input type="hidden" name="action" value="pack_all">
                         <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewMode, ENT_QUOTES, 'UTF-8'); ?>">
-                        <button type="submit" class="pack-btn pack-btn--primary"><?php bakery_te('pack_list.pack_all'); ?></button>
+                        <button type="submit" class="pack-btn"><?php bakery_te('pack_list.pack_all'); ?></button>
                     </form>
                 <?php endif; ?>
                 <button type="button" class="pack-btn" onclick="window.print()"><?php bakery_te('pack_list.print'); ?></button>
             </div>
         </div>
+        <?php if ($planUncommitted): ?>
+            <p class="pack-plan-note" role="status"><?php bakery_te('pack_list.plan_not_committed'); ?></p>
+        <?php endif; ?>
         <?php
         if (!$isBaker && function_exists('bakery_production_workflow_strip_css')) {
             echo bakery_production_workflow_strip_css();
@@ -1631,28 +1649,35 @@ require_once 'includes/nav.php';
             <?php endif; ?>
         </div>
         <?php if ($canBackfillProduction && $missingProductionTargets !== []): ?>
+            <?php
+            // Before a commit these quantities are demand, not an approved bake: open Daily
+            // Production first and keep "mark produced" as the quieter, confirmed action.
+            $showProductionLink = $isBaker || !$isDriver;
+            $productionLinkHtml = $showProductionLink
+                ? '<a class="pack-btn' . ($planUncommitted ? ' pack-btn--primary' : '') . '" href="'
+                    . htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8') . '">'
+                    . htmlspecialchars(bakery_t('pack_list.daily_production'), ENT_QUOTES, 'UTF-8') . '</a>'
+                : '';
+            $backfillDayHtml = bakery_pack_backfill_form_html(
+                'backfill_day',
+                $selectedDate,
+                $viewMode,
+                bakery_t('pack_list.mark_day_produced'),
+                [
+                    'button_class' => $planUncommitted ? 'pack-btn' : 'pack-btn pack-btn--primary',
+                    'confirm' => bakery_t('pack_list.mark_day_produced_confirm', [
+                        'count' => number_format(count($missingProductionTargets)),
+                    ]),
+                ]
+            );
+            ?>
             <div class="pack-produced-banner" role="status">
-                <p><?php echo htmlspecialchars(bakery_t('pack_list.no_production_body', [
-                    'count' => number_format(count($missingProductionTargets)),
-                ]), ENT_QUOTES, 'UTF-8'); ?></p>
+                <p><?php echo htmlspecialchars(bakery_t(
+                    $planUncommitted ? 'pack_list.no_production_body_uncommitted' : 'pack_list.no_production_body',
+                    ['count' => number_format(count($missingProductionTargets))]
+                ), ENT_QUOTES, 'UTF-8'); ?></p>
                 <div class="pack-produced-banner__actions">
-                    <?php
-                    echo bakery_pack_backfill_form_html(
-                        'backfill_day',
-                        $selectedDate,
-                        $viewMode,
-                        bakery_t('pack_list.mark_day_produced'),
-                        [
-                            'button_class' => 'pack-btn pack-btn--primary',
-                            'confirm' => bakery_t('pack_list.mark_day_produced_confirm', [
-                                'count' => number_format(count($missingProductionTargets)),
-                            ]),
-                        ]
-                    );
-                    ?>
-                    <?php if ($isBaker || !$isDriver): ?>
-                        <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
-                    <?php endif; ?>
+                    <?php echo $planUncommitted ? $productionLinkHtml . $backfillDayHtml : $backfillDayHtml . $productionLinkHtml; ?>
                 </div>
             </div>
         <?php endif; ?>
@@ -2040,7 +2065,13 @@ require_once 'includes/nav.php';
                         <div class="pack-section__totals">
                             <span class="pack-qty-pill pack-qty-pill--big"><?php echo htmlspecialchars(bakery_t('pack_list.units', ['count' => number_format($route['total'])]), ENT_QUOTES, 'UTF-8'); ?></span>
                             <?php if ($packProgressReady && !$packComplete): ?>
-                                <form method="post" class="pack-all-form">
+                                <form method="post" class="pack-all-form"<?php echo bakery_pack_confirm_attr(bakery_t('pack_list.pack_driver_confirm', [
+                                    'count' => number_format(bakery_pack_unpacked_count(
+                                        array_keys($lineKeysByDriver[(int)$route['driver_id']] ?? []),
+                                        $checkedMap
+                                    )),
+                                    'driver' => (string)$route['driver_name'],
+                                ])); ?>>
                                     <?php echo bakery_csrf_field(); ?>
                                     <input type="hidden" name="action" value="pack_all">
                                     <input type="hidden" name="view" value="route">

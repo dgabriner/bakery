@@ -494,6 +494,14 @@ function bakery_hosted_migration_approve_jobs(array $jobs): array {
         if (!$safe) {
             throw new RuntimeException($message);
         }
+        $idRefusal = bakery_hosted_migration_id_refusal($id);
+        if ($idRefusal !== '') {
+            throw new RuntimeException($idRefusal);
+        }
+        $userSqlRefusal = bakery_hosted_migration_sql_user_refusal($sql);
+        if ($userSqlRefusal !== '') {
+            throw new RuntimeException($userSqlRefusal);
+        }
         $loaded[] = [
             'id' => $id,
             'file' => $file,
@@ -506,6 +514,10 @@ function bakery_hosted_migration_approve_jobs(array $jobs): array {
     [$catchupSafe, $catchupMessage] = bakery_hosted_migration_sql_safe($catchupSql);
     if (!$catchupSafe) {
         throw new RuntimeException($catchupMessage);
+    }
+    $catchupUserRefusal = bakery_hosted_migration_sql_user_refusal($catchupSql);
+    if ($catchupUserRefusal !== '') {
+        throw new RuntimeException($catchupUserRefusal);
     }
     $first = $loaded[0];
     $release = 'migration-' . $first['id'] . '-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
@@ -572,6 +584,14 @@ function bakery_hosted_migration_approve(string $file): array {
     [$safe, $message] = bakery_hosted_migration_sql_safe($sql);
     if (!$safe) throw new RuntimeException($message);
     $id = substr($file, 0, -4);
+    $idRefusal = bakery_hosted_migration_id_refusal($id);
+    if ($idRefusal !== '') {
+        throw new RuntimeException($idRefusal);
+    }
+    $userSqlRefusal = bakery_hosted_migration_sql_user_refusal($sql);
+    if ($userSqlRefusal !== '') {
+        throw new RuntimeException($userSqlRefusal);
+    }
     $release = 'migration-' . $id . '-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
     $root = bakery_hosted_migration_export_root();
     $temp = $root . DIRECTORY_SEPARATOR . 'releases' . DIRECTORY_SEPARATOR . $release . '.tmp';

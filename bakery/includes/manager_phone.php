@@ -50,7 +50,7 @@ function bakery_manager_phone_href(string $date, string $view = 'today', array $
     return (defined('BASE_URL') ? BASE_URL : '') . 'manager.php?' . http_build_query($query);
 }
 
-function bakery_manager_phone_date_label(string $date): string
+function bakery_manager_phone_date_label(string $date, bool $short = false): string
 {
     $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
     if (!$dt) {
@@ -58,13 +58,39 @@ function bakery_manager_phone_date_label(string $date): string
     }
     $locale = (function_exists('bakery_locale') && bakery_locale() === 'es') ? 'es_MX' : 'en_US';
     if (class_exists('IntlDateFormatter')) {
-        $fmt = new IntlDateFormatter($locale, IntlDateFormatter::FULL, IntlDateFormatter::NONE);
+        $fmt = new IntlDateFormatter(
+            $locale,
+            $short ? IntlDateFormatter::MEDIUM : IntlDateFormatter::FULL,
+            IntlDateFormatter::NONE
+        );
         $label = $fmt ? $fmt->format($dt) : false;
         if (is_string($label) && $label !== '') {
             return $label;
         }
     }
     return $dt->format('Y-m-d');
+}
+
+/**
+ * Kitchen chip for a date whose plan is not committed. Names the delivery date
+ * and what the bake sheet is actually following (dated orders, not saved targets).
+ *
+ * @param array<string,mixed>|null $bakeSource Result of bakery_production_produce_targets_by_product()
+ */
+function bakery_manager_phone_uncommitted_chip(?array $bakeSource, string $date): string
+{
+    if ($bakeSource === null) {
+        return bakery_t('manager_phone.plan_not_committed');
+    }
+    $dateLabel = bakery_manager_phone_date_label($date, true);
+    $units = (int)($bakeSource['required_units'] ?? 0);
+    if ($units <= 0) {
+        return bakery_t('manager_phone.plan_not_committed_empty', ['date' => $dateLabel]);
+    }
+    return bakery_t('manager_phone.plan_not_committed_demand', [
+        'date' => $dateLabel,
+        'count' => number_format($units),
+    ]);
 }
 
 function bakery_manager_phone_tomorrow_needs_work(?array $tomorrow): bool
@@ -180,7 +206,15 @@ function bakery_manager_phone_next_action(array $ctx): array
         return $step('unassigned', bakery_manager_phone_href($date, 'routes'), 'attention', $unassigned);
     }
     $center = (defined('BASE_URL') ? BASE_URL : '') . 'production_center.php?date=' . rawurlencode($date);
-    if (array_key_exists('plan_committed', $ctx) && $ctx['plan_committed'] === false) {
+    $planUncommitted = array_key_exists('plan_committed', $ctx) && $ctx['plan_committed'] === false;
+    // No dated orders yet: releasing a plan would commit nothing to bake. Orders come first.
+    if ($planUncommitted && array_key_exists('dailyOrders', $ctx) && (int)$ctx['dailyOrders'] === 0) {
+        $ordersHref = function_exists('bakery_ops_link_daily_orders')
+            ? bakery_ops_link_daily_orders($date, [], 'manager')
+            : (defined('BASE_URL') ? BASE_URL : '') . 'daily_orders.php?date=' . rawurlencode($date);
+        return $step('no_orders', $ordersHref, 'attention', 0);
+    }
+    if ($planUncommitted) {
         return $step('release', $center, 'attention', 0);
     }
     $drift = (int)($ctx['plan_drift'] ?? 0);
@@ -772,6 +806,10 @@ function bakery_manager_phone_render_routes(array $ctx): void
     </section>
   <?php endif; ?>
 
+  <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_health.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.route_health'); ?></a></p>
+  <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'delivery_manager_review.php'); ?>"><?php bakery_te('manager_phone.delivery_review'); ?></a></p>
+  <p class="manager-phone__cadence"><a href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_photo_journey.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.journey'); ?></a></p>
+  <p class="manager-phone__cadence"><a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'driver_reports.php?date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.driver_reports'); ?></a></p>
   <section class="manager-phone__drivers" aria-label="<?php bakery_te('manager_phone.driver_board'); ?>">
     <?php if (empty($ctx['driverRows'])): ?>
       <p class="manager-phone__cadence"><?php bakery_te('manager_phone.no_drivers'); ?></p>
@@ -951,6 +989,7 @@ function bakery_manager_phone_render_routes(array $ctx): void
           <?php if ($needsClose && !$isClosed): ?>
             <a class="manager-phone__btn manager-phone__btn--primary" href="<?php echo $h(bakery_manager_phone_href($date, 'routes', ['sheet' => 'close', 'driver_id' => $id])); ?>"><?php bakery_te('manager_phone.close_route'); ?></a>
           <?php endif; ?>
+          <a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_photo_journey.php?date=' . rawurlencode($date) . '&driver_id=' . $id); ?>"><?php bakery_te('manager_phone.journey'); ?></a>
           <a class="manager-phone__btn" href="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'driver.php?driver_id=' . $id . '&date=' . rawurlencode($date)); ?>"><?php bakery_te('manager_phone.open_route'); ?></a>
         </div>
       </article>
@@ -1007,6 +1046,7 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
         && bakery_production_plan_commits_ready($db);
     $committedAtLabel = '';
     $driftCount = 0;
+    $bakeSource = null;
     if ($planStateAvailable && function_exists('bakery_production_plan_state')) {
         try {
             $planState = bakery_production_plan_state($db, $date);
@@ -1022,13 +1062,20 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
         } catch (Throwable $e) {
             error_log('manager phone kitchen plan state: ' . $e->getMessage());
         }
+        if ($committedAtLabel === '' && function_exists('bakery_production_produce_targets_by_product')) {
+            try {
+                $bakeSource = bakery_production_produce_targets_by_product($db, $date);
+            } catch (Throwable $e) {
+                error_log('manager phone kitchen bake source: ' . $e->getMessage());
+            }
+        }
     }
     ?>
   <p class="manager-phone__cadence"><?php bakery_te('manager_phone.cadence'); ?></p>
   <?php if ($planStateAvailable): ?>
     <div class="manager-phone__chips">
       <?php if ($committedAtLabel === ''): ?>
-        <span class="manager-phone__chip manager-phone__chip--loud"><?php bakery_te('manager_phone.plan_not_committed'); ?></span>
+        <span class="manager-phone__chip manager-phone__chip--loud"><?php echo $h(bakery_manager_phone_uncommitted_chip($bakeSource, $date)); ?></span>
       <?php else: ?>
         <span class="manager-phone__chip<?php echo $driftCount > 0 ? ' manager-phone__chip--loud' : ''; ?>"><?php echo $h($committedAtLabel); ?></span>
         <?php if ($driftCount > 0): ?>
@@ -1041,9 +1088,15 @@ function bakery_manager_phone_render_kitchen(array $ctx): void
     <h2><?php bakery_te('manager_phone.bake'); ?></h2>
     <p class="manager-phone__metric"><?php echo number_format($produced); ?> / <?php echo number_format($target); ?></p>
     <div class="manager-phone__bar" aria-hidden="true"><span style="width:<?php echo $percent; ?>%"></span></div>
-    <p><?php echo $remaining > 0
-        ? htmlspecialchars(bakery_t('manager_phone.still_to_make', ['count' => $remaining]), ENT_QUOTES, 'UTF-8')
-        : bakery_t('manager_phone.bake_covered'); ?></p>
+    <p><?php
+      if ($remaining > 0) {
+          echo htmlspecialchars(bakery_t('manager_phone.still_to_make', ['count' => $remaining]), ENT_QUOTES, 'UTF-8');
+      } elseif ($target <= 0) {
+          bakery_te('manager_phone.bake_nothing_ordered');
+      } else {
+          bakery_te('manager_phone.bake_covered');
+      }
+    ?></p>
     <?php
       $kitchenAction = bakery_manager_phone_kitchen_action([
           'date' => $date,

@@ -172,6 +172,32 @@ function bakery_route_summary_photo_status(string $deliveryStatus, bool $hasArri
     return 'none';
 }
 
+/**
+ * Shared visit label for Route summary and Route photo journey.
+ * A closed status stays closed. Photos without a closeout are arrived, not closed.
+ */
+function bakery_route_stop_visit_state(string $deliveryStatus, bool $hasArrival, bool $hasPod): string
+{
+    if (in_array($deliveryStatus, ['cancelled', 'failed', 'delivered'], true)) {
+        return $deliveryStatus;
+    }
+    if ($hasArrival || $hasPod) {
+        return 'arrived_not_closed';
+    }
+    if ($deliveryStatus === 'in_transit' || $deliveryStatus === 'rescheduled') {
+        return $deliveryStatus;
+    }
+    return 'pending';
+}
+
+function bakery_route_summary_visit_status_key(string $visitState): string
+{
+    if ($visitState === 'arrived_not_closed') {
+        return 'route_summary.status_arrived_not_closed';
+    }
+    return bakery_route_summary_status_key($visitState);
+}
+
 function bakery_route_summary_status_key(string $status): string
 {
     $known = ['pending', 'in_transit', 'delivered', 'failed', 'cancelled', 'rescheduled'];
@@ -184,12 +210,12 @@ function bakery_route_summary_status_key(string $status): string
 function bakery_route_summary_matches_filter(array $stop, string $filter): bool
 {
     $status = (string)($stop['delivery_status'] ?? 'pending');
-    $hasPod = !empty($stop['has_pod_photo']);
+    $hasProof = !empty($stop['has_pod_photo']) || !empty($stop['has_arrival_photo']);
     switch ($filter) {
         case 'photos':
-            return $hasPod;
+            return $hasProof;
         case 'missing':
-            return !$hasPod && $status !== 'cancelled';
+            return !$hasProof && $status !== 'cancelled';
         case 'delivered':
             return $status === 'delivered';
         case 'pending':
@@ -257,6 +283,7 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
             $stop['has_pod_photo'] = $hasPod;
             $stop['arrival_only'] = $arrivalOnly;
             $stop['photo_status'] = bakery_route_summary_photo_status($status, $hasArrival, $hasPod);
+            $stop['visit_state'] = bakery_route_stop_visit_state($status, $hasArrival, $hasPod);
             $stop['hero_photo'] = bakery_route_summary_choose_hero_photo($photos);
             $stop['sold_amount'] = $sold;
             $stop['pieces'] = $pieces;
@@ -279,14 +306,14 @@ function bakery_route_summary_build_day(array $driversData, array $photosByStop,
                 $stats['photo_count'] += count($photos);
                 $driverPhotos += count($photos);
             }
-            if ($status === 'delivered' && $hasPod) {
+            if ($status === 'delivered' && ($hasPod || $hasArrival)) {
                 $stats['with_photos']++;
             }
             if ($arrivalOnly) {
                 $stats['arrival_only']++;
                 $driverArrivalOnly++;
             }
-            if ($status !== 'cancelled' && !$hasPod) {
+            if ($status !== 'cancelled' && !$hasPod && !$hasArrival) {
                 $stats['missing_photos']++;
                 $driverMissing++;
             }

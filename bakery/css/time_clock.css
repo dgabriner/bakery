@@ -98,6 +98,15 @@
   font-size: 0.85rem;
 }
 
+.time-clock__people--earlier li {
+  align-items: baseline;
+}
+
+.time-clock__earlier-fix {
+  margin-left: 0.5rem;
+  font-weight: 600;
+}
+
 .time-clock__table {
   width: 100%;
   border-collapse: collapse;

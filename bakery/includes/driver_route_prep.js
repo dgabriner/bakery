@@ -182,7 +182,8 @@
       }
       toast(data.message || t('prep_removed', 'Stop removed from your route.'));
       markRouteDirty();
-      window.setTimeout(function () { window.location.reload(); }, 350);
+      if (stopEl.parentNode) stopEl.parentNode.removeChild(stopEl);
+      prepListChanged();
     } catch (err) {
       toast(err.message || t('route_order_error', 'Could not update the route.'));
     }
@@ -349,11 +350,72 @@
       }
       toast(data.message || t('prep_added', 'Added :name', { name: name }));
       markRouteDirty();
-      window.setTimeout(function () { window.location.reload(); }, 350);
+      appendAddedStop(card, data);
+      prepListChanged();
     } catch (err) {
       toast(err.message || t('route_order_error', 'Could not update the route.'));
     }
   }
+
+  function prepStopCount() {
+    return document.querySelectorAll('#routePrepList .route-prep-stop').length;
+  }
+
+  function prepListChanged() {
+    var list = document.getElementById('routePrepList');
+    var empty = document.getElementById('routePrepEmpty');
+    var count = prepStopCount();
+    if (empty) empty.hidden = count > 0;
+    var counts = document.querySelector('.route-prep-counts strong');
+    if (counts) counts.textContent = t('prep_stops', ':count stops', { count: count, COUNT: count });
+    if (list) paintMoveButtons();
+    if (window.DriverRouteMap && typeof window.DriverRouteMap.refresh === 'function') {
+      window.DriverRouteMap.refresh();
+    }
+  }
+
+  function appendAddedStop(card, data) {
+    var list = document.getElementById('routePrepList');
+    var orderId = parseInt(String((data && data.daily_order_id) || 0), 10);
+    if (!list || !card || orderId <= 0) return;
+    if (list.querySelector('.route-prep-stop[data-daily-order-id="' + orderId + '"]')) return;
+    var name = (data && data.customer_name) || card.getAttribute('data-customer-name') || '';
+    var addressEl = card.querySelector('p');
+    var address = addressEl ? addressEl.textContent : '';
+    var metaEl = card.querySelector('.route-prep-candidate-meta');
+    var meta = metaEl ? metaEl.textContent : '';
+    var stop = document.createElement('article');
+    stop.className = 'route-prep-stop route-prep-stop--added';
+    stop.setAttribute('data-daily-order-id', String(orderId));
+    stop.setAttribute('data-customer-id', card.getAttribute('data-customer-id') || '0');
+    stop.setAttribute('data-customer-name', name);
+    stop.setAttribute('data-status', 'pending');
+    stop.setAttribute('data-route-order', String(prepStopCount() + 1));
+    stop.innerHTML = '<div class="route-prep-stop-top">'
+      + '<span class="route-prep-stop-num" aria-hidden="true"></span>'
+      + '<div class="route-prep-stop-body">'
+      + '<strong class="route-prep-stop-name">' + escapeHtml(name) + '</strong>'
+      + '<p class="route-prep-stop-address">' + escapeHtml(address) + '</p>'
+      + (meta ? '<p class="route-prep-stop-meta"><span>' + escapeHtml(meta) + '</span></p>' : '')
+      + '</div>'
+      + '<div class="route-prep-move">'
+      + '<button type="button" class="route-prep-move-btn route-prep-move-up" aria-label="' + escapeHtml(t('prep_move_up', 'Move up')) + '">&#9650;</button>'
+      + '<button type="button" class="route-prep-move-btn route-prep-move-down" aria-label="' + escapeHtml(t('prep_move_down', 'Move down')) + '">&#9660;</button>'
+      + '</div></div>'
+      + '<div class="route-prep-stop-actions">'
+      + '<button type="button" class="route-prep-action route-prep-action--danger route-prep-remove" data-daily-order-id="' + orderId + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(t('prep_remove', 'Remove')) + '</button>'
+      + '</div>';
+    list.appendChild(stop);
+    var button = card.querySelector('.route-prep-candidate-btn');
+    if (button) {
+      var state = document.createElement('span');
+      state.className = 'route-prep-candidate-state';
+      state.textContent = t('prep_already', 'Already on your route', { name: name });
+      button.parentNode.replaceChild(state, button);
+    }
+  }
+
+  window.DriverRoutePrep = { listChanged: prepListChanged };
 
   function bind() {
     if (!root()) return;

@@ -1186,7 +1186,8 @@ function collectStandingOrderLines() {
     return lines;
 }
 
-function submitAddCustomerToRoute() {
+function submitAddCustomerToRoute(extra) {
+    extra = extra || {};
     const customerId = parseInt(document.getElementById('add-customer-select')?.value, 10);
     const driverId = parseInt(document.getElementById('add-customer-driver-select')?.value, 10);
     const saveStandingRoute = document.getElementById('add-customer-save-standing-route')?.checked;
@@ -1231,6 +1232,17 @@ function submitAddCustomerToRoute() {
         + '&save_standing_route=' + (saveStandingRoute ? '1' : '0')
         + '&apply_pan_dulce=' + (applyPanDulce ? '1' : '0')
         + '&standing_order_lines=' + encodeURIComponent(JSON.stringify(standingOrderLines));
+    if (extra.restoreStanding) {
+        body += '&restore_standing=1';
+    }
+    if (extra.keepEmpty) {
+        body += '&keep_empty=1';
+    }
+
+    const emptyActions = document.getElementById('add-customer-empty-actions');
+    if (emptyActions && !extra.restoreStanding && !extra.keepEmpty) {
+        emptyActions.hidden = true;
+    }
 
     fetch('driver_assignment.php', {
         method: 'POST',
@@ -1239,6 +1251,15 @@ function submitAddCustomerToRoute() {
     })
     .then(response => response.json())
     .then(data => {
+        if (data && data.needs_restore) {
+            const warning = document.getElementById('add-customer-empty-warning');
+            if (warning) {
+                warning.textContent = data.message || (driverAssignmentConfig.emptyOrderWarning || '');
+            }
+            if (emptyActions) emptyActions.hidden = false;
+            if (statusEl) statusEl.textContent = '';
+            return;
+        }
         if (data.success) {
             location.reload();
             return;
@@ -1258,6 +1279,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchEl = document.getElementById('add-customer-search');
     if (searchEl) {
         searchEl.addEventListener('input', filterAddCustomerOptions);
+    }
+    const restoreBtn = document.getElementById('add-customer-restore-btn');
+    if (restoreBtn) {
+        restoreBtn.addEventListener('click', function () {
+            submitAddCustomerToRoute({ restoreStanding: true });
+        });
+    }
+    const keepEmptyBtn = document.getElementById('add-customer-keep-empty-btn');
+    if (keepEmptyBtn) {
+        keepEmptyBtn.addEventListener('click', function () {
+            submitAddCustomerToRoute({ keepEmpty: true });
+        });
     }
 });
 

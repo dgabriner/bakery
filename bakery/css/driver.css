@@ -1,4 +1,4 @@
-﻿/* Mobile-first responsive design */
+/* Mobile-first responsive design */
 * {
     box-sizing: border-box;
 }
@@ -3043,6 +3043,28 @@ html {
     font-weight: 650;
     font-size: 1rem;
     margin-bottom: 2px;
+}
+
+.pan-carry-label {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: #fff6e5;
+    color: #8a5a00;
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    vertical-align: middle;
+}
+
+.pan-carry-remove {
+    font: inherit;
+    font-size: 0.75rem;
+    margin-left: 0.25rem;
+    border: 1px solid #c9b89a;
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
 }
 
 .stop-item-address {
@@ -6465,4 +6487,879 @@ body.route-prep-saving .route-prep-move-btn {
 .route-prep-edit-link {
     min-height: 32px;
     font-size: 0.72rem;
+}
+
+.special-order-stop {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f4f0e4;
+    border: 1px solid #e2d3a2;
+}
+
+.special-order-stop__label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #7a5b12;
+}
+
+.delivery-special-counts {
+    margin: 8px 0 12px;
+    padding: 10px;
+    border-radius: 12px;
+    background: #f4f0e4;
+    border: 1px solid #e2d3a2;
+}
+
+.delivery-special-counts__label {
+    margin: 0 0 8px;
+    font-weight: 700;
+    color: #7a5b12;
+}
+
+.delivery-invoice-item--special {
+    background: #fbf8ef;
+}
+
+/* ===== Driver phone: Now and Route views, inline capture, Problem sheet ===== */
+.now-strip,
+.bakery-nav__route-tab {
+    display: none;
+}
+
+.now-strip-views {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.now-strip-view {
+    min-height: 36px;
+    padding: 4px 12px;
+    border: 1px solid #c7d8d4;
+    border-radius: 999px;
+    background: #fff;
+    color: #102a31;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 750;
+}
+
+.now-strip-view[aria-pressed="true"] {
+    border-color: #0d7771;
+    background: #0d7771;
+    color: #fff;
+}
+
+.now-strip-date {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    min-height: 36px;
+    padding: 4px 10px;
+    border: 1px solid #c7d8d4;
+    border-radius: 999px;
+    background: #fff;
+    color: #102a31;
+    font: inherit;
+    font-size: 0.85rem;
+}
+
+.now-strip-date-kind {
+    color: #0d7771;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.now-strip-progress {
+    color: #102a31;
+    font-size: 0.95rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.now-strip-refresh {
+    min-height: 36px;
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: #fff3d6;
+    color: #7a4b00;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.now-strip .driver-outbox-chip {
+    margin: 0;
+}
+
+.driver-outbox-chip[hidden],
+.now-strip-refresh[hidden] {
+    display: none;
+}
+
+/* Now card body */
+body.driver-workflow-page .now-card-head .next-stop-eyebrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.now-window-chip {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #ffd98a;
+    color: #4a2f00;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+body.driver-workflow-page .next-stop-store {
+    margin: 0 0 2px;
+    font-size: 1.35rem;
+    line-height: 1.2;
+}
+
+body.driver-workflow-page .next-stop-address {
+    margin: 0 0 6px;
+    font-size: 0.92rem;
+}
+
+body.driver-workflow-page .now-card-head .next-stop-phone {
+    min-height: 36px;
+    margin: 0 0 6px;
+    padding: 4px 10px;
+    font-size: 0.88rem;
+}
+
+.now-lines {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 12px;
+    margin: 6px 0 4px;
+    padding: 0;
+    list-style: none;
+}
+
+.now-lines li {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+
+.now-line-qty {
+    flex: 0 0 auto;
+    min-width: 2ch;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.now-line-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.now-lines-more {
+    grid-column: 1 / -1;
+    opacity: 0.8;
+}
+
+.now-lines-total {
+    margin: 0 0 6px;
+    font-size: 0.82rem;
+    font-weight: 750;
+    opacity: 0.85;
+}
+
+body.driver-workflow-page button.next-stop-notes {
+    display: block;
+    width: 100%;
+    margin: 0 0 8px;
+    padding: 8px 12px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+body.driver-workflow-page button.next-stop-notes strong {
+    margin-bottom: 2px;
+}
+
+body.driver-workflow-page .next-stop-notes.is-clamped p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.now-not-first {
+    margin: 0 0 8px;
+}
+
+.now-not-first .stop-go-next {
+    min-height: 40px;
+    padding: 6px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: #ffd98a;
+    color: #4a2f00;
+    font: inherit;
+    font-weight: 800;
+}
+
+body.driver-workflow-page .next-stop-actions {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 8px;
+}
+
+body.driver-workflow-page .route-btn--problem {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* Stop rows */
+.stop-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.stop-row-actions button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 4px 10px;
+    border: 1px solid #c7d8d4;
+    border-radius: 10px;
+    background: #fff;
+    color: #102a31;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 750;
+}
+
+.stop-row-actions .stop-go-next {
+    margin-right: auto;
+}
+
+.stop-adjust-moves {
+    display: none;
+    gap: 6px;
+}
+
+body.route-adjust-open .stop-adjust-moves {
+    display: inline-flex;
+}
+
+body.route-adjust-open .stop-row-actions .stop-go-next,
+body.route-adjust-open .stop-row-actions .stop-problem-btn {
+    display: none;
+}
+
+body.route-adjust-open #stopList .stop-item {
+    touch-action: pan-y;
+    cursor: grab;
+}
+
+body.route-dragging,
+body.route-dragging * {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#stopList .stop-item.is-dragging {
+    position: relative;
+    z-index: 2;
+    box-shadow: 0 10px 28px rgba(16, 42, 49, 0.25);
+    transform: scale(1.02);
+    cursor: grabbing;
+}
+
+.stop-item-leg {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eef5f3;
+    color: #2b4a50;
+    font-size: 0.74rem;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+}
+
+.route-suggest-btn {
+    min-height: 40px;
+    padding: 6px 12px;
+    border: 1px solid #0d7771;
+    border-radius: 10px;
+    background: #fff;
+    color: #0d7771;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 800;
+}
+
+.route-suggest-preview {
+    margin: 0 0 10px;
+    padding: 12px 14px;
+    border: 1px solid #b8d8c2;
+    border-radius: 12px;
+    background: #f2fbf4;
+    color: #1d3a2a;
+}
+
+.route-suggest-preview p {
+    margin: 0 0 6px;
+}
+
+.route-suggest-warn {
+    color: #7a4b00;
+    font-weight: 750;
+}
+
+.route-suggest-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.route-suggest-actions button {
+    min-height: 44px;
+    padding: 6px 14px;
+    border: 1px solid #c7d8d4;
+    border-radius: 10px;
+    background: #fff;
+    font: inherit;
+    font-weight: 800;
+}
+
+.route-suggest-actions .route-suggest-accept {
+    border-color: #0d7771;
+    background: #0d7771;
+    color: #fff;
+}
+
+.van-loaded-btn {
+    width: 100%;
+    margin-top: 10px;
+}
+
+/* Map on demand */
+.route-map-load {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    border: 1px dashed #9fbab4;
+    border-radius: 12px;
+    background: #f5faf9;
+    color: #0d7771;
+    font: inherit;
+    font-weight: 800;
+}
+
+.route-map-load[hidden] {
+    display: none;
+}
+
+html.driver-map-deferred .route-map-canvas,
+html.driver-map-deferred .route-map-toolbar .route-map-scope,
+html.driver-map-deferred .route-map-toolbar .route-map-tools {
+    display: none;
+}
+
+/* Problem sheet */
+.problem-sheet-actions {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 12px;
+}
+
+.problem-chip {
+    min-height: 48px;
+    padding: 10px 14px;
+    border: 1px solid #c7d8d4;
+    border-radius: 12px;
+    background: #fff;
+    color: #102a31;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 800;
+    text-align: left;
+}
+
+.problem-chip[hidden] {
+    display: none;
+}
+
+/* Delivery step: photo proof, totals, reasons */
+.delivery-inline-proof {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 10px;
+}
+
+.delivery-inline-proof[hidden] {
+    display: none;
+}
+
+.delivery-inline-proof img {
+    width: 96px;
+    height: 72px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: #e5eeec;
+}
+
+.delivery-inline-proof[data-proof-state="uploading"] img {
+    opacity: 0.6;
+}
+
+.delivery-inline-proof button {
+    min-height: 44px;
+    margin-left: auto;
+    padding: 4px 12px;
+    border: 1px solid #c7d8d4;
+    border-radius: 10px;
+    background: #fff;
+    font: inherit;
+    font-weight: 750;
+}
+
+.delivery-totals-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.delivery-totals-line button {
+    min-height: 40px;
+    padding: 4px 12px;
+    border: 1px solid #c7d8d4;
+    border-radius: 10px;
+    background: #fff;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 750;
+}
+
+.delivery-no-photo-chips {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0 0;
+}
+
+.delivery-no-photo[hidden],
+.delivery-camera-tip[hidden] {
+    display: none;
+}
+
+.delivery-no-photo-chips button {
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid #c7d8d4;
+    border-radius: 12px;
+    background: #fff;
+    font: inherit;
+    font-weight: 750;
+    text-align: left;
+}
+
+.delivery-camera-tip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: #fff3d6;
+    color: #4a2f00;
+    font-size: 0.88rem;
+}
+
+.delivery-camera-tip button {
+    min-height: 40px;
+    margin-left: auto;
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: #4a2f00;
+    color: #fff;
+    font: inherit;
+    font-weight: 750;
+}
+
+/* More sheet route tools */
+.bakery-nav__more-choice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+}
+
+.bakery-nav__more-choice span {
+    flex: 1 1 100%;
+    font-size: 0.78rem;
+    font-weight: 750;
+    opacity: 0.85;
+}
+
+.bakery-nav__more-choice button {
+    min-height: 40px;
+    padding: 4px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 750;
+}
+
+.bakery-nav__more-choice button[aria-pressed="true"] {
+    background: #fff;
+    color: #102a31;
+}
+
+.bakery-nav__more-clock {
+    width: 100%;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+@media (min-width: 721px) {
+    .bakery-nav__more-route > form,
+    .bakery-nav__more-route > a {
+        display: none;
+    }
+}
+
+/* ----- Phones (bottom nav breakpoint) ----- */
+@media (max-width: 720px) {
+    body.driver-workflow-page {
+        color-scheme: light;
+        --driver-nav-h: calc(62px + env(safe-area-inset-bottom, 0px));
+        --driver-dock-h: 72px;
+    }
+
+    body.driver-workflow-page button,
+    body.driver-workflow-page a,
+    body.driver-workflow-page summary {
+        touch-action: manipulation;
+    }
+
+    body.driver-workflow-page input,
+    body.driver-workflow-page select,
+    body.driver-workflow-page textarea {
+        font-size: 16px;
+    }
+
+    .now-strip {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        margin: 0 -12px 8px;
+        padding: 4px 12px;
+        border-bottom: 1px solid #dbe7e4;
+        background: rgba(246, 250, 249, 0.97);
+        backdrop-filter: blur(10px);
+    }
+
+    body:has(.bakery-nav__route-tab) .now-strip-views {
+        display: none;
+    }
+
+    body.driver-workflow-page .route-topbar,
+    body.driver-workflow-page .route-day-nav,
+    body.driver-workflow-page .route-day-nav-today-wrap,
+    body.driver-workflow-page .route-mobile-progress {
+        display: none !important;
+    }
+
+    /* Bottom nav on My Route: Now, Route, Problem, HQ, More */
+    .bakery-nav--driver-route .bakery-nav__driver-bar,
+    .bakery-nav--driver-route .bakery-nav__my-route,
+    .bakery-nav--driver-route .bakery-nav__date-toggle,
+    .bakery-nav--driver-route .bakery-nav__survey {
+        display: none !important;
+    }
+
+    .bakery-nav--driver-route .bakery-nav__route-tab {
+        display: flex;
+    }
+
+    .bakery-nav--driver-route .bakery-nav__route-tab[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    body.driver-route-prep .bakery-nav--driver-route .bakery-nav__route-tab {
+        display: none !important;
+    }
+
+    body.driver-route-prep .bakery-nav--driver-route .bakery-nav__my-route,
+    body.driver-route-prep .bakery-nav--driver-route .bakery-nav__date-toggle,
+    body.driver-route-prep .bakery-nav--driver-route .bakery-nav__survey {
+        display: flex !important;
+    }
+
+    body.driver-workflow-page .route-sticky-dock {
+        bottom: var(--driver-nav-h);
+        padding: 6px 10px;
+        box-shadow: none;
+    }
+
+    body.driver-workflow-page .route-sticky-btn {
+        min-height: 56px;
+    }
+
+    body.driver-workflow-page .route-adjust-dock {
+        bottom: var(--driver-nav-h);
+        padding-bottom: 8px;
+    }
+
+    body.route-adjust-open .driver-route .stop-list-adjust-hint {
+        display: none;
+    }
+
+    body.driver-field-mode.driver-workflow-page .driver-route,
+    body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route {
+        padding-bottom: calc(var(--driver-dock-h) + 8px);
+        min-height: 0;
+    }
+
+    /* Now view: the next stop, a small map, and the dock */
+    .driver-route[data-route-view="now"] .route-section-overview,
+    .driver-route[data-route-view="now"] .route-secondary-column,
+    .driver-route[data-route-view="now"] .route-map-horizon,
+    .driver-route[data-route-view="now"] .route-map-unmapped,
+    .driver-route[data-route-view="now"] .route-map-toolbar .route-map-scope,
+    .driver-route[data-route-view="now"] .route-map-toolbar .route-map-tools,
+    .driver-route[data-route-view="now"] .route-map-live {
+        display: none !important;
+    }
+
+    body:not(.now-load-van) .driver-route[data-route-view="now"] .route-section-manifest {
+        display: none;
+    }
+
+    body.now-load-van .driver-route[data-route-view="now"] .route-section-manifest {
+        order: 0;
+    }
+
+    .driver-route[data-route-view="now"] .route-map {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .driver-route[data-route-view="now"] .route-map-toolbar {
+        margin: 0 0 4px;
+        padding: 0;
+    }
+
+    .driver-route[data-route-view="now"] .route-map-canvas {
+        height: 128px !important;
+        min-height: 0 !important;
+        border-radius: 14px;
+    }
+
+    .driver-route[data-route-view="now"] .route-dashboard {
+        gap: 10px;
+    }
+
+    body.driver-workflow-page .driver-route[data-route-view="now"] .route-section-next {
+        padding: 14px 14px 10px;
+    }
+
+    body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions {
+        display: none;
+    }
+
+    /* Route view: the day map and the numbered list */
+    .driver-route[data-route-view="route"] .route-section-next,
+    .driver-route[data-route-view="route"] .now-capture-host,
+    .driver-route[data-route-view="route"] .route-section-overview,
+    .driver-route[data-route-view="route"] .route-section-manifest,
+    .driver-route[data-route-view="route"] .stop-list-helper:not(.stop-list-adjust-hint) {
+        display: none !important;
+    }
+
+    .route-map-insight[hidden] {
+        display: none !important;
+    }
+
+    .driver-route[data-route-view="route"] .route-map-horizon,
+    .driver-route[data-route-view="route"] .route-map-scope,
+    .driver-route[data-route-view="route"] .route-map-tool--zoom,
+    .driver-route[data-route-view="route"] #routeMapExpand {
+        display: none !important;
+    }
+
+    body[data-route-view="route"] .route-sticky-dock {
+        display: none !important;
+    }
+
+    .driver-route[data-route-view="route"] .route-map-canvas {
+        height: 34svh !important;
+        min-height: 200px !important;
+    }
+
+    .driver-route[data-route-view="route"] .stop-list-section {
+        padding-top: 4px;
+    }
+
+    .driver-route[data-route-view="route"] #stopList .stop-item {
+        padding: 10px 12px;
+    }
+
+    /* Inline capture inside the Now view */
+    .now-capture-host:not([hidden]) {
+        display: block;
+        order: 1;
+    }
+
+    body.now-capture-open .driver-route[data-route-view="now"] .route-section-next,
+    body.now-capture-open .driver-route[data-route-view="now"] .route-map,
+    body.now-capture-open .route-sticky-dock {
+        display: none !important;
+    }
+
+    .photo-modal.is-inline {
+        position: static !important;
+        inset: auto !important;
+        z-index: auto !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+        overflow: visible !important;
+    }
+
+    .photo-modal.is-inline .delivery-photo-modal-content {
+        position: static !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: auto !important;
+        max-height: none !important;
+        margin: 0 !important;
+        border-radius: 16px !important;
+        box-shadow: 0 6px 18px rgba(16, 42, 49, 0.12) !important;
+        transform: none !important;
+        overflow: visible !important;
+    }
+
+    .photo-modal.is-inline #deliveryWizardSteps,
+    .photo-modal.is-inline #deliveryArriveOrders,
+    .photo-modal.is-inline #deliveryPhotoType,
+    .photo-modal.is-inline #deliveryPhotoNotes,
+    .photo-modal.is-inline #deliveryPhotoGuidance,
+    .photo-modal.is-inline #deliveryCameraHeading,
+    .photo-modal.is-inline #deliveryPhotosGallerySection {
+        display: none !important;
+    }
+
+    .photo-modal.is-inline #deliveryCameraFrame {
+        aspect-ratio: 4 / 3;
+        height: auto !important;
+        max-height: min(45svh, 320px) !important;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .photo-modal.is-inline #deliveryCameraVideo,
+    .photo-modal.is-inline #deliveryPhotoPreview {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .photo-modal.is-inline #deliveryCaptureBtn {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-height: 64px;
+        border-radius: 999px;
+        font-size: 1.1rem;
+        font-weight: 800;
+    }
+
+    .photo-modal.is-inline .photo-modal-footer {
+        position: sticky;
+        bottom: var(--driver-nav-h);
+        z-index: 5;
+        padding: 8px 0;
+        background: #fff;
+    }
+
+    .photo-modal.is-inline #deliveryWizardPrimaryBtn {
+        grid-column: 1 / -1;
+        min-height: 56px;
+    }
+
+    .photo-modal.is-inline #deliveryPhotoStatus.is-success,
+    .photo-modal.is-inline #deliverySubmitNote,
+    .photo-modal.is-inline #deliveryWizardReviewBtn,
+    body:has(#driverNavProblem) .photo-modal.is-inline #deliveryWizardBackBtn,
+    body:has(#driverNavProblem) .photo-modal.is-inline #deliveryWizardFailBtn {
+        display: none !important;
+    }
+
+    .photo-modal.is-inline.delivery-step-delivery #deliveryConfirmation:not(:has(#deliveryAdjustDetails[open])) {
+        display: none;
+    }
+
+    /* Problem sheet docks to the bottom like a sheet */
+    body.driver-workflow-page #failStopModal .exception-desk-modal__content {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        max-height: 88svh;
+        margin: 0;
+        overflow-y: auto;
+        border-radius: 18px 18px 0 0;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+
+    body.driver-workflow-page #failStopModal .exception-desk__btn-row {
+        position: sticky;
+        bottom: calc(-16px - env(safe-area-inset-bottom, 0px));
+        display: grid;
+        grid-template-columns: 1fr 1.4fr;
+        gap: 8px;
+        margin: 8px -16px 0;
+        padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        background: #fff;
+        border-top: 1px solid rgba(15, 61, 54, 0.1);
+    }
+}
+
+body.driver-workflow-page .route-sticky-btn--finish {
+    border-color: transparent;
+    background: #a8600f;
+    color: #fff;
 }

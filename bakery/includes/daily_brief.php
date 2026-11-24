@@ -469,6 +469,17 @@ function bakery_daily_brief_important_changes(PDO $db, string $date, ?array $dem
             continue;
         }
 
+        if ($state === 'changed' && bakery_demand_review_is_routed_zero_order($customer)) {
+            $changes[] = [
+                'severity' => 'critical',
+                'category' => 'demand',
+                'title' => $name . '. Empty dated order',
+                'detail' => bakery_t('daily_brief.routed_empty_detail'),
+                'href' => $customerHref,
+            ];
+            continue;
+        }
+
         if ($state === 'changed') {
             $meaningful = [];
             foreach ($customer['diff_lines'] ?? [] as $diff) {

@@ -334,6 +334,47 @@ try {
     tc_assert(false, '092 applies again when every correction column already exists (' . $e->getMessage() . ')');
 }
 
+// Open punches from an earlier day are split out of "Clocked in now".
+$splitNow = strtotime('2098-03-18 09:30:00'); // a Tuesday; 03-17 is its Monday, 03-16 the Sunday before
+$splitRows = [
+    ['id' => 1, 'user_id' => 11, 'clock_in_at' => '2098-03-18 05:00:00', 'display_name' => 'Early', 'role_slug' => 'cashier'],
+    ['id' => 2, 'user_id' => 12, 'clock_in_at' => '2098-03-17 14:10:00', 'display_name' => 'Forgot', 'role_slug' => 'driver'],
+    ['id' => 3, 'user_id' => 13, 'clock_in_at' => '2098-03-16 22:00:00', 'display_name' => 'Monday night', 'role_slug' => 'baker'],
+    ['id' => 4, 'user_id' => 14, 'clock_in_at' => '2098-03-18 00:00:00', 'display_name' => 'Midnight', 'role_slug' => 'baker'],
+];
+$split = bakery_time_clock_split_open($splitRows, $splitNow);
+tc_assert(
+    array_column($split['now'], 'user_id') === [11, 14],
+    'split: punches that started today stay in Clocked in now (midnight counts as today)'
+);
+tc_assert(
+    array_column($split['earlier'], 'user_id') === [12, 13],
+    'split: punches from an earlier day move to Open from an earlier day'
+);
+tc_assert(
+    ($split['earlier'][0]['week_monday'] ?? '') === '2098-03-17' && ($split['earlier'][1]['week_monday'] ?? '') === '2098-03-10',
+    'split: earlier punches carry the Monday of their own week for the correction link'
+);
+tc_assert(
+    bakery_time_clock_split_open([], $splitNow) === ['now' => [], 'earlier' => []],
+    'split: no open punches gives two empty groups'
+);
+$flagsForEarlier = bakery_time_clock_flags($splitRows[1] + ['clock_out_at' => null], $splitNow);
+tc_assert(in_array('no_out', $flagsForEarlier, true), 'split uses the same earlier-day rule as the weekly no clock out flag');
+
+$tcPage = (string)file_get_contents($root . '/time_clock.php');
+tc_assert(
+    strpos($tcPage, 'bakery_time_clock_split_open(') !== false
+        && strpos($tcPage, 'time_clock.earlier_open_title') !== false
+        && strpos($tcPage, "'time_clock.php?week='") !== false,
+    'time clock page shows the earlier-day group and links to that week correction form'
+);
+$tcEn = require $root . '/lang/en.php';
+$tcEs = require $root . '/lang/es.php';
+foreach (['time_clock.earlier_open_title', 'time_clock.earlier_open_help', 'time_clock.earlier_open_fix'] as $tcKey) {
+    tc_assert(isset($tcEn[$tcKey], $tcEs[$tcKey]) && $tcEn[$tcKey] !== $tcEs[$tcKey], "i18n {$tcKey} exists in en and es");
+}
+
 echo $failed === 0
     ? "Time clock tests passed ({$passed})\n"
     : "Time clock tests finished with {$failed} failure(s), {$passed} pass(es)\n";

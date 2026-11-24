@@ -37,7 +37,8 @@ function driver_photo_section(string $source, string $start, string $end): strin
     return substr($source, $startAt, $endAt - $startAt);
 }
 
-$page = (string)file_get_contents($root . '/driver.php');
+$page = (string)file_get_contents($root . '/driver.php')
+    . (string)file_get_contents($root . '/includes/driver_route.js');
 $script = (string)file_get_contents($root . '/includes/driver_delivery.js');
 $styles = (string)file_get_contents($root . '/css/driver.css');
 $header = (string)file_get_contents($root . '/includes/header.php');
@@ -128,7 +129,8 @@ driver_photo_assert(
 );
 driver_photo_assert(
     'large mobile photos are normalized to a bounded JPEG',
-    strpos($script, 'var maxDimension = 1920;') !== false
+    strpos($script, '{ maxDimension: 1280, quality: 0.72 }') !== false
+        && strpos($script, '{ maxDimension: 1024, quality: 0.65 }') !== false
         && strpos($script, "canvas.toBlob") !== false
         && strpos($script, "'image/jpeg'") !== false
 );
@@ -382,13 +384,13 @@ driver_photo_assert(
         && strpos($page, 'route-prep-tomorrow-cta') === false
 );
 driver_photo_assert(
-    'happy-path confirm saves quantities then prompts for a leaving photo',
+    'happy-path confirm saves quantities with one Delivered tap after the arrival photo',
     strpos($page, 'id="deliveryWizardReviewBtn"') !== false
         && strpos($page, 'id="deliveryVarianceAck"') !== false
         && strpos($page, 'id="deliveryAdjustDetails"') !== false
-        && strpos($script, "primaryBtn.textContent = i18n('save_and_leave_photo')") !== false
-        && strpos($script, "state.photoReturnStep = 'complete'") !== false
-        && strpos($script, 'function promptDeparturePhoto()') !== false
+        && strpos($script, "primaryBtn.textContent = i18n('delivered')") !== false
+        && strpos($script, 'function resumeAfterSavedArrival()') !== false
+        && strpos($script, 'stopHasProofPhoto()') !== false
 );
 driver_photo_assert(
     'confirm step collapses quantity edits under Adjust and keeps billable = pieces - credits',
@@ -416,6 +418,17 @@ driver_photo_assert(
         && strpos($script, 'BakeryDriverOutbox') !== false
         && strpos($script, 'client_request_id') !== false
         && strpos($page, 'id="driverOutboxChip"') !== false
+);
+driver_photo_assert(
+    'offline outbox reopens a lost IndexedDB connection and does not reject flush',
+    strpos($outbox, 'onclose') !== false
+        && strpos($outbox, 'onversionchange') !== false
+        && strpos($outbox, 'Indexed Database server lost') !== false
+        && strpos($outbox, 'attempt < 1') !== false
+        && strpos($outbox, 'preventDefault') !== false
+        && strpos($outbox, 'visibilitychange') !== false
+        && strpos($outbox, 'memoryJobs') !== false
+        && strpos($outbox, 'function safeFlush') !== false
 );
 driver_photo_assert(
     'failed stops update live and include HQ contact links',

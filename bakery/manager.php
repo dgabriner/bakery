@@ -1325,6 +1325,7 @@ require_once 'includes/nav.php';
       </div>
       <div class="manager-tools-list">
         <a href="<?php echo htmlspecialchars(bakery_ops_link_daily_orders($selectedDate, [], 'manager')); ?>"><strong>Demand & order changes</strong><span>Review the commercial commitment</span></a>
+        <a href="<?php echo htmlspecialchars(BASE_URL); ?>special_orders.php?date=<?php echo urlencode($selectedDate); ?>"><strong><?php echo htmlspecialchars(bakery_t('special_order.manager_link')); ?></strong><span><?php echo htmlspecialchars(bakery_t('special_order.manager_hint')); ?></span></a>
         <a href="<?php echo htmlspecialchars(BASE_URL); ?>production_center.php?date=<?php echo urlencode($selectedDate); ?>"><strong>Production targets</strong><span>Adjust saved plan quantities</span></a>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_pack_list($selectedDate, [], 'manager')); ?>"><strong>Packing checklist</strong><span>Check customer, product, or route work</span></a>
         <a href="<?php echo htmlspecialchars(bakery_ops_link_driver_assignment($selectedDate, [], 'manager')); ?>"><strong>Routes & dispatch</strong><span>Assign drivers and shape delivery work</span></a>
@@ -1428,6 +1429,10 @@ require_once 'includes/nav.php';
         <div class="manager-section__actions">
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_manager.php?date=<?php echo urlencode($selectedDate); ?>">Route manager</a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_summary.php?date=<?php echo urlencode($selectedDate); ?>">Route summary</a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_health.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.route_health')); ?></a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>delivery_manager_review.php"><?php echo htmlspecialchars(bakery_t('page.delivery_manager_review')); ?></a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>route_photo_journey.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.route_photo_journey')); ?></a>
+          <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>driver_reports.php?date=<?php echo urlencode($selectedDate); ?>"><?php echo htmlspecialchars(bakery_t('page.driver_reports')); ?></a>
           <a class="sf-btn sf-btn--outline sf-btn--sm" href="<?php echo htmlspecialchars(BASE_URL); ?>daily_route.php?date=<?php echo urlencode($selectedDate); ?>">Daily route</a>
         </div>
       </div>

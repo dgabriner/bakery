@@ -8,6 +8,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/text_comms.php';
+
 /** Headquarters SMS inbox already used by My Route / exception desk. */
 function bakery_survey_hq_sms_number(): string
 {
@@ -220,6 +222,97 @@ function bakery_survey_store_verify_resolve_date(string $defaultDate, ?string $r
 }
 
 /**
+ * Today through 21 days ahead. Logged-in staff may also open the previous 14 days.
+ * The token's own delivery_date is never rewritten to land inside this window.
+ */
+function bakery_survey_date_in_switch_window(string $today, string $date, bool $allowRecentPast): bool
+{
+    try {
+        $today = bakery_survey_validate_ymd($today);
+        $date = bakery_survey_validate_ymd($date);
+    } catch (RuntimeException $e) {
+        return false;
+    }
+    $todayDt = new DateTimeImmutable($today);
+    $pastDays = $allowRecentPast ? 14 : 0;
+    $min = $todayDt->modify('-' . $pastDays . ' days')->format('Y-m-d');
+    $max = $todayDt->modify('+21 days')->format('Y-m-d');
+    return $date >= $min && $date <= $max;
+}
+
+/**
+ * Date to open when the viewer picks a different day. Empty means stay on the
+ * token's bound delivery date (same day, junk, or outside the window).
+ */
+function bakery_survey_requested_switch_date(string $boundDate, string $requested, string $today, bool $allowRecentPast): string
+{
+    $requested = trim($requested);
+    if ($requested === '') {
+        return '';
+    }
+    try {
+        $boundDate = bakery_survey_validate_ymd($boundDate);
+        $requested = bakery_survey_validate_ymd($requested);
+    } catch (RuntimeException $e) {
+        return '';
+    }
+    if ($requested === $boundDate) {
+        return '';
+    }
+    if (!bakery_survey_date_in_switch_window($today, $requested, $allowRecentPast)) {
+        return '';
+    }
+    return $requested;
+}
+
+/**
+ * Today / Tomorrow chips and the date field. Posts switch_day so the page
+ * opens that day's survey instead of ignoring the choice on a bound token.
+ */
+function bakery_survey_day_switch_html(string $token, string $activeDate): string
+{
+    $esc = static function (string $value): string {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    };
+    $activeDate = bakery_survey_validate_ymd($activeDate);
+    $today = date('Y-m-d');
+    $tomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+    $action = 'survey.php?t=' . rawurlencode($token);
+    $csrf = function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
+    $label = static function (string $key, string $fallback): string {
+        if (function_exists('bakery_survey_text')) {
+            return bakery_survey_text($key, [], $fallback);
+        }
+        return $fallback;
+    };
+    $chip = static function (string $date, string $text) use ($activeDate, $esc, $action, $csrf): string {
+        $active = $activeDate === $date;
+        $class = 'survey-day-chip' . ($active ? ' survey-day-chip--active' : '');
+        $current = $active ? ' aria-current="date"' : '';
+        return '<form method="post" action="' . $esc($action) . '" class="survey-day-chip-form">'
+            . $csrf
+            . '<input type="hidden" name="action" value="switch_day">'
+            . '<input type="hidden" name="date" value="' . $esc($date) . '">'
+            . '<button type="submit" class="' . $class . '"' . $current . '>' . $esc($text) . '</button>'
+            . '</form>';
+    };
+    $html = '<div class="survey-day-chips" role="group" aria-label="'
+        . $esc($label('survey.hub_day_aria', 'Choose delivery day')) . '">';
+    $html .= $chip($today, $label('common.today', 'Today'));
+    $html .= $chip($tomorrow, $label('common.tomorrow', 'Tomorrow'));
+    $html .= '</div>';
+    $html .= '<form class="date-bar" method="post" action="' . $esc($action) . '">';
+    $html .= $csrf;
+    $html .= '<input type="hidden" name="action" value="switch_day">';
+    $html .= '<label>' . $esc($label('survey.store_verify_date', 'Delivery day'));
+    $html .= '<input type="date" name="date" value="' . $esc($activeDate) . '" required></label>';
+    $html .= '<button type="submit" class="btn ghost">'
+        . $esc($label('survey.store_verify_date_go', 'Show day')) . '</button>';
+    $html .= '</form>';
+    return $html;
+}
+
+/**
  * Survey-only reassign: move store ids onto to_driver ON set; drop from others.
  *
  * @param array<int, list<int>> $postedByDriver
@@ -344,104 +437,262 @@ function bakery_survey_store_verify_collect(array $onIds, array $assigned, array
 }
 
 /**
- * One store name per line for HQ SMS (readable on a phone).
+ * English HQ inbox phrase. The shared ops phone stays in English even when
+ * the driver who submitted is using the Spanish UI. Spanish catalog entries
+ * exist so the keys stay paired; this reader does not switch locale.
  *
- * @param list<array{name?:string}> $stores
- * @return list<string>
+ * @param array<string, scalar> $params
  */
-function bakery_survey_store_verify_sms_name_lines(array $stores, string $prefix = ''): array
+function bakery_survey_hq_sms_phrase(string $key, array $params = [], string $fallback = ''): string
 {
-    $lines = [];
-    foreach ($stores as $store) {
-        $name = trim((string)($store['name'] ?? ''));
-        if ($name === '') {
-            continue;
-        }
-        $lines[] = $prefix . $name;
+    static $catalog = null;
+    if ($catalog === null) {
+        $path = dirname(__DIR__) . '/lang/en.php';
+        $loaded = is_file($path) ? require $path : [];
+        $catalog = is_array($loaded) ? $loaded : [];
     }
-    return $lines;
+    $text = isset($catalog[$key]) ? (string)$catalog[$key] : $fallback;
+    foreach ($params as $name => $value) {
+        $text = str_replace(':' . $name, (string)$value, $text);
+    }
+    return $text;
+}
+
+/** One GSM-safe line label. Long names are cut so the summary can keep the link. */
+function bakery_survey_hq_sms_driver_label(string $name): string
+{
+    $name = str_replace(["\r", "\n", "\t"], ' ', $name);
+    $name = trim((string)preg_replace('/\s+/u', ' ', $name));
+    if ($name === '') {
+        return 'Driver';
+    }
+    if (function_exists('mb_strlen') && mb_strlen($name, 'UTF-8') > 24) {
+        return mb_substr($name, 0, 24, 'UTF-8');
+    }
+    if (strlen($name) > 24) {
+        return substr($name, 0, 24);
+    }
+    return $name;
 }
 
 /**
- * ON list + Changed (+ added / - dropped) block for one driver.
+ * Counts only. Store names stay on the survey page, not in the text.
  *
  * @param array{on?:list,added?:list,dropped?:list} $group
- * @return list<string>
  */
-function bakery_survey_store_verify_sms_driver_lines(array $group): array
+function bakery_survey_store_verify_sms_flags(array $group): string
 {
-    $lines = ['ON:'];
-    $onLines = bakery_survey_store_verify_sms_name_lines($group['on'] ?? []);
-    if ($onLines === []) {
-        $lines[] = '(none)';
-    } else {
-        foreach ($onLines as $line) {
-            $lines[] = $line;
-        }
+    $on = count(is_array($group['on'] ?? null) ? $group['on'] : []);
+    $added = count(is_array($group['added'] ?? null) ? $group['added'] : []);
+    $dropped = count(is_array($group['dropped'] ?? null) ? $group['dropped'] : []);
+    $parts = [
+        bakery_survey_hq_sms_phrase('survey.hq_sms_on', ['count' => (string)$on], $on . ' on'),
+    ];
+    if ($added > 0) {
+        $parts[] = bakery_survey_hq_sms_phrase('survey.hq_sms_added', ['count' => (string)$added], '+' . $added);
     }
-    $lines[] = 'Changed:';
-    $addedLines = bakery_survey_store_verify_sms_name_lines($group['added'] ?? [], '+ ');
-    $droppedLines = bakery_survey_store_verify_sms_name_lines($group['dropped'] ?? [], '- ');
-    if ($addedLines === [] && $droppedLines === []) {
-        $lines[] = '(none)';
-    } else {
-        foreach ($addedLines as $line) {
-            $lines[] = $line;
-        }
-        foreach ($droppedLines as $line) {
-            $lines[] = $line;
-        }
+    if ($dropped > 0) {
+        $parts[] = bakery_survey_hq_sms_phrase('survey.hq_sms_dropped', ['count' => (string)$dropped], '-' . $dropped);
     }
-    return $lines;
+    return implode(', ', $parts);
 }
 
 /**
- * SMS for HQ. English on purpose — shared ops inbox, not the driver UI.
- * Stores are one-per-line; Changed lists adds (+) and drops (−) vs assigned defaults.
+ * Short HQ text: date, driver, counts, optional route line, and a link.
+ * Hard cap is 3 segments (GSM-7 or UCS-2). The link is kept when it fits.
  *
- * @param array{driver_name?:string,delivery_date?:string,on?:list,added?:list,dropped?:list,drivers?:list,assigned_off_count?:int} $choice
+ * Rule for sending (see bakery_survey_hq_sms_claim): one text per driver
+ * per delivery date. Resubmits do not send an "updated" text.
+ *
+ * @param array{driver_name?:string,delivery_date?:string,on?:list,added?:list,dropped?:list,drivers?:list,link?:string,route_line?:string} $choice
  */
 function bakery_survey_store_verify_sms_body(array $choice): string
 {
+    $max = function_exists('bakery_sms_hq_max_segments') ? bakery_sms_hq_max_segments() : 3;
     $date = trim((string)($choice['delivery_date'] ?? ''));
-    $groups = isset($choice['drivers']) && is_array($choice['drivers']) ? $choice['drivers'] : [];
-    if (count($groups) > 1) {
-        $lines = ['HQ ' . $date];
-        foreach ($groups as $group) {
-            $driver = trim((string)($group['driver_name'] ?? ''));
-            if ($driver === '') {
-                $driver = 'Driver';
+    $link = trim((string)($choice['link'] ?? ''));
+    $routeLine = trim(str_replace(["\r", "\n"], ' ', (string)($choice['route_line'] ?? '')));
+    $groups = [];
+    if (isset($choice['drivers']) && is_array($choice['drivers'])) {
+        foreach ($choice['drivers'] as $group) {
+            if (is_array($group)) {
+                $groups[] = $group;
             }
-            $lines[] = $driver;
-            foreach (bakery_survey_store_verify_sms_driver_lines($group) as $line) {
+        }
+    }
+
+    if (count($groups) > 1) {
+        $head = bakery_survey_hq_sms_phrase('survey.hq_sms_head', ['date' => $date], 'HQ ' . $date);
+        $driverLines = [];
+        foreach ($groups as $group) {
+            $driver = bakery_survey_hq_sms_driver_label((string)($group['driver_name'] ?? ''));
+            $flags = bakery_survey_store_verify_sms_flags($group);
+            $driverLines[] = bakery_survey_hq_sms_phrase(
+                'survey.hq_sms_driver',
+                ['driver' => $driver, 'flags' => $flags],
+                $driver . ': ' . $flags
+            );
+        }
+        $extra = 0;
+        while (true) {
+            $lines = [$head];
+            foreach ($driverLines as $line) {
                 $lines[] = $line;
             }
-        }
-        $body = implode("\n", $lines);
-    } else {
-        $driver = trim((string)($choice['driver_name'] ?? 'Driver'));
-        if ($driver === '') {
-            $driver = 'Driver';
-        }
-        $block = $choice;
-        if (count($groups) === 1) {
-            $block = $groups[0];
-            $singleDriver = trim((string)($block['driver_name'] ?? ''));
-            if ($singleDriver !== '') {
-                $driver = $singleDriver;
+            if ($extra > 0) {
+                $lines[] = bakery_survey_hq_sms_phrase(
+                    'survey.hq_sms_more',
+                    ['count' => (string)$extra],
+                    '+' . $extra . ' more'
+                );
             }
+            if ($routeLine !== '') {
+                $lines[] = $routeLine;
+            }
+            $summary = implode("\n", $lines);
+            $joined = function_exists('bakery_sms_join') ? bakery_sms_join($summary, $link) : $summary;
+            if (!function_exists('bakery_sms_segment_count') || bakery_sms_segment_count($joined) <= $max || $driverLines === []) {
+                return function_exists('bakery_sms_cap_body')
+                    ? bakery_sms_cap_body($summary, $link, $max)
+                    : $joined;
+            }
+            array_pop($driverLines);
+            $extra++;
         }
-        $lines = array_merge(
-            [$driver . ' ' . $date],
-            bakery_survey_store_verify_sms_driver_lines($block)
+    }
+
+    $block = $choice;
+    $driver = bakery_survey_hq_sms_driver_label((string)($choice['driver_name'] ?? 'Driver'));
+    if (count($groups) === 1) {
+        $block = $groups[0];
+        $named = bakery_survey_hq_sms_driver_label((string)($block['driver_name'] ?? ''));
+        if ($named !== 'Driver') {
+            $driver = $named;
+        }
+    }
+    $flags = bakery_survey_store_verify_sms_flags($block);
+    $summary = bakery_survey_hq_sms_phrase(
+        'survey.hq_sms_single',
+        ['driver' => $driver, 'date' => $date, 'flags' => $flags],
+        $driver . ' ' . $date . ': ' . $flags
+    );
+    if ($routeLine !== '') {
+        $summary .= "\n" . $routeLine;
+    }
+    if (!function_exists('bakery_sms_cap_body')) {
+        return $link === '' ? $summary : $summary . "\n" . $link;
+    }
+    return bakery_sms_cap_body($summary, $link, $max);
+}
+
+/**
+ * Claim the one HQ text for this driver and delivery date.
+ *
+ * The first submit wins. Later submits the same day save the survey and
+ * update the route, and send nothing. There is no second "updated" text
+ * and no cooldown window. driver_id 0 is the combined HQ page.
+ * store_verify and route_order are separate kinds, so each may send once.
+ * A failed or logged attempt still keeps the slot so a resubmit loop cannot
+ * repeat a carrier rejection.
+ *
+ * Returns true when this caller may send.
+ */
+function bakery_survey_hq_sms_claim(PDO $db, string $kind, int $driverId, string $deliveryDate): bool
+{
+    $kind = substr(trim($kind), 0, 32);
+    $driverId = max(0, $driverId);
+    if ($kind === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
+        return false;
+    }
+    if (!function_exists('table_exists') || !table_exists($db, 'survey_hq_sms_sent')) {
+        error_log('survey HQ SMS: survey_hq_sms_sent is missing; sending without a debounce slot');
+        return true;
+    }
+    try {
+        $stmt = $db->prepare(
+            'INSERT INTO survey_hq_sms_sent (kind, driver_id, delivery_date) VALUES (?, ?, ?)'
         );
-        $body = implode("\n", $lines);
+        $stmt->execute([$kind, $driverId, $deliveryDate]);
+        return true;
+    } catch (PDOException $e) {
+        $info = $e->errorInfo ?? [];
+        $mysqlCode = (int)($info[1] ?? 0);
+        if ($mysqlCode === 1062) {
+            return false;
+        }
+        throw $e;
     }
-    // Multi-segment SMS is fine for the HQ inbox; keep a soft ceiling.
-    if (strlen($body) > 1500) {
-        $body = substr($body, 0, 1497) . '...';
+}
+
+function bakery_survey_hq_sms_release(PDO $db, string $kind, int $driverId, string $deliveryDate): void
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'survey_hq_sms_sent')) {
+        return;
     }
-    return $body;
+    $stmt = $db->prepare(
+        'DELETE FROM survey_hq_sms_sent WHERE kind = ? AND driver_id = ? AND delivery_date = ?'
+    );
+    $stmt->execute([substr(trim($kind), 0, 32), max(0, $driverId), $deliveryDate]);
+}
+
+/**
+ * Send one HQ text, or skip when this driver and date were already claimed.
+ *
+ * @param array<string, mixed> $sendOpts
+ * @return array<string, mixed>
+ */
+function bakery_survey_hq_sms_dispatch(PDO $db, string $kind, int $driverId, string $deliveryDate, string $body, array $sendOpts): array
+{
+    $driverId = max(0, $driverId);
+    $failed = [
+        'ok' => false,
+        'recorded_only' => false,
+        'status' => 'failed',
+        'error' => '',
+        'id' => 0,
+    ];
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
+        $failed['error'] = 'bad_date';
+        return $failed;
+    }
+    if (!bakery_survey_hq_sms_claim($db, $kind, $driverId, $deliveryDate)) {
+        error_log(
+            'survey HQ SMS skipped already_sent kind=' . $kind
+            . ' driver=' . $driverId
+            . ' date=' . $deliveryDate
+        );
+        $failed['status'] = 'skipped';
+        $failed['skipped'] = 'already_sent';
+        return $failed;
+    }
+    if (!function_exists('bakery_text_send')) {
+        bakery_survey_hq_sms_release($db, $kind, $driverId, $deliveryDate);
+        $failed['error'] = 'sms_helper_missing';
+        return $failed;
+    }
+    $info = function_exists('bakery_sms_segment_info')
+        ? bakery_sms_segment_info($body)
+        : ['encoding' => 'unknown', 'segments' => 0, 'units' => 0];
+    error_log(
+        'survey HQ SMS ' . $kind
+        . ' ' . $info['encoding']
+        . ' segments=' . $info['segments']
+        . ' units=' . $info['units']
+        . ' driver=' . $driverId
+        . ' date=' . $deliveryDate
+    );
+    $sms = bakery_text_send($db, bakery_survey_hq_sms_number(), $body, $sendOpts);
+    if (!empty($sms['id']) && function_exists('table_exists') && table_exists($db, 'survey_hq_sms_sent')) {
+        try {
+            $upd = $db->prepare(
+                'UPDATE survey_hq_sms_sent SET text_message_id = ? WHERE kind = ? AND driver_id = ? AND delivery_date = ?'
+            );
+            $upd->execute([(int)$sms['id'], substr(trim($kind), 0, 32), $driverId, $deliveryDate]);
+        } catch (Throwable $e) {
+            error_log('survey HQ SMS marker update: ' . $e->getMessage());
+        }
+    }
+    return $sms;
 }
 
 /**
@@ -1008,44 +1259,29 @@ function bakery_survey_store_verify_submit(PDO $db, array $fields): array
         'staff_user_id' => (int)($fields['staff_user_id'] ?? 0),
     ]);
 
-    $body = bakery_survey_store_verify_sms_body($payload);
-    $routeLine = bakery_survey_store_verify_sms_route_line($route);
-    if ($routeLine !== '') {
-        $body .= "\n" . $routeLine;
-        if (strlen($body) > 1500) {
-            $body = substr($body, 0, 1497) . '...';
-        }
+    $deliveryDate = (string)($payload['delivery_date'] ?? '');
+    $link = '';
+    if ($surveyId > 0 && function_exists('bakery_survey_hq_sms_link')) {
+        $link = bakery_survey_hq_sms_link($db, $surveyId, $deliveryDate);
     }
-    error_log('survey store-verify SMS payload: ' . $body);
+    $body = bakery_survey_store_verify_sms_body($payload + [
+        'link' => $link,
+        'route_line' => bakery_survey_store_verify_sms_route_line($route),
+    ]);
 
-    $sms = [
-        'ok' => false,
-        'recorded_only' => false,
-        'status' => 'failed',
-        'error' => 'sms_helper_missing',
-        'id' => 0,
-    ];
-    if (!function_exists('bakery_text_send')) {
-        $textComms = dirname(__DIR__) . '/includes/text_comms.php';
-        if (is_readable($textComms)) {
-            require_once $textComms;
-        }
-    }
-    if (function_exists('bakery_text_send')) {
-        $sms = bakery_text_send($db, bakery_survey_hq_sms_number(), $body, [
-            'staff_user_id' => (int)($fields['staff_user_id'] ?? 0) ?: null,
-            'context_type' => 'driver',
-            'context_id' => $surveyId > 0 ? $surveyId : null,
-            'operating_date' => $payload['delivery_date'] !== '' ? $payload['delivery_date'] : date('Y-m-d'),
+    $sms = bakery_survey_hq_sms_dispatch($db, 'store_verify', (int)($payload['driver_id'] ?? 0), $deliveryDate, $body, [
+        'staff_user_id' => (int)($fields['staff_user_id'] ?? 0) ?: null,
+        'context_type' => 'driver',
+        'context_id' => $surveyId > 0 ? $surveyId : null,
+        'operating_date' => $deliveryDate !== '' ? $deliveryDate : date('Y-m-d'),
+    ]);
+    if (!empty($sms['id']) && $surveyId > 0 && function_exists('bakery_survey_record_response')) {
+        bakery_survey_record_response($db, [
+            'survey_id' => $surveyId,
+            'text_message_id' => (int)$sms['id'],
+            'action' => 'sent',
+            'response' => !empty($sms['ok']) ? 'store_verify_sms' : 'store_verify_sms_logged',
         ]);
-        if (!empty($sms['id']) && $surveyId > 0 && function_exists('bakery_survey_record_response')) {
-            bakery_survey_record_response($db, [
-                'survey_id' => $surveyId,
-                'text_message_id' => (int)$sms['id'],
-                'action' => 'sent',
-                'response' => !empty($sms['ok']) ? 'store_verify_sms' : 'store_verify_sms_logged',
-            ]);
-        }
     }
 
     $smsOk = !empty($sms['ok']) && empty($sms['recorded_only']);
@@ -1053,6 +1289,7 @@ function bakery_survey_store_verify_submit(PDO $db, array $fields): array
         'payload' => $payload,
         'sms' => $sms,
         'sms_ok' => $smsOk,
+        'sms_skipped' => (string)($sms['skipped'] ?? ''),
         'recorded' => $recorded,
         'route' => $route,
     ];

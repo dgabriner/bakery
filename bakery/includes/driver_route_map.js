@@ -21,6 +21,7 @@
   var lastPathKey = '';
   var pathTimer = 0;
   var ready = false;
+  var inited = false;
   // Tiny screens begin with the immediate delivery decision. Drivers can widen to
   // the next three stops or the complete dated route without changing route_order.
   var viewMode = 'next';
@@ -54,6 +55,7 @@
     var out = String(template || '');
     Object.keys(vars || {}).forEach(function (key) {
       out = out.split(':' + key).join(String(vars[key]));
+      out = out.split('__' + key.toUpperCase() + '__').join(String(vars[key]));
     });
     return out;
   }
@@ -530,20 +532,40 @@
     });
   }
 
+  // The route key is built from stops only. A moving driver re-requests the
+  // leg from their position at most once per LEG_REFRESH_MS and only after
+  // LEG_REFRESH_METERS of travel, so a GPS fix never costs a Directions call.
+  var LEG_REFRESH_MS = 120000;
+  var LEG_REFRESH_METERS = 400;
+  var pathOrigin = null;
+  var lastRequestAt = 0;
+  var directionsRequests = 0;
+
+  function metersBetween(a, b) {
+    var miles = haversineMiles(a, b);
+    return miles == null ? 0 : miles * 1609.344;
+  }
+
+  function driverLegIsStale() {
+    if (!youPos) return false;
+    if (!pathOrigin) return true;
+    if (Date.now() - lastRequestAt < LEG_REFRESH_MS) return false;
+    return metersBetween(pathOrigin, youPos) >= LEG_REFRESH_METERS;
+  }
+
   function drawPath(stops) {
     if (!map) return;
     var remaining = mapped(visibleStops(stops));
-    var points = remaining.map(function (stop) {
+    var stopPoints = remaining.map(function (stop) {
       return { lat: stop.lat, lng: stop.lng };
     });
-    if (youPos) {
-      points = [{ lat: youPos.lat, lng: youPos.lng }].concat(points);
-    }
-    var key = viewMode + '|' + points.map(function (pt) {
+    var key = viewMode + '|' + stopPoints.map(function (pt) {
       return pt.lat.toFixed(5) + ',' + pt.lng.toFixed(5);
     }).join('|');
-    if (key === lastPathKey) return;
+    if (key === lastPathKey && !driverLegIsStale()) return;
     lastPathKey = key;
+    pathOrigin = youPos ? { lat: youPos.lat, lng: youPos.lng } : null;
+    var points = pathOrigin ? [pathOrigin].concat(stopPoints) : stopPoints;
     routeMetrics = { totalDuration: 0, totalDistance: 0, byStopId: {} };
     renderMapInsights(stops);
     renderHorizon(stops);
@@ -571,7 +593,9 @@
       return { location: pt, stopover: true };
     });
     directionsRenderer.setMap(map);
-    var hasDriverOrigin = !!youPos;
+    var hasDriverOrigin = !!pathOrigin;
+    lastRequestAt = Date.now();
+    directionsRequests += 1;
     directionsService.route({
       origin: origin,
       destination: destination,
@@ -607,6 +631,78 @@
       if (target) byStopId[String(target.id)] = { duration: duration, distance: distance };
     });
     routeMetrics = { totalDuration: totalDuration, totalDistance: totalDistance, byStopId: byStopId };
+    paintStopLegs(byStopId);
+  }
+
+  function paintStopLegs(byStopId) {
+    document.querySelectorAll('#stopList .stop-item').forEach(function (el) {
+      var leg = byStopId[String(el.getAttribute('data-daily-order-id') || '')];
+      var badge = el.querySelector('[data-stop-leg]');
+      if (!badge || !leg || !leg.duration) return;
+      badge.textContent = formatDuration(leg.duration);
+      badge.hidden = false;
+      badge.setAttribute('data-leg-source', 'directions');
+    });
+  }
+
+  /**
+   * One optimized Directions request for the remaining stops. The first and
+   * last remaining stops stay fixed when the driver's position is unknown.
+   * Google ignores delivery windows, so moved stops with a deadline are named.
+   */
+  function suggestOrder() {
+    return new Promise(function (resolve, reject) {
+      if (!map || !directionsService || typeof google === 'undefined') {
+        reject(new Error('maps_unavailable'));
+        return;
+      }
+      var remaining = mapped(remainingStops(readStops()));
+      if (remaining.length < 3 || remaining.length > 25) {
+        reject(new Error('maps_unavailable'));
+        return;
+      }
+      var origin = youPos ? { lat: youPos.lat, lng: youPos.lng } : { lat: remaining[0].lat, lng: remaining[0].lng };
+      var fixedFirst = youPos ? null : remaining[0];
+      var last = remaining[remaining.length - 1];
+      var middle = remaining.slice(fixedFirst ? 1 : 0, -1);
+      directionsRequests += 1;
+      directionsService.route({
+        origin: origin,
+        destination: { lat: last.lat, lng: last.lng },
+        waypoints: middle.map(function (stop) { return { location: { lat: stop.lat, lng: stop.lng }, stopover: true }; }),
+        optimizeWaypoints: true,
+        travelMode: google.maps.TravelMode.DRIVING
+      }, function (result, status) {
+        if (status !== 'OK' || !result || !result.routes || !result.routes[0]) {
+          reject(new Error('directions_failed'));
+          return;
+        }
+        var route = result.routes[0];
+        var orderIndex = Array.isArray(route.waypoint_order) ? route.waypoint_order : [];
+        var ordered = (fixedFirst ? [fixedFirst] : [])
+          .concat(orderIndex.map(function (i) { return middle[i]; }))
+          .concat([last]);
+        var optimizedSeconds = (route.legs || []).reduce(function (sum, leg) {
+          return sum + (Number(leg && leg.duration && leg.duration.value) || 0);
+        }, 0);
+        var currentIds = remaining.map(function (stop) { return stop.id; });
+        var moves = 0;
+        var windowNames = [];
+        ordered.forEach(function (stop, index) {
+          if (currentIds[index] === stop.id) return;
+          moves += 1;
+          if (stop.deliverBy && index > currentIds.indexOf(stop.id)) windowNames.push(stop.name);
+        });
+        var unmapped = remainingStops(readStops()).filter(function (stop) { return stop.lat == null || stop.lng == null; });
+        var sameOrigin = viewMode === 'day' && !!pathOrigin === !!youPos;
+        resolve({
+          orderIds: ordered.map(function (stop) { return stop.id; }).concat(unmapped.map(function (stop) { return stop.id; })),
+          moves: moves,
+          savedSeconds: sameOrigin && routeMetrics.totalDuration > 0 ? Math.max(0, routeMetrics.totalDuration - optimizedSeconds) : null,
+          windowNames: windowNames
+        });
+      });
+    });
   }
 
   function queuePath(stops) {
@@ -644,7 +740,10 @@
       map.setZoom(15);
       return;
     }
-    map.fitBounds(bounds, { top: 48, right: 36, bottom: 72, left: 36 });
+    var mapHeight = (map.getDiv() && map.getDiv().clientHeight) || 300;
+    map.fitBounds(bounds, mapHeight < 240
+      ? { top: 24, right: 24, bottom: 16, left: 24 }
+      : { top: 48, right: 36, bottom: 72, left: 36 });
   }
 
   function syncFollowButton() {
@@ -767,16 +866,35 @@
     }
     var stops = readStops();
     updateLive(stops);
-    lastPathKey = '';
-    queuePath(stops);
+    if (driverLegIsStale()) queuePath(stops);
     // The first GPS fix is the moment the default next-leg view can genuinely
     // frame the driver and destination together. Do not steal the view again
     // after the driver has panned or zoomed manually.
     if (!hadLocation && !userDragged) fitView(stops);
   }
 
+  var watchWanted = false;
+  var watchHighAccuracy = false;
+  var mapOnScreen = true;
+
+  function wantsHighAccuracy() {
+    return follow || mapOnScreen;
+  }
+
+  function stopWatch() {
+    if (watchId != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+    watchId = null;
+  }
+
   function startWatch() {
-    if (!navigator.geolocation || watchId != null) return;
+    watchWanted = true;
+    if (!navigator.geolocation || document.hidden) return;
+    var high = wantsHighAccuracy();
+    if (watchId != null && high === watchHighAccuracy) return;
+    stopWatch();
+    watchHighAccuracy = high;
     watchId = navigator.geolocation.watchPosition(
       function (pos) {
         setYou(
@@ -789,11 +907,31 @@
         updateLive(readStops());
       },
       {
-        enableHighAccuracy: true,
-        maximumAge: 4000,
-        timeout: 12000
+        enableHighAccuracy: high,
+        maximumAge: high ? 8000 : 30000,
+        timeout: high ? 12000 : 20000
       }
     );
+  }
+
+  function syncWatch() {
+    if (!watchWanted) return;
+    if (document.hidden) {
+      stopWatch();
+      return;
+    }
+    startWatch();
+  }
+
+  function bindWatchLifecycle() {
+    document.addEventListener('visibilitychange', syncWatch);
+    var root = $('driverRouteMap');
+    if (root && 'IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        mapOnScreen = entries.some(function (entry) { return entry.isIntersecting; });
+        syncWatch();
+      }).observe(root);
+    }
   }
 
   function locateOnce(thenFollow) {
@@ -909,6 +1047,7 @@
         userDragged = false;
         syncFollowButton();
         if (follow) locateOnce(true);
+        syncWatch();
       });
     }
     root.querySelectorAll('[data-map-scope]').forEach(function (button) {
@@ -981,6 +1120,10 @@
   }
 
   function init() {
+    if (!inited) {
+      inited = true;
+      bindWatchLifecycle();
+    }
     bindChrome();
     restoreViewMode();
     syncFollowButton();
@@ -1003,8 +1146,14 @@
       userDragged = false;
       syncFollowButton();
       if (follow) locateOnce(true);
+      syncWatch();
     },
-    setViewMode: setViewMode
+    setViewMode: setViewMode,
+    suggestOrder: suggestOrder,
+    isReady: function () { return !!map; },
+    stats: function () {
+      return { directionsRequests: directionsRequests, watching: watchId != null, highAccuracy: watchHighAccuracy };
+    }
   };
 
   window.bakeryInitDriverRouteMap = function () {

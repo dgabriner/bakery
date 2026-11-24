@@ -2,8 +2,8 @@
   "id": "driver-complete-stop",
   "title": { "en": "Complete a stop", "es": "Completar una parada" },
   "description": {
-    "en": "Arrival photo, confirm pieces, review the invoice. Do not save yet.",
-    "es": "Foto de llegada, confirma piezas y revisa la factura. No guardes todavía."
+    "en": "Tap I'm here, choose No photo with a reason, check totals, see the invoice. Do not save yet.",
+    "es": "Toca Ya llegué, elige Sin foto con un motivo, revisa totales y mira la factura. No guardes todavía."
   },
   "prepare": "driver-route",
   "viewport": { "width": 390, "height": 844 },
@@ -32,30 +32,19 @@
     },
     { "action": "waitForSelector", "selector": "#nextStopCard:not([hidden])" },
     {
-      "action": "scroll",
-      "selector": "#nextStopCard button.route-btn--photo.photo-complete-btn",
-      "caption": {
-        "en": "Scroll down to the next stop",
-        "es": "Baja hasta la siguiente parada"
-      },
-      "waitAfter": 900
-    },
-    {
       "action": "click",
-      "selector": "#nextStopCard button.route-btn--photo.photo-complete-btn",
-      "dismissFileChooser": true,
-      "force": true,
+      "selector": ".route-sticky-dock .route-sticky-btn--finish",
       "caption": {
-        "en": "Tap the arrival photo button",
-        "es": "Toca el botón de foto al llegar"
+        "en": "At the store, tap I'm here. The camera opens in the card.",
+        "es": "En la tienda, toca Ya llegué. La cámara se abre en la tarjeta."
       }
     },
-    { "action": "waitForSelector", "selector": "#deliveryPhotoModal", "waitAfter": 1000 },
+    { "action": "waitForSelector", "selector": "#deliveryPhotoModal.is-open", "waitAfter": 1000 },
     {
       "action": "caption",
       "caption": {
-        "en": "On the phone this opens the camera. Here we skip the photo.",
-        "es": "En el teléfono aquí se abre la cámara. En este video omitimos la foto."
+        "en": "On the phone you tap the shutter. Here we choose No photo.",
+        "es": "En el teléfono tocas el obturador. Aquí elegimos Sin foto."
       },
       "captionHoldMs": 2000
     },
@@ -64,26 +53,34 @@
       "selector": "#deliverySkipPhotoInlineBtn",
       "force": true,
       "caption": {
-        "en": "Tap Skip photo, then confirm the pieces",
-        "es": "Toca Omitir foto y luego confirma las piezas"
+        "en": "No photo asks why",
+        "es": "Sin foto pregunta por qué"
       }
     },
-    { "action": "waitForSelector", "selector": "#deliveryPiecesInput:enabled", "waitAfter": 1100 },
+    {
+      "action": "click",
+      "selector": "[data-proof-skip-reason=\"camera_broken\"]",
+      "caption": {
+        "en": "Pick the reason",
+        "es": "Elige el motivo"
+      }
+    },
+    { "action": "waitForSelector", "selector": "#deliveryWizardPrimaryBtn", "waitAfter": 1100 },
     {
       "action": "caption",
       "caption": {
-        "en": "Check the piece count, then save. You can still review the invoice.",
-        "es": "Revisa las piezas y guarda. Todavía puedes ver la factura."
+        "en": "Totals show as ordered. Adjust only if the count changed.",
+        "es": "Los totales salen como se pidió. Ajusta solo si cambió la cantidad."
       },
       "captionHoldMs": 1600
     },
     {
       "action": "click",
-      "selector": "#deliveryWizardReviewBtn",
+      "selector": "#deliverySeeInvoice",
       "force": true,
       "caption": {
-        "en": "Review the invoice. Do not save yet.",
-        "es": "Revisa la factura. No guardes todavía."
+        "en": "See the invoice. Do not tap Delivered yet.",
+        "es": "Mira la factura. No toques Entregado todavía."
       }
     },
     { "action": "waitForSelector", "selector": "#deliveryStepInvoice:not([hidden])" },

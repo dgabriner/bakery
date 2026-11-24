@@ -56,8 +56,35 @@
     return (Date.now() - at) < RELOAD_COOLDOWN_MS;
   }
 
+  var heldBuild = '';
+
+  // A page can set window.bakeryClientRefreshHold = function () { return true; }
+  // while unsaved work is on screen (for example a delivery photo in progress).
+  function refreshHeld() {
+    try {
+      return typeof window.bakeryClientRefreshHold === 'function' && !!window.bakeryClientRefreshHold();
+    } catch (error) {
+      return false;
+    }
+  }
+
   function reloadForBuild(nextBuild) {
     if (!nextBuild || read(RELOAD_KEY) === nextBuild || withinCooldown()) {
+      return;
+    }
+    if (refreshHeld()) {
+      if (!heldBuild) {
+        window.setTimeout(function retryHeld() {
+          if (refreshHeld()) {
+            window.setTimeout(retryHeld, 15 * 1000);
+            return;
+          }
+          var pending = heldBuild;
+          heldBuild = '';
+          reloadForBuild(pending);
+        }, 15 * 1000);
+      }
+      heldBuild = nextBuild;
       return;
     }
     // Require a durable latch. If storage is blocked, skip auto-reload rather

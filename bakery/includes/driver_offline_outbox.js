@@ -1,6 +1,12 @@
 /**
- * Driver offline outbox — IndexedDB queue for photo upload + delivery confirm.
- * No service-worker page caching; sync when navigator.onLine returns.
+ * Driver offline outbox. IndexedDB queue for photo upload and delivery confirm.
+ * No service-worker page caching. Sync when navigator.onLine returns.
+ *
+ * iOS Safari drops the IndexedDB connection after the page is backgrounded and
+ * rejects in-flight work with "Connection to Indexed Database server lost".
+ * That rejection was unhandled. This file closes the connection when the page
+ * hides, reopens on the next use, retries a lost connection once, and keeps
+ * the job in memory when IndexedDB is down so a photo or confirm is not dropped.
  */
 (function (global) {
   'use strict';
@@ -10,18 +16,54 @@
   var STORE = 'jobs';
   var MAX_ATTEMPTS = 8;
 
+  var dbPromise = null;
+  var liveDb = null;
+  var memoryJobs = [];
+  var inFlight = {};
+
   function i18n(key, fallback) {
     var pack = global.__DRIVER_PAGE_I18N__ || {};
     return pack[key] || fallback || key;
   }
 
+  function isConnectionLost(err) {
+    var name = String(err && err.name || '');
+    var message = String(err && err.message || err || '');
+    return name === 'InvalidStateError'
+      || /Indexed Database server lost/i.test(message)
+      || /database connection is closing/i.test(message);
+  }
+
+  function preventDefault(event) {
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+  }
+
+  function releaseConnection() {
+    var db = liveDb;
+    liveDb = null;
+    dbPromise = null;
+    if (!db) return;
+    db.onclose = null;
+    db.onversionchange = null;
+    try { db.close(); } catch (closeErr) { /* already closed */ }
+  }
+
   function openDb() {
-    return new Promise(function (resolve, reject) {
+    if (dbPromise) return dbPromise;
+    var pending = new Promise(function (resolve, reject) {
       if (!global.indexedDB) {
         reject(new Error('indexedDB unavailable'));
         return;
       }
-      var req = global.indexedDB.open(DB_NAME, DB_VERSION);
+      var req;
+      try {
+        req = global.indexedDB.open(DB_NAME, DB_VERSION);
+      } catch (err) {
+        reject(err);
+        return;
+      }
       req.onupgradeneeded = function () {
         var db = req.result;
         if (!db.objectStoreNames.contains(STORE)) {
@@ -30,21 +72,94 @@
           store.createIndex('dailyOrderId', 'dailyOrderId', { unique: false });
         }
       };
+      req.onsuccess = function () {
+        var db = req.result;
+        liveDb = db;
+        db.onclose = function () {
+          if (liveDb === db) {
+            liveDb = null;
+            dbPromise = null;
+          }
+        };
+        db.onversionchange = function () {
+          if (liveDb === db) {
+            liveDb = null;
+            dbPromise = null;
+          }
+          try { db.close(); } catch (closeErr) { /* ignore */ }
+        };
+        resolve(db);
+      };
+      req.onerror = function (event) {
+        preventDefault(event);
+        reject(req.error || new Error('outbox open failed'));
+      };
+    });
+    dbPromise = pending;
+    pending.catch(function () {
+      if (dbPromise === pending) dbPromise = null;
+    });
+    return pending;
+  }
+
+  function requestToPromise(req) {
+    return new Promise(function (resolve, reject) {
       req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error || new Error('outbox open failed')); };
+      req.onerror = function (event) {
+        preventDefault(event);
+        reject(req.error || new Error('outbox request failed'));
+      };
     });
   }
 
-  function withStore(mode, fn) {
-    return openDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(STORE, mode);
-        var store = tx.objectStore(STORE);
-        Promise.resolve(fn(store)).then(function (value) {
-          tx.oncomplete = function () { resolve(value); };
-          tx.onerror = function () { reject(tx.error || new Error('outbox tx failed')); };
-        }).catch(reject);
+  function runTransaction(db, mode, fn) {
+    return new Promise(function (resolve, reject) {
+      var tx;
+      try {
+        tx = db.transaction(STORE, mode);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      var store = tx.objectStore(STORE);
+      var settled = false;
+      var pendingValue;
+      function finish(err, value) {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve(value);
+      }
+      tx.oncomplete = function () { finish(null, pendingValue); };
+      tx.onerror = function (event) {
+        preventDefault(event);
+        finish(tx.error || new Error('outbox tx failed'));
+      };
+      tx.onabort = function (event) {
+        preventDefault(event);
+        finish(tx.error || new Error('outbox tx aborted'));
+      };
+      Promise.resolve().then(function () {
+        return fn(store);
+      }).then(function (value) {
+        pendingValue = value;
+      }).catch(function (err) {
+        try { tx.abort(); } catch (abortErr) { /* ignore */ }
+        finish(err);
       });
+    });
+  }
+
+  function withStore(mode, fn, attempt) {
+    attempt = attempt || 0;
+    return openDb().then(function (db) {
+      return runTransaction(db, mode, fn);
+    }).catch(function (err) {
+      if (attempt < 1 && isConnectionLost(err)) {
+        releaseConnection();
+        return withStore(mode, fn, attempt + 1);
+      }
+      throw err;
     });
   }
 
@@ -62,37 +177,62 @@
     return String(prefix || 'req') + '-' + rand;
   }
 
+  function rememberJob(job) {
+    if (!job || !job.id) return;
+    for (var i = 0; i < memoryJobs.length; i++) {
+      if (memoryJobs[i].id === job.id) {
+        memoryJobs[i] = job;
+        return;
+      }
+    }
+    memoryJobs.push(job);
+  }
+
+  function forgetJob(id) {
+    memoryJobs = memoryJobs.filter(function (job) { return job.id !== id; });
+  }
+
+  function mergeJobs(rows, memory) {
+    var byId = {};
+    (rows || []).forEach(function (job) {
+      if (job && job.id) byId[job.id] = job;
+    });
+    (memory || []).forEach(function (job) {
+      if (!job || !job.id) return;
+      if (!byId[job.id]) {
+        byId[job.id] = job;
+        return;
+      }
+      if (job.photoBlob && !byId[job.id].photoBlob) {
+        byId[job.id].photoBlob = job.photoBlob;
+      }
+    });
+    return Object.keys(byId).map(function (id) { return byId[id]; });
+  }
+
   function putJob(job) {
+    rememberJob(job);
     return withStore('readwrite', function (store) {
-      store.put(job);
+      return requestToPromise(store.put(job)).then(function () { return job; });
+    }).catch(function () {
       return job;
     });
   }
 
-  function getJob(id) {
-    return withStore('readonly', function (store) {
-      return new Promise(function (resolve, reject) {
-        var req = store.get(id);
-        req.onsuccess = function () { resolve(req.result || null); };
-        req.onerror = function () { reject(req.error); };
-      });
-    });
-  }
-
   function deleteJob(id) {
+    forgetJob(id);
     return withStore('readwrite', function (store) {
-      store.delete(id);
-      return true;
-    });
+      return requestToPromise(store.delete(id)).then(function () { return true; });
+    }).catch(function () { return true; });
   }
 
   function listJobs() {
     return withStore('readonly', function (store) {
-      return new Promise(function (resolve, reject) {
-        var req = store.getAll();
-        req.onsuccess = function () { resolve(req.result || []); };
-        req.onerror = function () { reject(req.error); };
-      });
+      return requestToPromise(store.getAll());
+    }).then(function (rows) {
+      return mergeJobs(rows || [], memoryJobs);
+    }).catch(function () {
+      return memoryJobs.slice();
     });
   }
 
@@ -112,7 +252,7 @@
 
   function renderChips() {
     listJobs().then(function (jobs) {
-      var active = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'failed'; });
+      var active = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'failed' || j.status === 'syncing'; });
       var header = document.getElementById('driverOutboxChip');
       if (header) {
         if (!active.length) {
@@ -184,14 +324,16 @@
   }
 
   async function processJob(job) {
-    if (!job || (job.status !== 'queued' && job.status !== 'failed')) return;
+    if (!job || (job.status !== 'queued' && job.status !== 'failed' && job.status !== 'syncing')) return;
+    if (inFlight[job.id]) return;
     if (!global.navigator.onLine && !job.force) {
       return;
     }
+    inFlight[job.id] = true;
     job.status = 'syncing';
     job.attempts = (job.attempts || 0) + 1;
-    await putJob(job);
     try {
+      await putJob(job);
       if (job.kind === 'photo') {
         await sendPhoto(job);
       } else if (job.kind === 'confirm') {
@@ -208,26 +350,33 @@
       await putJob(job);
       emit('failed', { id: job.id, kind: job.kind, error: job.lastError, dailyOrderId: job.dailyOrderId });
       throw err;
+    } finally {
+      delete inFlight[job.id];
     }
   }
 
   async function flush(opts) {
     opts = opts || {};
-    var jobs = await listJobs();
-    jobs.sort(function (a, b) {
-      return (a.createdAt || 0) - (b.createdAt || 0);
-    });
-    var now = Date.now();
-    for (var i = 0; i < jobs.length; i++) {
-      var job = jobs[i];
-      if (job.status !== 'queued' && !(opts.force && job.status === 'failed')) continue;
-      if (!opts.force && job.nextAttemptAt && job.nextAttemptAt > now) continue;
-      job.force = !!opts.force;
-      try {
-        await processJob(job);
-      } catch (e) {
-        // Continue remaining jobs.
+    try {
+      var jobs = await listJobs();
+      jobs.sort(function (a, b) {
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      });
+      var now = Date.now();
+      for (var i = 0; i < jobs.length; i++) {
+        var job = jobs[i];
+        if (job.status === 'syncing') job.status = 'queued';
+        if (job.status !== 'queued' && !(opts.force && job.status === 'failed')) continue;
+        if (!opts.force && job.nextAttemptAt && job.nextAttemptAt > now) continue;
+        job.force = !!opts.force;
+        try {
+          await processJob(job);
+        } catch (e) {
+          // Continue remaining jobs. The job stays queued or in memory.
+        }
       }
+    } catch (err) {
+      // IndexedDB can be down. Memory jobs stay put and the next flush retries.
     }
     renderChips();
   }
@@ -272,14 +421,33 @@
     return { id: id, queued: true };
   }
 
+  function safeFlush(opts) {
+    return flush(opts).catch(function () { /* flush already catches */ });
+  }
+
+  function onPageHidden() {
+    releaseConnection();
+  }
+
+  function onPageVisible() {
+    safeFlush();
+  }
+
   function bindUi() {
-    global.addEventListener('online', function () { flush({ force: true }); });
+    global.addEventListener('online', function () { safeFlush({ force: true }); });
+    global.addEventListener('pagehide', onPageHidden);
+    if (global.document && typeof global.document.addEventListener === 'function') {
+      global.document.addEventListener('visibilitychange', function () {
+        if (global.document.visibilityState === 'hidden') onPageHidden();
+        else if (global.document.visibilityState === 'visible') onPageVisible();
+      });
+    }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', renderChips);
     } else {
       renderChips();
     }
-    setInterval(function () { flush(); }, 15000);
+    setInterval(function () { safeFlush(); }, 15000);
   }
 
   global.BakeryDriverOutbox = {

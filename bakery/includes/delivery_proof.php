@@ -2,9 +2,10 @@
 /**
  * Proof-of-delivery gate for marking a stop delivered.
  *
- * Arrival (Before) photos stay separate from proof (After, Receipt). That
- * split lives in bakery_route_summary_is_pod_photo. This file only decides
- * whether a confirm may proceed, and logs an explicit after-photo skip.
+ * One arrival (Before) photo is enough proof; After and Receipt photos count
+ * too. Reports still tell arrival and leaving photos apart through
+ * bakery_route_summary_is_pod_photo. This file only decides whether a confirm
+ * may proceed, and logs a no-photo delivery with the driver's reason.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -32,10 +33,30 @@ function bakery_delivery_proof_photo_types(PDO $db, int $dailyOrderId): array
     return $types;
 }
 
+function bakery_delivery_is_proof_photo_type(string $type): bool
+{
+    return bakery_route_summary_is_pod_photo($type) || bakery_route_summary_is_arrival_photo($type);
+}
+
+/** @return list<string> */
+function bakery_delivery_proof_skip_reasons(): array
+{
+    return ['camera_broken', 'customer_declined', 'no_safe_spot', 'other'];
+}
+
+function bakery_delivery_normalize_proof_skip_reason($reason): string
+{
+    $reason = strtolower(trim((string)$reason));
+    if ($reason === '') {
+        return '';
+    }
+    return in_array($reason, bakery_delivery_proof_skip_reasons(), true) ? $reason : 'other';
+}
+
 function bakery_delivery_has_proof_photo(PDO $db, int $dailyOrderId): bool
 {
     foreach (bakery_delivery_proof_photo_types($db, $dailyOrderId) as $type) {
-        if (bakery_route_summary_is_pod_photo($type)) {
+        if (bakery_delivery_is_proof_photo_type($type)) {
             return true;
         }
     }
@@ -56,7 +77,7 @@ function bakery_delivery_proof_skip_logged(PDO $db, int $dailyOrderId): bool
     return (bool)$stmt->fetchColumn();
 }
 
-function bakery_delivery_log_proof_skip(PDO $db, int $dailyOrderId): void
+function bakery_delivery_log_proof_skip(PDO $db, int $dailyOrderId, string $reason = ''): void
 {
     if ($dailyOrderId <= 0 || bakery_delivery_proof_skip_logged($db, $dailyOrderId)) {
         return;
@@ -70,14 +91,17 @@ function bakery_delivery_log_proof_skip(PDO $db, int $dailyOrderId): void
     bakery_record_operational_event(
         $db,
         BAKERY_OP_DELIVERY_PROOF_SKIPPED,
-        'Driver skipped the after photo before marking the stop delivered',
+        'Driver marked the stop delivered with no photo',
         [
             'daily_order_id' => $dailyOrderId,
             'customer_id' => $customerId > 0 ? $customerId : null,
             'driver_id' => $driverId > 0 ? $driverId : null,
             'assignment_id' => is_array($ctx) ? ($ctx['assignment_id'] ?? null) : null,
             'operational_date' => is_array($ctx) ? (string)($ctx['order_date'] ?? '') : null,
-            'metadata' => ['explicit' => true],
+            'metadata' => array_filter([
+                'explicit' => true,
+                'reason' => bakery_delivery_normalize_proof_skip_reason($reason),
+            ], static fn($value): bool => $value !== ''),
         ]
     );
 }
@@ -97,20 +121,20 @@ function bakery_delivery_order_status(PDO $db, int $dailyOrderId): string
  * Block a not-yet-delivered stop unless it has a proof photo or an explicit skip.
  * An explicit skip is logged once. Already delivered stops can be saved again.
  */
-function bakery_delivery_assert_proof_for_confirm(PDO $db, int $dailyOrderId, bool $explicitSkip): void
+function bakery_delivery_assert_proof_for_confirm(PDO $db, int $dailyOrderId, bool $explicitSkip, string $skipReason = ''): void
 {
     $status = bakery_delivery_order_status($db, $dailyOrderId);
     if (in_array($status, ['delivered', 'invoiced'], true)) {
         return;
     }
     if ($explicitSkip && !bakery_delivery_has_proof_photo($db, $dailyOrderId)) {
-        bakery_delivery_log_proof_skip($db, $dailyOrderId);
+        bakery_delivery_log_proof_skip($db, $dailyOrderId, $skipReason);
     }
     if (bakery_delivery_has_proof_photo($db, $dailyOrderId) || bakery_delivery_proof_skip_logged($db, $dailyOrderId)) {
         return;
     }
     $message = function_exists('bakery_t')
         ? bakery_t('driver.proof_required')
-        : 'Take the after photo, or choose Skip leaving photo, before this stop can be marked delivered.';
+        : 'Take the arrival photo, or choose No photo and a reason, before this stop can be marked delivered.';
     throw new Exception($message);
 }

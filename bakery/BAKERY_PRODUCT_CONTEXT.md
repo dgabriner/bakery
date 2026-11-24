@@ -37,10 +37,11 @@ customers / standing demand
 work, and leave a trustworthy record for the next role.
 
 **Refined thesis (the important one):** *The operational spine already exists; several
-individual stages do not fully close.* `includes/daily_run.php` implements an 8-stage
-gated checklist (Confirm Demand → Commit Production Plan → Produce → Pack →
-Assign/Load/Dispatch → Deliver & Reconcile → Invoice → Close the Day) whose closeout
-refuses to record while blockers exist. Dated demand now lazy-generates, route construction
+individual stages do not fully close.* `includes/daily_run.php` implements an 8-step
+gated checklist: 7 working stages (Confirm Demand → Commit Production Plan → Produce →
+Pack → Assign/Load/Dispatch → Deliver & Reconcile → Invoice) plus the Close the Day gate.
+The progress ring counts the 7 working stages ("x of 7"); Close the Day is step 8 and its
+closeout refuses to record while blockers exist. Dated demand now lazy-generates, route construction
 prepares demand first, and route closeout reconciles loads. Staff alerts shipped (nav bell
 + cron digest); the overnight cron install itself remains an owner ops task
 (`docs/CRON_KIT.md`). The product work is closing remaining loops — not adding modules.
@@ -237,7 +238,7 @@ Compact map — entry points only, not every file.
 | Surface | File(s) | Responsibility |
 |---------|---------|----------------|
 | Operations Dashboard | `index.php`, `includes/dashboard_command_center.php` | Per-date 6-stage state + exceptions + inline actions |
-| Daily Run | `daily_run.php`, `includes/daily_run.php`, `daily_run_api.php` | 8-stage checklist, gated day closeout |
+| Daily Run | `daily_run.php`, `includes/daily_run.php`, `daily_run_api.php` | 8-step checklist (7 counted stages + gated day closeout) |
 | Daily Brief | `daily_brief.php`, `includes/daily_brief.php` | Printable shift handoff |
 | Daily Orders | `daily_orders.php`, `includes/demand_review.php` | The day's demand: generate, create one-time dated orders, review states, edit |
 | Standing Orders | `standing_orders_manager.php` (canonical; `standing_orders.php` legacy) | Recurring weekly template |

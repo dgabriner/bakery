@@ -7,9 +7,9 @@ function Get-BakeryDeployRootFiles {
         'staging-robots.txt',
         'index.php', 'login.php', 'logout.php', 'baker.php', 'build_id.php', 'qr_login.php', 'customer_qr_login.php',
         'customers.php', 'customer_schedule.php', 'customer_overview.php', 'customer_routes.php',
-        'zones.php', 'leads.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
+        'zones.php', 'leads.php', 'sales_home.php', 'pan_dulce_pricing.php', 'pan_dulce_quantities.php',
         'products.php', 'catalog_gaps.php', 'cost_margin.php', 'product_photos.php', 'cashier_add_product.php', 'dough_types.php', 'formulas.php', 'ingredients.php',
-        'daily_orders.php', 'daily_orders_api.php', 'zazie_weekly_sheet.php', 'standing_orders.php', 'standing_orders_manager.php', 'standing_orders_manager_api.php', 'orders.php',
+        'daily_orders.php', 'daily_orders_api.php', 'zazie_weekly_sheet.php', 'standing_orders.php', 'standing_orders_manager.php', 'standing_orders_manager_api.php', 'special_orders.php', 'orders.php',
         'bread_distribution.php', 'product_distribution.php',
         'production.php', 'baker_mix.php', 'pack_list.php',
         'standing_routes.php', 'daily_route.php',
@@ -18,7 +18,7 @@ function Get-BakeryDeployRootFiles {
         'complete_delivery.php', 'get_driver_orders.php', 'get_customer_order_details.php', 'global_gps_handler.php',
         'upload_driver_photo.php', 'upload_product_photo.php',
         'cashier_shop_photos.php', 'upload_shop_photo.php', 'counter_orders.php', 'time_clock.php',
-        'daily_run.php', 'daily_run_api.php', 'daily_status_api.php', 'daily_brief.php', 'today.php',
+        'daily_run.php', 'daily_run_api.php', 'daily_status_api.php', 'demand_self_heal.php', 'sales_leads_api.php', 'daily_brief.php', 'today.php',
         'manager.php', 'billing_center.php', 'billing_api.php', 'billing_export.php', 'production_center.php', 'production_center_api.php', 'production_manager.php',
         'customer_login.php', 'customer_portal.php', 'customer_portal_tip.php', 'customer_portal_regular.php',
         'customer_portal_account.php', 'customer_portal_notifications.php',
@@ -26,7 +26,7 @@ function Get-BakeryDeployRootFiles {
         'customer_record.php', 'account_health.php',
         'square_webhook.php',
         'text_comms.php', 'text_comms_api.php', 'twilio_webhook.php', 'survey.php', 'text_media.php',
-        'route_closeout.php', 'route_analysis.php',
+        'route_closeout.php', 'route_analysis.php', 'route_photo_journey.php', 'route_health.php', 'delivery_manager_review.php', 'driver_reports.php', 'driver_photo.php',
         'driver_load.php', 'driver_stops.php', 'driver_session_ping.php',
         'users.php', 'walkthroughs.php', 'guias.php', 'login_history.php', 'audit_log.php', 'login_audit_api.php', 'client_error_api.php',
         'generate_invoice.php', 'oauth_callback.php',
@@ -63,6 +63,8 @@ function Get-BakeryDeployExcludeNamePatterns {
         'auto_push_api.php', 'sourflour.html',
         # Staging-only night-shift tour (PR #1). Never send to Live.
         'staging_update.php', 'oven_light.php', 'proof_window.php',
+        # Staging-only portal seeder and SF 2.0 page. Never send to Live.
+        'seed_portal_session_router.php', 'sf20.html',
         'tmp_*.php', 'tmp_*.js', 'tmp_*.txt'
     )
 }

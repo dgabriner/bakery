@@ -32,8 +32,10 @@ function driver_ux_fill(string $template, array $vars): string
     return $out;
 }
 
-$page = (string)file_get_contents($root . '/driver.php');
-$styles = (string)file_get_contents($root . '/css/driver.css');
+$page = (string)file_get_contents($root . '/driver.php')
+    . (string)file_get_contents($root . '/includes/driver_route.js');
+$styles = str_replace("\r\n", "\n", (string)file_get_contents($root . '/css/driver.css'));
+$mapJs = (string)file_get_contents($root . '/includes/driver_route_map.js');
 $english = require $root . '/lang/en.php';
 $spanish = require $root . '/lang/es.php';
 
@@ -130,6 +132,60 @@ if ($mobileAt !== false) {
 driver_ux_assert(
     'narrow route column stretches instead of growing with the heading',
     strpos($mobileDashboard, 'align-items: stretch;') !== false
+);
+
+$setYouAt = strpos($mapJs, 'function setYou(');
+$setYouBody = $setYouAt === false ? '' : substr($mapJs, $setYouAt, 900);
+driver_ux_assert(
+    'Directions refresh the driver leg only after 400 m and 2 minutes',
+    strpos($mapJs, 'LEG_REFRESH_MS = 120000') !== false
+        && strpos($mapJs, 'LEG_REFRESH_METERS = 400') !== false
+        && strpos($mapJs, 'function driverLegIsStale()') !== false
+);
+driver_ux_assert(
+    'a GPS fix no longer clears the Directions cache key',
+    $setYouBody !== '' && strpos($setYouBody, "lastPathKey = ''") === false
+);
+driver_ux_assert(
+    'GPS watch pauses while the page is hidden',
+    strpos($mapJs, "'visibilitychange'") !== false && strpos($mapJs, 'clearWatch') !== false
+);
+driver_ux_assert(
+    'map keeps waypoint order and never saves a route order',
+    strpos($mapJs, 'optimizeWaypoints: false') !== false && strpos($mapJs, 'reorder_route') === false
+);
+
+$routeJs = (string)file_get_contents($root . '/includes/driver_route.js');
+$completeDelivery = (string)file_get_contents($root . '/complete_delivery.php');
+$refreshJs = (string)file_get_contents($root . '/includes/client_refresh.js');
+driver_ux_assert(
+    'My Route reloads only from the route-changed button',
+    substr_count($routeJs, 'location.reload') === 1
+        && strpos($routeJs, "refresh.addEventListener('click', function () { window.location.reload(); });") !== false
+);
+driver_ux_assert(
+    'route snapshot answers unchanged with only the hash',
+    strpos($completeDelivery, "case 'route_snapshot':") !== false
+        && strpos($completeDelivery, "'unchanged' => true") !== false
+        && strpos($routeJs, "body.set('action', 'route_snapshot');") !== false
+);
+driver_ux_assert(
+    'a new build waits while a stop, sheet, or reorder is open',
+    strpos($refreshJs, 'window.bakeryClientRefreshHold') !== false
+        && strpos($routeJs, 'window.bakeryClientRefreshHold = function') !== false
+);
+driver_ux_assert(
+    'phone Back closes the open layer before leaving the page',
+    strpos($routeJs, "pushLayer('capture')") !== false
+        && strpos($routeJs, "pushLayer('problem')") !== false
+        && strpos($routeJs, "pushLayer('adjust')") !== false
+        && strpos($routeJs, "window.addEventListener('popstate'") !== false
+);
+driver_ux_assert(
+    'Suggest order previews and never saves until the driver accepts',
+    strpos($routeJs, 'function suggestRouteOrder') !== false
+        && strpos($routeJs, 'function acceptSuggestedOrder') !== false
+        && strpos($mapJs, 'optimizeWaypoints: true') !== false
 );
 
 if ($failures > 0) {

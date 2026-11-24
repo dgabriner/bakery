@@ -63,13 +63,15 @@ $confirmEnd = strpos($js, 'function finishDeliveryUi');
 if ($confirmStart !== false && $confirmEnd !== false && $confirmEnd > $confirmStart) {
     $confirmSection = substr($js, $confirmStart, $confirmEnd - $confirmStart);
 }
-$promptAt = strpos($confirmSection, 'promptDeparturePhoto()');
+$proofGateAt = strpos($confirmSection, 'stopHasProofPhoto()');
 $postAt = strpos($confirmSection, 'action=confirm_delivery');
 $assert(
-    $promptAt !== false && $postAt !== false && $promptAt < $postAt,
-    'confirm prompts for the after photo before the delivered POST'
+    $proofGateAt !== false && $postAt !== false && $proofGateAt < $postAt,
+    'confirm checks for the arrival photo before the delivered POST'
 );
-$assert(strpos($js, 'proof_skip=1') !== false, 'skipping the after photo is an explicit confirm flag');
+$assert(strpos($confirmSection, 'promptDeparturePhoto()') === false, 'confirm does not demand a leaving photo');
+$assert(strpos($js, 'proof_skip=1') !== false, 'No photo is an explicit confirm flag');
+$assert(strpos($js, 'proof_skip_reason=') !== false, 'No photo sends the chosen reason');
 $assert(
     strpos($js, "state.confirmationSaved && state.photoReturnStep === 'complete'") === false,
     'closing the after-photo prompt does not mark the stop delivered'
@@ -238,9 +240,9 @@ if ($driverId > 0 && $customerId > 0 && $afterCustomerId > 0 && $receiptCustomer
         bakery_delivery_assert_proof_for_confirm($db, $bareId, false);
     } catch (Throwable $e) {
         $threw = true;
-        $assert(strpos($e->getMessage(), 'after photo') !== false || strpos($e->getMessage(), 'foto') !== false, 'missing proof explains the after photo');
+        $assert(stripos($e->getMessage(), 'arrival photo') !== false || strpos($e->getMessage(), 'foto') !== false, 'missing proof explains the arrival photo');
     }
-    $assert($threw, 'a stop without an after photo cannot be marked delivered');
+    $assert($threw, 'a stop with no photo and no reason cannot be marked delivered');
 
     $insertPhoto($db, $driverId, $customerId, $date, 'Before');
     $arrivalThrew = false;
@@ -249,9 +251,10 @@ if ($driverId > 0 && $customerId > 0 && $afterCustomerId > 0 && $receiptCustomer
     } catch (Throwable $e) {
         $arrivalThrew = true;
     }
-    $assert($arrivalThrew, 'an arrival photo is not proof of delivery');
+    $assert(!$arrivalThrew, 'an arrival photo is proof of delivery');
+    $db->prepare('DELETE FROM driver_photos WHERE delivery_date = ? AND customer_id = ?')->execute([$date, $customerId]);
 
-    bakery_delivery_assert_proof_for_confirm($db, $bareId, true);
+    bakery_delivery_assert_proof_for_confirm($db, $bareId, true, 'customer_declined');
     $skipCount = 0;
     if (table_exists($db, 'operational_events')) {
         $skipStmt = $db->prepare(

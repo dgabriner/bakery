@@ -196,7 +196,10 @@ if ((string)$survey['status'] !== 'open') {
         (string)bakery_t('survey.closed_body', [], 'This survey already closed. Thank you!')
     );
 }
-if (bakery_survey_token_is_expired($survey, date('Y-m-d'))) {
+$todayYmd = date('Y-m-d');
+$staffMayOpenExpired = $user !== []
+    && bakery_survey_date_in_switch_window($todayYmd, trim((string)($survey['delivery_date'] ?? '')), true);
+if (bakery_survey_token_is_expired($survey, $todayYmd) && !$staffMayOpenExpired) {
     bakery_survey_fail(
         (string)bakery_t('survey.token_expired_title', [], 'Survey link expired'),
         (string)bakery_t('survey.token_expired_body', [], 'This survey link has expired. Ask the bakery to send a new one.')
@@ -222,6 +225,28 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $surveyDate)) {
         );
     } catch (RuntimeException $e) {
         // Keep the default next-delivery date when the query is junk.
+    }
+}
+
+// A dated token stays on its own delivery day. Choosing Today or another
+// day opens that day's survey instead of rewriting this token.
+$switchKind = (string)($survey['kind'] ?? '');
+$switchableKind = in_array($switchKind, ['store_verify', 'route_order', 'route_review'], true);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $switchableKind) {
+    $targetDay = bakery_survey_requested_switch_date($verifyDate, $dateParam, $todayYmd, $user !== []);
+    if ($targetDay !== '') {
+        try {
+            $peer = bakery_survey_find_dated_kind($db, $switchKind, $driverId, $targetDay);
+            $peerToken = (string)($peer['token'] ?? '');
+            if ($peerToken !== '' && $peerToken !== $token) {
+                safe_redirect('survey.php?t=' . rawurlencode($peerToken) . '&date=' . rawurlencode($targetDay));
+            }
+            if ($peerToken === '' && $user !== []) {
+                safe_redirect('survey.php?date=' . rawurlencode($targetDay));
+            }
+        } catch (Throwable $e) {
+            error_log('survey day switch: ' . $e->getMessage());
+        }
     }
 }
 
@@ -252,8 +277,43 @@ $error = trim((string)($_GET['err'] ?? ''));
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     bakery_require_csrf();
-    $action = (string)($_POST['action'] ?? '');
-    try {
+        $action = (string)($_POST['action'] ?? '');
+        try {
+        if ($action === 'switch_day' && $switchableKind) {
+            $postedDay = trim((string)($_POST['date'] ?? ''));
+            try {
+                $postedDay = bakery_survey_validate_ymd($postedDay);
+            } catch (RuntimeException $e) {
+                $postedDay = '';
+            }
+            if ($postedDay === $verifyDate) {
+                safe_redirect('survey.php?t=' . rawurlencode($token) . '&date=' . rawurlencode($verifyDate));
+            }
+            $targetDay = $postedDay === ''
+                ? ''
+                : bakery_survey_requested_switch_date($verifyDate, $postedDay, $todayYmd, $user !== []);
+            if ($targetDay === '') {
+                safe_redirect(
+                    'survey.php?t=' . rawurlencode($token)
+                    . '&date=' . rawurlencode($verifyDate)
+                    . '&err=' . rawurlencode((string)bakery_t(
+                        'survey.day_switch_rejected',
+                        [],
+                        'That day is outside the range. Choose today, a recent day, or a day in the next three weeks.'
+                    ))
+                );
+            }
+            $opened = bakery_survey_ensure_day_pair($db, $switchKind, $driverId, $targetDay, (int)($user['id'] ?? 0));
+            $openedToken = (string)($opened['token'] ?? '');
+            if ($openedToken === '') {
+                throw new RuntimeException((string)bakery_t(
+                    'survey.day_switch_rejected',
+                    [],
+                    'That day is outside the range. Choose today, a recent day, or a day in the next three weeks.'
+                ));
+            }
+            safe_redirect('survey.php?t=' . rawurlencode($openedToken) . '&date=' . rawurlencode($targetDay));
+        }
         if (($action === 'close' || $action === 'reopen') && $isManager) {
             bakery_survey_set_status($db, (int)$survey['id'], $action === 'close' ? 'closed' : 'open');
             safe_redirect('text_comms.php?view=surveys&survey=' . ($action === 'close' ? 'closed' : 'reopened'));
@@ -408,7 +468,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'Saved your list. Some route updates could not apply. Ask the bakery to check Driver Assignment.'
                 );
             }
-            if (empty($result['sms_ok'])) {
+            if (($result['sms_skipped'] ?? '') === 'already_sent') {
+                if ($routeTouched) {
+                    $done = (string)bakery_t(
+                        'survey.store_verify_sms_already_route',
+                        [],
+                        'Saved and updated the route. Headquarters already has the text for this day.'
+                    );
+                } elseif (empty($route['errors'])) {
+                    $done = (string)bakery_t(
+                        'survey.store_verify_sms_already',
+                        [],
+                        'Saved. Headquarters already has the text for this day.'
+                    );
+                }
+            } elseif (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.store_verify_sms_failed',
                     [],
@@ -472,7 +546,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
             $done = (string)bakery_t('survey.route_order_done', [], 'Order saved. Headquarters got the sequence.');
-            if (empty($result['sms_ok'])) {
+            if (($result['sms_skipped'] ?? '') === 'already_sent') {
+                $done = (string)bakery_t(
+                    'survey.route_order_sms_already',
+                    [],
+                    'Order saved. Headquarters already has the text for this day.'
+                );
+            } elseif (empty($result['sms_ok'])) {
                 $done = (string)bakery_t(
                     'survey.route_order_sms_failed',
                     [],
@@ -718,7 +798,8 @@ if ($showStoreVerify || $isHqStoreVerify) {
   .date-bar label { font-size: 12px; font-weight: 700; opacity: .7; display: grid; gap: 4px; flex: 1; min-width: 140px; }
   .date-bar input[type="date"] { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #d8d0c2; background: #fff; }
   .survey-day-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; width: 100%; }
-  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; }
+  .survey-day-chip-form { margin: 0; }
+  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
   .survey-day-chip--active { background: #2c5aa0; border-color: #2c5aa0; color: #fff; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
   .toolbar .btn { font-size: 13px; padding: 8px 11px; }
@@ -783,22 +864,7 @@ if ($showStoreVerify || $isHqStoreVerify) {
   <?php if ($error !== ''): ?><div class="flash err"><?php echo $esc($error); ?></div><?php endif; ?>
 
   <?php if ($showStoreVerify): ?>
-  <?php
-    $chipToday = date('Y-m-d');
-    $chipTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
-    $chipBase = 'survey.php?t=' . rawurlencode($token) . '&date=';
-  ?>
-  <div class="survey-day-chips" role="group" aria-label="<?php echo $esc(bakery_survey_text('survey.hub_day_aria', [], 'Choose delivery day')); ?>">
-    <a class="survey-day-chip<?php echo $verifyDate === $chipToday ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipToday)); ?>"<?php echo $verifyDate === $chipToday ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.today', [], 'Today')); ?></a>
-    <a class="survey-day-chip<?php echo $verifyDate === $chipTomorrow ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipTomorrow)); ?>"<?php echo $verifyDate === $chipTomorrow ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.tomorrow', [], 'Tomorrow')); ?></a>
-  </div>
-  <form class="date-bar" method="get" action="survey.php">
-    <input type="hidden" name="t" value="<?php echo $esc($token); ?>">
-    <label><?php echo $esc(bakery_survey_text('survey.store_verify_date', [], 'Delivery day')); ?>
-      <input type="date" name="date" value="<?php echo $esc($verifyDate); ?>" required>
-    </label>
-    <button type="submit" class="btn ghost"><?php echo $esc(bakery_survey_text('survey.store_verify_date_go', [], 'Show day')); ?></button>
-  </form>
+  <?php echo bakery_survey_day_switch_html($token, $verifyDate); ?>
   <?php endif; ?>
 
   <?php if ($isHqStoreVerify): ?>

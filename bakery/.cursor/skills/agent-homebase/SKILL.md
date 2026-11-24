@@ -20,7 +20,7 @@ Chat is steam. Homebase is the ledger. Read `docs/AGENT_DEVELOPMENT_MANUAL.md`.
 3. Use `mission_packet` and `craft_stanza`. `tests-for --files=` if you already know the paths.
 4. **Start:** `php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="one sentence"`
 5. **During:** `pin` decisions, `bug` durable defects, `note --kind=question` if blocked.
-6. **End:** `handoff` with eight numbered §10 fields. The CLI returns `handoff_score` and `map_suggestions`.
+6. **End:** run `php scripts/agent_homebase.php nag-check` yourself, then `handoff` with eight numbered §10 fields. The reminder is manual. Cursor does not post it into chat. The CLI returns `handoff_score` and `map_suggestions`.
 
 The CLI hops from the nightly mirror onto **`bakerysf_stage_local`**. Do not store craft on `bakerysf_test`.
 
@@ -46,6 +46,7 @@ php scripts/agent_homebase.php brief --agent=NAME --json
 php scripts/agent_homebase.php tests-for --files="a.php,lang/en.php" --json
 php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=NAME --mission="..."
+php scripts/agent_homebase.php nag-check
 php scripts/agent_homebase.php handoff --agent=NAME --summary="1. ... 8. ..." --files="path.php"
 php scripts/agent_homebase.php notes --kind=coach --json
 ```

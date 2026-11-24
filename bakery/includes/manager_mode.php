@@ -142,7 +142,7 @@ function bakery_manager_exception_save(PDO $db, array $exception, string $date, 
         bakery_record_operational_event(
             $db,
             'manager_exception_work_completed',
-            'Manager completed exception work: ' . (string)($exception['title'] ?? $exception['type'] ?? 'exception'),
+            'Manager completed exception work: ' . (string)($exception['title_en'] ?? $exception['title'] ?? $exception['type'] ?? 'exception'),
             [
                 'operational_date' => $date,
                 'customer_id' => !empty($ctx['customer_id']) ? (int)$ctx['customer_id'] : null,

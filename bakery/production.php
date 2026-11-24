@@ -711,6 +711,19 @@ if (!empty($groupedData) && is_array($groupedData)) {
                 <strong><?php echo htmlspecialchars($days[$selectedDay], ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(date('M j, Y', strtotime($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></strong>
                 <?php if (!$isBaker): ?>
                     <span class="bp-date-source"><?php echo htmlspecialchars($orderSourceLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php else: ?>
+                    <?php
+                    $bakerTodayYmd = date('Y-m-d');
+                    $bakerWhenKey = $selectedDate === $bakerTodayYmd
+                        ? 'today.when.today'
+                        : ($selectedDate === date('Y-m-d', strtotime($bakerTodayYmd . ' +1 day'))
+                            ? 'today.when.tomorrow'
+                            : ($selectedDate < $bakerTodayYmd ? 'today.when.past' : ''));
+                    $bakerDeliveryLine = $bakerWhenKey !== ''
+                        ? bakery_t('production.baker_delivery_day', ['when' => bakery_t($bakerWhenKey)])
+                        : bakery_t('production.baker_delivery_day_plain');
+                    ?>
+                    <span class="bp-date-source" data-baker-delivery-day="1"><?php echo htmlspecialchars($bakerDeliveryLine, ENT_QUOTES, 'UTF-8'); ?></span>
                 <?php endif; ?>
                 <?php if (!$isBaker && $planAvailable): ?>
                     <?php if ($planCommitted): ?>
@@ -743,10 +756,10 @@ if (!empty($groupedData) && is_array($groupedData)) {
                 <?php endif; ?>
             </div>
             <?php if ($planAvailable && !$planCommitted): ?>
-                <details class="bp-plan-note">
-                    <summary><?php bakery_te('production.baker_uncommitted_summary'); ?></summary>
-                    <p><?php bakery_te('production.uncommitted_banner_baker'); ?></p>
-                </details>
+                <p class="bp-plan-note bp-plan-note--uncommitted" role="status" data-baker-uncommitted="1">
+                    <strong><?php bakery_te('production.baker_uncommitted_summary'); ?></strong>
+                    <span><?php bakery_te('production.uncommitted_banner_baker'); ?></span>
+                </p>
             <?php elseif ($planCommitted && $planDriftCount > 0): ?>
                 <details class="bp-plan-note bp-plan-note--drift">
                     <summary><?php bakery_te('production.baker_drift_note'); ?></summary>
@@ -1230,6 +1243,9 @@ button.bp-pack-link { font: inherit; cursor: pointer; }
 .bp-plan-note summary { cursor: pointer; font-weight: 700; }
 .bp-plan-note p { margin: 6px 0 0; }
 .bp-plan-note--drift > summary { color: #ffd9a0; }
+.bp-plan-note--uncommitted { display: grid; gap: 2px; margin: 10px 0 0; padding: 8px 12px; border-radius: 10px; background: rgba(255, 217, 160, .16); font-size: .9rem; }
+.bp-plan-note--uncommitted strong { color: #ffd9a0; }
+.bp-plan-note--uncommitted span { opacity: .92; }
 .bp-commit-diff { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
 .bp-commit-diff__chip { background: rgba(255,255,255,.12); border-radius: 999px; padding: 4px 10px; font-weight: 700; color: #ffd9a0; }
 .bp-baker-help { margin: 0 0 14px; border: 1px solid #dbe7df; border-radius: 10px; background: #f8faf9; }

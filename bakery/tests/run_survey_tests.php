@@ -281,6 +281,26 @@ try {
     $stillNoOrder = bakery_survey_find_route_order($db, 0, $probeDate);
     $assert($stillNoOrder === [], 'route-order lookup stays read-only');
 
+    $switchFrom = '2099-02-02';
+    $switchTo = '2099-02-03';
+    $fromRow = bakery_survey_ensure_store_verify($db, 0, $switchFrom, 0);
+    $surveyIds[] = (int)$fromRow['id'];
+    $pair = bakery_survey_ensure_day_pair($db, 'store_verify', 0, $switchTo, 0);
+    $surveyIds[] = (int)$pair['id'];
+    $orderRow = bakery_survey_find_route_order($db, 0, $switchTo);
+    if (!empty($orderRow['id'])) {
+        $surveyIds[] = (int)$orderRow['id'];
+    }
+    $assert(substr((string)$pair['delivery_date'], 0, 10) === $switchTo, 'choosing another day opens that day');
+    $assert((string)$pair['token'] !== (string)$fromRow['token'], 'the original survey token stays on its own day');
+    $assert(
+        bakery_survey_bound_delivery_date($fromRow, $switchTo) === $switchFrom,
+        'switching days does not retarget the open token'
+    );
+    $assert(substr((string)($orderRow['delivery_date'] ?? ''), 0, 10) === $switchTo, 'set-order for that day opens with it');
+    $againPair = bakery_survey_ensure_day_pair($db, 'route_order', 0, $switchTo, 0);
+    $assert((int)$againPair['id'] === (int)$orderRow['id'], 'opening the same day again reuses the survey');
+
     $assert(function_exists('bakery_unassigned_for_date'), 'shared unassigned-for-date query exists');
     if (function_exists('bakery_unassigned_for_date')) {
         $gapDate = '2026-10-10';
@@ -348,10 +368,136 @@ try {
     $assert(strpos($surveyPhp, 'bakery_survey_token_is_expired') !== false, 'survey page rejects an expired token');
     $assert(strpos($surveyPhp, '!$expiredPublicToken && bakery_survey_page_needs_login') !== false, 'an expired public link shows the expired page without a login wall');
     $assert(strpos($surveyPhp, 'bakery_survey_bound_delivery_date') !== false, 'survey page keeps the token on its delivery date');
+    $assert(strpos($surveyPhp, "action === 'switch_day'") !== false, 'Today and other days open that day\'s survey');
+    $assert(strpos($routeOrderRender, 'bakery_survey_day_switch_html') !== false, 'route order uses the same day switch');
     $assert(strpos($surveyPhp, 'bakery_survey_record_interaction') === false, 'a survey page view does not write an open interaction');
     $assert(substr_count($surveyPhp, 'bakery_survey_dual_hub_links') === 1, 'creating hub rows happens in one POST path');
     $assert(strpos($routeOrderRender, 'bakery_survey_ensure_') === false, 'route-order render does not create surveys');
     $assert(strpos($routeOrderRender, 'bakery_survey_dual_hub_existing') !== false, 'route-order sibling link is a lookup');
+
+    // ---- HQ SMS debounce: six submits, one Twilio send -----------------------
+    $migrationPath = dirname(__DIR__) . '/database/schema/109_survey_hq_sms_sent.sql';
+    $migrationSql = (string)file_get_contents($migrationPath);
+    $assert(is_file($migrationPath) && strpos($migrationSql, 'CREATE TABLE IF NOT EXISTS survey_hq_sms_sent') !== false, 'migration 109 creates the HQ SMS marker');
+    require_once dirname(__DIR__) . '/includes/hosted_migration_runtime.php';
+    [$hostedSafe] = bakery_hosted_migration_sql_safe($migrationSql);
+    $assert($hostedSafe === true, '109 is an additive hosted migration');
+    foreach (array_filter(array_map('trim', preg_split('/;\s*\n/', $migrationSql) ?: [])) as $statement) {
+        if ($statement !== '') {
+            $db->exec($statement);
+        }
+    }
+    $schemaCache = &bakery_table_exists_cache();
+    unset($schemaCache['survey_hq_sms_sent']);
+
+    $hqSurvey = bakery_survey_create($db, [
+        'mode' => 'link',
+        'kind' => 'store_verify',
+        'audience' => 'driver',
+        'driver_id' => 0,
+        'delivery_date' => '2099-10-20',
+        'created_by' => 1,
+        'title' => 'HQ store verify',
+    ]);
+    $surveyIds[] = (int)$hqSurvey['id'];
+    $onStores = [];
+    for ($n = 1; $n <= 25; $n++) {
+        $onStores[] = ['id' => 8000 + $n, 'name' => 'La Palma Market ' . $n];
+    }
+    $hqFields = [
+        'survey_id' => (int)$hqSurvey['id'],
+        'driver_id' => 0,
+        'driver_name' => 'HQ',
+        'delivery_date' => '2099-10-20',
+        'on' => [],
+        'off' => [],
+        'added' => [],
+        'dropped' => [],
+        'drivers' => [[
+            'driver_id' => 1,
+            'driver_name' => 'Juan',
+            'on' => $onStores,
+            'added' => [['id' => 8099, 'name' => 'Extra Cafe']],
+            'dropped' => [],
+        ], [
+            'driver_id' => 2,
+            'driver_name' => 'Ana',
+            'on' => [['id' => 8101, 'name' => 'Sunset Stop']],
+            'added' => [],
+            'dropped' => [],
+        ]],
+        'staff_user_id' => 1,
+    ];
+    $savedRecordOnly = $GLOBALS['bakery_text_force_record_only'] ?? null;
+    $savedLive = $GLOBALS['bakery_text_force_live_ready'] ?? null;
+    $GLOBALS['bakery_text_force_record_only'] = null;
+    $GLOBALS['bakery_text_force_live_ready'] = true;
+    $GLOBALS['bakery_twilio_messaging_service_sid_override'] = 'MGbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    $hqCalls = 0;
+    $hqForm = [];
+    $GLOBALS['bakery_twilio_api_handler'] = static function (string $method, string $path, array $form) use (&$hqCalls, &$hqForm): array {
+        $hqCalls++;
+        $hqForm = $form;
+        return [
+            'sid' => 'SMhqdebounce' . str_pad((string)$hqCalls, 20, '0', STR_PAD_LEFT),
+            'status' => 'queued',
+            'from' => '+14155550999',
+        ];
+    };
+    $first = [];
+    for ($submit = 1; $submit <= 6; $submit++) {
+        $hqFields['drivers'][0]['on'] = $onStores;
+        if ($submit > 1) {
+            $hqFields['drivers'][0]['dropped'] = [['id' => 8001, 'name' => 'La Palma Market 1']];
+        }
+        $result = bakery_survey_store_verify_submit($db, $hqFields);
+        if (!empty($result['sms']['id'])) {
+            $messageIds[] = (int)$result['sms']['id'];
+        }
+        if ($submit === 1) {
+            $first = $result;
+        } else {
+            $assert(($result['sms_skipped'] ?? '') === 'already_sent', 'resubmit ' . $submit . ' sends nothing');
+        }
+    }
+    $sentBody = (string)($hqForm['Body'] ?? '');
+    $sentInfo = bakery_sms_segment_info($sentBody);
+    $assert($hqCalls === 1, 'six HQ submits produce one Twilio send');
+    $assert(!empty($first['recorded']) && !empty($first['sms']['ok']), 'the first submit records the survey and sends');
+    $assert(
+        ($hqForm['MessagingServiceSid'] ?? '') === 'MGbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            && !array_key_exists('From', $hqForm),
+        'the HQ send posts MessagingServiceSid'
+    );
+    $assert(
+        ($hqForm['To'] ?? '') === '+14155091210'
+            && strpos($sentBody, 'HQ 2099-10-20') !== false
+            && strpos($sentBody, 'Juan') !== false
+            && strpos($sentBody, (string)$hqSurvey['token']) !== false
+            && strpos($sentBody, 'La Palma') === false
+            && $sentInfo['segments'] <= 3,
+        'the one HQ text is a short summary plus the survey link'
+    );
+    $markerCount = (int)$db->query(
+        "SELECT COUNT(*) FROM survey_hq_sms_sent WHERE kind = 'store_verify' AND driver_id = 0 AND delivery_date = '2099-10-20'"
+    )->fetchColumn();
+    $assert($markerCount === 1, 'one debounce row marks the HQ page for that delivery date');
+
+    $juanFields = $hqFields;
+    $juanFields['driver_id'] = (int)$driverId;
+    $juanFields['driver_name'] = 'Juan';
+    $juanFields['drivers'] = [];
+    $juanFields['on'] = $onStores;
+    $juanResult = bakery_survey_store_verify_submit($db, $juanFields);
+    if (!empty($juanResult['sms']['id'])) {
+        $messageIds[] = (int)$juanResult['sms']['id'];
+    }
+    $assert($hqCalls === 2 && ($juanResult['sms_skipped'] ?? '') === '', 'a different driver on the same date can still send once');
+
+    unset($GLOBALS['bakery_twilio_api_handler'], $GLOBALS['bakery_twilio_messaging_service_sid_override']);
+    $GLOBALS['bakery_text_force_live_ready'] = $savedLive;
+    $GLOBALS['bakery_text_force_record_only'] = $savedRecordOnly;
+    $db->prepare('DELETE FROM survey_hq_sms_sent WHERE delivery_date = ?')->execute(['2099-10-20']);
 
     $commsPage = (string)file_get_contents(dirname(__DIR__) . '/text_comms.php');
     $assert(strpos($commsPage, 'texts.survey_today_create') !== false, 'Survey Center offers a Create today link button');

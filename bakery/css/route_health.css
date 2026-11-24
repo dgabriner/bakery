@@ -1,0 +1,98 @@
+.route-health {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 2.5rem;
+  color: #3b2a1d;
+}
+
+.route-health__header h1,
+.route-health__section h2,
+.route-health__section h3 {
+  margin: 0 0 0.35rem;
+}
+
+.route-health__header h1 {
+  font-size: 1.6rem;
+}
+
+.route-health__header p,
+.route-health__note,
+.route-health__empty,
+.route-health__section p {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.route-health__note,
+.route-health__empty {
+  color: #6d5a48;
+}
+
+.route-health__range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+  margin: 0.5rem 0 1rem;
+}
+
+.route-health__range label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 700;
+  flex: 1 1 12rem;
+}
+
+.route-health__range input,
+.route-health .sf-btn {
+  min-height: 44px;
+}
+
+.route-health__range input {
+  width: 100%;
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.route-health__section {
+  margin: 1.5rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e8dccb;
+}
+
+.route-health__banner {
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.6rem;
+  background: #f4efe8;
+}
+
+.route-health__banner.is-missed,
+.route-health__table tr.is-short {
+  background: #fde8e8;
+}
+
+.route-health__table a {
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.route-health .sf-table-wrap {
+  overflow-x: auto;
+  margin: 0.5rem 0 1rem;
+}
+
+@media (max-width: 640px) {
+  .route-health {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .route-health__range {
+    align-items: stretch;
+  }
+
+  .route-health .sf-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

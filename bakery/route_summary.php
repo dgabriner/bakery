@@ -45,6 +45,7 @@ require_once 'includes/nav.php';
       <p class="rs-subtitle"><?php bakery_te('route_summary.subtitle'); ?></p>
     </div>
     <div class="rs-header__actions">
+      <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_photo_journey.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('page.route_photo_journey'); ?></a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_manager.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('route_summary.board_link'); ?></a>
       <a class="sf-btn sf-btn--outline" href="<?php echo htmlspecialchars(BASE_URL . 'route_closeout.php?date=' . urlencode($selectedDate)); ?>"><?php bakery_te('route_summary.closeout_link'); ?></a>
     </div>
@@ -83,7 +84,7 @@ require_once 'includes/nav.php';
     <div><span><?php bakery_te('route_summary.stat_stops'); ?></span><strong><?php echo (int)$stats['stops']; ?></strong><small><?php echo (int)$stats['delivered']; ?> / <?php echo (int)$stats['stops']; ?> <?php bakery_te('route_summary.stat_delivered'); ?></small></div>
     <div><span><?php bakery_te('route_summary.stat_sold'); ?></span><strong><?php echo htmlspecialchars(bakery_route_summary_format_money((float)$stats['sold'])); ?></strong><small><?php echo (int)$stats['pieces']; ?> <?php bakery_te('route_summary.stat_pieces'); ?></small></div>
     <div><span><?php bakery_te('route_summary.stat_pod'); ?></span><strong><?php echo (int)$stats['pod_photo_count']; ?></strong><small><?php echo (int)$stats['with_photos']; ?> <?php bakery_te('route_summary.stops_with_proof'); ?></small></div>
-    <div<?php echo ((int)$stats['missing_photos'] > 0 || (int)$stats['arrival_only'] > 0) ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php if ((int)$stats['arrival_only'] > 0): ?><?php echo (int)$stats['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php else: ?><?php bakery_te('route_summary.missing_help'); ?><?php endif; ?></small></div>
+    <div<?php echo (int)$stats['missing_photos'] > 0 ? ' class="is-warn"' : ''; ?>><span><?php bakery_te('route_summary.stat_missing_photos'); ?></span><strong><?php echo (int)$stats['missing_photos']; ?></strong><small><?php if ((int)$stats['arrival_only'] > 0): ?><?php echo (int)$stats['arrival_only']; ?> <?php bakery_te('route_summary.arrival_only_short'); ?><?php else: ?><?php bakery_te('route_summary.missing_help'); ?><?php endif; ?></small></div>
   </section>
 
   <nav class="rs-filters" aria-label="<?php echo htmlspecialchars(bakery_t('route_summary.filter_label')); ?>">
@@ -93,7 +94,7 @@ require_once 'includes/nav.php';
   </nav>
 
   <?php if ((int)$stats['arrival_only'] > 0): ?>
-    <p class="rs-note rs-note--warn" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
+    <p class="rs-note" role="status"><?php echo htmlspecialchars(bakery_t('route_summary.arrival_only_help', ['count' => (int)$stats['arrival_only']]), ENT_QUOTES, 'UTF-8'); ?></p>
   <?php endif; ?>
 
   <?php if (!$day['photos_available']): ?>
@@ -136,7 +137,12 @@ require_once 'includes/nav.php';
               }
               $cardLabel = $stop['customer_name'] . ' - ' . bakery_route_summary_format_money((float)$stop['sold_amount']);
             ?>
-            <article class="rs-card status-<?php echo htmlspecialchars($status); ?><?php echo !empty($stop['arrival_only']) ? ' is-arrival-only' : ''; ?><?php echo $hero ? ' has-photo' : ' no-photo'; ?>" data-stop-id="<?php echo (int)$stop['daily_order_id']; ?>">
+            <?php
+              $visitState = (string)($stop['visit_state'] ?? $status);
+              $visitClass = preg_replace('/[^a-z_]/', '', $visitState) ?: 'pending';
+              $visitKey = bakery_route_summary_visit_status_key($visitState);
+            ?>
+            <article class="rs-card status-<?php echo htmlspecialchars($visitClass); ?><?php echo !empty($stop['arrival_only']) ? ' is-arrival-only' : ''; ?><?php echo $hero ? ' has-photo' : ' no-photo'; ?>" data-stop-id="<?php echo (int)$stop['daily_order_id']; ?>">
               <button type="button" class="rs-card__photo" data-photos="<?php echo htmlspecialchars(json_encode($photoPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>" data-customer="<?php echo htmlspecialchars((string)$stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars($hero ? bakery_t('route_summary.view_photos') . ': ' . $cardLabel : $cardLabel); ?>">
                 <?php if ($hero): ?>
                   <img src="<?php echo htmlspecialchars((string)$hero['url']); ?>" alt="" loading="lazy" data-fallback="<?php echo htmlspecialchars((string)($hero['fallback_url'] ?? '')); ?>" onerror="if(this.dataset.fallback && !this.dataset.tried){this.dataset.tried='1';this.src=this.dataset.fallback;}">
@@ -151,14 +157,14 @@ require_once 'includes/nav.php';
                   <span class="rs-card__placeholder">
                     <span class="rs-card__stop-num">#<?php echo (int)$stop['route_order']; ?></span>
                     <strong><?php bakery_te('route_summary.no_photo'); ?></strong>
-                    <em><?php bakery_te(bakery_route_summary_status_key($status)); ?></em>
+                    <em><?php bakery_te($visitKey); ?></em>
                   </span>
                 <?php endif; ?>
               </button>
               <div class="rs-card__body">
                 <div class="rs-card__title">
                   <a class="rs-card__customer" href="<?php echo htmlspecialchars(BASE_URL . 'customer_record.php?customer_id=' . (int)$stop['customer_id'] . '&date=' . urlencode($selectedDate)); ?>"><?php echo htmlspecialchars((string)$stop['customer_name']); ?></a>
-                  <span class="rs-status rs-status--<?php echo htmlspecialchars($status); ?>"><?php bakery_te(bakery_route_summary_status_key($status)); ?></span>
+                  <span class="rs-status rs-status--<?php echo htmlspecialchars($visitClass); ?>"><?php bakery_te($visitKey); ?></span>
                 </div>
                 <?php if (!empty($stop['arrival_only'])): ?>
                   <p class="rs-flag"><?php bakery_te('route_summary.arrival_only'); ?></p>

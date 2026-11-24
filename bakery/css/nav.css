@@ -40,6 +40,50 @@
   color: #ffe7b0;
 }
 
+.bakery-nav__mode {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+}
+
+.bakery-nav__mode-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: #f4fbf9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.1;
+  min-height: 36px;
+  padding: 0.3rem 0.7rem;
+}
+
+.bakery-nav__mode-btn:hover,
+.bakery-nav__mode-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  outline: none;
+}
+
+.bakery-nav__mode-btn--active,
+.bakery-nav__mode-btn--active:hover,
+.bakery-nav__mode-btn--active:focus-visible {
+  background: #fff;
+  color: #143532;
+}
+
+.bakery-nav__mode .bakery-nav__label-short {
+  display: none;
+}
+
 .bakery-nav__menu-toggle {
   align-items: center;
   background: rgba(255, 255, 255, 0.1);
@@ -67,8 +111,36 @@
   line-height: 1;
 }
 
+.bakery-nav__route-shortcut--compact .bakery-nav__label-full {
+  display: none;
+}
+
+.bakery-nav__route-shortcut--compact .bakery-nav__label-short {
+  display: inline;
+}
+
+@media (min-width: 721px) {
+  /* The wide bar already shows these as pills. Phones hide those pills, so Today stays in the menu. */
+  .bakery-nav__group--mode_focus {
+    display: none;
+  }
+}
+
+.bakery-nav:not(.bakery-nav--focused) .bakery-nav__section--mode_more > .bakery-nav__section-header {
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .bakery-nav__route-shortcut,
-.bakery-nav__billing-shortcut {
+.bakery-nav__billing-shortcut,
+.bakery-nav__staff-shortcut {
   background: var(--sf-accent);
   border: 1px solid var(--sf-accent-hover);
   border-radius: 999px;
@@ -105,11 +177,27 @@
   outline: none;
 }
 
+.bakery-nav__route-shortcut--active,
+.bakery-nav__route-shortcut--active:hover,
+.bakery-nav__route-shortcut--active:focus-visible {
+  background: #fff;
+  border-color: #fff;
+  color: #143532;
+}
+
+.bakery-nav__group--mode_more > .bakery-nav__panel {
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+}
+
 .bakery-nav__route-shortcut:hover,
 .bakery-nav__route-shortcut:focus-visible,
 .bakery-nav__billing-shortcut:hover,
 .bakery-nav__billing-shortcut:focus-visible,
-.bakery-nav__billing-shortcut--active {
+.bakery-nav__billing-shortcut--active,
+.bakery-nav__staff-shortcut:hover,
+.bakery-nav__staff-shortcut:focus-visible,
+.bakery-nav__staff-shortcut--active {
   background: var(--sf-accent-hover);
   outline: none;
 }
@@ -822,6 +910,19 @@
     padding: var(--sf-space-2) var(--sf-space-3);
   }
 
+  .bakery-nav__mode .bakery-nav__label-full {
+    display: none;
+  }
+
+  .bakery-nav__mode .bakery-nav__label-short {
+    display: inline;
+  }
+
+  .bakery-nav__mode-btn {
+    min-height: var(--sf-touch-min);
+    padding: 0.3rem 0.55rem;
+  }
+
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__brand-full {
     display: none;
   }
@@ -836,7 +937,8 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     font-size: 0.8rem;
     min-height: var(--sf-touch-min);
     padding: var(--sf-space-2) 0.65rem;
@@ -876,12 +978,14 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut .bakery-nav__label-full,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-full {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-full,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut .bakery-nav__label-full {
     display: none;
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut .bakery-nav__label-short,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-short {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut .bakery-nav__label-short,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut .bakery-nav__label-short {
     display: inline;
   }
 
@@ -1105,6 +1209,25 @@
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   }
 
+  /* The manager alert bell floats above the bottom bar (min-height 44px plus an
+     8px gap). Reserve that strip so it never covers a tap target at scroll end. */
+  body.workspace-manager {
+    --sf-manager-bar-h: calc(64px + env(safe-area-inset-bottom, 0px));
+    --sf-manager-bell-reserve: 56px;
+    padding-bottom: calc(92px + var(--sf-manager-bell-reserve) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Manager "view as driver" (driver.php under the manager bar): lift the sticky
+     docks above the bar and the bell, and keep the last stop clear of them. */
+  body.workspace-manager.driver-workflow-page .route-sticky-dock,
+  body.workspace-manager.driver-workflow-page .route-adjust-dock {
+    bottom: calc(var(--sf-manager-bar-h) + var(--sf-manager-bell-reserve));
+  }
+
+  body.workspace-manager.driver-workflow-page.route-has-sticky-dock {
+    padding-bottom: calc(var(--sf-manager-bar-h) + var(--sf-manager-bell-reserve) + var(--driver-dock-h, 72px) + 8px);
+  }
+
   .bakery-nav--focused {
     border-bottom: 0;
     border-top: 1px solid var(--sf-nav-border);
@@ -1176,7 +1299,8 @@
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__manager-shortcut,
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     display: none;
   }
 
@@ -1459,7 +1583,8 @@
   }
 
   .bakery-nav:not(.bakery-nav--focused) .bakery-nav__route-shortcut,
-  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut {
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__billing-shortcut,
+  .bakery-nav:not(.bakery-nav--focused) .bakery-nav__staff-shortcut {
     font-size: 0.78rem;
     padding: var(--sf-space-2) 9px;
   }
@@ -1567,4 +1692,42 @@
 .auth-bar .bakery-lang-switch--inline .bakery-lang-switch__btn--active {
   background: #fff;
   color: var(--sf-text, #1c2a26);
+}
+
+.bakery-nav--sales .bakery-nav__groups {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bakery-nav--sales .bakery-nav__direct {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  min-height: 48px;
+  padding: 0.55rem 0.85rem;
+}
+
+.bakery-nav--sales .bakery-nav__label-full {
+  display: inline;
+}
+
+.bakery-nav--sales .bakery-nav__label-short {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  body.workspace-sales {
+    padding-bottom: 1.5rem;
+  }
+
+  .bakery-nav--sales {
+    border-bottom: 1px solid var(--sf-nav-border);
+    border-top: 0;
+    bottom: auto;
+    box-shadow: none;
+    position: sticky;
+    top: 0;
+  }
 }

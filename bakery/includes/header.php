@@ -11,12 +11,13 @@ $isBakerUser = $authUser && $authRoleSlug === 'baker';
 $isDriverUser = $authUser && bakery_is_driver_route_role($authRoleSlug);
 $isManagerUser = $authUser && $authRoleSlug === 'manager';
 $isCashierUser = $authUser && $authRoleSlug === 'cashier';
-$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser || $isManagerUser || $isCashierUser;
+$isSalesUser = $authUser && $authRoleSlug === 'sales';
+$isFocusedWorkspaceUser = $isBakerUser || $isDriverUser || $isManagerUser || $isCashierUser || $isSalesUser;
 $showLocalDebugBanner = defined('IS_LOCAL') && IS_LOCAL && !$isBakerUser;
 $showStagingBanner = defined('IS_STAGING') && IS_STAGING;
 $workspaceBodyClass = $isDriverUser
     ? 'workspace-driver'
-    : ($isBakerUser ? 'workspace-baker' : ($isManagerUser ? 'workspace-manager' : ($isCashierUser ? 'workspace-cashier' : ($authUser ? 'workspace-ops' : ''))));
+    : ($isBakerUser ? 'workspace-baker' : ($isManagerUser ? 'workspace-manager' : ($isCashierUser ? 'workspace-cashier' : ($isSalesUser ? 'workspace-sales' : ($authUser ? 'workspace-ops' : '')))));
 if (!function_exists('bakery_user_can_control_auto_push')) {
     $autoPushControlPath = __DIR__ . '/auto_push_control.php';
     if (is_file($autoPushControlPath)) {
@@ -36,6 +37,9 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="app-base-url" content="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if (!empty($pageColorScheme)): ?>
+    <meta name="color-scheme" content="<?php echo htmlspecialchars((string)$pageColorScheme, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
     <?php require __DIR__ . '/client_refresh.php'; ?>
     <?php require_once __DIR__ . '/google_analytics.php'; ?>
     <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -47,12 +51,21 @@ $currentLocale = function_exists('bakery_locale') ? bakery_locale() : 'en';
     <meta name="login-audit-session" content="<?php echo (int)bakery_login_audit_current_id(); ?>">
     <script src="<?php echo bakery_asset_href('includes/csrf.js'); ?>"></script>
     <?php endif; ?>
+    <?php
+    if ($authUser && in_array((string)$authRoleSlug, ['administrator', 'manager', 'driver', 'driver_assistant', 'sales'], true)) {
+        require_once __DIR__ . '/daily_order_generation.php';
+        bakery_demand_self_heal_render_beacon();
+    }
+    ?>
     <title><?php echo isset($page_title) ? $page_title . ' - ' : ''; ?><?php echo SITE_NAME; ?></title>
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/tokens.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/base.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/nav.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/kitchen.css'); ?>">
     <link rel="stylesheet" href="<?php echo bakery_asset_href('css/styles.css'); ?>">
+    <?php if (in_array($current_page, ['sales_home', 'leads'], true)): ?>
+    <link rel="stylesheet" href="<?php echo bakery_asset_href('css/sales_home.css'); ?>">
+    <?php endif; ?>
     <script defer src="<?php echo bakery_asset_href('includes/shell.js'); ?>"></script>
     <?php if ($authUser): ?>
     <script>

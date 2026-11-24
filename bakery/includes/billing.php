@@ -136,7 +136,10 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
         if ($delivered !== null && !$isStoreCredit) {
             $lineTotal = round($unitPrice * $delivered, 2);
         }
-        $orderedPieces += $ordered;
+        $isSpecialOrder = !empty($item['is_special_order']);
+        if (!$isSpecialOrder) {
+            $orderedPieces += $ordered;
+        }
         $lineTotalSum += $lineTotal;
 
         $variance = null;
@@ -154,7 +157,8 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
         $noChargeReason = isset($item['no_charge_reason']) && $item['no_charge_reason'] !== ''
             ? (string)$item['no_charge_reason']
             : null;
-        if ($ordered > 0 && $unitPrice <= 0 && !$isNoCharge) {
+        $enteredSpecialPrice = !empty($item['is_special_order']);
+        if ($ordered > 0 && $unitPrice <= 0 && !$isNoCharge && !$enteredSpecialPrice) {
             $missingLinePrice = true;
         }
 
@@ -168,7 +172,6 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
             'variance' => $variance,
             'unit_price' => $unitPrice,
             'line_total' => $lineTotal,
-            'has_price' => $unitPrice > 0 || $isNoCharge,
             'is_store_credit' => $isStoreCredit ? 1 : 0,
             'is_no_charge' => $isNoCharge ? 1 : 0,
             'no_charge_reason' => $isNoCharge ? $noChargeReason : null,
@@ -178,6 +181,8 @@ function bakery_billing_classify_order(array $order, array $items, ?array $atten
             ]) : '',
             'is_match' => $variance === null || $variance === 0,
             'delivered_quantity_estimated' => (int)($item['delivered_quantity_estimated'] ?? 0) === 1 ? 1 : 0,
+            'is_special_order' => $isSpecialOrder ? 1 : 0,
+            'has_price' => $unitPrice > 0 || $isNoCharge || $isSpecialOrder,
         ];
     }
 
@@ -512,6 +517,15 @@ function bakery_billing_load_items(PDO $db, array $orderIds) {
             $item['product_name'] = $removedName;
         }
         $itemsByOrder[(int)$item['daily_order_id']][] = $item;
+    }
+    if (!function_exists('bakery_special_order_append_billing_items')) {
+        $specialPath = __DIR__ . '/special_orders.php';
+        if (is_file($specialPath)) {
+            require_once $specialPath;
+        }
+    }
+    if (function_exists('bakery_special_order_append_billing_items')) {
+        bakery_special_order_append_billing_items($db, $itemsByOrder, array_values($orderIds));
     }
     return $itemsByOrder;
 }

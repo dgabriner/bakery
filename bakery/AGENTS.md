@@ -11,8 +11,11 @@ php scripts/agent_homebase.php brief --agent=YOUR-MISSION --json
 php scripts/agent_homebase.php tests-for --files="a.php,b.php" --json
 php scripts/agent_homebase.php craft --json
 php scripts/agent_homebase.php start --agent=YOUR-MISSION --mission="..."
+php scripts/agent_homebase.php nag-check
 php scripts/agent_homebase.php handoff --agent=YOUR-MISSION --summary="1. ... 8. ..." --files="..."
 ```
+
+The handoff reminder is manual. Run `php scripts/agent_homebase.php nag-check` (or handoff) yourself before ending a session. Cursor does not post that reminder into chat.
 
 The CLI hops onto `bakerysf_stage_local` (durable ledger). Tests use `bakerysf_test` (wiped by the test gate). Never write craft to the nightly mirror.
 
@@ -22,7 +25,7 @@ Skills: `.cursor/skills/agent-homebase/SKILL.md`, `test-gate`, `close-a-loop`, `
 
 **Live ops login:** when the owner asks who is signed in or how live routes are doing, use `.cursor/skills/live-ops-login/SKILL.md` with env secrets `BAKERY_LIVE_AGENT_CODE` (manager) and `BAKERY_LIVE_ADMIN_CODE` (admin / Login History). Never commit the codes.
 
-Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`. New schema files take the next unused `NNN` (`php scripts/next_schema_migration.php --name=slug`); do not reuse 062 or rename applied migrations.
+Close loops. Do not add modules. Dated beats standing per customer. Never price historical invoices from live catalog prices. i18n in both `lang/en.php` and `lang/es.php`. Local/test database only unless the owner explicitly authorizes production. Staging auto-push must never target `bakery.sourflour.org/bake`. New schema files take the next unused `NNN` (`php scripts/next_schema_migration.php --name=slug`). 114 and 115 are Live-only ledger rows, so the next file starts at 116. Do not reuse 062, 114, or 115, and do not rename applied migrations. Never change a user's role with a migration. Role changes go through the Staff page.
 
 ## Sync — every Cursor surface (desktop, cloud, mobile)
 

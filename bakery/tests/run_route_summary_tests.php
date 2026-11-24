@@ -232,8 +232,8 @@ foreach ($coverage['drivers'][0]['stops'] ?? [] as $stop) {
     $coverageStops[(string)$stop['customer_name']] = $stop;
 }
 route_summary_assert(
-    'a delivered stop counts as with photo only when it has a proof photo',
-    (int)$coverage['stats']['with_photos'] === 2
+    'a delivered stop counts as with photo when it has an arrival or leaving photo',
+    (int)$coverage['stats']['with_photos'] === 3
 );
 route_summary_assert(
     'arrival and proof photos are counted separately',
@@ -241,9 +241,9 @@ route_summary_assert(
         && (int)$coverage['stats']['pod_photo_count'] === 2
 );
 route_summary_assert(
-    'delivered stops with only an arrival photo are flagged and counted as missing proof',
+    'arrival-only stops are noted but count as proof; only the stop with no photo is missing',
     (int)$coverage['stats']['arrival_only'] === 1
-        && (int)$coverage['stats']['missing_photos'] === 3
+        && (int)$coverage['stats']['missing_photos'] === 1
         && !empty($coverageStops['Arrival Only']['arrival_only'])
         && empty($coverageStops['Arrival Only']['has_pod_photo'])
         && !empty($coverageStops['Arrival Only']['has_arrival_photo'])
@@ -251,6 +251,8 @@ route_summary_assert(
         && !empty($coverageStops['Proof After']['has_pod_photo'])
         && !empty($coverageStops['Proof Receipt']['has_pod_photo'])
         && empty($coverageStops['Pending Arrival']['arrival_only'])
+        && ($coverageStops['Pending Arrival']['visit_state'] ?? '') === 'arrived_not_closed'
+        && ($coverageStops['Arrival Only']['visit_state'] ?? '') === 'delivered'
 );
 $coverageMissing = bakery_route_summary_build_day($coverageDrivers, $coveragePhotos, 'missing');
 $coverageMissingNames = array_map(static function ($stop) {
@@ -258,8 +260,8 @@ $coverageMissingNames = array_map(static function ($stop) {
 }, $coverageMissing['drivers'][0]['stops'] ?? []);
 sort($coverageMissingNames);
 route_summary_assert(
-    'missing-photo filter includes delivered stops that only have an arrival photo',
-    $coverageMissingNames === ['Arrival Only', 'No Photo', 'Pending Arrival']
+    'missing-photo filter lists only stops with no photo at all',
+    $coverageMissingNames === ['No Photo']
 );
 $coverageWith = bakery_route_summary_build_day($coverageDrivers, $coveragePhotos, 'photos');
 $coverageWithNames = array_map(static function ($stop) {
@@ -267,8 +269,8 @@ $coverageWithNames = array_map(static function ($stop) {
 }, $coverageWith['drivers'][0]['stops'] ?? []);
 sort($coverageWithNames);
 route_summary_assert(
-    'with-photo filter keeps proof photos and drops arrival-only stops',
-    $coverageWithNames === ['Proof After', 'Proof Receipt']
+    'with-photo filter keeps arrival and leaving photos',
+    $coverageWithNames === ['Arrival Only', 'Pending Arrival', 'Proof After', 'Proof Receipt']
 );
 
 $page = (string)file_get_contents($root . '/route_summary.php');
@@ -300,6 +302,7 @@ $requiredKeys = [
     'route_summary.filter_missing',
     'route_summary.no_photo',
     'route_summary.arrival_only',
+    'route_summary.status_arrived_not_closed',
     'route_summary.arrival_only_help',
     'route_summary.stops_with_proof',
     'closeout.stops_heading',
@@ -347,9 +350,9 @@ route_summary_assert(
 $photoHandlerSrc = (string)file_get_contents($root . '/includes/photo_handler.php');
 $shopPhotoSrc = (string)file_get_contents($root . '/includes/shop_photo_handler.php');
 route_summary_assert(
-    'Driver photo URLs are not hard-coded to the site-root host',
+    'Driver photo URLs go through the login handler',
     strpos($photoHandlerSrc, 'https://bakery.sourflour.org/uploads/driver_photos/') === false
-        && strpos($photoHandlerSrc, "return bakery_upload_display_url('driver_photos'") !== false
+        && strpos($photoHandlerSrc, 'driver_photo.php?file=') !== false
 );
 route_summary_assert(
     'Shop photo URLs are not hard-coded to the site-root host',

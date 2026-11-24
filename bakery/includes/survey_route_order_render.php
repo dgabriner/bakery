@@ -7,6 +7,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/pan_carry.php';
+
 $isHq = $driverId <= 0;
 $hqGroups = $isHq ? bakery_survey_route_order_hq_data($db, $verifyDate) : [];
 $driverData = $isHq
@@ -40,8 +42,9 @@ $pageTitle = (string)bakery_survey_text('survey.page_title', [], 'Survey');
 $esc = static function ($s): string {
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 };
+$carryLabels = bakery_pan_carry_labels_for_date($db, $verifyDate);
 
-$renderBoard = static function (array $locked, array $movable, int $formDriverId) use ($esc): void {
+$renderBoard = static function (array $locked, array $movable, int $formDriverId) use ($esc, $carryLabels): void {
     $total = count($movable);
     ?>
     <div class="ro-board" data-ro-board data-driver-id="<?php echo (int)$formDriverId; ?>" data-total="<?php echo (int)$total; ?>">
@@ -76,6 +79,12 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
             ?>
           <button type="button" class="ro-store" data-ro-store data-order-id="<?php echo $oid; ?>" data-name="<?php echo $esc($name); ?>">
             <span class="ro-name"><?php echo $esc($name); ?></span>
+            <?php
+            $carry = $carryLabels[(int)($row['customer_id'] ?? 0)] ?? null;
+            if (is_array($carry) && (string)($carry['label'] ?? '') !== '') {
+                echo '<span class="pan-carry-label">' . $esc((string)$carry['label']) . '</span>';
+            }
+            ?>
           </button>
         <?php endforeach; ?>
       </div>
@@ -110,7 +119,8 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   .date-bar label { font-size: 11px; font-weight: 700; opacity: .7; display: grid; gap: 3px; flex: 1; min-width: 130px; }
   .date-bar input[type="date"] { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d0c2; background: #fff; }
   .survey-day-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; width: 100%; }
-  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; }
+  .survey-day-chip-form { margin: 0; }
+  .survey-day-chip { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid #d8d0c2; background: #fff; color: #24303e; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
   .survey-day-chip--active { background: #2c5aa0; border-color: #2c5aa0; color: #fff; }
   .links-card { background: #fff; border: 1px solid #e4ddd2; border-radius: 10px; padding: 8px 10px; margin: 0 0 10px; font-size: 13px; }
   .links-card .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #efe9df; }
@@ -130,6 +140,10 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
   .ro-remaining { display: grid; gap: 5px; }
   .ro-store { width: 100%; text-align: left; background: #fff; border: 1.5px solid #d8d0c2; border-radius: 10px; padding: 9px 11px; min-height: 40px; cursor: pointer; font-weight: 600; font-size: 14px; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
   .ro-store:active { background: #eef3fa; border-color: #2c5aa0; }
+  .route-load-warning { background: #fff6e5; border: 1px solid #e6c98a; border-radius: 10px; padding: 8px 10px; margin: 0 0 10px; }
+  .route-load-warning-line { margin: 0 0 2px; font-weight: 700; }
+  .route-load-warning-samples { margin: 0 0 6px; font-size: 12px; opacity: .75; }
+  .pan-carry-label { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; background: #fff6e5; color: #8a5a00; border-radius: 999px; padding: 2px 6px; }
   .ro-store.is-picked { display: none; }
   .submit-bar { position: sticky; bottom: 0; background: #f6f3ee; padding: 8px 0 2px; z-index: 5; }
   .submit-bar .btn { width: 100%; padding: 12px 14px; font-size: 15px; }
@@ -153,23 +167,9 @@ $renderBoard = static function (array $locked, array $movable, int $formDriverId
     <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_order_sub', ['date' => $verifyDate], 'Tap stores in the order you will deliver on :date')); ?></p>
   <?php endif; ?>
   <p class="sub"><?php echo $esc(bakery_survey_text('survey.route_order_hint', [], 'Tap remaining stores one by one.')); ?></p>
+  <?php echo bakery_route_load_warning_html($db, $verifyDate, is_array($user ?? null) ? $user : null, $isHq ? 0 : (int)$driverId); ?>
 
-  <?php
-    $chipToday = date('Y-m-d');
-    $chipTomorrow = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
-    $chipBase = 'survey.php?t=' . rawurlencode($token) . '&date=';
-  ?>
-  <div class="survey-day-chips" role="group" aria-label="<?php echo $esc(bakery_survey_text('survey.hub_day_aria', [], 'Choose delivery day')); ?>">
-    <a class="survey-day-chip<?php echo $verifyDate === $chipToday ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipToday)); ?>"<?php echo $verifyDate === $chipToday ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.today', [], 'Today')); ?></a>
-    <a class="survey-day-chip<?php echo $verifyDate === $chipTomorrow ? ' survey-day-chip--active' : ''; ?>" href="<?php echo $esc($chipBase . rawurlencode($chipTomorrow)); ?>"<?php echo $verifyDate === $chipTomorrow ? ' aria-current="date"' : ''; ?>><?php echo $esc(bakery_survey_text('common.tomorrow', [], 'Tomorrow')); ?></a>
-  </div>
-  <form class="date-bar" method="get" action="survey.php">
-    <input type="hidden" name="t" value="<?php echo $esc($token); ?>">
-    <label><?php echo $esc(bakery_survey_text('survey.store_verify_date', [], 'Delivery day')); ?>
-      <input type="date" name="date" value="<?php echo $esc($verifyDate); ?>">
-    </label>
-    <button type="submit" class="btn ghost"><?php echo $esc(bakery_survey_text('survey.store_verify_date_go', [], 'Show day')); ?></button>
-  </form>
+  <?php echo bakery_survey_day_switch_html($token, $verifyDate); ?>
 
   <?php if ($isHq): ?>
   <div class="links-card">

@@ -1061,6 +1061,75 @@
     color: #6c757d;
 }
 
+.route-load-warning {
+    margin: 0 0 0.75rem;
+}
+
+.route-load-warning-line {
+    margin: 0 0 0.15rem;
+    font-weight: 700;
+}
+
+.route-load-warning-samples {
+    margin: 0 0 0.45rem;
+    font-size: 0.85rem;
+}
+
+.route-load-settings {
+    margin: 0 0 1rem;
+    background: #fff;
+    border: 1px solid #e4ddd2;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+}
+
+.route-load-settings-form,
+.route-load-override-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.8rem;
+    align-items: end;
+    margin-top: 0.6rem;
+}
+
+.route-load-settings label,
+.route-load-override-form label {
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+}
+
+.route-load-estimate {
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+
+.pan-carry-label {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #fff6e5;
+    color: #8a5a00;
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+}
+
+.pan-carry-remove-form {
+    display: inline;
+    margin-left: 0.35rem;
+}
+
+.pan-carry-remove {
+    font: inherit;
+    font-size: 0.8rem;
+    border: 1px solid #c9b89a;
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+}
+
 .btn-link {
     background: none;
     border: none;

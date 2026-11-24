@@ -197,8 +197,25 @@ function bakery_daily_order_recompute_total(PDO $db, int $orderId): float
     );
     $stmt->execute([$orderId, $orderId]);
     $get->execute([$orderId]);
+    $panTotal = (float)$get->fetchColumn();
 
-    return (float)$get->fetchColumn();
+    // special_orders.php includes this file. require_once is safe once both exist.
+    if (!function_exists('bakery_special_order_chargeable_total')) {
+        $specialPath = __DIR__ . '/special_orders.php';
+        if (is_file($specialPath)) {
+            require_once $specialPath;
+        }
+    }
+    if (function_exists('bakery_special_order_chargeable_total')) {
+        $special = bakery_special_order_chargeable_total($db, $orderId, false);
+        if ($special > 0) {
+            $panTotal = round($panTotal + $special, 2);
+            $db->prepare('UPDATE daily_orders SET total_amount = ? WHERE id = ?')
+                ->execute([$panTotal, $orderId]);
+        }
+    }
+
+    return $panTotal;
 }
 
 require_once __DIR__ . '/customer_portal.php';

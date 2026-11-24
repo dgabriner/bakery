@@ -65,6 +65,12 @@ cache_assert('login does not force scrollTo on mobile', strpos($login, 'keepMobi
 
 $htaccess = file_get_contents($root . '/.htaccess');
 cache_assert('Apache HTML/PHP responses are not stored', strpos($htaccess, 'no-store') !== false);
+cache_assert(
+    'fingerprinted static assets cache for a year only when ?v= is present',
+    strpos($htaccess, '%{QUERY_STRING} =~ /(^|&)v=/') !== false
+        && strpos($htaccess, 'max-age=31536000, immutable') !== false
+);
+cache_assert('static text responses are compressed', strpos($htaccess, 'AddOutputFilterByType DEFLATE') !== false);
 
 $buildEndpoint = file_get_contents($root . '/build_id.php');
 cache_assert('build_id endpoint returns bakery_client_build_id', strpos($buildEndpoint, 'bakery_client_build_id()') !== false);

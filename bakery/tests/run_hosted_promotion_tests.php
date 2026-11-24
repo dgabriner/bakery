@@ -44,6 +44,16 @@ foreach (['staging_update.php', 'oven_light.php', 'proof_window.php'] as $tourPa
         exit(1);
     }
 }
+foreach (['seed_portal_session_router.php', 'sf20.html'] as $strayPage) {
+    if (!bakery_staging_live_skip_name($strayPage)) {
+        fwrite(STDERR, "FAIL\n - hosted Live skip missing: {$strayPage}\n");
+        exit(1);
+    }
+    if (in_array($strayPage, $paths, true)) {
+        fwrite(STDERR, "FAIL\n - stray page included in Live snapshot: {$strayPage}\n");
+        exit(1);
+    }
+}
 $again = bakery_staging_live_snapshot_files();
 if (array_column($files, 'sha256') !== array_column($again, 'sha256')) {
     fwrite(STDERR, "FAIL\n - hash cache changed snapshot hashes\n");

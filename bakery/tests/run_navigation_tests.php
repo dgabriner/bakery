@@ -35,11 +35,12 @@ function navigation_test_group_keys($role) {
 if (!defined('BASE_URL')) {
     define('BASE_URL', '/');
 }
-function navigation_test_render_nav($role, $page = 'index') {
+function navigation_test_render_nav($role, $page = 'index', $mode = 'full') {
     $_SESSION = [
         'user_id' => 999,
         'user_role_slug' => $role,
         'user_display_name' => 'Navigation Test',
+        'admin_workspace_mode' => $mode,
     ];
     $_SERVER['PHP_SELF'] = '/' . $page . '.php';
     ob_start();
@@ -132,7 +133,9 @@ $adminNav = navigation_test_render_nav('administrator', 'users');
 navigation_test_assert(strpos($adminNav, 'bakery-nav--ops') !== false, 'administrator navigation uses the operations mobile shell');
 navigation_test_assert(strpos($adminNav, 'bakery-nav__billing-shortcut') !== false, 'administrator navigation includes a Billing Center shortcut');
 navigation_test_assert(strpos($adminNav, 'billing_center.php') !== false, 'administrator navigation links to Billing Center');
-navigation_test_assert(strpos($adminNav, 'User Management') !== false, 'administrator navigation still includes User Management');
+navigation_test_assert(strpos($adminNav, 'Staff') !== false, 'administrator navigation includes Staff');
+navigation_test_assert(strpos($adminNav, 'users.php') !== false, 'administrator navigation links Staff to users.php');
+navigation_test_assert(strpos($managerNav, 'users.php') === false, 'manager navigation omits Staff');
 navigation_test_assert(strpos($adminNav, 'Shop Photos') !== false, 'administrator navigation labels Shop Photos');
 navigation_test_assert(strpos($adminNav, 'nav.item.cashier_shop_photos') === false, 'administrator navigation does not show the Shop Photos translation key');
 navigation_test_assert(strpos($adminNav, 'call_headquarters.php') !== false, 'administrator navigation includes Call Headquarters');
@@ -173,6 +176,8 @@ navigation_test_assert($usageCounts['occasional'] >= 10, 'occasional bucket incl
 
 navigation_test_assert(function_exists('bakery_role_home'), 'role home helper exists');
 navigation_test_assert(bakery_role_home('cashier') === 'time_clock.php', 'cashier home is the time clock');
+navigation_test_assert(bakery_role_home('sales') === 'sales_home.php', 'sales home is Sales Home');
+navigation_test_assert(bakery_ops_index_bypass_home('sales') === 'sales_home.php', 'sales hitting the ops dashboard land on Sales Home');
 navigation_test_assert(bakery_role_uses_dedicated_home('cashier') === true, 'cashier login must not keep a default next of index.php');
 navigation_test_assert(bakery_role_uses_dedicated_home('administrator') === false, 'administrators keep the requested next URL');
 navigation_test_assert(bakery_ops_index_bypass_home('cashier') === 'time_clock.php', 'cashiers hitting the ops dashboard are sent to the time clock');
@@ -199,6 +204,21 @@ $headerSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/header.php'
 navigation_test_assert(strpos($headerSrc, 'workspace-cashier') !== false, 'header treats cashier as a focused workspace');
 $navCss = (string)file_get_contents(dirname(__DIR__) . '/css/nav.css');
 navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups') !== false, 'nav.css lays out the cashier focused bar');
+$phoneNavCss = (string)(preg_split('/@media \(max-width: 720px\) \{\s*body\.workspace-driver,/', $navCss)[1] ?? '');
+navigation_test_assert(
+    strpos($phoneNavCss, '--sf-manager-bell-reserve: 56px') !== false
+        && preg_match('/body\.workspace-manager \{[^}]*padding-bottom:\s*calc\(92px \+ var\(--sf-manager-bell-reserve\)/s', $phoneNavCss) === 1,
+    'nav.css reserves bottom space for the manager alert bell on phones'
+);
+navigation_test_assert(
+    preg_match('/body\.workspace-manager\.driver-workflow-page \.route-sticky-dock,\s*body\.workspace-manager\.driver-workflow-page \.route-adjust-dock \{[^}]*bottom:\s*calc\(var\(--sf-manager-bar-h\) \+ var\(--sf-manager-bell-reserve\)\)/s', $phoneNavCss) === 1,
+    'nav.css lifts the view-as-driver docks above the manager bar and bell'
+);
+$managerPhoneCss = (string)file_get_contents(dirname(__DIR__) . '/css/manager_phone.css');
+navigation_test_assert(
+    preg_match('/body\.workspace-manager \{[^}]*padding-bottom:\s*calc\(92px \+ var\(--sf-manager-bell-reserve, 56px\)/s', $managerPhoneCss) === 1,
+    'manager_phone.css keeps the bell reserve instead of overriding it back to 92px'
+);
 
 $bakerNav = navigation_test_render_nav('baker', 'production');
 navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
@@ -314,5 +334,55 @@ $moduleGuideSrc = file_get_contents($rootDir . '/module_guide.php');
 navigation_test_assert(strpos($moduleGuideSrc, 'Mix Today') !== false, 'module guide baker blurb includes Mix Today');
 $accessGuideSrc = file_get_contents($rootDir . '/docs/MODULE_ACCESS_GUIDE.md');
 navigation_test_assert(strpos($accessGuideSrc, 'Mix Today') !== false, 'MODULE_ACCESS_GUIDE documents Mix Today for bakers');
+
+navigation_test_assert(bakery_admin_workspace_mode_allows('full', 'billing_center.php'), 'full admin mode keeps every screen');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'route_manager.php'), 'driver manager mode keeps the route board');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'driver_assignment.php'), 'driver manager mode keeps route planning');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'complete_delivery.php'), 'driver manager mode keeps delivery confirmation');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('driver', 'billing_center.php'), 'driver manager mode strips billing');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('driver', 'production_center.php'), 'driver manager mode strips the bake hub');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'standing_orders_manager.php'), 'production manager mode keeps standing orders');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'daily_orders.php'), 'production manager mode keeps daily orders');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'production_center.php'), 'production manager mode keeps the bake hub');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('production', 'route_manager.php'), 'production manager mode strips the route board');
+navigation_test_assert(!bakery_admin_workspace_mode_allows('production', 'billing_center.php'), 'production manager mode strips billing');
+navigation_test_assert(bakery_admin_workspace_mode_home('driver') === 'route_manager.php', 'driver manager mode opens on the route board');
+navigation_test_assert(bakery_admin_workspace_mode_home('production') === 'standing_orders_manager.php', 'production manager mode opens on standing orders');
+
+$driverModeNav = navigation_test_render_nav('administrator', 'route_manager', 'driver');
+navigation_test_assert(strpos($driverModeNav, 'name="bakery_admin_mode"') !== false, 'administrator navigation can switch workspace mode');
+navigation_test_assert(strpos($driverModeNav, 'value="driver"') !== false, 'driver manager mode is one of the switches');
+navigation_test_assert(strpos($driverModeNav, 'billing_center.php') === false, 'driver manager navigation hides billing');
+navigation_test_assert(strpos($driverModeNav, 'production_center.php') === false, 'driver manager navigation hides the bake hub');
+navigation_test_assert(strpos($driverModeNav, 'route_manager.php') !== false, 'driver manager navigation keeps the route board');
+navigation_test_assert(strpos($driverModeNav, 'delivery_manager_review.php') !== false, 'driver manager bar keeps delivery review');
+navigation_test_assert(strpos($driverModeNav, 'driver.php?change_driver=1') !== false, 'driver manager bar keeps my route');
+navigation_test_assert(strpos($driverModeNav, 'text_comms.php"') === false, 'driver manager navigation drops the full text center');
+navigation_test_assert(strpos($driverModeNav, 'text_comms.php?view=surveys') !== false, 'driver manager navigation keeps Survey Center');
+navigation_test_assert(strpos($driverModeNav, 'map.php') !== false, 'driver manager still links the map under More');
+navigation_test_assert(strpos($driverModeNav, 'drivers.php') !== false, 'driver manager still links driver records under More');
+navigation_test_assert(substr_count($driverModeNav, '<details class="bakery-nav__group') === 2, 'driver manager menu is Today plus More');
+navigation_test_assert(strpos($driverModeNav, 'bakery-nav__group--mode_focus') !== false, 'driver manager keeps Today for the phone menu');
+navigation_test_assert(strpos($navCss, '.bakery-nav__group--mode_focus') !== false, 'wide screens hide Today because the bar already shows it');
+navigation_test_assert(bakery_admin_workspace_mode_allows('driver', 'map.php'), 'hiding the map from the bar does not close the page');
+
+$productionModeNav = navigation_test_render_nav('administrator', 'standing_orders_manager', 'production');
+navigation_test_assert(strpos($productionModeNav, 'standing_orders_manager.php') !== false, 'production manager navigation keeps standing orders');
+navigation_test_assert(strpos($productionModeNav, 'daily_orders.php') !== false, 'production manager navigation keeps daily orders');
+navigation_test_assert(strpos($productionModeNav, 'production_manager.php') !== false, 'production manager bar keeps the dough board');
+navigation_test_assert(strpos($productionModeNav, 'production_center.php') !== false, 'production manager bar keeps the bake hub');
+navigation_test_assert(strpos($productionModeNav, 'pack_list.php') !== false, 'production manager bar keeps packing');
+navigation_test_assert(strpos($productionModeNav, 'ingredient_requirements.php') !== false, 'production manager still links the ingredient planner under More');
+navigation_test_assert(strpos($productionModeNav, 'special_orders.php') !== false, 'production manager still links special orders under More');
+navigation_test_assert(strpos($productionModeNav, 'route_manager.php') === false, 'production manager navigation hides the route board');
+navigation_test_assert(strpos($productionModeNav, 'users.php') === false, 'production manager navigation hides staff admin');
+navigation_test_assert(substr_count($productionModeNav, '<details class="bakery-nav__group') === 2, 'production manager menu is Today plus More');
+navigation_test_assert(bakery_admin_workspace_mode_allows('production', 'ingredient_requirements.php'), 'hiding the ingredient planner from the bar does not close the page');
+
+$fullModeNav = navigation_test_render_nav('administrator', 'index', 'full');
+navigation_test_assert(substr_count($fullModeNav, '<details class="bakery-nav__group') > 3, 'full admin keeps the grouped menu');
+
+$managerWithMode = navigation_test_render_nav('manager', 'manager', 'driver');
+navigation_test_assert(strpos($managerWithMode, 'name="bakery_admin_mode"') === false, 'manager navigation does not offer admin workspace modes');
 
 exit($failed === 0 ? 0 : 1);

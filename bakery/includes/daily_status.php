@@ -90,11 +90,12 @@ function bakery_daily_status_public_blocker(array $exception): array
         'type' => (string)($exception['type'] ?? ''),
         'severity' => (string)($exception['severity'] ?? ''),
         'stage' => (string)($exception['stage'] ?? ''),
-        'title' => (string)($exception['title'] ?? ''),
-        'detail' => (string)($exception['detail'] ?? ''),
+        // The public status JSON stays English and stable whatever language the viewer uses.
+        'title' => (string)($exception['title_en'] ?? $exception['title'] ?? ''),
+        'detail' => (string)($exception['detail_en'] ?? $exception['detail'] ?? ''),
         'count' => array_key_exists('count', $exception) ? $exception['count'] : null,
         'href' => isset($exception['href']) ? (string)$exception['href'] : null,
-        'action' => (string)($exception['action'] ?? ''),
+        'action' => (string)($exception['action_en'] ?? $exception['action'] ?? ''),
     ];
 }
 
@@ -361,8 +362,8 @@ function bakery_daily_status_stops(PDO $db, string $date): array
                 'driver_name' => $driverName,
                 'delivery_status' => $deliveryStatus,
                 'delivered_at' => bakery_daily_status_delivered_at($delivery),
-                'photo_present' => $podUrl !== '',
-                'photo_url' => $podUrl !== '' ? $podUrl : null,
+                'photo_present' => $podUrl !== '' || $arrivalUrl !== '',
+                'photo_url' => $podUrl !== '' ? $podUrl : ($arrivalUrl !== '' ? $arrivalUrl : null),
                 'pod_photo_present' => $podUrl !== '',
                 'arrival_photo_present' => $arrivalUrl !== '',
                 'arrival_photo_url' => $arrivalUrl !== '' ? $arrivalUrl : null,
@@ -389,7 +390,7 @@ function bakery_daily_status_photo_coverage(array $stops): array
             continue;
         }
         $delivered++;
-        if (!empty($stop['pod_photo_present'])) {
+        if (!empty($stop['pod_photo_present']) || !empty($stop['arrival_photo_present'])) {
             $withProof++;
         }
         if (!empty($stop['arrival_only'])) {

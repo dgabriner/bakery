@@ -218,37 +218,47 @@ function bakery_driver_assignment_action_sync_driver_route(PDO $db, array $input
     }
 
     $restoreLabels = [];
+    $missingStops = [];
     foreach (bakery_route_missing_standing_by_driver($db, $deliveryDate) as $group) {
         if ((int)$group['driver_id'] === $driverId) {
             $restoreLabels = $group['labels'];
+            $missingStops = $group['stops'];
             break;
         }
     }
 
-    bakery_generate_daily_orders_from_standing($db, $deliveryDate, [
-        'overwrite_changed' => false,
-        'record_event' => true,
-        'assign_routes' => false,
-    ]);
-
-    $assignments = [];
-    foreach ($routeStops as $index => $stop) {
-        $dailyOrderId = bakery_daily_order_find_or_create($db, (int)$stop['customer_id'], $deliveryDate);
-        $assignments[] = [
-            'daily_order_id' => $dailyOrderId,
-            'route_order' => $index + 1,
+    if ($missingStops === []) {
+        return [
+            'success' => true,
+            'message' => bakery_t('driver_assignment.restore_done_none', [
+                'driver' => (string)$driverRow['name'],
+            ]),
+            'stores' => [],
         ];
     }
 
-    $result = bakery_driver_assign_orders($db, $driverId, $deliveryDate, $assignments, 'append');
-
-    if ($restoreLabels === []) {
-        $message = bakery_t('driver_assignment.restore_done_none', [
-            'driver' => (string)$driverRow['name'],
+    $assignments = [];
+    foreach ($missingStops as $stop) {
+        $customerId = (int)($stop['customer_id'] ?? 0);
+        if ($customerId <= 0) {
+            continue;
+        }
+        bakery_generate_daily_orders_from_standing($db, $deliveryDate, [
+            'overwrite_changed' => false,
+            'record_event' => false,
+            'assign_routes' => false,
+            'only_customer_id' => $customerId,
         ]);
-    } else {
-        $message = bakery_route_restore_done_message($restoreLabels, (string)$driverRow['name']);
+        $dailyOrderId = bakery_daily_order_find_or_create($db, $customerId, $deliveryDate);
+        $assignments[] = [
+            'daily_order_id' => $dailyOrderId,
+            'route_order' => (int)($stop['route_order'] ?? 0),
+        ];
     }
+
+    bakery_driver_assign_orders($db, $driverId, $deliveryDate, $assignments, 'append');
+
+    $message = bakery_route_restore_done_message($restoreLabels, (string)$driverRow['name']);
 
     return [
         'success' => true,
@@ -325,6 +335,13 @@ function bakery_driver_assignment_action_add_customer_to_route(PDO $db, array $i
     if (!$saveStandingRoute) {
         $standingOrderLines = [];
     }
+    $options = [];
+    if ((string)($input['restore_standing'] ?? '0') === '1') {
+        $options['restore_standing'] = true;
+    }
+    if ((string)($input['keep_empty'] ?? '0') === '1') {
+        $options['keep_empty'] = true;
+    }
 
     $result = bakery_driver_add_customer_to_route(
         $db,
@@ -333,8 +350,18 @@ function bakery_driver_assignment_action_add_customer_to_route(PDO $db, array $i
         $deliveryDate,
         $saveStandingRoute,
         $standingOrderLines,
-        $applyPanDulce
+        $applyPanDulce,
+        $options
     );
+    if (!empty($result['needs_restore'])) {
+        return [
+            'success' => false,
+            'needs_restore' => true,
+            'message' => $result['message'],
+            'daily_order_id' => $result['daily_order_id'],
+            'customer_name' => $result['customer_name'] ?? '',
+        ];
+    }
 
     return [
         'success' => true,

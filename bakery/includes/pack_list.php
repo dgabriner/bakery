@@ -6,6 +6,8 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/production_plan.php';
+
 function bakery_pack_line_key(int $customerId, int $productId): string
 {
     return 'c' . $customerId . '_p' . $productId;
@@ -19,6 +21,43 @@ function bakery_pack_line_key_valid(string $key): bool
 function bakery_pack_progress_ready(PDO $db): bool
 {
     return function_exists('table_exists') && table_exists($db, 'pack_progress');
+}
+
+/**
+ * How many of the day's operating demand lines are checked off on the Pack List.
+ * Lines are the same customer x product keys the Pack List uses, so a stale check
+ * for a line that no longer exists never inflates the count.
+ *
+ * @param list<array<string,mixed>> $operatingLines Rows with customer_id, product_id, quantity
+ * @return array{tracking:bool,total:int,packed:int}
+ */
+function bakery_pack_day_progress(PDO $db, string $date, array $operatingLines): array
+{
+    $keys = [];
+    foreach ($operatingLines as $line) {
+        $customerId = (int)($line['customer_id'] ?? 0);
+        $productId = (int)($line['product_id'] ?? 0);
+        if ($customerId <= 0 || $productId <= 0 || (int)($line['quantity'] ?? 0) <= 0) {
+            continue;
+        }
+        $keys[bakery_pack_line_key($customerId, $productId)] = true;
+    }
+    $progress = ['tracking' => false, 'total' => count($keys), 'packed' => 0];
+    if (!bakery_pack_progress_ready($db)) {
+        return $progress;
+    }
+    $progress['tracking'] = true;
+    if ($keys === []) {
+        return $progress;
+    }
+    $stmt = $db->prepare('SELECT line_key FROM pack_progress WHERE pack_date = ?');
+    $stmt->execute([$date]);
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $checkedKey) {
+        if (isset($keys[(string)$checkedKey])) {
+            $progress['packed']++;
+        }
+    }
+    return $progress;
 }
 
 function bakery_pack_set_checked(PDO $db, string $date, string $lineKey, bool $checked, ?int $userId): void
@@ -62,6 +101,55 @@ function bakery_pack_mark_keys(PDO $db, string $date, array $lineKeys, ?int $use
     $count = $db->prepare('SELECT COUNT(*) FROM pack_progress WHERE pack_date = ?');
     $count->execute([$date]);
     return (int)$count->fetchColumn();
+}
+
+/**
+ * True when commit tracking is installed and this delivery date has no committed
+ * bake plan. When commit tables are missing the answer is false: the page says
+ * nothing rather than guessing.
+ */
+function bakery_pack_plan_uncommitted(PDO $db, string $date): bool
+{
+    try {
+        return bakery_production_plan_commits_ready($db)
+            && bakery_production_plan_commit_get($db, $date) === null;
+    } catch (Throwable $e) {
+        error_log('pack_list plan state: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Pack lines in $lineKeys that are not yet checked off.
+ *
+ * @param list<string> $lineKeys
+ * @param array<string,bool> $checkedMap line_key => true
+ */
+function bakery_pack_unpacked_count(array $lineKeys, array $checkedMap): int
+{
+    $count = 0;
+    foreach ($lineKeys as $key) {
+        if (!isset($checkedMap[$key])) {
+            $count++;
+        }
+    }
+    return $count;
+}
+
+/**
+ * onsubmit attribute (with leading space) that asks the user to confirm.
+ * Empty message returns an empty string.
+ */
+function bakery_pack_confirm_attr(string $message): string
+{
+    if ($message === '') {
+        return '';
+    }
+    $encoded = json_encode(
+        $message,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+    );
+    return ' onsubmit="return confirm(' . htmlspecialchars((string)$encoded, ENT_QUOTES, 'UTF-8') . ')"';
 }
 
 /**

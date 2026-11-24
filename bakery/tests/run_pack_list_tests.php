@@ -89,6 +89,25 @@ $focus = bakery_pack_phone_focus_state([9, 3, 7], 3);
 $assert($focus['current'] === 3 && $focus['prev'] === 9 && $focus['next'] === 7, 'phone focus prev/next around middle');
 $assert(strpos($loadSrc, 'backfill_day') !== false && strpos($loadSrc, 'mark_produced_qty') !== false, 'Load board can mark missing production');
 
+// Live review wave 1: one tap must not write a false pack record or invent the bake.
+$assert(bakery_pack_unpacked_count(['c1_p1', 'c2_p2', 'c3_p3'], ['c2_p2' => true]) === 2, 'unpacked count skips checked lines');
+$assert(bakery_pack_unpacked_count([], ['c2_p2' => true]) === 0, 'unpacked count of no lines is zero');
+$assert(bakery_pack_confirm_attr('') === '', 'empty confirm message adds no onsubmit');
+$confirmAttr = bakery_pack_confirm_attr('Pack "12" lines <now>?');
+$assert(strpos($confirmAttr, 'onsubmit="return confirm(') !== false && strpos($confirmAttr, '<now>') === false, 'confirm attribute escapes markup');
+$assert(strpos($packSrc, 'pack_list.pack_all_confirm') !== false, 'Pack List asks before pack all');
+$assert(strpos($packSrc, 'pack_list.pack_driver_confirm') !== false, 'Pack List asks before pack this driver');
+$assert(
+    strpos($packSrc, 'class="pack-btn pack-btn--primary"><?php bakery_te(\'pack_list.pack_all\')') === false,
+    'Pack all is not the primary button'
+);
+$assert(strpos($packSrc, 'pack_list.plan_not_committed') !== false, 'Pack List shows a plan-not-committed first line');
+$assert(strpos($packSrc, 'pack_list.no_production_body_uncommitted') !== false, 'Backfill banner has uncommitted wording');
+if (function_exists('bakery_production_plan_commits_ready') && bakery_production_plan_commits_ready($db)) {
+    $noCommitDate = date('Y-m-d', strtotime('+2000 days'));
+    $assert(bakery_pack_plan_uncommitted($db, $noCommitDate) === true, 'a date with no commit reports uncommitted');
+}
+
 if (bakery_inventory_ready($db)) {
     $productIds = $db->query('SELECT id FROM products ORDER BY id LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
     $productA = (int)($productIds[0] ?? 0);

@@ -54,6 +54,195 @@ function bakery_upload_display_url(string $bucket, string $storedPath, ?string $
     return $prefix . $tail;
 }
 
+/**
+ * Driver, customer, and Before/After/Receipt token in a delivery photo name.
+ * The filename is who took the photo. The driver_photos columns can be wrong.
+ *
+ * @return array{driver_id:int,customer_id:int,photo_type:string}|null
+ */
+function bakery_driver_photo_parse_filename(string $name): ?array
+{
+    if ($name === '' || !preg_match('/driver(\d+)_customer(\d+)_(Before|After|Receipt)(?:_|\.|$)/', $name, $matches)) {
+        return null;
+    }
+    return [
+        'driver_id' => (int)$matches[1],
+        'customer_id' => (int)$matches[2],
+        'photo_type' => $matches[3],
+    ];
+}
+
+/**
+ * Filename driver wins over driver_photos.driver_id.
+ *
+ * @param array<string, mixed> $photo
+ */
+function bakery_driver_photo_credited_driver_id(array $photo): int
+{
+    foreach (['filename', 'file_path', 'original_filename'] as $key) {
+        $parsed = bakery_driver_photo_parse_filename((string)($photo[$key] ?? ''));
+        if ($parsed !== null) {
+            return $parsed['driver_id'];
+        }
+    }
+    return (int)($photo['driver_id'] ?? 0);
+}
+
+/**
+ * Path under uploads/driver_photos. Empty when the value leaves that folder.
+ */
+function bakery_driver_photo_relative_path(string $stored): string
+{
+    $stored = str_replace('\\', '/', trim($stored));
+    if ($stored === '' || strpos($stored, "\0") !== false) {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $stored)) {
+        $stored = (string)(parse_url($stored, PHP_URL_PATH) ?? '');
+    }
+    if (preg_match('#(?:^|/)uploads/driver_photos/(.+)$#', $stored, $matches)) {
+        $stored = $matches[1];
+    }
+    $stored = ltrim($stored, '/');
+    if ($stored === '' || strpos($stored, '..') !== false || !preg_match('#^[A-Za-z0-9._/-]+$#', $stored)) {
+        return '';
+    }
+    return $stored;
+}
+
+/**
+ * Login-gated display URL. Does not point at the public uploads folder.
+ */
+function bakery_driver_photo_url(string $stored, ?string $base = null): string
+{
+    if ($base === null) {
+        $base = defined('BASE_URL') ? (string)BASE_URL : '/';
+    }
+    if ($base === '') {
+        $base = '/';
+    }
+    $relative = bakery_driver_photo_relative_path($stored);
+    return rtrim($base, '/') . '/driver_photo.php?file=' . rawurlencode($relative);
+}
+
+/**
+ * Real file under uploads/driver_photos, or empty when it is missing or escapes.
+ */
+function bakery_driver_photo_disk_path(string $stored): string
+{
+    $relative = bakery_driver_photo_relative_path($stored);
+    if ($relative === '') {
+        return '';
+    }
+    $base = realpath(dirname(__DIR__) . '/uploads/driver_photos');
+    if ($base === false) {
+        return '';
+    }
+    $candidate = $base . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+    $real = realpath($candidate);
+    if ($real === false || !is_file($real)) {
+        return '';
+    }
+    $prefix = rtrim($base, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+    if (strpos($real, $prefix) !== 0) {
+        return '';
+    }
+    return $real;
+}
+
+function bakery_driver_photo_mime(string $path): string
+{
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    switch ($ext) {
+        case 'jpg':
+        case 'jpeg':
+            return 'image/jpeg';
+        case 'png':
+            return 'image/png';
+        case 'webp':
+            return 'image/webp';
+        default:
+            return 'image/jpeg';
+    }
+}
+
+/**
+ * @return array<string, mixed>|null
+ */
+function bakery_driver_photo_find(PDO $db, int $id, string $relative): ?array
+{
+    if (!function_exists('table_exists') || !table_exists($db, 'driver_photos')) {
+        return null;
+    }
+    if ($id > 0) {
+        $stmt = $db->prepare('SELECT * FROM driver_photos WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+    if ($relative === '') {
+        return null;
+    }
+    $stmt = $db->prepare(
+        'SELECT * FROM driver_photos WHERE file_path = ? OR file_path = ? OR filename = ? LIMIT 1'
+    );
+    $stmt->execute([$relative, 'uploads/driver_photos/' . $relative, basename($relative)]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/**
+ * Manager and administrator may read any delivery photo. A driver may read
+ * only the photo whose filename names their route identity. Logged-out and
+ * other roles are refused before any path is resolved.
+ *
+ * @param array<string, mixed>|null $user
+ * @return array{status:int,path:string,mime:string}
+ */
+function bakery_driver_photo_authorize(PDO $db, ?array $user, int $id, string $file): array
+{
+    $denied = static function (int $status): array {
+        return ['status' => $status, 'path' => '', 'mime' => ''];
+    };
+    $role = strtolower(trim((string)($user['role_slug'] ?? '')));
+    if ($user === null || $role === '') {
+        return $denied(403);
+    }
+    $allowed = ['administrator', 'manager', 'driver', 'driver_assistant'];
+    if (!in_array($role, $allowed, true)) {
+        return $denied(403);
+    }
+    $relative = bakery_driver_photo_relative_path($file);
+    if ($id <= 0 && $relative === '') {
+        return $denied(404);
+    }
+    $row = bakery_driver_photo_find($db, $id, $relative);
+    if ($row === null) {
+        return $denied(404);
+    }
+    if ($role === 'driver' || $role === 'driver_assistant') {
+        $deliveryDate = (string)($row['delivery_date'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
+            $deliveryDate = date('Y-m-d');
+        }
+        $workerId = function_exists('bakery_route_worker_driver_id')
+            ? bakery_route_worker_driver_id($db, $user, $deliveryDate)
+            : (int)($user['driver_id'] ?? 0);
+        if ($workerId !== bakery_driver_photo_credited_driver_id($row)) {
+            return $denied(403);
+        }
+    }
+    $disk = bakery_driver_photo_disk_path((string)($row['file_path'] ?? ''));
+    if ($disk === '') {
+        return $denied(404);
+    }
+    return [
+        'status' => 200,
+        'path' => $disk,
+        'mime' => bakery_driver_photo_mime($disk),
+    ];
+}
+
 class PhotoHandler {
     
     private $uploadDir;
@@ -358,8 +547,8 @@ class PhotoHandler {
      * @return string Full URL to photo
      */
     public function getPhotoUrl($filePath, $thumbnail = false) {
-        // CSS sizes the main image. The URL always follows the app base path.
-        return bakery_upload_display_url('driver_photos', (string)$filePath);
+        // CSS sizes the main image. The handler checks login before reading the file.
+        return bakery_driver_photo_url((string)$filePath);
     }
     
     /**

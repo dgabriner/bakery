@@ -152,6 +152,9 @@ function bakery_square_order_line_items(array $invoice): array
 {
     $lines = [];
     foreach ($invoice['items'] ?? [] as $item) {
+        if (!empty($item['is_special_order'])) {
+            continue;
+        }
         $qty = $item['delivered_quantity'] !== null && $item['delivered_quantity'] !== ''
             ? (int)$item['delivered_quantity']
             : (int)($item['quantity'] ?? 0);

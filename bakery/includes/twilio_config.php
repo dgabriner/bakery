@@ -16,6 +16,19 @@ define('TWILIO_AUTH_TOKEN', (string)($_ENV['TWILIO_AUTH_TOKEN'] ?? getenv('TWILI
 define('TWILIO_FROM_NUMBER', (string)($_ENV['TWILIO_FROM_NUMBER'] ?? getenv('TWILIO_FROM_NUMBER') ?: ''));
 define('TWILIO_MESSAGING_SERVICE_SID', (string)($_ENV['TWILIO_MESSAGING_SERVICE_SID'] ?? getenv('TWILIO_MESSAGING_SERVICE_SID') ?: ''));
 
+/**
+ * A2P Messaging Service SID. Tests may set
+ * $GLOBALS['bakery_twilio_messaging_service_sid_override'] (including '')
+ * to force either branch without rewriting the process environment.
+ */
+function bakery_twilio_messaging_service_sid(): string
+{
+    if (array_key_exists('bakery_twilio_messaging_service_sid_override', $GLOBALS)) {
+        return trim((string)$GLOBALS['bakery_twilio_messaging_service_sid_override']);
+    }
+    return trim((string)TWILIO_MESSAGING_SERVICE_SID);
+}
+
 // Optional public URL that receives delivery status callbacks (sent → delivered/failed).
 define('TWILIO_STATUS_CALLBACK_URL', (string)($_ENV['TWILIO_STATUS_CALLBACK_URL'] ?? getenv('TWILIO_STATUS_CALLBACK_URL') ?: ''));
 

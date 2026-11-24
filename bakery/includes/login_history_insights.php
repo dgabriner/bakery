@@ -18,6 +18,27 @@ function bakery_login_history_views(): array
     return ['overview', 'time', 'usage', 'live', 'records', 'client_errors'];
 }
 
+/**
+ * Who may open Login History.
+ * Administrators get the whole page. Managers may only read client errors.
+ *
+ * @return array{allowed:bool, read_only:bool}
+ */
+function bakery_login_history_access(?array $user, string $view, string $method, string $export): array
+{
+    $role = strtolower(trim((string)($user['role_slug'] ?? '')));
+    $method = strtoupper(trim($method));
+    $view = strtolower(trim($view));
+    $export = strtolower(trim($export));
+    if ($role === 'administrator') {
+        return ['allowed' => true, 'read_only' => false];
+    }
+    if ($role === 'manager' && $method === 'GET' && $view === 'client_errors' && $export === '') {
+        return ['allowed' => true, 'read_only' => true];
+    }
+    return ['allowed' => false, 'read_only' => true];
+}
+
 function bakery_login_history_ranges(): array
 {
     return ['today', '7d', '14d', '30d', 'all'];

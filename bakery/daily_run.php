@@ -11,6 +11,7 @@ require_once 'includes/daily_run.php';
 require_once 'includes/driver_assignments.php';
 require_once 'includes/operational_exceptions.php';
 require_once 'includes/driver_day_sms.php';
+require_once 'includes/pan_carry.php';
 
 $user = bakery_current_user();
 if ($user && bakery_is_driver_route_role($user['role_slug'] ?? '')) {
@@ -62,6 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'delivery_date' => $postDate,
             ]);
             $flash = (string)($restored['message'] ?? '');
+            $selectedDate = $postDate;
+        } elseif ($action === 'remove_pan_carry') {
+            bakery_require_role(['administrator', 'manager']);
+            $removed = bakery_pan_carry_remove($db, (int)($_POST['carry_id'] ?? 0), (int)($user['id'] ?? 0) ?: null);
+            $flash = $removed ? bakery_t('pan_carry.removed') : bakery_t('pan_carry.remove_failed');
             $selectedDate = $postDate;
         }
     } catch (Throwable $e) {
@@ -164,6 +170,48 @@ require_once 'includes/nav.php';
             </div>
         <?php endif; ?>
 
+        <section class="dr-hero" aria-label="<?php bakery_te('daily_run.progress_aria'); ?>">
+            <div class="dr-progress-ring">
+                <span class="dr-progress-count"><?php echo (int)$dailyRun['progress']['complete']; ?></span>
+                <span class="dr-progress-of">/ <?php echo (int)$dailyRun['progress']['total']; ?></span>
+            </div>
+            <div class="dr-hero-body">
+                <h2><?php echo htmlspecialchars($dailyRun['progress']['label']); ?></h2>
+                <?php if ($dailyRun['next_action']): ?>
+                    <p class="dr-next-prompt"><?php bakery_te('daily_run.what_next'); ?></p>
+                    <a class="dr-next-action" href="<?php echo htmlspecialchars($dailyRun['next_action']['href']); ?>">
+                        <span class="dr-next-step"><?php echo htmlspecialchars(bakery_t('daily_run.step_n', ['n' => (int)$dailyRun['next_action']['step']])); ?></span>
+                        <strong><?php echo htmlspecialchars($dailyRun['next_action']['label']); ?></strong>
+                        <span class="dr-next-cta"><?php echo htmlspecialchars($dailyRun['next_action']['action_label']); ?> →</span>
+                    </a>
+                <?php else: ?>
+                    <p class="dr-next-prompt"><?php bakery_te('daily_run.all_clear'); ?></p>
+                <?php endif; ?>
+                <?php if ($dailyRun['later_in_progress']): ?>
+                    <p class="dr-parallel-note">
+                        <?php echo htmlspecialchars(bakery_t('daily_run.parallel_work', [
+                            'stage' => $dailyRun['later_in_progress']['label'],
+                        ])); ?>
+                    </p>
+                <?php endif; ?>
+            </div>
+            <div class="dr-hero-links">
+                <a class="ops-quick-link dr-hub-link" href="<?php echo htmlspecialchars($dailyRun['links']['index']); ?>">
+                    <?php bakery_te('nav.item.index'); ?>
+                </a>
+            </div>
+        </section>
+
+        <?php $routedZeroCount = (int)($dailyRun['routed_zero']['count'] ?? 0); ?>
+        <?php if ($routedZeroCount > 0): ?>
+            <div class="ops-alert ops-alert-danger" role="alert">
+                <?php echo htmlspecialchars(bakery_t('daily_run.routed_zero_count', ['count' => $routedZeroCount])); ?>
+                <a href="<?php echo htmlspecialchars(bakery_ops_link_daily_orders($selectedDate, ['review' => 'routed_zero'], 'daily_run')); ?>"><?php bakery_te('daily_run.routed_zero_link'); ?></a>
+            </div>
+        <?php endif; ?>
+
+        <?php echo bakery_route_day_flags_html($db, $selectedDate, $user); ?>
+
         <?php
         $routeRestoreGroups = [];
         if (function_exists('bakery_route_missing_standing_by_driver')) {
@@ -227,39 +275,9 @@ require_once 'includes/nav.php';
             </section>
         <?php endif; ?>
 
-        <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
-
-        <section class="dr-hero" aria-label="<?php bakery_te('daily_run.progress_aria'); ?>">
-            <div class="dr-progress-ring">
-                <span class="dr-progress-count"><?php echo (int)$dailyRun['progress']['complete']; ?></span>
-                <span class="dr-progress-of">/ <?php echo (int)$dailyRun['progress']['total']; ?></span>
-            </div>
-            <div class="dr-hero-body">
-                <h2><?php echo htmlspecialchars($dailyRun['progress']['label']); ?></h2>
-                <?php if ($dailyRun['next_action']): ?>
-                    <p class="dr-next-prompt"><?php bakery_te('daily_run.what_next'); ?></p>
-                    <a class="dr-next-action" href="<?php echo htmlspecialchars($dailyRun['next_action']['href']); ?>">
-                        <span class="dr-next-step"><?php echo htmlspecialchars(bakery_t('daily_run.step_n', ['n' => (int)$dailyRun['next_action']['step']])); ?></span>
-                        <strong><?php echo htmlspecialchars($dailyRun['next_action']['label']); ?></strong>
-                        <span class="dr-next-cta"><?php echo htmlspecialchars($dailyRun['next_action']['action_label']); ?> →</span>
-                    </a>
-                <?php else: ?>
-                    <p class="dr-next-prompt"><?php bakery_te('daily_run.all_clear'); ?></p>
-                <?php endif; ?>
-                <?php if ($dailyRun['later_in_progress']): ?>
-                    <p class="dr-parallel-note">
-                        <?php echo htmlspecialchars(bakery_t('daily_run.parallel_work', [
-                            'stage' => $dailyRun['later_in_progress']['label'],
-                        ])); ?>
-                    </p>
-                <?php endif; ?>
-            </div>
-            <div class="dr-hero-links">
-                <a class="ops-quick-link dr-hub-link" href="<?php echo htmlspecialchars($dailyRun['links']['index']); ?>">
-                    <?php bakery_te('nav.item.index'); ?>
-                </a>
-            </div>
-        </section>
+        <?php if ($selectedDate >= $today): ?>
+            <?php bakery_render_demand_cadence_strip($db, $today, 'daily_run'); ?>
+        <?php endif; ?>
 
         <?php if ($driverSmsBlocks !== []): ?>
         <section class="dr-driver-sms" aria-label="<?php echo htmlspecialchars(bakery_t('daily_run.driver_sms_title')); ?>">

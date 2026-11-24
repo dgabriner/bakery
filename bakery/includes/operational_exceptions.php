@@ -93,7 +93,47 @@ function bakery_ops_category_stage(string $category): string
 }
 
 /**
+ * Localized text for one exception field (title, detail, or action).
+ *
+ * The English wording written at the call site stays canonical: it is the
+ * fallback when a catalog key is missing, it is kept in `<field>_en` for
+ * machine consumers (daily status JSON, audit log lines), and exception
+ * identity never depends on it (see bakery_manager_exception_key()).
+ *
+ * `<field>_key` is a catalog key, or a [one, many] pair chosen by `count`.
+ * `<field>_params` adds placeholders; `count` is always available as :count.
+ *
+ * @param array<string, mixed> $fields
+ */
+function bakery_ops_exception_text(array $fields, string $field, string $default = ''): string
+{
+    $english = (string)($fields[$field . '_en'] ?? $fields[$field] ?? $default);
+    $key = $fields[$field . '_key'] ?? '';
+    if (is_array($key)) {
+        $count = $fields['count'] ?? null;
+        $key = $count !== null && (int)$count === 1
+            ? (string)($key[0] ?? '')
+            : (string)($key[1] ?? $key[0] ?? '');
+    }
+    $key = (string)$key;
+    if ($key === '' || !function_exists('bakery_t')) {
+        return $english;
+    }
+    $params = is_array($fields[$field . '_params'] ?? null) ? $fields[$field . '_params'] : [];
+    if (!array_key_exists('count', $params) && ($fields['count'] ?? null) !== null) {
+        $params['count'] = number_format((int)$fields['count']);
+    }
+    $text = bakery_t($key, $params);
+    return ($text === '' || $text === $key) ? $english : $text;
+}
+
+/**
  * Build a normalized operational exception array.
+ *
+ * Optional localization: `title_key`, `detail_key`, `action_key` (plus
+ * `*_params`) route the visible text through the language catalogs. The
+ * English `title`/`detail`/`action` remain the fallback and are exposed as
+ * `title_en`/`detail_en`/`action_en`.
  *
  * @param array<string, mixed> $fields
  * @return array<string, mixed>
@@ -112,14 +152,24 @@ function bakery_ops_exception(array $fields): array
         'severity' => $severity,
         'category' => $category,
         'stage' => (string)($fields['stage'] ?? bakery_ops_category_stage($category)),
-        'title' => (string)($fields['title'] ?? ''),
-        'detail' => (string)($fields['detail'] ?? ''),
+        'title' => bakery_ops_exception_text($fields, 'title'),
+        'detail' => bakery_ops_exception_text($fields, 'detail'),
         'count' => array_key_exists('count', $fields) ? $fields['count'] : null,
         'href' => isset($fields['href']) ? (string)$fields['href'] : null,
-        'action' => (string)($fields['action'] ?? 'Open'),
+        'action' => bakery_ops_exception_text($fields, 'action', 'Open'),
         'resolution' => (string)($fields['resolution'] ?? 'deep_link'),
         'context' => is_array($fields['context'] ?? null) ? $fields['context'] : [],
     ];
+
+    foreach (['title', 'detail', 'action'] as $textField) {
+        $default = $textField === 'action' ? 'Open' : '';
+        $ex[$textField . '_en'] = (string)($fields[$textField . '_en'] ?? $fields[$textField] ?? $default);
+        foreach (['_key', '_params'] as $suffix) {
+            if (isset($fields[$textField . $suffix])) {
+                $ex[$textField . $suffix] = $fields[$textField . $suffix];
+            }
+        }
+    }
 
     if (!empty($fields['inline_action']) && is_array($fields['inline_action'])) {
         $ex['inline_action'] = $fields['inline_action'];
@@ -256,6 +306,19 @@ function bakery_ops_link_manager(string $date, array $params = [], ?string $retu
 }
 
 /**
+ * Catalog text with the English wording as fallback (CLI and tests may load
+ * this file without the translation layer).
+ */
+function bakery_ops_label(string $key, string $english): string
+{
+    if (!function_exists('bakery_t')) {
+        return $english;
+    }
+    $text = bakery_t($key);
+    return ($text === '' || $text === $key) ? $english : $text;
+}
+
+/**
  * Enrich legacy/simple exceptions with stage + typed deep links.
  *
  * @param list<array<string, mixed>> $exceptions
@@ -296,8 +359,11 @@ function bakery_ops_enrich_exceptions(array $exceptions, string $date, ?string $
             if (empty($fields['inline_action'])) {
                 $fields['inline_action'] = [
                     'action' => 'generate_daily_orders',
-                    'label' => 'Generate daily orders',
-                    'confirm' => 'Generate daily orders from standing for this date? Pauses are respected and dated quantity changes are preserved.',
+                    'label' => bakery_ops_label('ops.ia.generate_daily_orders', 'Generate daily orders'),
+                    'confirm' => bakery_ops_label(
+                        'ops.ia.generate_daily_orders_confirm',
+                        'Generate daily orders from standing for this date? Pauses are respected and dated quantity changes are preserved.'
+                    ),
                 ];
             }
         } elseif ($type === 'demand_empty_daily' || $type === 'demand_no_orders') {
@@ -305,8 +371,11 @@ function bakery_ops_enrich_exceptions(array $exceptions, string $date, ?string $
             if (empty($fields['inline_action'])) {
                 $fields['inline_action'] = [
                     'action' => 'generate_daily_orders',
-                    'label' => 'Generate daily orders',
-                    'confirm' => 'Generate daily orders from standing for this date? Pauses are respected and dated quantity changes are preserved.',
+                    'label' => bakery_ops_label('ops.ia.generate_daily_orders', 'Generate daily orders'),
+                    'confirm' => bakery_ops_label(
+                        'ops.ia.generate_daily_orders_confirm',
+                        'Generate daily orders from standing for this date? Pauses are respected and dated quantity changes are preserved.'
+                    ),
                 ];
             }
         } elseif ($type === 'production_fg_shortfall' || $type === 'production_shortfall') {
@@ -324,8 +393,11 @@ function bakery_ops_enrich_exceptions(array $exceptions, string $date, ?string $
             if (empty($fields['inline_action'])) {
                 $fields['inline_action'] = [
                     'action' => 'assign_from_standing',
-                    'label' => 'Build routes from standing',
-                    'confirm' => 'Build this date from the standing route? Existing dated assignments for this date will be replaced.',
+                    'label' => bakery_ops_label('ops.ia.assign_from_standing', 'Build routes from standing'),
+                    'confirm' => bakery_ops_label(
+                        'ops.ia.assign_from_standing_confirm',
+                        'Build this date from the standing route? Existing dated assignments for this date will be replaced.'
+                    ),
                 ];
             }
         } elseif ($type === 'delivery_failed') {
@@ -371,6 +443,9 @@ function bakery_ops_exceptions_to_blockers(array $exceptions): array
             'category' => $ex['category'] ?? null,
             'title' => $ex['title'] ?? '',
             'detail' => $ex['detail'] ?? '',
+            'title_en' => $ex['title_en'] ?? ($ex['title'] ?? ''),
+            'detail_en' => $ex['detail_en'] ?? ($ex['detail'] ?? ''),
+            'action_en' => $ex['action_en'] ?? ($ex['action'] ?? 'Open'),
             'count' => $ex['count'] ?? null,
             'href' => $ex['href'] ?? null,
             'action' => $ex['action'] ?? 'Open',
