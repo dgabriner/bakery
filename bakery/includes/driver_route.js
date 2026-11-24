@@ -409,7 +409,9 @@
     function rowActionsHtml(stopEl) {
         var id = escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0');
         var name = stopEl.getAttribute('data-customer-name') || '';
-        return '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
+        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo"' + photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '</button>' +
+            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.confirm || 'Confirm') + '</button>' +
+            '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
             '<div class="stop-adjust-moves">' +
             '<button type="button" class="stop-move-up" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_up) + '">&#9650;</button>' +
             '<button type="button" class="stop-move-down" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_down) + '">&#9660;</button>' +
@@ -433,6 +435,9 @@
                 actions.parentNode.insertBefore(rowActions, actions);
             }
             rowActions.innerHTML = rowActionsHtml(stopEl);
+            if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
+                window.DriverDelivery.bindPhotoButtons(rowActions);
+            }
             actions.innerHTML = '';
             actions.hidden = true;
             stopEl.classList.remove('stop-item--skipped');
@@ -444,6 +449,10 @@
         var name = stopEl.getAttribute('data-customer-name') || '';
         var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
         var html = '';
+        if (status === 'delivered' || status === 'failed' || status === 'office_flag') {
+            html += '<button type="button" class="contact-link contact-link--photo" data-open-store-photo' +
+                photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.add_store_photo || di.photo || 'Add photo') + '</button>';
+        }
         if (status === 'delivered') {
             html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
                 photoButtonAttrs(stopEl) + '>' + escapeHtml(di.view_invoice_photos) + '</button>';
@@ -1390,6 +1399,9 @@
         if (!root || boot.prepMode) return;
         view = view === 'route' ? 'route' : 'now';
         var previous = currentRouteView();
+        if (view === 'route' && document.body.classList.contains('now-capture-open') && window.DriverDelivery && typeof window.DriverDelivery.closeModal === 'function' && !window.DriverDelivery.isBusy()) {
+            window.DriverDelivery.closeModal();
+        }
         root.setAttribute('data-route-view', view);
         document.body.setAttribute('data-route-view', view);
         document.querySelectorAll('[data-route-view-target]').forEach(function (btn) {

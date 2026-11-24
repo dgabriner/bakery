@@ -682,6 +682,7 @@ function bakery_manager_phone_render(array $ctx): void
   <?php if ($view === 'missed') { bakery_manager_phone_render_missed($ctx); } ?>
 
   <nav class="manager-phone__adjust" aria-label="<?php bakery_te('manager_phone.adjust_aria'); ?>">
+    <button type="button" class="manager-phone__adjust-btn manager-phone__adjust-btn--photo" data-open-store-photo data-date="<?php echo $h($date); ?>">&#128247; <?php bakery_te('store_photo.fab'); ?></button>
     <a class="manager-phone__adjust-btn" data-sheet="move" href="<?php echo $h(bakery_manager_phone_href($date, $view, ['sheet' => 'move'])); ?>"><?php bakery_te('manager_phone.move_stop'); ?></a>
     <a class="manager-phone__adjust-btn" data-sheet="qty" href="<?php echo $h(bakery_manager_phone_href($date, $view, ['sheet' => 'qty'])); ?>"><?php bakery_te('manager_phone.change_qty'); ?></a>
     <a class="manager-phone__adjust-btn" data-sheet="skip" href="<?php echo $h(bakery_manager_phone_href($date, $view, ['sheet' => 'skip'])); ?>"><?php bakery_te('manager_phone.skip_stop'); ?></a>
@@ -883,6 +884,9 @@ function bakery_manager_phone_render_routes(array $ctx): void
                       <small><?php echo $h(bakery_manager_phone_status_label($st)); ?></small>
                     </span>
                     <time><?php echo $h($stop['actual_time_label'] !== '' ? $stop['actual_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
+                    <?php if (!empty($stop['customer_id'])): ?>
+                    <button type="button" class="manager-phone__mission-photo-btn" data-open-store-photo data-customer-id="<?php echo (int)$stop['customer_id']; ?>" data-customer-name="<?php echo $h((string)$stop['customer_name']); ?>" data-daily-order-id="<?php echo (int)($stop['daily_order_id'] ?? 0); ?>" data-date="<?php echo $h($date); ?>" aria-label="<?php echo $h(bakery_t('store_photo.take_for_store', ['store' => (string)$stop['customer_name']])); ?>">&#128247;</button>
+                    <?php endif; ?>
                   </li>
                 <?php endforeach; ?>
               </ol>
@@ -908,6 +912,9 @@ function bakery_manager_phone_render_routes(array $ctx): void
                       <?php endif; ?>
                     </span>
                     <time><?php echo $h($stop['scheduled_time_label'] !== '' ? $stop['scheduled_time_label'] : bakery_t('manager_phone.mission_no_time')); ?></time>
+                    <?php if (!empty($stop['customer_id'])): ?>
+                    <button type="button" class="manager-phone__mission-photo-btn" data-open-store-photo data-customer-id="<?php echo (int)$stop['customer_id']; ?>" data-customer-name="<?php echo $h((string)$stop['customer_name']); ?>" data-daily-order-id="<?php echo (int)($stop['daily_order_id'] ?? 0); ?>" data-date="<?php echo $h($date); ?>" aria-label="<?php echo $h(bakery_t('store_photo.take_for_store', ['store' => (string)$stop['customer_name']])); ?>">&#128247;</button>
+                    <?php endif; ?>
                   </li>
                 <?php endforeach; ?>
               </ol>

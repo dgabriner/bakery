@@ -398,6 +398,17 @@ function bakery_render_driver_stop_item(
         <?php if (!$isPastList && !$isDone): ?>
         <div class="stop-row-actions">
             <button type="button"
+                class="stop-photo-btn photo-complete-btn"
+                data-start-step="photo"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
+            <button type="button"
                 class="stop-open-delivery photo-complete-btn"
                 data-start-step="delivery"
                 data-driver-id="<?php echo (int)$selectedDriverId; ?>"
@@ -425,6 +436,17 @@ function bakery_render_driver_stop_item(
         </div>
         <?php endif; ?>
         <div class="contact-actions"<?php echo $isDone ? '' : ' hidden'; ?>>
+            <?php if ($isDone && in_array($status, ['delivered', 'failed', 'office_flag'], true)): ?>
+            <button type="button"
+                class="contact-link contact-link--photo"
+                data-open-store-photo
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.add_store_photo'); ?></button>
+            <?php endif; ?>
             <?php if ($isDone && $status === 'delivered'): ?>
             <button type="button"
                 class="contact-link photo-complete-btn"
@@ -492,6 +514,7 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
             <?php endif; ?>
         </div>
         <div class="route-prep-stop-actions">
+            <button type="button" class="route-prep-action" data-open-store-photo data-customer-id="<?php echo (int)$stop['customer_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
             <?php if ($movable): ?>
             <button type="button" class="route-prep-action stop-orders-btn" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.store_orders'); ?></button>
             <?php if ($phoneHref): ?>
@@ -1360,6 +1383,7 @@ document.body.classList.add('driver-route-prep');
 
             <div class="delivery-step-panel" id="deliveryStepDelivery" data-step-panel="delivery" hidden>
                 <div class="delivery-photo-strip" id="deliveryPhotoStrip">
+                    <button type="button" class="btn btn-primary delivery-inline-take-photo" id="deliveryInlineTakePhotoBtn" hidden>&#128247; <?php bakery_te('driver.take_photo_now'); ?></button>
                     <div class="delivery-inline-proof" id="deliveryInlineProof" data-proof-state="" hidden>
                         <img id="deliveryInlineThumb" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
                         <span class="delivery-inline-proof-text">
@@ -1705,6 +1729,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'fail_error' => bakery_t('exception_desk.report_error'),
     'view_invoice_photos' => bakery_t('driver.view_invoice_photos'),
     'photo' => bakery_t('driver.photo'),
+    'photo_btn' => bakery_t('driver.photo_btn'),
+    'add_store_photo' => bakery_t('driver.add_store_photo'),
+    'take_photo_now' => bakery_t('driver.take_photo_now'),
     'call' => bakery_t('driver.call'),
     'status_delivered' => bakery_t('driver.status_delivered'),
     'status_office_flag' => bakery_t('driver.status_office_flag'),

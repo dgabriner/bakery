@@ -518,6 +518,41 @@ driver_photo_assert(
         && strpos($shell, 'window.bakeryReportClientError') !== false
 );
 
+$quickPhp = (string)file_get_contents($root . '/includes/store_photo_quick.php');
+$quickJs = (string)file_get_contents($root . '/includes/store_photo_quick.js');
+$quickCss = (string)file_get_contents($root . '/css/store_photo_quick.css');
+$navPhp = (string)file_get_contents($root . '/includes/nav.php');
+
+driver_photo_assert(
+    'universal store photo launcher is wired across staff screens',
+    strpos($navPhp, "require __DIR__ . '/store_photo_quick.php';") !== false
+        && strpos($quickPhp, 'id="sfQuickPhotoFab"') !== false
+        && strpos($quickPhp, 'id="sfQuickCameraInput" accept="image/*" capture="environment"') !== false
+        && strpos($quickJs, 'openNativeCameraSync()') !== false
+        && strpos($quickJs, "form.append('store_visit', '1');") !== false
+        && strpos($quickCss, '.sf-quick-photo-fab') !== false
+);
+driver_photo_assert(
+    'Route view does not mount capture inside hidden nowCaptureHost on phones',
+    strpos($script, "currentRouteView === 'now'") !== false
+);
+driver_photo_assert(
+    'phones default to the native rear camera unless switched to in-app camera',
+    strpos($script, "if (pref === 'inapp') return false;") !== false
+        && strpos($script, 'return usesCompactCapture();') !== false
+);
+driver_photo_assert(
+    'every stop row and confirm step exposes a direct 1-tap photo button',
+    strpos($page, 'stop-photo-btn photo-complete-btn') !== false
+        && strpos($page, 'id="deliveryInlineTakePhotoBtn"') !== false
+        && strpos($page, 'contact-link--photo') !== false
+);
+driver_photo_assert(
+    'store photoupload accepts store visits without a daily_order_assignments row',
+    strpos($uploadPhoto, 'function bakery_resolve_store_photo_driver_id') !== false
+        && strpos($uploadPhoto, '$storeVisit') !== false
+);
+
 $nodeScript = $root . '/tests/driver_takeover_arrival_photo.js';
 $nodeOut = [];
 $nodeCode = 1;

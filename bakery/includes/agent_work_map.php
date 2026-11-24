@@ -642,6 +642,11 @@ function bakery_agent_work_map_core(): array
             'files' => [
                 'driver.php',
                 'includes/driver_delivery.js',
+                'includes/driver_route.js',
+                'includes/store_photo_quick.php',
+                'includes/store_photo_quick.js',
+                'css/store_photo_quick.css',
+                'upload_driver_photo.php',
                 'css/driver.css',
                 'complete_delivery.php',
                 'database/schema/096_delivery_line_estimated.sql',
@@ -663,6 +668,7 @@ function bakery_agent_work_map_core(): array
                 'includes/survey_route_order_render.php',
             ],
             'tests' => [
+                'tests/run_store_photo_everywhere_tests.php',
                 'tests/run_route_load_carry_tests.php',
                 'tests/run_driver_workflow_tests.php',
                 'tests/run_route_integrity_tests.php',

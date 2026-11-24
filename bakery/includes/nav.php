@@ -190,6 +190,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet">
+          <button type="button" class="bakery-nav__more-link bakery-nav__more-link--photo" data-open-store-photo>&#128247; <?php bakery_te('store_photo.menu_cta'); ?></button>
           <?php if ($navDrivingAsSelf): ?>
           <div class="bakery-nav__more-staff">
             <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffHomeHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te($navRole === 'administrator' ? 'nav.driving_admin_home' : 'nav.driving_manager_home'); ?></a>
@@ -436,6 +437,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
               ['href' => 'index.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.index')],
               ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
               ['href' => 'special_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.special_orders')],
+              ['href' => 'cashier_shop_photos.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.cashier_shop_photos')],
           ],
       ],
   ];
@@ -475,6 +477,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffMyRouteHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.my_route'); ?></a>
           <?php endif; ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'survey' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.survey_route'); ?></a>
+          <button type="button" class="bakery-nav__more-link bakery-nav__more-link--photo" data-open-store-photo>&#128247; <?php bakery_te('store_photo.menu_cta'); ?></button>
           <?php if (function_exists('bakery_sandbox_home_for_user') && bakery_sandbox_home_for_user($navUser)): ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'sandbox' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'sandbox.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'sandbox' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.item.sandbox'); ?></a>
           <?php endif; ?>
@@ -796,3 +799,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php endif; ?>
+<?php require __DIR__ . '/store_photo_quick.php'; ?>

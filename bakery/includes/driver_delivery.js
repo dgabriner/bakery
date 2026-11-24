@@ -119,10 +119,13 @@
       && !cameraDeniedRecently();
   }
 
-  // A driver who picked "Use phone camera" keeps getting the phone's own
-  // camera app until they switch back; the in-app viewfinder is the default.
+  // Phones default to the native rear camera (1-tap OS camera, no getUserMedia
+  // prompt/stall) unless the user explicitly opted into the in-app viewfinder.
   function phoneCameraPreferred() {
-    return storageGet(CAMERA_PREF_KEY) === 'phone';
+    var pref = storageGet(CAMERA_PREF_KEY);
+    if (pref === 'inapp') return false;
+    if (pref === 'phone') return true;
+    return usesCompactCapture();
   }
 
   function inlineCameraAvailable() {
@@ -808,6 +811,7 @@
         }
       } else if (step === 'delivery') {
         stopCamera();
+        syncInlineTakePhotoBtn();
       }
     }
 
@@ -1021,7 +1025,7 @@
    */
   function startBackgroundUpload(blob, filename, objectUrl) {
     var second = !!state.secondPhoto && state.currentStep === 'photo' && state.photoMode !== 'review';
-    var guided = state.photoMode !== 'review' && !state.retakePhotoId && state.currentStep === 'photo';
+    var guided = state.photoMode !== 'review' && !state.retakePhotoId && (state.currentStep === 'photo' || state.currentStep === 'delivery');
     // Read the type now: the select is reset as soon as the charge screen returns.
     var typeSelect = $('deliveryPhotoType');
     var photoType = second ? 'After' : ((typeSelect && typeSelect.value) || 'Before');
@@ -1149,8 +1153,17 @@
     goToStep('delivery');
   }
 
+  function syncInlineTakePhotoBtn() {
+    var btn = $('deliveryInlineTakePhotoBtn');
+    if (!btn) return;
+    var hasProof = state.proofState === 'uploading' || state.proofState === 'saved' || state.proofState === 'queued' || stopHasProofPhoto();
+    btn.hidden = hasProof || state.photoMode === 'review';
+    btn.disabled = !!(state.uploading || state.preparing || state.submitting);
+  }
+
   function setProofState(kind, objectUrl) {
     state.proofState = kind;
+    syncInlineTakePhotoBtn();
     var box = $('deliveryInlineProof');
     var thumb = $('deliveryInlineThumb');
     var label = $('deliveryInlineProofLabel');
@@ -1375,6 +1388,10 @@
       updatePhotoWorkflowUi(true);
       resumeAfterSavedArrival();
       syncSecondPhotoFromList();
+      if (state.currentStep === 'delivery' && !state.proofState && state.photos.length > 0) {
+        setProofState('saved', thumbUrl(state.photos[0]));
+      }
+      syncInlineTakePhotoBtn();
       if (state.photos.length > 0) {
         maybeEnableGpsTracking();
       }
@@ -2862,7 +2879,9 @@
     }
     modal.classList.remove('is-closing', 'has-saved-photo', 'delivery-invoice-open', 'delivery-invoice-fullstep', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
     var inlineHost = $('nowCaptureHost');
-    state.inline = !!inlineHost && isPhoneLayout() && opts.photoMode !== 'review';
+    var routeRootForView = $('driverRouteRoot');
+    var currentRouteView = routeRootForView ? (routeRootForView.getAttribute('data-route-view') || 'now') : 'now';
+    state.inline = !!inlineHost && currentRouteView === 'now' && isPhoneLayout() && opts.photoMode !== 'review';
     if (state.inline) {
       inlineHost.appendChild(modal);
       inlineHost.hidden = false;
@@ -3305,11 +3324,32 @@
     var inAppCameraBtn = $('deliveryInAppCameraBtn');
     if (inAppCameraBtn) {
       inAppCameraBtn.addEventListener('click', function () {
-        storageSet(CAMERA_PREF_KEY, null);
+        storageSet(CAMERA_PREF_KEY, 'inapp');
         showLivePreview();
         beginPhotoCapture();
       });
     }
+    var inlineTakePhotoBtn = $('deliveryInlineTakePhotoBtn');
+    if (inlineTakePhotoBtn) {
+      inlineTakePhotoBtn.addEventListener('click', function () {
+        state.secondPhoto = false;
+        state.retakePhotoId = null;
+        var typeSelect = $('deliveryPhotoType');
+        if (typeSelect) typeSelect.value = 'Before';
+        if (phoneCameraPreferred() || !inlineCameraSupported()) {
+          useNativeCamera();
+          openNativeCameraPicker();
+        } else {
+          goToStep('photo');
+        }
+      });
+    }
+    document.addEventListener('bakery:store-photo-saved', function (ev) {
+      var detail = ev && ev.detail ? ev.detail : {};
+      if (state.customerId && String(detail.customerId || '') === String(state.customerId)) {
+        loadPhotos();
+      }
+    });
     $('deliveryGalleryPickerBtn').addEventListener('click', function () {
       $('deliveryGalleryInput').click();
     });

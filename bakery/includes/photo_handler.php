@@ -774,27 +774,31 @@ class PhotoHandler {
      */
     public function getPhotos($db, $driverId, $date, $customerId = null) {
         try {
+            if ($customerId) {
+                $stmt = $db->prepare("
+                    SELECT p.*, c.name as customer_name, c.address as customer_address
+                    FROM driver_photos p
+                    JOIN customers c ON p.customer_id = c.id
+                    WHERE p.customer_id = ? AND p.delivery_date = ?
+                    ORDER BY p.created_at DESC
+                ");
+                $stmt->execute([(int)$customerId, $date]);
+                return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+
             $query = "
                 SELECT p.*, c.name as customer_name, c.address as customer_address
                 FROM driver_photos p
                 JOIN customers c ON p.customer_id = c.id
                 WHERE p.driver_id = ? AND p.delivery_date = ?
+                ORDER BY p.created_at DESC
             ";
-            
-            $params = [$driverId, $date];
-            
-            if ($customerId) {
-                $query .= " AND p.customer_id = ?";
-                $params[] = $customerId;
-            }
-            
-            $query .= " ORDER BY p.created_at DESC";
-            
+
             $stmt = $db->prepare($query);
-            $stmt->execute($params);
-            
+            $stmt->execute([$driverId, $date]);
+
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
         } catch (Exception $e) {
             error_log("Get photos error: " . $e->getMessage());
             return [];

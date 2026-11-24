@@ -6762,11 +6762,40 @@ body.driver-workflow-page .route-btn--problem {
     margin-right: auto;
 }
 
+.stop-row-actions .stop-photo-btn {
+    border-color: #156c43;
+    background: #156c43;
+    color: #fff;
+}
+
 .stop-row-actions .stop-open-delivery {
     flex: 1 1 auto;
     border-color: #0f766e;
     background: #0f766e;
     color: #fff;
+}
+
+.delivery-inline-take-photo {
+    width: 100%;
+    min-height: 52px;
+    margin-bottom: 8px;
+    border-color: #156c43 !important;
+    background: #156c43 !important;
+    color: #fff !important;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.contact-link--photo {
+    border-color: #156c43 !important;
+    background: #edf8f1 !important;
+    color: #134a2e !important;
+    font-weight: 800;
+}
+
+body.route-adjust-open .stop-row-actions .stop-photo-btn,
+body.route-adjust-open .stop-row-actions .stop-open-delivery {
+    display: none;
 }
 
 .stop-adjust-moves {
