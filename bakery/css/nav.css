@@ -26,18 +26,19 @@
 }
 
 .bakery-nav__brand {
-  color: var(--sf-nav-text, #f4fbf9);
+  color: var(--sf-nav-text, #f7f3ea);
   flex: 0 0 auto;
   font-family: var(--sf-font-serif);
-  font-size: 1.05rem;
+  font-size: 1.08rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.045em;
   text-decoration: none;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
   white-space: nowrap;
 }
 
 .bakery-nav__brand:hover {
-  color: #ffe7b0;
+  color: var(--sf-nav-highlight, #f3d7a4);
 }
 
 .bakery-nav__mode {
@@ -76,8 +77,8 @@
 .bakery-nav__mode-btn--active,
 .bakery-nav__mode-btn--active:hover,
 .bakery-nav__mode-btn--active:focus-visible {
-  background: #fff;
-  color: #143532;
+  background: var(--sf-nav-highlight, #f3d7a4);
+  color: var(--sf-brand, #12332f);
 }
 
 .bakery-nav__mode .bakery-nav__label-short {

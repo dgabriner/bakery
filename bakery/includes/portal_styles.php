@@ -47,7 +47,8 @@ if (!defined('ACCESS_ALLOWED')) {
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }
   body {
-    background: var(--cream);
+    background-color: var(--sand);
+    background-image: var(--sf-paper-wash, none);
     color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     margin: 0;
@@ -59,8 +60,8 @@ if (!defined('ACCESS_ALLOWED')) {
   /* ── Top bar ── */
   .portal-top {
     align-items: center;
-    background: #fff;
-    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--cream) 86%, white);
+    border-bottom: 3px solid var(--terracotta);
     display: flex;
     gap: 10px;
     min-height: var(--top-h);
