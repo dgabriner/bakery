@@ -17,6 +17,12 @@
  * Past orders that are still Pending are listed in a read-only cleanup
  * queue. This page does not change them.
  *
+ * Staff and house rows are not wholesale accounts. customers.is_internal
+ * is the only mark. Until that column exists, this page lists the same
+ * active human customers it lists today. Flagged rows drop out of the list,
+ * the cleanup queue, and every tally together. Synthetic bakers stay out
+ * through sfb_origin. Capp is not flagged here.
+ *
  * Thresholds (one block):
  *   BAKERY_ACCOUNT_HEALTH_RECENT_DAYS — delivered units, inclusive, ending on as-of
  *   BAKERY_ACCOUNT_HEALTH_PRIOR_DAYS — the window immediately before that
@@ -324,7 +330,34 @@ function bakery_account_health_csv(array $rows): string
 }
 
 /**
- * One row per active human customer. Read-only.
+ * True only when the stored is_internal flag is set. Names are not consulted.
+ *
+ * @param array<string, mixed> $row
+ */
+function bakery_account_health_row_is_internal(array $row): bool
+{
+    return (int)($row['is_internal'] ?? 0) === 1;
+}
+
+/**
+ * SQL fragment for every account-health customer query.
+ * Empty until customers.is_internal exists, so an unmigrated database
+ * keeps today's list.
+ */
+function bakery_account_health_real_customer_sql(string $alias, PDO $db): string
+{
+    if (!column_exists($db, 'customers', 'is_internal')) {
+        return '';
+    }
+    $alias = preg_replace('/[^a-zA-Z0-9_]/', '', $alias);
+    if (!is_string($alias) || $alias === '') {
+        $alias = 'c';
+    }
+    return ' AND COALESCE(' . $alias . '.is_internal, 0) = 0';
+}
+
+/**
+ * One row per active human wholesale customer. Read-only.
  *
  * @return array<int, array<string, mixed>>
  */
@@ -334,13 +367,16 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
         return [];
     }
     $windows = bakery_account_health_windows($asOf);
-    $where = 'c.is_active = 1' . bakery_sfb_ops_origin_clause('c', $db);
+    $where = 'c.is_active = 1'
+        . bakery_sfb_ops_origin_clause('c', $db)
+        . bakery_account_health_real_customer_sql('c', $db);
+    $internalSelect = column_exists($db, 'customers', 'is_internal') ? ', c.is_internal' : '';
     $confirmedSelect = column_exists($db, 'daily_orders', 'delivery_confirmed_at')
         ? 'do.delivery_confirmed_at'
         : 'NULL';
 
     $customers = $db->prepare(
-        "SELECT c.id, c.name, c.zone
+        "SELECT c.id, c.name, c.zone{$internalSelect}
          FROM customers c
          WHERE {$where}
          ORDER BY c.name ASC, c.id ASC"
@@ -507,6 +543,9 @@ function bakery_account_health_rows(PDO $db, string $asOf): array
     $balances = bakery_billing_customer_balances($db);
     $rows = [];
     foreach ($customers->fetchAll(PDO::FETCH_ASSOC) as $customer) {
+        if (bakery_account_health_row_is_internal($customer)) {
+            continue;
+        }
         $customerId = (int)$customer['id'];
         $bucket = $totals[$customerId] ?? [
             'recent' => 0,
@@ -647,7 +686,7 @@ function bakery_account_health_order_timeline_url(int $dailyOrderId, string $ord
 }
 
 /**
- * Past-dated orders still Pending. Read-only. Same active human customers as the health table.
+ * Past-dated orders still Pending. Read-only. Same wholesale customers as the health table.
  *
  * @return array<int, array<string, mixed>>
  */
@@ -657,22 +696,29 @@ function bakery_account_health_cleanup_queue(PDO $db, string $asOf): array
         return [];
     }
     $windows = bakery_account_health_windows($asOf);
-    $where = 'c.is_active = 1' . bakery_sfb_ops_origin_clause('c', $db);
+    $where = 'c.is_active = 1'
+        . bakery_sfb_ops_origin_clause('c', $db)
+        . bakery_account_health_real_customer_sql('c', $db);
+    $internalSelect = column_exists($db, 'customers', 'is_internal') ? ', c.is_internal' : '';
+    $internalGroup = column_exists($db, 'customers', 'is_internal') ? ', c.is_internal' : '';
     $stmt = $db->prepare(
         "SELECT do.id AS daily_order_id, do.customer_id, c.name AS customer_name,
-                do.order_date, COALESCE(SUM(doi.quantity), 0) AS ordered_units
+                do.order_date, COALESCE(SUM(doi.quantity), 0) AS ordered_units{$internalSelect}
          FROM daily_orders do
          INNER JOIN customers c ON c.id = do.customer_id
          LEFT JOIN daily_order_items doi ON doi.daily_order_id = do.id
          WHERE {$where}
            AND do.status = 'pending'
            AND do.order_date < ?
-         GROUP BY do.id, do.customer_id, c.name, do.order_date
+         GROUP BY do.id, do.customer_id, c.name, do.order_date{$internalGroup}
          ORDER BY c.name ASC, do.order_date ASC, do.id ASC"
     );
     $stmt->execute([$windows['as_of']]);
     $rows = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if (bakery_account_health_row_is_internal($row)) {
+            continue;
+        }
         $rows[] = [
             'daily_order_id' => (int)$row['daily_order_id'],
             'customer_id' => (int)$row['customer_id'],
