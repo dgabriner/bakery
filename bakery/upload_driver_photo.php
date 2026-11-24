@@ -67,7 +67,7 @@ function bakery_store_photo_driver_exists(PDO $db, int $driverId): bool {
 function bakery_resolve_store_photo_driver_id(PDO $db, int $requestedDriverId, int $customerId, int $dailyOrderId, string $date): int {
     $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
     $role = (string)($user['role_slug'] ?? '');
-    $isStaffSupervisor = in_array($role, ['administrator', 'manager', 'sales'], true);
+    $isStaffSupervisor = in_array($role, ['administrator', 'manager'], true);
 
     if ($requestedDriverId > 0) {
         if ($isStaffSupervisor) {
@@ -175,7 +175,7 @@ function bakery_list_driver_photos(PDO $db, PhotoHandler $photoHandler) {
     $allDrivers = !empty($_POST['all_drivers']);
     $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
     $role = (string)($user['role_slug'] ?? '');
-    $canViewAllStorePhotos = in_array($role, ['administrator', 'manager', 'sales'], true);
+    $canViewAllStorePhotos = in_array($role, ['administrator', 'manager'], true);
 
     if ($customerId <= 0) {
         throw new Exception('customer_id is required');
@@ -286,7 +286,7 @@ function bakery_upload_driver_photo(PDO $db, PhotoHandler $photoHandler) {
 
     $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
     $role = (string)($user['role_slug'] ?? '');
-    $isStaffSupervisor = in_array($role, ['administrator', 'manager', 'sales'], true);
+    $isStaffSupervisor = in_array($role, ['administrator', 'manager'], true);
 
     if (!$storeVisit && !$isStaffSupervisor && ($requestedDriverId <= 0 || $dailyOrderId <= 0)) {
         throw new Exception('driver_id, customer_id, and daily_order_id are required');

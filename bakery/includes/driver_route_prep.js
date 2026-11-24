@@ -350,7 +350,6 @@
       }
       toast(data.message || t('prep_added', 'Added :name', { name: name }));
       markRouteDirty();
-      window.location.reload();
       appendAddedStop(card, data);
       prepListChanged();
     } catch (err) {

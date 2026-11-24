@@ -641,6 +641,9 @@ function bakery_agent_work_map_core(): array
             'aliases' => ['driver-workflow', 'driver-contract', 'my-route'],
             'files' => [
                 'driver.php',
+                'driver_stops.php',
+                'customers.php',
+                'includes/photo_handler.php',
                 'includes/driver_delivery.js',
                 'includes/driver_route.js',
                 'includes/store_photo_quick.php',

@@ -445,9 +445,6 @@ function &bakery_navigation_script_registry(): array
             $boot($registry, $script, $cashierRoles);
         }
         $boot($registry, 'time_clock.php', ['cashier', 'driver', 'driver_assistant', 'administrator', 'manager', 'baker']);
-        foreach (['upload_driver_photo.php', 'driver_photo.php', 'driver_session_ping.php'] as $storePhotoScript) {
-            $boot($registry, $storePhotoScript, ['sales']);
-        }
         $bakerRoles = ['baker', 'administrator', 'manager'];
         foreach (['production.php', 'baker_mix.php', 'pack_list.php'] as $script) {
             $boot($registry, $script, $bakerRoles);

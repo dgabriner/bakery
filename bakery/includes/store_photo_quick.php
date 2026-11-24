@@ -9,7 +9,7 @@ if (!defined('ACCESS_ALLOWED')) {
 
 $sfQuickPhotoUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
 $sfQuickPhotoRole = (string)($sfQuickPhotoUser['role_slug'] ?? '');
-$sfQuickPhotoEligibleRoles = ['administrator', 'manager', 'driver', 'driver_assistant', 'sales', 'cashier'];
+$sfQuickPhotoEligibleRoles = ['administrator', 'manager', 'driver', 'driver_assistant', 'cashier'];
 
 if ($sfQuickPhotoUser && in_array($sfQuickPhotoRole, $sfQuickPhotoEligibleRoles, true)):
     $sfQuickPhotoShopOnly = ($sfQuickPhotoRole === 'cashier');
@@ -47,7 +47,7 @@ if ($sfQuickPhotoUser && in_array($sfQuickPhotoRole, $sfQuickPhotoEligibleRoles,
             if (!$sfQuickPhotoShopOnly && function_exists('table_exists') && table_exists($db, 'customers')) {
                 $todayMap = [];
                 if (table_exists($db, 'daily_orders') && table_exists($db, 'daily_order_assignments')) {
-                    if ($sfQuickPhotoDefaultDriverId > 0 && !in_array($sfQuickPhotoRole, ['administrator', 'manager', 'sales'], true)) {
+                    if ($sfQuickPhotoDefaultDriverId > 0 && !in_array($sfQuickPhotoRole, ['administrator', 'manager'], true)) {
                         $tStmt = $db->prepare(
                             'SELECT do.customer_id, do.id AS daily_order_id, doa.driver_id, doa.route_order
                              FROM daily_order_assignments doa

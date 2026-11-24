@@ -105,7 +105,6 @@ try {
         ['manager', $lauraName, 'customer_record', 0],
         ['driver', $marcosName, 'driver', $marcosDriverId],
         ['administrator', 'Danny', 'index', 0],
-        ['sales', 'Sales Rep', 'sales_home', 0],
         ['cashier', 'Cashier', 'counter_orders', 0],
     ] as [$role, $name, $page, $drvId]) {
         $html = store_photo_render_nav($db, $role, $name, $page, $drvId);
@@ -113,9 +112,11 @@ try {
         assert_true(strpos($html, 'id="sfQuickPhotoModal"') !== false, "$role on $page renders #sfQuickPhotoModal");
     }
 
-    // Baker screen stays uncluttered without wholesale store camera FAB.
+    // Baker and read-only Sales stay focused without the wholesale store camera FAB.
     $bakerHtml = store_photo_render_nav($db, 'baker', 'Juan Carlos', 'baker_day', 0);
     assert_true(strpos($bakerHtml, 'id="sfQuickPhotoFab"') === false, 'baker nav stays focused without store photo FAB');
+    $salesHtml = store_photo_render_nav($db, 'sales', 'Sales Rep', 'sales_home', 0);
+    assert_true(strpos($salesHtml, 'id="sfQuickPhotoFab"') === false, 'sales read-only nav omits store photo upload FAB');
 
     // 2. Laura (manager with matching driver profile) resolves her own driver_id even with driver_id=0 and no order today.
     $_SESSION = [
