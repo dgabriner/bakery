@@ -272,19 +272,120 @@ $tiles = [
         'href' => $link(['view' => 'customers', 'filter' => 'short']),
     ],
 ];
+$brief = bakery_delivery_manager_review_brief(
+    $report,
+    $today,
+    $view === 'drivers' ? $driverId : 0,
+    $view === 'customers' ? $customerId : 0,
+    $view === 'customers' ? 'stores' : 'drivers'
+);
+$briefLead = bakery_t((string)$brief['lead']['key'], is_array($brief['lead']['params']) ? $brief['lead']['params'] : []);
+$briefRate = $summary['delivered_rate'] === null
+    ? bakery_t('delivery_review.kpi_empty')
+    : ((int)$summary['delivered_rate']) . '%';
+if ((int)$summary['due'] === 0 && (int)$summary['problem'] === 0 && (int)$summary['unassigned'] === 0) {
+    $briefScore = bakery_t('delivery_review.brief_score_empty');
+} elseif ((int)$summary['due'] > 0) {
+    $briefScore = bakery_t('delivery_review.brief_score', [
+        'rate' => $briefRate,
+        'problem' => (int)$summary['problem'],
+        'unassigned' => (int)$summary['unassigned'],
+    ]);
+} else {
+    $briefScore = bakery_t('delivery_review.brief_score_plain', [
+        'problem' => (int)$summary['problem'],
+        'unassigned' => (int)$summary['unassigned'],
+    ]);
+}
+$briefPrior = ($summary['delivered_rate'] !== null && $priorSummary['delivered_rate'] !== null)
+    ? bakery_t('delivery_review.brief_prior', ['value' => ((int)$priorSummary['delivered_rate']) . '%'])
+    : '';
+$cardAction = static function (array $card) use ($base): string {
+    $date = (string)($card['action_date'] ?? '');
+    $driver = (int)($card['action_driver'] ?? 0);
+    $customer = (int)($card['action_customer'] ?? 0);
+    switch ((string)($card['action'] ?? '')) {
+        case 'sheet':
+            return $base . 'driver_reports.php?' . http_build_query(['tab' => 'sheet', 'date' => $date]);
+        case 'assign':
+            return $base . 'driver_assignment.php?' . http_build_query(['date' => $date]);
+        case 'photos':
+            $query = ['date' => $date];
+            if ($driver > 0) {
+                $query['driver_id'] = $driver;
+            }
+            return $base . 'route_photo_journey.php?' . http_build_query($query);
+        case 'standing':
+            return $base . 'standing_routes.php';
+        case 'record':
+            return $base . 'customer_record.php?' . http_build_query(['customer_id' => $customer]);
+        default:
+            return (string)($card['review_href'] ?? '');
+    }
+};
+$cardActionKey = static function (array $card): string {
+    switch ((string)($card['action'] ?? '')) {
+        case 'sheet':
+            return 'open_sheet';
+        case 'assign':
+            return 'open_assign';
+        case 'photos':
+            return 'open_photos';
+        case 'standing':
+            return 'open_standing';
+        case 'record':
+            return 'open_record';
+        default:
+            return 'see_here';
+    }
+};
+$wallRows = $brief['wall']['rows'];
+$wallCalm = $brief['wall']['calm_rows'];
+$wallShown = $wallRows !== [] ? $wallRows : $wallCalm;
+$wallExtra = $wallRows !== [] ? $wallCalm : [];
+$wallSolo = $hasSelection;
+$paintWallRow = static function (array $row) use ($h, $cell, $from, $to): void {
+    echo '<div class="delivery-review__wall-row">';
+    echo '<a class="delivery-review__wall-name" href="' . $h((string)$row['href']) . '">' . $h((string)$row['name']) . '</a>';
+    echo '<span class="delivery-review__strip delivery-review__strip--wall">';
+    foreach ($row['cells'] as $stripCell) {
+        $state = (string)$stripCell['state'];
+        $stops = (int)($stripCell['stops'] ?? 0);
+        $what = bakery_t(bakery_delivery_manager_review_state_key($state));
+        $date = (string)$stripCell['date'];
+        $label = $stops > 0
+            ? bakery_t('delivery_review.cell_title_driver', [
+                'date' => bakery_delivery_manager_review_display_date($date),
+                'what' => $what,
+                'stops' => $stops,
+                'delivered' => (int)($stripCell['delivered'] ?? 0),
+            ])
+            : bakery_t('delivery_review.cell_title', [
+                'date' => bakery_delivery_manager_review_display_date($date),
+                'what' => $what,
+            ]);
+        $dayHref = '';
+        if ($state !== 'idle' && array_key_exists('stops', $stripCell)) {
+            $dayHref = bakery_delivery_manager_review_href([
+                'view' => 'drivers',
+                'from' => $from,
+                'to' => $to,
+                'driver' => (int)$row['id'],
+                'day' => $date,
+            ]) . '#day-' . $date;
+        } elseif ($state !== 'idle') {
+            $dayHref = (string)$row['href'];
+        }
+        echo $cell($state, $date, $stops > 0 ? (string)$stops : ' ', $label, $dayHref);
+    }
+    echo '</span></div>';
+};
 ?>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/delivery_manager_review.css'); ?>">
 <main class="delivery-review">
   <header class="delivery-review__header">
     <div>
       <h1><?php bakery_te('page.delivery_manager_review'); ?></h1>
-      <p class="delivery-review__sub">
-        <?php echo $t('range_line', [
-            'from' => bakery_delivery_manager_review_display_date($from),
-            'to' => bakery_delivery_manager_review_display_date($to),
-        ]); ?>.
-        <?php echo $t('subtitle'); ?>
-      </p>
     </div>
     <div class="delivery-review__controls">
       <nav class="delivery-review__presets" aria-label="<?php echo $t('presets_label'); ?>">
@@ -305,6 +406,8 @@ $tiles = [
           <a class="delivery-review__chip<?php echo $presetOn ? ' is-active' : ''; ?>" href="<?php echo $h($presetHref); ?>"<?php echo $presetOn ? ' aria-current="true"' : ''; ?>><?php echo $t('preset_days', ['days' => (int)$preset['days']]); ?></a>
         <?php endforeach; ?>
       </nav>
+      <details class="delivery-review__dates">
+        <summary><?php echo $t('choose_dates'); ?></summary>
       <form class="delivery-review__range" method="get" action="delivery_manager_review.php">
         <input type="hidden" name="view" value="<?php echo $h($view); ?>">
         <?php if ($view === 'drivers' && $driverId > 0): ?>
@@ -326,12 +429,110 @@ $tiles = [
         </label>
         <button class="sf-btn sf-btn--primary sf-btn--sm" type="submit"><?php echo $t('show'); ?></button>
       </form>
+      </details>
     </div>
   </header>
   <?php if (!empty($range['clamped'])): ?>
     <p class="delivery-review__note"><?php echo $t('range_clamped', ['days' => BAKERY_ROUTE_HEALTH_MAX_DAYS]); ?></p>
   <?php endif; ?>
 
+  <section class="delivery-review__brief<?php echo $wallSolo ? ' is-solo' : ''; ?>" aria-labelledby="delivery-review-lead">
+    <p id="delivery-review-lead" class="delivery-review__hero is-<?php echo $h((string)$brief['tone']); ?>"><?php echo $h($briefLead); ?></p>
+    <p class="delivery-review__score">
+      <?php echo $h(bakery_t('delivery_review.range_line', [
+          'from' => bakery_delivery_manager_review_display_date($from),
+          'to' => bakery_delivery_manager_review_display_date($to),
+      ])); ?>.
+      <strong><?php echo $h($briefScore); ?></strong>
+      <?php if ($briefPrior !== ''): ?><span class="delivery-review__muted"><?php echo $h($briefPrior); ?></span><?php endif; ?>
+    </p>
+    <?php if ($brief['cards'] !== []): ?>
+      <ol class="delivery-review__cards">
+        <?php foreach ($brief['cards'] as $card): ?>
+          <?php
+            $cardTitle = (string)($card['title'] ?? '');
+            if ($cardTitle === '' && (string)($card['title_key'] ?? '') !== '') {
+                $cardTitle = bakery_t((string)$card['title_key'], is_array($card['title_params'] ?? null) ? $card['title_params'] : []);
+            }
+            $cardSentence = bakery_t((string)$card['sentence_key'], is_array($card['sentence_params'] ?? null) ? $card['sentence_params'] : []);
+            $cardHref = $cardAction($card);
+            $cardWhen = (string)($card['when'] ?? '');
+          ?>
+          <li class="delivery-review__card is-<?php echo $h((string)$card['tone']); ?>">
+            <p class="delivery-review__eyebrow"><?php echo $h(bakery_t((string)$card['eyebrow_key'])); ?></p>
+            <p class="delivery-review__card-title">
+              <?php if ((string)($card['review_href'] ?? '') !== ''): ?>
+                <a href="<?php echo $h((string)$card['review_href']); ?>"><?php echo $h($cardTitle); ?></a>
+              <?php else: ?>
+                <?php echo $h($cardTitle); ?>
+              <?php endif; ?>
+            </p>
+            <?php if ($cardWhen !== ''): ?><p class="delivery-review__card-when"><?php echo $dateLabel($cardWhen); ?></p><?php endif; ?>
+            <p><?php echo $h($cardSentence); ?></p>
+            <?php if ($safePhoto((string)($card['photo_url'] ?? ''))): ?>
+              <a class="delivery-review__thumb-link" href="<?php echo $h((string)$card['photo_url']); ?>"><img class="delivery-review__thumb" loading="lazy" src="<?php echo $h((string)$card['photo_url']); ?>" alt="<?php echo $t('photo_alt'); ?>"></a>
+            <?php endif; ?>
+            <p class="delivery-review__card-actions">
+              <a class="sf-btn sf-btn--primary sf-btn--sm" href="<?php echo $h($cardHref); ?>"><?php echo $t($cardActionKey($card)); ?></a>
+              <?php if ((string)($card['review_href'] ?? '') !== '' && (string)$card['review_href'] !== $cardHref): ?>
+                <a href="<?php echo $h((string)$card['review_href']); ?>"><?php echo $t('see_here'); ?></a>
+              <?php endif; ?>
+            </p>
+          </li>
+        <?php endforeach; ?>
+      </ol>
+      <?php if ((int)$brief['more'] > 0): ?>
+        <p class="delivery-review__more"><a href="#delivery-review-record"><?php echo $t('brief_more', ['count' => (int)$brief['more']]); ?></a></p>
+      <?php endif; ?>
+    <?php endif; ?>
+
+    <?php if ($wallShown !== []): ?>
+      <div class="delivery-review__wall">
+        <h2><?php echo $t('wall_title'); ?></h2>
+        <ul class="delivery-review__key">
+          <?php foreach (['clean' => 'wall_key_landed', 'photo_gap' => 'wall_key_photo', 'problem' => 'wall_key_look', 'not_out' => 'wall_key_out', 'covered' => 'wall_key_covered'] as $state => $keyName): ?>
+            <li><span class="delivery-review__cell is-<?php echo $h($state); ?>" aria-hidden="true"> </span><?php echo $t($keyName); ?></li>
+          <?php endforeach; ?>
+        </ul>
+        <div class="delivery-review__wall-scroll">
+          <div class="delivery-review__wall-row is-head" aria-hidden="true">
+            <span class="delivery-review__wall-name"></span>
+            <span class="delivery-review__strip delivery-review__strip--wall">
+              <?php foreach ($brief['wall']['dates'] as $wallDate): ?>
+                <span class="delivery-review__cell is-label"><?php echo $h((string)$wallDate['label']); ?></span>
+              <?php endforeach; ?>
+            </span>
+          </div>
+          <?php foreach ($wallShown as $wallRow): ?>
+            <?php $paintWallRow($wallRow); ?>
+          <?php endforeach; ?>
+        </div>
+        <p class="delivery-review__note"><?php echo $t('strip_note'); ?></p>
+        <?php if ($wallExtra !== []): ?>
+          <details class="delivery-review__calm">
+            <summary><?php echo $t('wall_calm', ['count' => count($wallExtra)]); ?></summary>
+            <div class="delivery-review__wall-scroll">
+              <?php foreach ($wallExtra as $wallRow): ?>
+                <?php $paintWallRow($wallRow); ?>
+              <?php endforeach; ?>
+            </div>
+          </details>
+        <?php endif; ?>
+        <?php if ((int)$brief['wall']['hidden'] > 0): ?>
+          <p class="delivery-review__more"><a href="#delivery-review-record"><?php echo $t('wall_more', ['count' => (int)$brief['wall']['hidden']]); ?></a></p>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
+  </section>
+
+  <nav class="delivery-review__tabs" aria-label="<?php echo $t('tabs_label'); ?>">
+    <a class="delivery-review__tab<?php echo $view === 'drivers' ? ' is-active' : ''; ?>" href="<?php echo $link(['view' => 'drivers', 'driver' => $driverId]); ?>"<?php echo $view === 'drivers' ? ' aria-current="page"' : ''; ?>><?php echo $t('tab_drivers'); ?> <span class="delivery-review__count"><?php echo count($report['drivers']); ?></span></a>
+    <a class="delivery-review__tab<?php echo $view === 'customers' ? ' is-active' : ''; ?>" href="<?php echo $link($storeParams + ['customer' => $customerId]); ?>"<?php echo $view === 'customers' ? ' aria-current="page"' : ''; ?>><?php echo $t('tab_customers'); ?> <span class="delivery-review__count"><?php echo count($report['customers']); ?></span></a>
+  </nav>
+
+  <?php if (!$hasSelection): ?>
+  <details class="delivery-review__record" id="delivery-review-record">
+    <summary><?php echo $t('record_title'); ?></summary>
   <ul class="delivery-review__kpis">
     <?php foreach ($tiles as $tile): ?>
       <li class="delivery-review__kpi is-<?php echo $h((string)$tile['tone']); ?>">
@@ -345,7 +546,7 @@ $tiles = [
     <?php endforeach; ?>
   </ul>
 
-  <details class="delivery-review__findings"<?php echo $hasSelection ? '' : ' open'; ?>>
+  <details class="delivery-review__findings">
     <summary><?php echo $t('insights_title'); ?> <span class="delivery-review__count"><?php echo count($insights); ?></span></summary>
     <ul>
       <?php foreach ($insights as $insight): ?>
@@ -360,13 +561,10 @@ $tiles = [
       <?php endforeach; ?>
     </ul>
   </details>
-
-  <nav class="delivery-review__tabs" aria-label="<?php echo $t('tabs_label'); ?>">
-    <a class="delivery-review__tab<?php echo $view === 'drivers' ? ' is-active' : ''; ?>" href="<?php echo $link(['view' => 'drivers', 'driver' => $driverId]); ?>"<?php echo $view === 'drivers' ? ' aria-current="page"' : ''; ?>><?php echo $t('tab_drivers'); ?> <span class="delivery-review__count"><?php echo count($report['drivers']); ?></span></a>
-    <a class="delivery-review__tab<?php echo $view === 'customers' ? ' is-active' : ''; ?>" href="<?php echo $link($storeParams + ['customer' => $customerId]); ?>"<?php echo $view === 'customers' ? ' aria-current="page"' : ''; ?>><?php echo $t('tab_customers'); ?> <span class="delivery-review__count"><?php echo count($report['customers']); ?></span></a>
-  </nav>
+  <?php endif; ?>
 
   <?php if ($view === 'drivers'): ?>
+    <?php if ($selectedDriver === null): ?>
     <section class="delivery-review__section" aria-labelledby="delivery-review-drivers">
       <h2 id="delivery-review-drivers"><?php echo $t('drivers_heading'); ?></h2>
       <?php if ($driverId > 0 && $selectedDriver === null): ?>
@@ -465,6 +663,7 @@ $tiles = [
         <p class="delivery-review__note"><?php echo $t('strip_note'); ?><?php if ($stripCut): ?> <?php echo $t('strip_cut', ['days' => BAKERY_DELIVERY_MANAGER_REVIEW_STRIP_DAYS]); ?><?php endif; ?></p>
       <?php endif; ?>
     </section>
+    <?php endif; ?>
 
     <?php if ($selectedDriver === null): ?>
       <section class="delivery-review__section" aria-labelledby="delivery-review-every-day">
@@ -687,6 +886,7 @@ $tiles = [
       </section>
     <?php endif; ?>
 
+    <?php if (!$hasSelection): ?>
     <section class="delivery-review__section" id="delivery-review-needs" aria-labelledby="delivery-review-needs-title">
       <h2 id="delivery-review-needs-title"><?php echo $t('needs_title'); ?><?php if ($selectedDriver !== null): ?> <span class="delivery-review__muted"><?php echo $h((string)$selectedDriver['driver_name']); ?></span><?php endif; ?></h2>
       <h3><?php echo $t('needs_open_title'); ?> <span class="delivery-review__count"><?php echo count($needsOpen); ?></span></h3>
@@ -764,8 +964,10 @@ $tiles = [
         </div>
       <?php endif; ?>
     </section>
+    <?php endif; ?>
   <?php else: ?>
     <section class="delivery-review__section" aria-labelledby="delivery-review-stores">
+      <?php if ($selectedCustomer === null): ?>
       <h2 id="delivery-review-stores"><?php echo $t('tab_customers'); ?></h2>
       <form class="delivery-review__range delivery-review__toolbar" method="get" action="delivery_manager_review.php">
         <input type="hidden" name="view" value="customers">
@@ -800,6 +1002,7 @@ $tiles = [
 
       <?php if ($customerId > 0 && $selectedCustomer === null): ?>
         <p class="delivery-review__note"><?php echo $t('not_in_window'); ?></p>
+      <?php endif; ?>
       <?php endif; ?>
 
       <?php if ($selectedCustomer !== null): ?>
@@ -917,6 +1120,7 @@ $tiles = [
         </article>
       <?php endif; ?>
 
+      <?php if ($selectedCustomer === null): ?>
       <?php if ($report['customers'] === []): ?>
         <p class="delivery-review__empty"><?php echo $t('customers_empty'); ?></p>
       <?php elseif ($visibleCustomers === []): ?>
@@ -992,7 +1196,11 @@ $tiles = [
           <p class="delivery-review__note"><?php echo $t('strip_cut', ['days' => BAKERY_DELIVERY_MANAGER_REVIEW_STRIP_DAYS]); ?></p>
         <?php endif; ?>
       <?php endif; ?>
+      <?php endif; ?>
     </section>
+  <?php endif; ?>
+  <?php if (!$hasSelection): ?>
+  </details>
   <?php endif; ?>
 
   <details class="delivery-review__help">

@@ -404,6 +404,9 @@ require_once __DIR__ . '/includes/nav.php';
     <div class="cr-back">
         <a class="cr-btn cr-btn-ghost" href="customers.php<?php echo $customerId > 0 ? '?highlight=' . (int)$customerId : ''; ?>">← Customers list</a>
         <a class="cr-btn cr-btn-ghost" href="account_health.php"><?php echo htmlspecialchars(bakery_t('account_health.link'), ENT_QUOTES, 'UTF-8'); ?></a>
+        <?php if ($customerId > 0 && $record && !$salesLookup): ?>
+        <button type="button" class="cr-btn cr-btn-primary" data-open-store-photo data-customer-id="<?php echo (int)$customerId; ?>" data-customer-name="<?php echo htmlspecialchars($record['customer']['name'], ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('store_photo.menu_cta'); ?></button>
+        <?php endif; ?>
     </div>
     <div class="cr-header">
         <h1><?php echo $customerId > 0 && $record ? htmlspecialchars($record['customer']['name']) : 'Customer Hub'; ?></h1>

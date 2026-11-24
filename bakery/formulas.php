@@ -274,6 +274,8 @@ if (isset($_GET['success'])) {
 $starter_templates = bakery_formula_starter_templates();
 
 $selected_dough_type_id = isset($_GET['dough_type']) ? max(0, (int)$_GET['dough_type']) : 0;
+// GET displays a mix size. It must not insert or update formula rows.
+$formula_readout_mix_pieces = bakery_formula_readout_query_pieces($_GET['mix_pieces'] ?? null);
 $all_ingredients = [];
 $dough_types = [];
 $formulas_by_dough = [];
@@ -885,6 +887,29 @@ try {
     font-size: .82rem;
 }
 .formula-structure-lines li.is-prep { background: #f3f7f5; }
+.formula-readout { margin-top: 14px; }
+.formula-readout h5 { margin: 12px 0 6px; font-size: .92rem; color: var(--formula-ink); }
+.formula-readout-form fieldset {
+    border: 1px solid #d5e4de;
+    border-radius: 8px;
+    margin: 0 0 10px;
+    padding: 10px;
+}
+.formula-readout-form legend { font-weight: 750; padding: 0 4px; }
+.formula-readout input,
+.formula-readout button {
+    min-height: var(--sf-touch-min, 44px);
+    min-width: var(--sf-touch-min, 44px);
+}
+.formula-readout-product { margin-top: 8px; }
+.formula-readout-flag {
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--sf-portal-amber, #b8860b);
+    border-radius: 8px;
+    background: #fff6df;
+    color: #6d5208;
+}
 
 .ingredient-picker { position: relative; }
 .ingredient-picker-input {
@@ -1112,7 +1137,8 @@ try {
                         $all_ingredients,
                         $formula_structures[$dough_type_id] ?? [],
                         $formula_parts_by_product,
-                        $formula_structure_ready
+                        $formula_structure_ready,
+                        $selected_dough_type_id === $dough_type_id ? $formula_readout_mix_pieces : null
                     );
                     ?>
 

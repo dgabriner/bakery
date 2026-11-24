@@ -339,17 +339,31 @@
         }
     }
 
-    function showSuccessToast(message) {
+    function showSuccessToast(message, action) {
         var toast = document.getElementById('routeSuccessToast');
         if (!toast) return;
         toast.textContent = message || di.delivery_saved;
+        toast.classList.toggle('has-action', !!action);
+        if (action && action.label && typeof action.run === 'function') {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'route-toast-action';
+            button.textContent = action.label;
+            button.addEventListener('click', function () {
+                clearTimeout(showSuccessToast._timer);
+                toast.classList.remove('is-visible');
+                toast.hidden = true;
+                action.run();
+            });
+            toast.appendChild(button);
+        }
         toast.hidden = false;
         toast.classList.add('is-visible');
         clearTimeout(showSuccessToast._timer);
         showSuccessToast._timer = setTimeout(function () {
             toast.classList.remove('is-visible');
             toast.hidden = true;
-        }, 4200);
+        }, action ? 9000 : 4200);
     }
 
     function routeOrderValue(stopEl) {
@@ -395,7 +409,9 @@
     function rowActionsHtml(stopEl) {
         var id = escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0');
         var name = stopEl.getAttribute('data-customer-name') || '';
-        return '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
+        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo"' + photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '</button>' +
+            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.confirm || 'Confirm') + '</button>' +
+            '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
             '<div class="stop-adjust-moves">' +
             '<button type="button" class="stop-move-up" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_up) + '">&#9650;</button>' +
             '<button type="button" class="stop-move-down" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_down) + '">&#9660;</button>' +
@@ -419,6 +435,9 @@
                 actions.parentNode.insertBefore(rowActions, actions);
             }
             rowActions.innerHTML = rowActionsHtml(stopEl);
+            if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
+                window.DriverDelivery.bindPhotoButtons(rowActions);
+            }
             actions.innerHTML = '';
             actions.hidden = true;
             stopEl.classList.remove('stop-item--skipped');
@@ -430,6 +449,10 @@
         var name = stopEl.getAttribute('data-customer-name') || '';
         var dailyOrderId = stopEl.getAttribute('data-daily-order-id') || '0';
         var html = '';
+        if (status === 'delivered' || status === 'failed' || status === 'office_flag') {
+            html += '<button type="button" class="contact-link contact-link--photo" data-open-store-photo' +
+                photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.add_store_photo || di.photo || 'Add photo') + '</button>';
+        }
         if (status === 'delivered') {
             html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
                 photoButtonAttrs(stopEl) + '>' + escapeHtml(di.view_invoice_photos) + '</button>';
@@ -929,16 +952,24 @@
             refreshRouteUi();
             showSuccessToast(message || di.empty_order_flagged);
         },
-        afterDeliveryComplete: function (dailyOrderId, message) {
+        afterDeliveryComplete: function (dailyOrderId, message, options) {
             var stop = findRouteStop(dailyOrderId);
+            var photoAction = null;
             if (stop) {
                 stop.setAttribute('data-status', 'delivered');
                 updateStopStatusBadge(stop, 'delivered');
                 rebuildStopContactActions(stop);
                 moveStopToPastList(stop);
+                var reviewBtn = stop.querySelector('.photo-complete-btn[data-photo-mode="review"]');
+                if (options && options.canAddPhoto && reviewBtn && window.DriverDelivery && typeof window.DriverDelivery.openReviewAddPhoto === 'function') {
+                    photoAction = {
+                        label: di.second_photo_toast_action,
+                        run: function () { window.DriverDelivery.openReviewAddPhoto(reviewBtn); }
+                    };
+                }
             }
             refreshRouteUi();
-            showSuccessToast(message || di.delivery_saved_next);
+            showSuccessToast(message || di.delivery_saved_next, photoAction);
         },
         afterStopSkipped: function (dailyOrderId, message) {
             if (document.getElementById('routePrepRoot')) {
@@ -1368,6 +1399,9 @@
         if (!root || boot.prepMode) return;
         view = view === 'route' ? 'route' : 'now';
         var previous = currentRouteView();
+        if (view === 'route' && document.body.classList.contains('now-capture-open') && window.DriverDelivery && typeof window.DriverDelivery.closeModal === 'function' && !window.DriverDelivery.isBusy()) {
+            window.DriverDelivery.closeModal();
+        }
         root.setAttribute('data-route-view', view);
         document.body.setAttribute('data-route-view', view);
         document.querySelectorAll('[data-route-view-target]').forEach(function (btn) {
@@ -1905,10 +1939,13 @@
         if (dateInput) {
             dateInput.addEventListener('change', function () {
                 if (!dateInput.value) return;
+                var chosen = dateInput.value;
+                var latest = dateInput.getAttribute('data-latest') || '';
+                if (latest && chosen > latest) chosen = latest;
                 document.body.classList.add('route-day-loading');
                 window.location.assign(
                     '?driver_id=' + encodeURIComponent(dateInput.getAttribute('data-driver-id') || '0') +
-                    '&date=' + encodeURIComponent(dateInput.value)
+                    '&date=' + encodeURIComponent(chosen)
                 );
             });
         }

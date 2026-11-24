@@ -29,6 +29,23 @@ $navPackLabel = $navRouteDate === date('Y-m-d')
     ? bakery_t('nav.pack_list')
     : bakery_t('nav.pack_for_date', ['date' => date('M j', strtotime($navRouteDate))]);
 
+// A manager or administrator who also drives: My Route opens their own profile, and
+// the driver screens show the focused Driving nav with a one-tap way back to manager tools.
+require_once __DIR__ . '/staff_driver_profile.php';
+$navStaffOwnDriverId = (isset($db) && $db instanceof PDO) ? bakery_staff_own_driver_id($db, $navUser) : 0;
+$navStaffMyRouteHref = bakery_staff_my_route_href(BASE_URL, $navRouteDate);
+$navDrivingAsSelf = $navStaffOwnDriverId > 0
+    && in_array($currentPage, ['driver', 'driver_stops'], true)
+    && (int)$navSelectedDriverId === $navStaffOwnDriverId;
+$navCraftPreview = function_exists('bakery_admin_craft_preview') ? bakery_admin_craft_preview() : '';
+$navCraftAllowed = function_exists('bakery_admin_craft_preview_allowed') && bakery_admin_craft_preview_allowed($navUser);
+$navDriverPreview = $navCraftPreview === 'driver';
+$navCraftDrivers = [];
+if ($navCraftAllowed && $navCraftPreview === '' && isset($db) && $db instanceof PDO && function_exists('bakery_admin_craft_preview_drivers')) {
+    $navCraftDrivers = bakery_admin_craft_preview_drivers($db);
+}
+$navCraftDate = bakery_staff_selected_date($_GET['date'] ?? null, date('Y-m-d'));
+
 if (!function_exists('bakery_nav_is_active')) {
     function bakery_nav_is_active(array $item, $page) {
         $href = (string)($item['href'] ?? '');
@@ -69,8 +86,12 @@ $navLogoutForm = function_exists('bakery_csrf_field')
         . '</button></form>'
     : '';
 ?>
-<?php if (bakery_is_driver_route_role($navRole)): ?>
+<?php if (bakery_is_driver_route_role($navRole) || $navDrivingAsSelf || $navDriverPreview): ?>
 <?php
+$navStaffHomeHref = BASE_URL . ($navRole === 'administrator'
+    ? bakery_admin_workspace_mode_home(bakery_admin_workspace_mode())
+    : 'manager.php?date=' . rawurlencode($navRouteDate));
+$navStaffChangeDriverHref = BASE_URL . 'driver.php?change_driver=1&date=' . rawurlencode($navRouteDate);
 $navDriverDateRaw = $_GET['date'] ?? date('Y-m-d');
 $navDriverDateObject = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$navDriverDateRaw);
 if (!$navDriverDateObject || $navDriverDateObject->format('Y-m-d') !== (string)$navDriverDateRaw) {
@@ -122,6 +143,13 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
   </div>
   <?php endif; ?>
   <div class="bakery-nav__inner">
+    <?php if ($navDriverPreview && function_exists('bakery_csrf_field')): ?>
+    <form method="post" action="<?php echo htmlspecialchars(BASE_URL . 'index.php', ENT_QUOTES, 'UTF-8'); ?>">
+      <?php echo bakery_csrf_field(); ?>
+      <input type="hidden" name="admin_craft_preview" value="exit">
+      <button class="bakery-nav__direct" type="submit"><?php bakery_te('nav.craft_admin'); ?></button>
+    </form>
+    <?php endif; ?>
     <a class="bakery-nav__brand" href="<?php echo htmlspecialchars($navDriverRouteHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.driver_workspace'); ?></a>
     <div class="bakery-nav__groups">
       <a class="bakery-nav__direct bakery-nav__my-route <?php echo $currentPage === 'driver' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverRouteHref, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.my_route'); ?>"<?php echo $currentPage === 'driver' ? ' aria-current="page"' : ''; ?>>
@@ -162,6 +190,13 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet">
+          <button type="button" class="bakery-nav__more-link bakery-nav__more-link--photo" data-open-store-photo>&#128247; <?php bakery_te('store_photo.menu_cta'); ?></button>
+          <?php if ($navDrivingAsSelf): ?>
+          <div class="bakery-nav__more-staff">
+            <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffHomeHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te($navRole === 'administrator' ? 'nav.driving_admin_home' : 'nav.driving_manager_home'); ?></a>
+            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars($navStaffChangeDriverHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.change_driver'); ?></a>
+          </div>
+          <?php endif; ?>
           <?php if ($navDriverShowDateToggle): ?>
           <div class="bakery-nav__more-route">
             <?php if ($navClockReady && function_exists('bakery_csrf_field')): ?>
@@ -199,6 +234,61 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     </div>
   </div>
 </nav>
+<?php elseif ($navCraftPreview === 'baker' || ($navRole === 'baker' && !bakery_baker_classic_nav())): ?>
+<?php
+  $navCraftBakerDate = bakery_baker_nav_workspace_date($_GET['date'] ?? null);
+  $navCraftStage = (string)($_GET['stage'] ?? 'mix');
+  if (!in_array($navCraftStage, ['mix', 'shape', 'pack'], true)) {
+      $navCraftStage = 'mix';
+  }
+?>
+<nav class="bakery-nav bakery-nav--focused bakery-nav--craft-baker" aria-label="<?php bakery_te('nav.baker_day_aria'); ?>">
+  <div class="bakery-nav__inner">
+    <?php if ($navCraftPreview === 'baker' && function_exists('bakery_csrf_field')): ?>
+    <form method="post" action="<?php echo htmlspecialchars(BASE_URL . 'index.php', ENT_QUOTES, 'UTF-8'); ?>">
+      <?php echo bakery_csrf_field(); ?>
+      <input type="hidden" name="admin_craft_preview" value="exit">
+      <button class="bakery-nav__direct" type="submit"><?php bakery_te('nav.craft_admin'); ?></button>
+    </form>
+    <?php endif; ?>
+    <a class="bakery-nav__brand" href="<?php echo htmlspecialchars(BASE_URL . 'baker_day.php?date=' . rawurlencode($navCraftBakerDate), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.baker_day_short'); ?></a>
+    <div class="bakery-nav__groups">
+      <?php foreach (['mix' => 'baker_day.stage_mix', 'shape' => 'baker_day.stage_shape', 'pack' => 'baker_day.stage_pack'] as $navCraftKey => $navCraftLabel): ?>
+        <?php $navCraftHref = BASE_URL . 'baker_day.php?' . http_build_query(['date' => $navCraftBakerDate, 'stage' => $navCraftKey]); ?>
+        <a class="bakery-nav__direct<?php echo $navCraftStage === $navCraftKey ? ' bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars($navCraftHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navCraftStage === $navCraftKey ? ' aria-current="page"' : ''; ?>>
+          <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te($navCraftLabel); ?></span>
+          <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te($navCraftLabel); ?></span>
+        </a>
+      <?php endforeach; ?>
+      <?php if ($navRole === 'baker'): ?>
+      <a class="bakery-nav__direct <?php echo $currentPage === 'counter_orders' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'counter_orders.php?' . http_build_query(['view' => 'pending', 'date' => $navCraftBakerDate]), ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
+      </a>
+      <?php
+        $navBakerClockOpen = null;
+        if (isset($db) && $db instanceof PDO && bakery_time_clock_ready($db) && $navUser) {
+            $navBakerClockOpen = bakery_time_clock_open_punch($db, (int)($navUser['id'] ?? 0));
+        }
+      ?>
+      <?php if (function_exists('bakery_csrf_field')): ?>
+      <form class="bakery-nav__clock" method="post" action="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
+        <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
+          <?php echo htmlspecialchars($navBakerClockOpen
+              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
+              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+        </button>
+      </form>
+      <?php endif; ?>
+      <?php endif; ?>
+      <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
+      <?php echo $navLogoutForm; ?>
+    </div>
+  </div>
+</nav>
 <?php elseif ($navRole === 'baker'): ?>
 <?php
   $navBakerHomeDate = bakery_baker_home_delivery_date();
@@ -231,6 +321,24 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.counter_orders'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.counter_orders_short'); ?></span>
       </a>
+      <?php
+        $navBakerClockOpen = null;
+        if (isset($db) && $db instanceof PDO && bakery_time_clock_ready($db) && $navUser) {
+            $navBakerClockOpen = bakery_time_clock_open_punch($db, (int)($navUser['id'] ?? 0));
+        }
+      ?>
+      <?php if (function_exists('bakery_csrf_field')): ?>
+      <form class="bakery-nav__clock" method="post" action="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo bakery_csrf_field(); ?>
+        <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
+        <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
+          <?php echo htmlspecialchars($navBakerClockOpen
+              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
+              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+        </button>
+      </form>
+      <?php endif; ?>
       <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
       <?php echo $navLogoutForm; ?>
     </div>
@@ -329,6 +437,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
               ['href' => 'index.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.index')],
               ['href' => 'daily_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.daily_orders')],
               ['href' => 'special_orders.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.special_orders')],
+              ['href' => 'cashier_shop_photos.php?date=' . rawurlencode($navManagerDate), 'label' => bakery_t('nav.item.cashier_shop_photos')],
           ],
       ],
   ];
@@ -364,7 +473,11 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.more_short'); ?></span>
         </summary>
         <div class="bakery-nav__more-sheet bakery-nav__more-sheet--manager">
+          <?php if ($navStaffOwnDriverId > 0): ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--staff" href="<?php echo htmlspecialchars($navStaffMyRouteHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.my_route'); ?></a>
+          <?php endif; ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'survey' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.survey_route'); ?></a>
+          <button type="button" class="bakery-nav__more-link bakery-nav__more-link--photo" data-open-store-photo>&#128247; <?php bakery_te('store_photo.menu_cta'); ?></button>
           <?php if (function_exists('bakery_sandbox_home_for_user') && bakery_sandbox_home_for_user($navUser)): ?>
           <a class="bakery-nav__more-link<?php echo $currentPage === 'sandbox' ? ' bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'sandbox.php', ENT_QUOTES, 'UTF-8'); ?>"<?php echo $currentPage === 'sandbox' ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.item.sandbox'); ?></a>
           <?php endif; ?>
@@ -440,7 +553,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       <span class="bakery-nav__label-full"><?php bakery_te('nav.manager_mode'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.manager_mode_short'); ?></span>
     </a>
-    <a class="bakery-nav__route-shortcut" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>driver.php?change_driver=1">
+    <a class="bakery-nav__route-shortcut" href="<?php echo htmlspecialchars($navStaffOwnDriverId > 0 ? $navStaffMyRouteHref : BASE_URL . 'driver.php?change_driver=1', ENT_QUOTES, 'UTF-8'); ?>">
       <span class="bakery-nav__label-full"><?php bakery_te('nav.my_route'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.my_route_short'); ?></span>
     </a>
@@ -453,6 +566,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       <span class="bakery-nav__label-full"><?php bakery_te('nav.item.users'); ?></span>
       <span class="bakery-nav__label-short"><?php bakery_te('nav.staff_short'); ?></span>
     </a>
+    <?php if ($navCraftAllowed): ?>
+    <a class="bakery-nav__route-shortcut<?php echo $currentPage === 'baker_day' ? ' bakery-nav__route-shortcut--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'baker_day.php?date=' . rawurlencode(bakery_baker_home_delivery_date()), ENT_QUOTES, 'UTF-8'); ?>">
+      <span class="bakery-nav__label-full"><?php bakery_te('nav.baker_day'); ?></span>
+      <span class="bakery-nav__label-short"><?php bakery_te('nav.baker_day_short'); ?></span>
+    </a>
+    <?php endif; ?>
     <?php endif; ?>
     <?php if (function_exists('bakery_staff_alerts_role_eligible') && function_exists('bakery_staff_alerts_nav_html') && bakery_staff_alerts_role_eligible($navUser)): ?>
       <?php echo bakery_staff_alerts_nav_html(); ?>
@@ -484,6 +603,25 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
             }
           ?></span>
         </div>
+        <?php if ($navCraftAllowed && function_exists('bakery_csrf_field')): ?>
+        <div class="bakery-nav__craft">
+          <a href="<?php echo htmlspecialchars(BASE_URL . 'baker_day.php?date=' . rawurlencode(bakery_baker_home_delivery_date()), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.baker_day'); ?></a>
+          <?php if ($navCraftDrivers !== []): ?>
+          <form method="post" action="<?php echo htmlspecialchars(BASE_URL . 'driver.php', ENT_QUOTES, 'UTF-8'); ?>">
+            <?php echo bakery_csrf_field(); ?>
+            <input type="hidden" name="admin_craft_preview" value="driver">
+            <input type="hidden" name="date" value="<?php echo htmlspecialchars($navCraftDate, ENT_QUOTES, 'UTF-8'); ?>">
+            <label for="nav-craft-driver"><?php bakery_te('nav.drive_as'); ?></label>
+            <select id="nav-craft-driver" name="driver_id" required>
+              <?php foreach ($navCraftDrivers as $navCraftDriver): ?>
+                <option value="<?php echo (int)$navCraftDriver['id']; ?>"><?php echo htmlspecialchars($navCraftDriver['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+              <?php endforeach; ?>
+            </select>
+            <button type="submit"><?php bakery_te('nav.drive_as_go'); ?></button>
+          </form>
+          <?php endif; ?>
+        </div>
+        <?php endif; ?>
         <?php $langSwitchVariant = 'nav'; require __DIR__ . '/language_switch.php'; ?>
         <?php echo $navOpsLogoutForm; ?>
       </div>
@@ -661,3 +799,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php endif; ?>
+<?php require __DIR__ . '/store_photo_quick.php'; ?>

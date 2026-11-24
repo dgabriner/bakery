@@ -243,6 +243,56 @@ function bakery_driver_photo_authorize(PDO $db, ?array $user, int $id, string $f
     ];
 }
 
+/**
+ * Parse a PHP memory_limit value. -1 means the limit is disabled.
+ */
+function bakery_photo_parse_memory_limit(string $raw): int
+{
+    $raw = trim($raw);
+    if ($raw === '' || $raw === '-1') {
+        return -1;
+    }
+    $unit = strtolower(substr($raw, -1));
+    $number = (float)$raw;
+    if ($unit === 'g') {
+        return (int)round($number * 1024 * 1024 * 1024);
+    }
+    if ($unit === 'm') {
+        return (int)round($number * 1024 * 1024);
+    }
+    if ($unit === 'k') {
+        return (int)round($number * 1024);
+    }
+    return (int)round($number);
+}
+
+/**
+ * GD decodes the whole frame before it can shrink it. A 12MP Android still
+ * is about 75MB of bitmaps, which exhausts a 128M PHP limit and the driver
+ * sees a memory error instead of a saved photo. Skip that decode.
+ */
+function bakery_photo_gd_decode_allowed(int $width, int $height, ?int $memoryLimitBytes = null): bool
+{
+    if ($width < 1 || $height < 1 || $width > 16000 || $height > 16000) {
+        return false;
+    }
+    $limit = $memoryLimitBytes === null ? bakery_photo_parse_memory_limit((string)ini_get('memory_limit')) : $memoryLimitBytes;
+    $pixels = $width * $height;
+    $longEdge = max($width, $height);
+    $destPixels = $pixels;
+    if ($longEdge > 1920) {
+        $scale = 1920 / $longEdge;
+        $destPixels = (int)max(1, round($width * $scale) * round($height * $scale));
+    }
+    // Truecolor source plus destination, about 5 bytes per pixel, plus room for PHP.
+    $needed = ($pixels + $destPixels) * 5;
+    $headroom = 64 * 1024 * 1024;
+    if ($limit < 0) {
+        return $needed <= 96 * 1024 * 1024;
+    }
+    return $needed + $headroom < $limit;
+}
+
 class PhotoHandler {
     
     private $uploadDir;
@@ -469,12 +519,18 @@ class PhotoHandler {
                 $newWidth = intval($width * $newHeight / $height);
             }
             
-            // Only resize if necessary
+            // Only resize if necessary. A full-resolution phone still can exhaust
+            // the process while GD decodes it, which the driver sees as a photo
+            // memory error. Keep the original file instead of failing the upload.
             if ($newWidth < $width || $newHeight < $height) {
+                if (!bakery_photo_gd_decode_allowed((int)$width, (int)$height)) {
+                    error_log('Photo optimization skipped: bitmap is too large for the memory limit');
+                    return;
+                }
                 $this->resizeImage($imagePath, $newWidth, $newHeight, $type);
             }
             
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             error_log("Image optimization error: " . $e->getMessage());
         }
     }
@@ -718,27 +774,31 @@ class PhotoHandler {
      */
     public function getPhotos($db, $driverId, $date, $customerId = null) {
         try {
+            if ($customerId) {
+                $stmt = $db->prepare("
+                    SELECT p.*, c.name as customer_name, c.address as customer_address
+                    FROM driver_photos p
+                    JOIN customers c ON p.customer_id = c.id
+                    WHERE p.customer_id = ? AND p.delivery_date = ?
+                    ORDER BY p.created_at DESC
+                ");
+                $stmt->execute([(int)$customerId, $date]);
+                return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+
             $query = "
                 SELECT p.*, c.name as customer_name, c.address as customer_address
                 FROM driver_photos p
                 JOIN customers c ON p.customer_id = c.id
                 WHERE p.driver_id = ? AND p.delivery_date = ?
+                ORDER BY p.created_at DESC
             ";
-            
-            $params = [$driverId, $date];
-            
-            if ($customerId) {
-                $query .= " AND p.customer_id = ?";
-                $params[] = $customerId;
-            }
-            
-            $query .= " ORDER BY p.created_at DESC";
-            
+
             $stmt = $db->prepare($query);
-            $stmt->execute($params);
-            
+            $stmt->execute([$driverId, $date]);
+
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
+
         } catch (Exception $e) {
             error_log("Get photos error: " . $e->getMessage());
             return [];

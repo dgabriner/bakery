@@ -26,18 +26,19 @@
 }
 
 .bakery-nav__brand {
-  color: var(--sf-nav-text, #f4fbf9);
+  color: var(--sf-nav-text, #f7f3ea);
   flex: 0 0 auto;
   font-family: var(--sf-font-serif);
-  font-size: 1.05rem;
+  font-size: 1.08rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.045em;
   text-decoration: none;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
   white-space: nowrap;
 }
 
 .bakery-nav__brand:hover {
-  color: #ffe7b0;
+  color: var(--sf-nav-highlight, #f3d7a4);
 }
 
 .bakery-nav__mode {
@@ -62,7 +63,7 @@
   font-size: 0.78rem;
   font-weight: 750;
   line-height: 1.1;
-  min-height: 36px;
+  min-height: var(--sf-touch-min);
   padding: 0.3rem 0.7rem;
 }
 
@@ -76,8 +77,8 @@
 .bakery-nav__mode-btn--active,
 .bakery-nav__mode-btn--active:hover,
 .bakery-nav__mode-btn--active:focus-visible {
-  background: #fff;
-  color: #143532;
+  background: var(--sf-nav-highlight, #f3d7a4);
+  color: var(--sf-brand, #12332f);
 }
 
 .bakery-nav__mode .bakery-nav__label-short {
@@ -1730,4 +1731,47 @@
     position: sticky;
     top: 0;
   }
+}
+
+/* Manager/administrator who also drives: a clear way back to manager tools, and a direct My Route link. */
+.bakery-nav__more-staff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.bakery-nav--driver .bakery-nav__more-link.bakery-nav__more-link--staff,
+.bakery-nav--manager .bakery-nav__more-link.bakery-nav__more-link--staff {
+  background: #c8872f;
+  color: #1b1206;
+}
+/* Driver More sheet: never taller than the screen. It scrolls from the top, so the first item stays visible. */
+.bakery-nav--driver .bakery-nav__more-sheet {
+  max-height: 70vh;
+  max-height: min(75dvh, calc(100dvh - 150px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bakery-nav__craft {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.bakery-nav__craft a,
+.bakery-nav__craft button,
+.bakery-nav__craft select {
+  min-height: 44px;
+}
+
+.bakery-nav__craft form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }

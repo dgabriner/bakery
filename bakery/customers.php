@@ -536,6 +536,7 @@ if (!$salesReadOnly) {
                         <td class="actions" data-label="<?php echo htmlspecialchars($salesReadOnly ? bakery_t('customers.sales_view') : $customersUi['actions'], ENT_QUOTES, 'UTF-8'); ?>">
                             <a class="btn-icon" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>" title="<?php echo htmlspecialchars(bakery_t('customers.sales_view'), ENT_QUOTES, 'UTF-8'); ?>">👤</a>
                             <?php if (!$salesReadOnly): ?>
+                            <button type="button" class="btn-icon" data-open-store-photo data-customer-id="<?php echo (int)$customer['id']; ?>" data-customer-name="<?php echo htmlspecialchars($customer['name'], ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars(bakery_t('store_photo.take_for_store', ['store' => $customer['name']]), ENT_QUOTES, 'UTF-8'); ?>">&#128247;</button>
                             <button class="btn-icon" onclick="editCustomer(<?php echo htmlspecialchars(json_encode($customer)); ?>)" title="Edit Customer">
                                 ✏️
                             </button>

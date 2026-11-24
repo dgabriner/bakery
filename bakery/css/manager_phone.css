@@ -224,10 +224,14 @@ body.workspace-manager {
 }
 
 .manager-phone__adjust {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .manager-phone__adjust-btn {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -241,6 +245,11 @@ body.workspace-manager {
   text-align: center;
   text-decoration: none;
   line-height: 1.15;
+}
+
+.manager-phone__adjust-btn--photo {
+  background: #156c43;
+  color: #fff;
 }
 
 .manager-phone__driver header {
@@ -522,7 +531,7 @@ body.workspace-manager {
 
 @media (min-width: 640px) {
   .manager-phone__adjust {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

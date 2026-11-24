@@ -25,6 +25,6 @@ backup, Git, sync, deploy, environment, hook, or DreamHost behavior.
 - New `database/schema/NNN_*.sql` files take the next unused number
   (`php scripts/next_schema_migration.php --name=slug`). Do not reuse 010,
   021, 025, 061, 062, 065, or 073. 114 and 115 are Live-only ledger rows.
-  The next file starts at 116. Do not rename applied migration files.
+  116_production_day_crew is already used. The next file starts at 117. Do not rename applied migration files.
   Do not change users through a migration. Role changes go through the Staff page.
 

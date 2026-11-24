@@ -14,6 +14,7 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/formula_units.php';
 require_once 'includes/product_pack_yields.php';
+bakery_baker_redirect_to_day('shape');
 
 // Days of the week for display
 $days = bakery_day_names();

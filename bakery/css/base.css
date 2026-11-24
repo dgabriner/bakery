@@ -29,7 +29,8 @@ body.workspace-baker,
 body.workspace-manager,
 body.workspace-cashier,
 body.workspace-sales {
-  background: var(--sf-bg-elevated);
+  background-color: var(--sf-bg);
+  background-image: var(--sf-paper-wash);
 }
 
 img, svg {
@@ -120,11 +121,13 @@ p {
   gap: var(--sf-space-4);
   margin-bottom: var(--sf-space-6);
   padding: var(--sf-space-5);
-  background: linear-gradient(180deg, var(--sf-bg-elevated) 0%, var(--sf-surface) 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 248, 0.55), transparent 46%),
+    linear-gradient(180deg, var(--sf-bg-elevated) 0%, var(--sf-surface) 100%);
   border: 1px solid var(--sf-border);
   border-left: 4px solid var(--sf-accent);
   border-radius: var(--sf-radius-lg);
-  box-shadow: var(--sf-shadow-sm);
+  box-shadow: var(--sf-shadow-md);
 }
 
 .page-header h1,
@@ -276,10 +279,10 @@ p {
 
 .btn-primary,
 .sf-btn--primary {
-  background: var(--sf-primary);
+  background: linear-gradient(180deg, var(--sf-brand-muted) 0%, var(--sf-primary) 100%);
   border-color: var(--sf-primary);
   color: var(--sf-text-inverse);
-  box-shadow: 0 1px 2px rgba(24, 40, 36, 0.14);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 16px rgba(18, 51, 47, 0.16);
 }
 
 .btn-primary:hover:not(:disabled),
@@ -532,6 +535,7 @@ textarea:focus,
 .card-panel {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
+  border-top: 3px solid var(--sf-accent);
   border-radius: var(--sf-radius-md);
   box-shadow: var(--sf-shadow-sm);
   padding: var(--sf-space-5);
@@ -574,17 +578,17 @@ table td,
 
 table th,
 .sf-table th {
-  background: var(--sf-bg-elevated);
+  background: var(--sf-surface-inset);
   font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sf-text-secondary);
+  color: var(--sf-brand);
 }
 
 table tbody tr:hover,
 .sf-table tbody tr:hover {
-  background: rgba(36, 116, 106, 0.04);
+  background: color-mix(in srgb, var(--sf-accent) 9%, var(--sf-surface));
 }
 
 table .num,

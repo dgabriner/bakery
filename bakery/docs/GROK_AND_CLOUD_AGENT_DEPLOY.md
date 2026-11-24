@@ -75,7 +75,7 @@ Edit → test if you can → commit → push branch to GitHub
 
 - Prefer **additive** branches (`codex/…`, `cursor/…`, `grok/…`). Do not rewrite history.
 - **Never** force-push to shared branches. **Never** update Live by pushing `main` or any default branch.
-- Commit **application source only** (PHP, CSS, JS, schema SQL under `database/schema/`, docs as needed). New schema files must use the next unused `NNN` from `php scripts/next_schema_migration.php --name=slug`. Do not reuse 062 or any other taken prefix. 114 and 115 are taken by Live-only ledger rows (`114_user_112_role_probe`, `115_user_112_sales_role`) that are not in git. The next schema file starts at 116.
+- Commit **application source only** (PHP, CSS, JS, schema SQL under `database/schema/`, docs as needed). New schema files must use the next unused `NNN` from `php scripts/next_schema_migration.php --name=slug`. Do not reuse 062 or any other taken prefix. 114 and 115 are taken by Live-only ledger rows (`114_user_112_role_probe`, `115_user_112_sales_role`) that are not in git. 116_production_day_crew is already in git and on Live. The next schema file starts at 117.
 - If you add a **new root-level** `.php` page (next to `login.php`), also add its filename to `Get-BakeryDeployRootFiles` in `scripts/deploy_manifest.ps1`. Staging Sync uses that whitelist; a missing name produces a Staging 404 while other files still “sync fine.”
 - New pages often need **new includes** under `includes/`. A Staging **500** with a page that works locally usually means the page uploaded but a `require_once` target did not. Confirm dependencies are on Staging, not only the root PHP file.
 - Secret-scan before commit: no `.env`, dumps, `storage/dumps/`, deploy state, credentials.
@@ -88,7 +88,7 @@ Agents must never change users through migrations. Do not write SQL that sets `u
 
 Change a role on the Staff page (`users.php`). An administrator picks the new role, confirms the old role and the new role, and saves. That updates `users.role_id`, writes the same audit row as any other staff role edit, and leaves the password, login code, email, name, and active flag alone. A non-driver role clears the driver link. There is no admin script for changing one user's role.
 
-Live `schema_migrations` already contains `114_user_112_role_probe` and `115_user_112_sales_role`. Those rows are not in git. Do not reuse 114 or 115. The next schema file starts at 116 (`php scripts/next_schema_migration.php --name=slug`).
+Live `schema_migrations` already contains `114_user_112_role_probe` and `115_user_112_sales_role`. Those rows are not in git. Do not reuse 114 or 115. 116_production_day_crew is already used. The next schema file starts at 117 (`php scripts/next_schema_migration.php --name=slug`).
 
 ---
 

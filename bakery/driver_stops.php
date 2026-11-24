@@ -142,6 +142,7 @@ require_once 'includes/nav.php';
             </div>
             <h2 id="driverCurrentStopTitle"><?php echo htmlspecialchars($currentStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?></h2>
             <p><?php echo htmlspecialchars($currentStop['customer_address'] ?: bakery_t('driver.no_address'), ENT_QUOTES, 'UTF-8'); ?></p>
+            <button type="button" class="driver-stop-photo-btn" data-open-store-photo data-customer-id="<?php echo (int)$currentStop['customer_id']; ?>" data-customer-name="<?php echo htmlspecialchars($currentStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-daily-order-id="<?php echo (int)$currentStop['daily_order_id']; ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.take_photo'); ?></button>
             <?php if ($currentMapsUrl): ?><a class="driver-current-stop-action" href="<?php echo htmlspecialchars($currentMapsUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><?php bakery_te('driver.navigate'); ?> <span aria-hidden="true">↗</span></a><?php endif; ?>
             <a class="driver-current-stop-action driver-current-stop-action--qr" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>qr_login.php">Generate customer QR login</a>
         </section>
@@ -191,6 +192,7 @@ require_once 'includes/nav.php';
                         </div>
                     </div>
                     <?php if ($canOpenStop): ?></a><?php endif; ?>
+                    <button type="button" class="driver-stop-photo-btn" data-open-store-photo data-customer-id="<?php echo (int)$stop['customer_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('store_photo.take_for_store', ['store' => $stop['customer_name']]), ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
                     <?php if ($ordersHref): ?><a class="driver-stop-orders" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.what_delivering') . ' - ' . $stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.store_orders'); ?></a><?php endif; ?>
                     <?php if (!$isDone && $mapsUrl): ?><a class="driver-stop-navigate" href="<?php echo htmlspecialchars($mapsUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate_to', ['name' => $stop['customer_name']]), ENT_QUOTES, 'UTF-8'); ?>">↗</a><?php endif; ?>
                 </li>
