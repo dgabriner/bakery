@@ -2170,3 +2170,253 @@ function bakery_sales_pipeline_list(PDO $db, array $filters, string $today): arr
     });
     return $rows;
 }
+
+/**
+ * A calendar day, or null when the text is not YYYY-MM-DD.
+ */
+function bakery_sales_leads_calendar_day(string $value): ?DateTimeImmutable
+{
+    $value = substr(trim($value), 0, 10);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) !== 1) {
+        return null;
+    }
+    $day = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+    if (!$day instanceof DateTimeImmutable || $day->format('Y-m-d') !== $value) {
+        return null;
+    }
+    return $day;
+}
+
+/**
+ * Same span as the orders chart for 7 days: the given day and the six
+ * days before it. A log from seven days earlier is outside.
+ *
+ * @return array{start:string,end:string}
+ */
+function bakery_sales_leads_activity_window(string $today): array
+{
+    $end = bakery_sales_leads_calendar_day($today);
+    if (!$end instanceof DateTimeImmutable) {
+        return ['start' => '', 'end' => ''];
+    }
+    return [
+        'start' => $end->modify('-6 days')->format('Y-m-d'),
+        'end' => $end->format('Y-m-d'),
+    ];
+}
+
+function bakery_sales_leads_in_activity_window(string $date, string $today): bool
+{
+    $window = bakery_sales_leads_activity_window($today);
+    $day = bakery_sales_leads_calendar_day($date);
+    if (!$day instanceof DateTimeImmutable || $window['start'] === '' || $window['end'] === '') {
+        return false;
+    }
+    $formatted = $day->format('Y-m-d');
+    return $formatted >= $window['start'] && $formatted <= $window['end'];
+}
+
+/**
+ * Whole days from $date to $today. Negative when $date is later.
+ */
+function bakery_sales_leads_days_before(string $date, string $today): ?int
+{
+    $left = bakery_sales_leads_calendar_day($date);
+    $right = bakery_sales_leads_calendar_day($today);
+    if (!$left instanceof DateTimeImmutable || !$right instanceof DateTimeImmutable) {
+        return null;
+    }
+    $diff = (int)$left->diff($right)->days;
+    if ($left > $right) {
+        return -$diff;
+    }
+    return $diff;
+}
+
+/**
+ * True only for priority A when the next action is more than 7 days overdue.
+ * Exactly 7 days is quiet. Any other priority stays quiet.
+ */
+function bakery_sales_leads_a_followup_late(array $row, string $today): bool
+{
+    return bakery_sales_leads_a_late_days($row, $today) !== null;
+}
+
+function bakery_sales_leads_a_late_days(array $row, string $today): ?int
+{
+    if (strtoupper(trim((string)($row['priority'] ?? ''))) !== 'A') {
+        return null;
+    }
+    $days = bakery_sales_leads_days_before((string)($row['next_action_date'] ?? ''), $today);
+    if ($days === null || $days <= 7) {
+        return null;
+    }
+    return $days;
+}
+
+function bakery_sales_leads_a_late_markup(array $row, string $today): string
+{
+    $days = bakery_sales_leads_a_late_days($row, $today);
+    if ($days === null) {
+        return '';
+    }
+    $label = function_exists('bakery_t')
+        ? bakery_t('leads.a_late', ['days' => (string)$days])
+        : ('A ' . $days . 'd');
+    return '<span class="sales-a-late" data-sales-a-late="1">' . bakery_sales_leads_h($label) . '</span>';
+}
+
+/**
+ * One logged row is one kind. A stage change wins over the note text.
+ * Visit and call are read from the note the rep wrote.
+ */
+function bakery_sales_leads_activity_kind(array $row): string
+{
+    $to = trim((string)($row['stage_to'] ?? ''));
+    $from = trim((string)($row['stage_from'] ?? ''));
+    if ($to !== '' && strcasecmp($to, $from) !== 0) {
+        return 'stage';
+    }
+    $note = trim((string)($row['note'] ?? ''));
+    if (preg_match('/^(visit|visited|visita|visite)\b/iu', $note) === 1) {
+        return 'visit';
+    }
+    if (preg_match('/^(call|called|phone|llamada|llamado|llame|llamé)\b/iu', $note) === 1) {
+        return 'call';
+    }
+    return 'note';
+}
+
+function bakery_sales_leads_activity_summary(array $row): string
+{
+    $kind = bakery_sales_leads_activity_kind($row);
+    $note = trim((string)($row['note'] ?? ''));
+    if ($note !== '' && function_exists('bakery_sales_leads_localize_note')) {
+        $note = trim(bakery_sales_leads_localize_note($note));
+    }
+    if ($kind !== 'stage') {
+        $summary = $note;
+    } else {
+        $from = trim((string)($row['stage_from'] ?? ''));
+        $to = trim((string)($row['stage_to'] ?? ''));
+        $fromLabel = ($from !== '' && function_exists('bakery_t')) ? bakery_t('leads.stage.' . $from) : $from;
+        $toLabel = ($to !== '' && function_exists('bakery_t')) ? bakery_t('leads.stage.' . $to) : $to;
+        if ($fromLabel !== '' && $toLabel !== '' && function_exists('bakery_t')) {
+            $summary = bakery_t('leads.activity_stage_change', ['from' => $fromLabel, 'to' => $toLabel]);
+        } elseif ($toLabel !== '' && function_exists('bakery_t')) {
+            $summary = bakery_t('leads.activity_stage_set', ['to' => $toLabel]);
+        } else {
+            $summary = trim($from . ' ' . $to);
+        }
+        if ($note !== '') {
+            $summary = trim($summary . ' ' . $note);
+        }
+    }
+    if (mb_strlen($summary) > 140) {
+        $summary = mb_substr($summary, 0, 137) . '...';
+    }
+    return $summary;
+}
+
+function bakery_sales_leads_can_review_reps(): bool
+{
+    return function_exists('bakery_user_has_role') && bakery_user_has_role(['administrator', 'manager']);
+}
+
+/**
+ * Per sales rep, what they logged in the 7-day window, plus the count of
+ * A leads whose next action is more than 7 days overdue.
+ * Null for every role except administrator and manager.
+ *
+ * @return array{late_count:int,reps:list<array<string,mixed>>}|null
+ */
+function bakery_sales_leads_rep_activity(PDO $db, string $today): ?array
+{
+    if (!bakery_sales_leads_can_review_reps() || !bakery_sales_leads_ready($db)) {
+        return null;
+    }
+    $window = bakery_sales_leads_activity_window($today);
+    if ($window['start'] === '' || $window['end'] === '') {
+        return null;
+    }
+    $reps = [];
+    $userStmt = $db->query(
+        "SELECT u.id, u.display_name
+         FROM users u
+         INNER JOIN roles r ON r.id = u.role_id
+         WHERE r.slug = 'sales' AND u.is_active = 1
+         ORDER BY u.display_name ASC, u.id ASC"
+    );
+    foreach ($userStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $user) {
+        $id = (int)($user['id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        $reps[$id] = [
+            'user_id' => $id,
+            'name' => (string)($user['display_name'] ?? ''),
+            'count' => 0,
+            'items' => [],
+        ];
+    }
+    $activity = $db->prepare(
+        'SELECT a.id, a.activity_date, a.user_id, a.note, a.stage_from, a.stage_to,
+                l.customer_name, l.external_id, l.id AS lead_id
+         FROM lead_activity a
+         INNER JOIN leads l ON l.id = a.lead_id
+         WHERE a.user_id IS NOT NULL
+           AND a.activity_date >= ?
+           AND a.activity_date <= ?
+         ORDER BY a.activity_date DESC, a.id DESC'
+    );
+    $activity->execute([$window['start'], $window['end']]);
+    foreach ($activity->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+        $userId = (int)($row['user_id'] ?? 0);
+        if (!isset($reps[$userId])) {
+            continue;
+        }
+        $kind = bakery_sales_leads_activity_kind($row);
+        $summary = bakery_sales_leads_activity_summary($row);
+        if ($kind === 'note' && $summary === '') {
+            continue;
+        }
+        $external = trim((string)($row['external_id'] ?? ''));
+        $reps[$userId]['items'][] = [
+            'kind' => $kind,
+            'date' => substr((string)($row['activity_date'] ?? ''), 0, 10),
+            'lead_name' => (string)($row['customer_name'] ?? ''),
+            'lead_key' => $external !== '' ? $external : (string)(int)($row['lead_id'] ?? 0),
+            'summary' => $summary,
+        ];
+        $reps[$userId]['count']++;
+    }
+    $lateCount = 0;
+    $end = bakery_sales_leads_calendar_day($today);
+    if ($end instanceof DateTimeImmutable) {
+        $limit = $end->modify('-7 days')->format('Y-m-d');
+        $late = $db->prepare(
+            "SELECT COUNT(*) FROM leads
+             WHERE UPPER(priority) = 'A'
+               AND next_action_date IS NOT NULL
+               AND next_action_date < ?"
+        );
+        $late->execute([$limit]);
+        $lateCount = (int)$late->fetchColumn();
+    }
+    $list = array_values($reps);
+    usort($list, static function (array $a, array $b): int {
+        $idle = ((int)$a['count'] === 0 ? 0 : 1) <=> ((int)$b['count'] === 0 ? 0 : 1);
+        if ($idle !== 0) {
+            return $idle;
+        }
+        $name = strcasecmp((string)$a['name'], (string)$b['name']);
+        if ($name !== 0) {
+            return $name;
+        }
+        return ((int)$a['user_id']) <=> ((int)$b['user_id']);
+    });
+    return [
+        'late_count' => $lateCount,
+        'reps' => $list,
+    ];
+}

@@ -48,7 +48,11 @@ $salesText = static function (string $value): string {
     ?>
     <div data-sales-detail="1">
         <p><a class="sales-home__back" href="<?php echo $salesText($backHref); ?>"><?php echo $salesText(bakery_t('leads.back')); ?></a></p>
-        <h1><?php echo $salesText($detailName !== '' ? $detailName : bakery_t('leads.new_title')); ?></h1>
+        <h1><?php echo $salesText($detailName !== '' ? $detailName : bakery_t('leads.new_title')); ?>
+            <?php if (is_array($lead)) {
+                echo bakery_sales_leads_a_late_markup($lead, $salesToday);
+            } ?>
+        </h1>
         <?php if ($notice !== ''): ?>
             <p class="sales-home__banner" role="status"><?php echo $salesText($notice); ?></p>
         <?php endif; ?>
