@@ -12,6 +12,7 @@ require_once 'includes/billing_aging.php';
 require_once 'includes/audit_log.php';
 require_once 'includes/payment_terms.php';
 require_once 'includes/customer_hub_create.php';
+require_once __DIR__ . '/includes/wholesale_price_import.php';
 bakery_ensure_portal_schema($db);
 bakery_ensure_sfb_schema($db);
 
@@ -445,6 +446,7 @@ if (!$salesReadOnly) {
                 <?php
                 try {
                     $customers = $db->query("SELECT * FROM customers ORDER BY zone, name")->fetchAll();
+                    $wholesaleZeroByCustomer = $salesReadOnly ? [] : bakery_wholesale_zero_price_standing_map($db);
                     $highlightId = max(0, (int)($_GET['highlight'] ?? 0));
                     foreach ($customers as $customer):
                         $phoneDigits = preg_replace('/\D+/', '', (string)($customer['phone'] ?? '') . (string)($customer['portal_phone'] ?? ''));
@@ -475,7 +477,11 @@ if (!$salesReadOnly) {
                             : number_format((float)$customer['default_pan_dulce_price'], 2, '.', '');
                 ?>
                     <tr class="<?php echo trim($rowClass); ?>" data-customer-id="<?php echo (int)$customer['id']; ?>" data-search="<?php echo htmlspecialchars($searchBlob, ENT_QUOTES, 'UTF-8'); ?>" data-active="<?php echo $isActive ? '1' : '0'; ?>" data-cod="<?php echo $isCod ? '1' : '0'; ?>" data-has-balance="<?php echo $salesReadOnly ? '0' : ($hasBalance ? '1' : '0'); ?>">
-                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="name" data-label="<?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortName, ENT_QUOTES, 'UTF-8'); ?>"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a></td>
+                        <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="name" data-label="<?php echo htmlspecialchars($customersUi['name'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortName, ENT_QUOTES, 'UTF-8'); ?>"><a class="customer-name-link" href="customer_record.php?customer_id=<?php echo (int)$customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></a><?php
+                            $zeroNames = $wholesaleZeroByCustomer[(int)$customer['id']] ?? [];
+                            $zeroText = $zeroNames === [] ? '' : bakery_wholesale_zero_price_warning_text($zeroNames);
+                            if ($zeroText !== ''):
+                        ?><p class="wholesale-zero-warn"><?php echo htmlspecialchars($zeroText, ENT_QUOTES, 'UTF-8'); ?></p><?php endif; ?></td>
                         <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="email" data-label="<?php echo htmlspecialchars($customersUi['email'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortEmail, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['email'] ?? ''); ?></td>
                         <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="phone" data-label="<?php echo htmlspecialchars($customersUi['phone'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortPhone, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['phone'] ?? ''); ?></td>
                         <td class="<?php echo $salesReadOnly ? '' : 'editable'; ?>" data-field="address" data-label="<?php echo htmlspecialchars($customersUi['address'], ENT_QUOTES, 'UTF-8'); ?>" data-sort="<?php echo htmlspecialchars($sortAddress, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($customer['address'] ?? ''); ?></td>

@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/operational_timeline.php';
 require_once __DIR__ . '/includes/operational_exceptions.php';
 require_once __DIR__ . '/includes/billing_aging.php';
 require_once __DIR__ . '/includes/sales_leads.php';
+require_once __DIR__ . '/includes/wholesale_price_import.php';
 
 $salesLookup = function_exists('bakery_user_is_sales') && bakery_user_is_sales();
 
@@ -558,7 +559,18 @@ require_once __DIR__ . '/includes/nav.php';
                 <?php if (!$salesLookup): ?>
                 <div class="cr-meta-item">
                     <span class="label">Pricing tier</span>
-                    <span class="value"><?php echo htmlspecialchars(ucfirst($cust['pricing_tier'] ?? 'retail')); ?></span>
+                    <span class="value"><?php
+                        $tier = (string)($cust['pricing_tier'] ?? 'retail');
+                        echo htmlspecialchars(ucfirst($tier));
+                        if ($tier === 'wholesale') {
+                            $zeroText = bakery_wholesale_zero_price_warning_text(
+                                bakery_wholesale_zero_price_product_names($db, $customerId)
+                            );
+                            if ($zeroText !== '') {
+                                echo '<p class="wholesale-zero-warn">' . htmlspecialchars($zeroText, ENT_QUOTES, 'UTF-8') . '</p>';
+                            }
+                        }
+                    ?></span>
                 </div>
                 <div class="cr-meta-item">
                     <span class="label"><?php echo htmlspecialchars(bakery_t('hub.balance_label')); ?></span>
