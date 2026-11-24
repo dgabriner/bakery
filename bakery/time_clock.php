@@ -10,7 +10,7 @@ require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/time_clock.php';
 
-bakery_require_role(['cashier', 'manager', 'administrator', 'driver', 'driver_assistant']);
+bakery_require_role(['cashier', 'manager', 'administrator', 'driver', 'driver_assistant', 'baker']);
 
 $user = bakery_current_user();
 $userId = (int)($user['id'] ?? 0);

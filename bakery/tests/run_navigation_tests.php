@@ -185,7 +185,9 @@ navigation_test_assert(bakery_ops_index_bypass_home('administrator') === null, '
 navigation_test_assert(isset(bakery_assignable_role_labels()['cashier']), 'User Management can assign the cashier type');
 $loginSrc = (string)file_get_contents(dirname(__DIR__) . '/login.php');
 $usersSrc = (string)file_get_contents(dirname(__DIR__) . '/users.php');
-navigation_test_assert(strpos($loginSrc, 'bakery_role_home') !== false, 'login sends staff to bakery_role_home');
+navigation_test_assert(strpos($loginSrc, 'bakery_staff_login_home(') !== false, 'login sends staff through bakery_staff_login_home');
+$staffHomeSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/staff_driver_profile.php');
+navigation_test_assert(strpos($staffHomeSrc, 'bakery_role_home') !== false, 'staff login home still uses bakery_role_home for every other role');
 navigation_test_assert(strpos($usersSrc, 'bakery_assignable_role_labels') !== false, 'users.php validates types via bakery_assignable_role_labels');
 
 $cashierNav = navigation_test_render_nav('cashier', 'product_photos');
@@ -221,12 +223,12 @@ navigation_test_assert(
 );
 
 $bakerNav = navigation_test_render_nav('baker', 'production');
-navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_today')) !== false, 'baker navigation includes Today');
-navigation_test_assert(strpos($bakerNav, 'production.php') !== false, 'baker Today links to Daily Production home');
-navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) === 2, 'baker navigation has Today and Orders');
+navigation_test_assert(strpos($bakerNav, bakery_t('nav.baker_day_short')) !== false, 'baker navigation includes Baker day');
+navigation_test_assert(strpos($bakerNav, 'baker_day.php') !== false, 'baker day links to the bake-day screen');
+navigation_test_assert(preg_match_all('/class="bakery-nav__direct(?:\s|")/', $bakerNav) >= 4, 'baker navigation has Mix, Shape, Pack, and Orders');
 navigation_test_assert(strpos($bakerNav, 'counter_orders.php?view=pending') !== false, 'baker navigation links counter orders');
 navigation_test_assert(strpos($bakerNav, 'Production Center') === false, 'baker navigation omits Production Center');
-navigation_test_assert(strpos($bakerNav, 'bakery-nav--baker') !== false, 'baker navigation uses the compact mobile bar');
+navigation_test_assert(strpos($bakerNav, 'bakery-nav--craft-baker') !== false, 'baker navigation uses the baker day bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__logout') !== false, 'baker navigation includes logout in the focused bar');
 navigation_test_assert(strpos($bakerNav, 'bakery-nav__label-short') !== false, 'baker navigation includes compact mobile labels');
 require_once dirname(__DIR__) . '/includes/kitchen_segments.php';
@@ -235,8 +237,8 @@ $navDateBefore = $_GET['date'] ?? null;
 $_GET['date'] = '2099-08-07';
 $_GET['line'] = '4';
 $bakerKept = navigation_test_render_nav('baker', 'baker_mix');
-navigation_test_assert(strpos($bakerKept, 'production.php?date=2099-08-07') !== false, 'baker workspace keeps the selected delivery date');
-navigation_test_assert(strpos($bakerKept, 'production.php?date=' . bakery_baker_home_delivery_date()) !== false, 'baker Today brand resets to tomorrow\'s delivery');
+navigation_test_assert(strpos($bakerKept, 'baker_day.php?') !== false && strpos($bakerKept, 'date=2099-08-07') !== false, 'baker workspace keeps the selected delivery date');
+navigation_test_assert(strpos($bakerNav, 'baker_day.php?date=' . bakery_baker_home_delivery_date()) !== false, 'baker day brand opens tomorrow when no date is selected');
 navigation_test_assert(strpos($bakerKept, 'counter_orders.php?view=pending&amp;date=2099-08-07') !== false || strpos($bakerKept, 'counter_orders.php?view=pending&date=2099-08-07') !== false, 'baker orders link keeps the delivery date');
 $bakerSegments = bakery_kitchen_segments_html('mix', '2099-08-07');
 navigation_test_assert(strpos($bakerSegments, 'baker_mix.php?') !== false && strpos($bakerSegments, 'date=2099-08-07') !== false, 'mix segment keeps the selected date');

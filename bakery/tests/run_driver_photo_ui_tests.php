@@ -104,12 +104,12 @@ driver_photo_assert(
     'driver session refresh returns and applies the current CSRF token',
     strpos($ping, "'csrf_token' => bakery_csrf_token()") !== false
         && strpos($csrfScript, 'window.bakerySetCsrfToken = setToken;') !== false
-        && strpos($script, 'async function refreshRouteSession()') !== false
+        &&     strpos($script, 'async function refreshRouteSession(') !== false
         && strpos($script, 'applyCsrfToken(data.csrf_token);') !== false
 );
 driver_photo_assert(
     'photo upload and delivery confirmation refresh CSRF immediately before saving',
-    substr_count($script, 'await refreshRouteSession();') >= 3
+    substr_count($script, 'refreshRouteSession()') >= 4
 );
 driver_photo_assert(
     'returning from the native camera immediately refreshes the route session',

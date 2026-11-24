@@ -185,13 +185,69 @@ function bakery_demand_self_heal_roles(): array {
  * Landing page after login for each staff role.
  * Administrators keep the requested URL (usually the ops dashboard).
  */
+function bakery_baker_classic_nav_file(): string
+{
+    return dirname(__DIR__) . '/storage/baker_nav_classic';
+}
+
+/** True when bakers should use the stored Mix / Bake / Pack screens. */
+function bakery_baker_classic_nav(): bool
+{
+    return is_file(bakery_baker_classic_nav_file());
+}
+
+function bakery_baker_classic_nav_set(bool $enabled): void
+{
+    $path = bakery_baker_classic_nav_file();
+    $dir = dirname($path);
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not store the baker view choice.');
+    }
+    if ($enabled) {
+        file_put_contents($path, "classic\n");
+        return;
+    }
+    if (is_file($path)) {
+        unlink($path);
+    }
+}
+
+function bakery_baker_redirect_to_day(string $stage): void
+{
+    $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
+    $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if (!in_array($method, ['GET', 'HEAD'], true)) {
+        return;
+    }
+    if ($user === null || (string)($user['role_slug'] ?? '') !== 'baker' || bakery_baker_classic_nav()) {
+        return;
+    }
+    if (!in_array($stage, ['mix', 'shape', 'pack'], true)) {
+        $stage = 'mix';
+    }
+    if (!function_exists('bakery_baker_home_delivery_date')) {
+        require_once __DIR__ . '/kitchen_segments.php';
+    }
+    $date = bakery_staff_selected_date($_GET['date'] ?? null, bakery_baker_home_delivery_date());
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+    header('Location: ' . $base . 'baker_day.php?' . http_build_query([
+        'date' => $date,
+        'stage' => $stage,
+    ]));
+    exit;
+}
+
 function bakery_role_home(string $role): string {
     if (bakery_is_driver_route_role($role)) {
         return 'driver.php';
     }
     switch ($role) {
         case 'baker':
-            return 'production.php?date=' . urlencode(date('Y-m-d', strtotime('+1 day')));
+            $date = urlencode(date('Y-m-d', strtotime('+1 day')));
+            if (bakery_baker_classic_nav()) {
+                return 'production.php?date=' . $date;
+            }
+            return 'baker_day.php?date=' . $date;
         case 'manager':
             return 'manager.php';
         case 'cashier':

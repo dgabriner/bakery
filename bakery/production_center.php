@@ -597,7 +597,25 @@ $weekLabel = date('M j', strtotime($weekStart)) . ' ' . bakery_locale_range_word
             <p><?php bakery_te('production_center.hub_lead'); ?></p>
         </div>
         <div class="pc-heading-actions">
-            <a class="btn btn-primary" href="production_manager.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_dashboard'); ?></a>
+            <?php
+            $managerBakeLinks = bakery_production_cadence_manager_bake_links($selectedDate);
+            if ($managerBakeLinks === []) {
+                $managerBakeLinks = [['bake_date' => $selectedDate, 'families' => []]];
+            }
+            foreach ($managerBakeLinks as $bakeLink):
+                $bakeLabel = bakery_t('production_center.link_dashboard');
+                if (count($managerBakeLinks) > 1 && ($bakeLink['families'] ?? []) !== []) {
+                    $familyNames = [];
+                    foreach ($bakeLink['families'] as $family) {
+                        $familyNames[] = bakery_t('production_cadence.family.' . $family);
+                    }
+                    $bakeLabel = bakery_t('production_center.link_dashboard_family', [
+                        'family' => implode(', ', $familyNames),
+                    ]);
+                }
+            ?>
+            <a class="btn btn-primary" href="production_manager.php?date=<?php echo urlencode((string)$bakeLink['bake_date']); ?>"><?php echo htmlspecialchars($bakeLabel, ENT_QUOTES, 'UTF-8'); ?></a>
+            <?php endforeach; ?>
             <a class="btn btn-outline" href="product_manager_plan.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('production_center.link_product_plan'); ?></a>
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($ordersHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_orders'); ?></a>
             <a class="btn btn-outline" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('production_center.link_bake'); ?></a>

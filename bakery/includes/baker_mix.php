@@ -26,9 +26,34 @@ require_once __DIR__ . '/formula_structure.php';
  *   unit_count: int
  * }
  */
-function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds = null): array
+function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds = null, ?array $quantityOverrides = null): array
 {
     $bakeList = bakery_production_bake_list($db, $date);
+    if (is_array($quantityOverrides)) {
+        $byId = [];
+        foreach ($bakeList['items'] as $bakeItem) {
+            $byId[(int)$bakeItem['product_id']] = $bakeItem;
+        }
+        foreach ($quantityOverrides as $productId => $quantity) {
+            $productId = (int)$productId;
+            $quantity = (int)$quantity;
+            if ($quantity < 0) {
+                continue;
+            }
+            if (isset($byId[$productId])) {
+                $byId[$productId]['bake_quantity'] = $quantity;
+                $byId[$productId]['source'] = 'draft_plan';
+            } elseif ($quantity > 0) {
+                $byId[$productId] = [
+                    'product_id' => $productId,
+                    'demand_quantity' => 0,
+                    'bake_quantity' => $quantity,
+                    'source' => 'draft_plan',
+                ];
+            }
+        }
+        $bakeList['items'] = array_values($byId);
+    }
     $batches = [];
     $starterFeedings = [];
     $unitCount = 0;

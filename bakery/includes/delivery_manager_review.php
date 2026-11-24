@@ -2127,3 +2127,448 @@ function bakery_delivery_manager_review_insights(array $report, string $today): 
     }
     return $out;
 }
+
+const BAKERY_DELIVERY_MANAGER_REVIEW_WALL_DAYS = 14;
+const BAKERY_DELIVERY_MANAGER_REVIEW_WALL_ROWS = 12;
+const BAKERY_DELIVERY_MANAGER_REVIEW_CARD_STOPS = 4;
+const BAKERY_DELIVERY_MANAGER_REVIEW_CARD_LIMIT = 6;
+
+/**
+ * @param list<array{date:string,state:string}> $cells
+ */
+function bakery_delivery_manager_review_wall_heat(array $cells): int
+{
+    $score = 0;
+    foreach ($cells as $cell) {
+        switch ((string)($cell['state'] ?? '')) {
+            case 'problem':
+                $score += 8;
+                break;
+            case 'photo_gap':
+                $score += 4;
+                break;
+            case 'not_out':
+                $score += 3;
+                break;
+            case 'cancelled':
+                $score += 2;
+                break;
+            case 'covered':
+                $score += 1;
+                break;
+        }
+    }
+    return $score;
+}
+
+/**
+ * Weekday labels for the last two weeks of the strip.
+ *
+ * @param array<string, mixed> $report
+ * @return list<array{date:string,label:string}>
+ */
+function bakery_delivery_manager_review_wall_dates(array $report): array
+{
+    $dates = bakery_delivery_manager_review_strip_dates(is_array($report['dates'] ?? null) ? $report['dates'] : []);
+    $dates = array_values(array_slice($dates, -BAKERY_DELIVERY_MANAGER_REVIEW_WALL_DAYS));
+    $names = function_exists('bakery_day_names') ? bakery_day_names(true) : [];
+    $out = [];
+    foreach ($dates as $date) {
+        $date = (string)$date;
+        $parsed = DateTime::createFromFormat('Y-m-d', $date);
+        $label = $date;
+        if ($parsed && $parsed->format('Y-m-d') === $date) {
+            $dow = (int)$parsed->format('N');
+            $short = trim((string)($names[$dow] ?? ''));
+            $label = $short !== '' ? $short : $parsed->format('D');
+        }
+        $out[] = ['date' => $date, 'label' => $label];
+    }
+    return $out;
+}
+
+/**
+ * Colored days. Hot rows first. A focused person is the only row.
+ *
+ * @param array<string, mixed> $report
+ * @return array{kind:string,dates:list<array{date:string,label:string}>,rows:list<array<string,mixed>>,calm_rows:list<array<string,mixed>>,hidden:int}
+ */
+function bakery_delivery_manager_review_wall(array $report, string $kind, int $focusId = 0): array
+{
+    $dated = bakery_delivery_manager_review_wall_dates($report);
+    $dates = array_column($dated, 'date');
+    $from = (string)($report['from'] ?? '');
+    $to = (string)($report['to'] ?? '');
+    $look = [];
+    $calm = [];
+    $source = $kind === 'stores'
+        ? (is_array($report['customers'] ?? null) ? $report['customers'] : [])
+        : (is_array($report['drivers'] ?? null) ? $report['drivers'] : []);
+    foreach ($source as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if ($kind === 'stores') {
+            $id = (int)($row['customer_id'] ?? 0);
+            $name = (string)($row['name'] ?? '');
+            $cells = bakery_delivery_manager_review_customer_strip($row, $dates);
+            $href = bakery_delivery_manager_review_href([
+                'view' => 'customers',
+                'from' => $from,
+                'to' => $to,
+                'customer' => $id,
+            ]);
+        } else {
+            $id = (int)($row['driver_id'] ?? 0);
+            $name = (string)($row['driver_name'] ?? '');
+            $cells = bakery_delivery_manager_review_driver_strip($row, $dates);
+            $href = bakery_delivery_manager_review_href([
+                'view' => 'drivers',
+                'from' => $from,
+                'to' => $to,
+                'driver' => $id,
+            ]);
+        }
+        if ($focusId > 0 && $id !== $focusId) {
+            continue;
+        }
+        $item = [
+            'id' => $id,
+            'name' => $name,
+            'href' => $href,
+            'cells' => $cells,
+            'heat' => bakery_delivery_manager_review_wall_heat($cells),
+        ];
+        if ($focusId > 0 || (int)$item['heat'] > 0) {
+            $look[] = $item;
+        } else {
+            $calm[] = $item;
+        }
+    }
+    $byHeat = static function (array $a, array $b): int {
+        return (((int)$b['heat']) <=> ((int)$a['heat']))
+            ?: strcasecmp((string)$a['name'], (string)$b['name']);
+    };
+    usort($look, $byHeat);
+    usort($calm, static function (array $a, array $b): int {
+        return strcasecmp((string)$a['name'], (string)$b['name']);
+    });
+    $hidden = 0;
+    if ($focusId === 0 && count($look) > BAKERY_DELIVERY_MANAGER_REVIEW_WALL_ROWS) {
+        $hidden = count($look) - BAKERY_DELIVERY_MANAGER_REVIEW_WALL_ROWS;
+        $look = array_slice($look, 0, BAKERY_DELIVERY_MANAGER_REVIEW_WALL_ROWS);
+    }
+    return [
+        'kind' => $kind === 'stores' ? 'stores' : 'drivers',
+        'dates' => $dated,
+        'rows' => $look,
+        'calm_rows' => $focusId > 0 ? [] : $calm,
+        'hidden' => $hidden,
+    ];
+}
+
+function bakery_delivery_manager_review_brief_tone(string $key, string $fallback = 'info'): string
+{
+    if (preg_match('/failed|open|missed|quiet|unassigned|stale/', $key) === 1) {
+        return 'bad';
+    }
+    if (preg_match('/missing|short|bulk|photo/', $key) === 1) {
+        return 'warn';
+    }
+    if (preg_match('/clear|on_track|extra/', $key) === 1) {
+        return 'good';
+    }
+    return $fallback;
+}
+
+/**
+ * The stops and stores a manager can act on. Photos and quiet stores stay one card each.
+ *
+ * @param array<string, mixed> $report
+ * @return array{cards:list<array<string,mixed>>,more:int}
+ */
+function bakery_delivery_manager_review_cards(array $report, string $today): array
+{
+    $from = (string)($report['from'] ?? '');
+    $to = (string)($report['to'] ?? '');
+    $link = static function (array $params) use ($from, $to): string {
+        return bakery_delivery_manager_review_href(['from' => $from, 'to' => $to] + $params);
+    };
+    $individuals = [];
+    $missingBy = [];
+    $openToday = 0;
+    foreach ($report['needs'] ?? [] as $need) {
+        if (!is_array($need)) {
+            continue;
+        }
+        $reason = (string)($need['reason'] ?? '');
+        $date = (string)($need['date'] ?? '');
+        $driverId = (int)($need['driver_id'] ?? 0);
+        $driverName = (string)($need['driver_name'] ?? '');
+        $customerId = (int)($need['customer_id'] ?? 0);
+        $customerName = (string)($need['customer_name'] ?? '');
+        if ($reason === 'missing_after') {
+            if (!isset($missingBy[$driverId])) {
+                $missingBy[$driverId] = [
+                    'driver_id' => $driverId,
+                    'driver_name' => $driverName,
+                    'count' => 0,
+                    'date' => $date,
+                    'photo_url' => (string)($need['photo_url'] ?? ''),
+                ];
+            }
+            $missingBy[$driverId]['count']++;
+            if ($date > (string)$missingBy[$driverId]['date']) {
+                $missingBy[$driverId]['date'] = $date;
+            }
+            continue;
+        }
+        if ($reason === 'open' && $date >= $today) {
+            $openToday++;
+            continue;
+        }
+        $failed = $reason === 'failed';
+        $individuals[] = [
+            'rank' => $failed ? 1 : 0,
+            'sort_date' => $date,
+            'tone' => 'bad',
+            'eyebrow_key' => $failed ? 'delivery_review.eyebrow_failed' : 'delivery_review.eyebrow_open',
+            'title' => $customerName,
+            'title_key' => '',
+            'title_params' => [],
+            'sentence_key' => $failed ? 'delivery_review.card_failed' : 'delivery_review.card_open',
+            'sentence_params' => ['driver' => $driverName],
+            'when' => $date,
+            'review_href' => $link(['view' => 'drivers', 'driver' => $driverId, 'day' => $date]) . '#day-' . $date,
+            'action' => 'sheet',
+            'action_date' => $date,
+            'action_driver' => $driverId,
+            'action_customer' => $customerId,
+            'photo_url' => '',
+        ];
+    }
+    foreach ($report['customers'] ?? [] as $customer) {
+        if (!is_array($customer) || (int)($customer['unassigned'] ?? 0) <= 0) {
+            continue;
+        }
+        $when = '';
+        foreach ($customer['visits'] ?? [] as $visit) {
+            if (!is_array($visit) || (string)($visit['status'] ?? '') !== 'unassigned') {
+                continue;
+            }
+            $date = (string)($visit['date'] ?? '');
+            if ($date !== '' && ($when === '' || $date > $when)) {
+                $when = $date;
+            }
+        }
+        $customerId = (int)($customer['customer_id'] ?? 0);
+        $individuals[] = [
+            'rank' => 2,
+            'sort_date' => $when,
+            'tone' => 'bad',
+            'eyebrow_key' => 'delivery_review.eyebrow_unassigned',
+            'title' => (string)($customer['name'] ?? ''),
+            'title_key' => '',
+            'title_params' => [],
+            'sentence_key' => 'delivery_review.card_unassigned',
+            'sentence_params' => [],
+            'when' => $when,
+            'review_href' => $link(['view' => 'customers', 'customer' => $customerId, 'filter' => 'unassigned']),
+            'action' => $when !== '' ? 'assign' : 'record',
+            'action_date' => $when,
+            'action_driver' => 0,
+            'action_customer' => $customerId,
+            'photo_url' => '',
+        ];
+    }
+    usort($individuals, static function (array $a, array $b): int {
+        $rank = ((int)$a['rank']) <=> ((int)$b['rank']);
+        if ($rank !== 0) {
+            return $rank;
+        }
+        $date = ((int)$a['rank']) === 0
+            ? strcmp((string)$a['sort_date'], (string)$b['sort_date'])
+            : strcmp((string)$b['sort_date'], (string)$a['sort_date']);
+        return $date !== 0 ? $date : strcasecmp((string)$a['title'], (string)$b['title']);
+    });
+
+    $summaries = [];
+    if ($missingBy !== []) {
+        $missingRows = array_values($missingBy);
+        $missingCount = 0;
+        foreach ($missingRows as $row) {
+            $missingCount += (int)$row['count'];
+        }
+        usort($missingRows, static function (array $a, array $b): int {
+            return (((int)$b['count']) <=> ((int)$a['count']))
+                ?: strcasecmp((string)$a['driver_name'], (string)$b['driver_name']);
+        });
+        $top = $missingRows[0];
+        $summaries[] = [
+            'tone' => 'warn',
+            'eyebrow_key' => 'delivery_review.eyebrow_photo',
+            'title' => (string)$top['driver_name'],
+            'title_key' => '',
+            'title_params' => [],
+            'sentence_key' => 'delivery_review.insight_missing_after',
+            'sentence_params' => [
+                'count' => $missingCount,
+                'driver' => (string)$top['driver_name'],
+                'most' => (int)$top['count'],
+            ],
+            'when' => (string)$top['date'],
+            'review_href' => $link(['view' => 'drivers', 'driver' => (int)$top['driver_id']]) . '#delivery-review-photos',
+            'action' => 'photos',
+            'action_date' => (string)$top['date'],
+            'action_driver' => (int)$top['driver_id'],
+            'action_customer' => 0,
+            'photo_url' => (string)$top['photo_url'],
+        ];
+    }
+    $quiet = [];
+    foreach ($report['customers'] ?? [] as $customer) {
+        if (is_array($customer) && !empty(bakery_delivery_manager_review_customer_flags($customer)['quiet'])) {
+            $quiet[] = $customer;
+        }
+    }
+    if ($quiet !== []) {
+        usort($quiet, static function (array $a, array $b): int {
+            return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? ''));
+        });
+        if (count($quiet) === 1) {
+            $reading = bakery_delivery_manager_review_customer_reading($quiet[0]);
+            $customerId = (int)($quiet[0]['customer_id'] ?? 0);
+            $summaries[] = [
+                'tone' => 'bad',
+                'eyebrow_key' => 'delivery_review.eyebrow_quiet',
+                'title' => (string)($quiet[0]['name'] ?? ''),
+                'title_key' => '',
+                'title_params' => [],
+                'sentence_key' => (string)$reading['key'],
+                'sentence_params' => is_array($reading['params'] ?? null) ? $reading['params'] : [],
+                'when' => '',
+                'review_href' => $link(['view' => 'customers', 'customer' => $customerId, 'filter' => 'quiet']),
+                'action' => 'standing',
+                'action_date' => '',
+                'action_driver' => 0,
+                'action_customer' => $customerId,
+                'photo_url' => '',
+            ];
+        } else {
+            $summaries[] = [
+                'tone' => 'bad',
+                'eyebrow_key' => 'delivery_review.eyebrow_quiet',
+                'title' => '',
+                'title_key' => 'delivery_review.quiet_title',
+                'title_params' => ['count' => count($quiet)],
+                'sentence_key' => 'delivery_review.card_quiet',
+                'sentence_params' => [],
+                'when' => '',
+                'review_href' => $link(['view' => 'customers', 'filter' => 'quiet']),
+                'action' => 'standing',
+                'action_date' => '',
+                'action_driver' => 0,
+                'action_customer' => 0,
+                'photo_url' => '',
+            ];
+        }
+    }
+    if ($openToday > 0) {
+        $summaries[] = [
+            'tone' => 'info',
+            'eyebrow_key' => 'delivery_review.eyebrow_today',
+            'title' => '',
+            'title_key' => 'delivery_review.today',
+            'title_params' => [],
+            'sentence_key' => 'delivery_review.insight_open_today',
+            'sentence_params' => ['count' => $openToday],
+            'when' => $today,
+            'review_href' => $link(['view' => 'drivers']) . '#delivery-review-needs',
+            'action' => 'sheet',
+            'action_date' => $today,
+            'action_driver' => 0,
+            'action_customer' => 0,
+            'photo_url' => '',
+        ];
+    }
+
+    $shown = array_slice($individuals, 0, BAKERY_DELIVERY_MANAGER_REVIEW_CARD_STOPS);
+    $more = count($individuals) - count($shown);
+    foreach ($summaries as $card) {
+        if (count($shown) >= BAKERY_DELIVERY_MANAGER_REVIEW_CARD_LIMIT) {
+            $more++;
+            continue;
+        }
+        $shown[] = $card;
+    }
+    $cards = [];
+    foreach ($shown as $card) {
+        unset($card['rank'], $card['sort_date']);
+        $cards[] = $card;
+    }
+    return ['cards' => $cards, 'more' => $more];
+}
+
+/**
+ * The front door: one sentence, the cards, and the day wall.
+ *
+ * @param array<string, mixed> $report
+ * @return array{tone:string,lead:array{key:string,params:array<string,mixed>},cards:list<array<string,mixed>>,more:int,wall:array<string,mixed>}
+ */
+function bakery_delivery_manager_review_brief(array $report, string $today, int $focusDriver = 0, int $focusCustomer = 0, string $wallKind = 'drivers'): array
+{
+    $lead = ['key' => 'delivery_review.insight_clear', 'params' => []];
+    $tone = 'good';
+    $cards = ['cards' => [], 'more' => 0];
+    if ($focusDriver > 0) {
+        foreach ($report['drivers'] ?? [] as $driver) {
+            if (!is_array($driver) || (int)($driver['driver_id'] ?? 0) !== $focusDriver) {
+                continue;
+            }
+            $lines = bakery_delivery_manager_review_driver_attention($driver);
+            $lead = $lines[0];
+            $tone = bakery_delivery_manager_review_brief_tone((string)$lead['key']);
+            break;
+        }
+        $wall = bakery_delivery_manager_review_wall($report, 'drivers', $focusDriver);
+    } elseif ($focusCustomer > 0) {
+        foreach ($report['customers'] ?? [] as $customer) {
+            if (!is_array($customer) || (int)($customer['customer_id'] ?? 0) !== $focusCustomer) {
+                continue;
+            }
+            $reading = bakery_delivery_manager_review_customer_reading($customer);
+            $lead = [
+                'key' => (string)$reading['key'],
+                'params' => is_array($reading['params'] ?? null) ? $reading['params'] : [],
+            ];
+            $tone = bakery_delivery_manager_review_brief_tone((string)$lead['key']);
+            break;
+        }
+        $wall = bakery_delivery_manager_review_wall($report, 'stores', $focusCustomer);
+    } else {
+        $insights = bakery_delivery_manager_review_insights($report, $today);
+        $lead = [
+            'key' => (string)($insights[0]['key'] ?? 'delivery_review.insight_clear'),
+            'params' => is_array($insights[0]['params'] ?? null) ? $insights[0]['params'] : [],
+        ];
+        $insightTone = (string)($insights[0]['tone'] ?? '');
+        if ($insightTone === 'danger') {
+            $tone = 'bad';
+        } elseif ($insightTone === 'warning') {
+            $tone = 'warn';
+        } elseif ($insightTone === 'success') {
+            $tone = 'good';
+        } else {
+            $tone = 'info';
+        }
+        $cards = bakery_delivery_manager_review_cards($report, $today);
+        $wall = bakery_delivery_manager_review_wall($report, $wallKind === 'stores' ? 'stores' : 'drivers', 0);
+    }
+    return [
+        'tone' => $tone,
+        'lead' => $lead,
+        'cards' => $cards['cards'],
+        'more' => (int)$cards['more'],
+        'wall' => $wall,
+    ];
+}

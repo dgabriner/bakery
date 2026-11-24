@@ -9,7 +9,8 @@
  *
  * Live schema_migrations also has 114_user_112_role_probe and
  * 115_user_112_sales_role. Those rows are not files in git. Do not reuse
- * 114 or 115. The next schema file starts at 116.
+ * 114 or 115. 116_production_day_crew is in git and on Live.
+ * The next schema file starts at 117.
  */
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not permitted');
@@ -105,7 +106,8 @@ function bakery_schema_unexpected_duplicate_prefixes(?array $ids = null): array
 
 /**
  * 093 through 096 stay reserved. 114 and 115 are Live-only ledger rows
- * with no file in git. New files start at 116.
+ * with no file in git. 116_production_day_crew is already used.
+ * New files start at 117.
  *
  * @return list<int>
  */

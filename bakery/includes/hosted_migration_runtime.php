@@ -323,7 +323,7 @@ function bakery_hosted_migration_id_refusal(string $id, ?string $schemaDir = nul
     }
     $number = (int)substr($id, 0, 3);
     if ($number === 114 || $number === 115) {
-        return 'Refusing migration id ' . $id . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. The next schema file starts at 116.';
+        return 'Refusing migration id ' . $id . '. Numbers 114 and 115 are already used on Live by ledger rows that are not in git. 116_production_day_crew is already used. The next schema file starts at 117.';
     }
     if ($requireGitFile && !bakery_hosted_migration_id_git_backed($id, $schemaDir)) {
         return 'Refusing migration id ' . $id . '. It is not backed by a file in database/schema/.';

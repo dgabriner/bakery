@@ -13,6 +13,7 @@ require_once 'includes/kitchen_segments.php';
 require_once 'includes/operational_exceptions.php';
 
 bakery_require_role(['baker', 'manager', 'administrator']);
+bakery_baker_redirect_to_day('mix');
 
 require_once 'includes/header.php';
 require_once 'includes/nav.php';
