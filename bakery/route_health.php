@@ -4,6 +4,7 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/database.php';
 require_once __DIR__ . '/includes/route_health.php';
+require_once __DIR__ . '/includes/stop_reliability.php';
 
 $user = bakery_current_user();
 $healthAccess = bakery_route_health_access_status($user);
@@ -17,6 +18,7 @@ if ($healthAccess !== 200) {
     echo "Forbidden\n";
     exit;
 }
+bakery_stop_reliability_handle_post($db);
 
 $today = (new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles')))->format('Y-m-d');
 $fromRaw = trim((string)($_GET['from'] ?? ''));
@@ -45,7 +47,9 @@ $yesNo = static function (?bool $value, bool $ready) use ($h): string {
 };
 ?>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/route_health.css'); ?>">
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/stop_reliability.css'); ?>">
 <main class="route-health">
+  <?php echo bakery_stop_reliability_render($db, 'route_health.php?from=' . rawurlencode((string)$range['from']) . '&to=' . rawurlencode((string)$range['to'])); ?>
   <header class="route-health__header">
     <h1><?php bakery_te('page.route_health'); ?></h1>
     <p><?php bakery_te('route_health.subtitle'); ?></p>

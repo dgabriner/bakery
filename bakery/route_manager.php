@@ -6,6 +6,8 @@ require_once 'includes/database.php';
 require_once 'includes/google_maps_config.php';
 require_once 'includes/route_manager.php';
 require_once 'includes/driver_assignments.php';
+require_once __DIR__ . '/includes/stop_reliability.php';
+bakery_stop_reliability_handle_post($db);
 
 // Handle AJAX request for delivery photos
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'get_delivery_photos') {
@@ -307,6 +309,7 @@ require_once 'includes/nav.php';
 </p>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('assets/photo_styles.css'); ?>">
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/route_manager.css'); ?>">
+<link rel="stylesheet" href="<?php echo bakery_asset_href('css/stop_reliability.css'); ?>">
 <?php
 
 // Fetch all drivers
@@ -319,6 +322,10 @@ $parsedSelected = DateTime::createFromFormat('Y-m-d', $selectedDate);
 if (!$parsedSelected || $parsedSelected->format('Y-m-d') !== $selectedDate) {
     $selectedDate = $defaultDate;
 }
+echo bakery_stop_reliability_render(
+    $db,
+    'route_manager.php?date=' . rawurlencode($selectedDate)
+);
 ?>
 
 <div class="container manager-desktop-only">
