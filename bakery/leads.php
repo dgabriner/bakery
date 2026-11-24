@@ -432,7 +432,11 @@ $exportQuery = http_build_query(array_filter([
             <p class="sales-leads-banner"><?php echo bakery_sales_leads_h(bakery_t('leads.won_readonly')); ?></p>
         <?php endif; ?>
         <?php if (!$recordWonReadOnly): ?>
-        <h2><?php echo bakery_sales_leads_h($lead ? bakery_t('leads.edit_title') : bakery_t('leads.new_title')); ?></h2>
+        <h2><?php echo bakery_sales_leads_h($lead ? bakery_t('leads.edit_title') : bakery_t('leads.new_title')); ?>
+            <?php if (is_array($lead)) {
+                echo bakery_sales_leads_a_late_markup($lead, date('Y-m-d'));
+            } ?>
+        </h2>
         <?php if ($lead): ?>
             <?php
             $legacyContact = trim((string)($lead['contact_name'] ?? ''));
@@ -721,6 +725,14 @@ $exportQuery = http_build_query(array_filter([
             <?php endif; ?>
         <?php endif; ?>
     <?php elseif ($ready): ?>
+        <?php
+        $repActivity = bakery_sales_leads_rep_activity($db, date('Y-m-d'));
+        if (is_array($repActivity)):
+        ?>
+        <div data-sales-rep-activity="1">
+            <?php require __DIR__ . '/includes/sales_rep_activity.php'; ?>
+        </div>
+        <?php endif; ?>
         <?php if ($showWriterTools): ?>
         <div class="sales-leads-actions">
             <a class="btn btn-primary" href="<?php echo bakery_sales_leads_h(BASE_URL . 'leads.php?lead=new' . ($view !== '' ? '&view=' . rawurlencode($view) : '')); ?>"><?php echo bakery_sales_leads_h(bakery_t('leads.add')); ?></a>
@@ -813,6 +825,7 @@ $exportQuery = http_build_query(array_filter([
                                 ?>
                                 <tr>
                                     <td><a href="<?php echo bakery_sales_leads_h($href); ?>"><?php echo bakery_sales_leads_h((string)$item['customer_name']); ?></a>
+                                        <?php echo bakery_sales_leads_a_late_markup($item, $followupToday); ?>
                                         <?php if (!empty($duplicateIndex[(int)$item['id']])): ?>
                                             <strong class="sales-leads-duplicate"><?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_flag')); ?></strong>
                                         <?php endif; ?>
@@ -858,6 +871,7 @@ $exportQuery = http_build_query(array_filter([
                         <tr>
                             <td><a href="<?php echo bakery_sales_leads_h($href); ?>"><?php echo bakery_sales_leads_h($publicId); ?></a></td>
                             <td><?php echo bakery_sales_leads_h((string)$item['customer_name']); ?>
+                                <?php echo bakery_sales_leads_a_late_markup($item, date('Y-m-d')); ?>
                                 <?php if (!empty($duplicateIndex[(int)$item['id']])): ?>
                                     <strong class="sales-leads-duplicate"><?php echo bakery_sales_leads_h(bakery_t('leads.duplicate_flag')); ?></strong>
                                 <?php endif; ?>

@@ -115,6 +115,7 @@ $boardAction = BASE_URL . 'leads.php';
                 <li class="sales-pipe__row<?php echo $bucket === 'overdue' || $bucket === 'today' ? ' is-due' : ''; ?>">
                     <a href="<?php echo $salesText($href); ?>">
                         <strong><?php echo $salesText((string)($item['customer_name'] ?? '')); ?></strong>
+                        <?php echo bakery_sales_leads_a_late_markup($item, $salesToday); ?>
                         <span><?php echo $salesText($stageLabel); ?></span>
                         <span><?php echo $salesText($when); ?></span>
                         <span><?php echo $salesText(bakery_sales_leads_localize_note((string)($item['last_note'] ?? ''))); ?></span>
