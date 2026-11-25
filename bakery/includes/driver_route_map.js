@@ -212,11 +212,12 @@
 
   function readStops() {
     var out = [];
-    document.querySelectorAll('#stopList .stop-item, #pastStopsList .stop-item').forEach(function (el) {
+    document.querySelectorAll('#stopList .stop-item, #pastStopsList .stop-item, #routePrepList .route-prep-stop').forEach(function (el) {
       var lat = el.getAttribute('data-lat');
       var lng = el.getAttribute('data-lng');
       var status = el.getAttribute('data-status') || 'pending';
-      var remaining = !!el.closest('#stopList') && status !== 'delivered' && status !== 'cancelled';
+      var inQueue = !!el.closest('#stopList') || !!el.closest('#routePrepList');
+      var remaining = inQueue && status !== 'delivered' && status !== 'cancelled';
       out.push({
         el: el,
         id: parseInt(el.getAttribute('data-daily-order-id') || '0', 10),

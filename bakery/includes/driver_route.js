@@ -1,6 +1,45 @@
 (function () {
     var di = window.__DRIVER_PAGE_I18N__ || {};
     var boot = window.__DRIVER_ROUTE_BOOT__ || {};
+
+    var DRIVER_MONTHS_ES = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    var DRIVER_MONTHS_EN = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    var DRIVER_MONTHS_SHORT_ES = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    var DRIVER_MONTHS_SHORT_EN = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var DRIVER_WEEKDAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    function bakeryFormatDriverDate(iso, style) {
+        var match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return '';
+        var year = Number(match[1]);
+        var month = Number(match[2]);
+        var day = Number(match[3]);
+        if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+        var locale = window.__BAKERY_LOCALE__ || boot.locale || 'en';
+        var es = locale === 'es';
+        var utc = new Date(Date.UTC(year, month - 1, day));
+        if (es) {
+            if (style === 'compact') return String(day) + ' ' + DRIVER_MONTHS_SHORT_ES[month];
+            return DRIVER_WEEKDAYS_ES[utc.getUTCDay()] + ' ' + String(day) + ' de ' + DRIVER_MONTHS_ES[month];
+        }
+        if (style === 'compact') return DRIVER_MONTHS_SHORT_EN[month] + ' ' + String(day);
+        return DRIVER_MONTHS_EN[month] + ' ' + String(day);
+    }
+    window.bakeryFormatDriverDate = bakeryFormatDriverDate;
+
+    function applyDriverDates() {
+        var iso = boot.routeDate || '';
+        document.querySelectorAll('[data-driver-date]').forEach(function (el) {
+            var elIso = el.getAttribute('data-driver-date-iso') || iso;
+            var text = bakeryFormatDriverDate(elIso, el.getAttribute('data-driver-date') || 'weekday');
+            if (text) el.textContent = text;
+        });
+        if (!iso) return;
+        var header = document.querySelector('.route-day-nav-date');
+        if (header) header.textContent = bakeryFormatDriverDate(iso, 'weekday');
+        var chip = document.querySelector('.now-strip-date strong');
+        if (chip) chip.textContent = bakeryFormatDriverDate(iso, 'compact');
+    }
     function mapsDirectionsUrl(address, lat, lng) {
         var q = '';
         var nlat = Number(lat);
@@ -115,6 +154,32 @@
         return true;
     }
 
+    function findStopByOrderId(orderId) {
+        var selector = '[data-daily-order-id="' + String(orderId) + '"]';
+        return document.querySelector('#stopList .stop-item' + selector)
+            || document.querySelector('#pastStopsList .stop-item' + selector)
+            || document.querySelector('#routePrepList .route-prep-stop' + selector);
+    }
+
+    function clearStopDeepLink(params) {
+        params.delete('open_stop');
+        params.delete('view_orders');
+        params.delete('daily_order_id');
+        var qs = params.toString();
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        }
+    }
+
+    function openHeroOrders(dailyOrderId) {
+        var wrap = document.getElementById('nextStopOrderDetails');
+        var toggle = document.getElementById('nextStopDetailsToggle');
+        if (!wrap) return;
+        wrap.style.display = 'none';
+        if (toggle) toggle.setAttribute('aria-expanded', 'true');
+        loadOrderDetails(wrap, dailyOrderId);
+    }
+
     function tryOpenStopFromUrl() {
         var params = new URLSearchParams(window.location.search);
         if (params.get('open_stop') !== '1') {
@@ -125,15 +190,29 @@
             return;
         }
         var expandOrders = params.get('view_orders') === '1';
-        var stop = document.querySelector('.stop-item[data-daily-order-id="' + orderId + '"]');
-        if (!stop || !openStopDeliveryFromEl(stop, { expandOrders: expandOrders })) {
+        var stop = findStopByOrderId(orderId);
+        if (!stop || (stop.getAttribute('data-status') || '') === 'cancelled') {
             return;
         }
-        params.delete('open_stop');
-        params.delete('view_orders');
-        params.delete('daily_order_id');
-        var qs = params.toString();
-        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        var opened = false;
+        if (stop.classList.contains('route-prep-stop')) {
+            if (stop.scrollIntoView) stop.scrollIntoView({ block: 'center' });
+            if (expandOrders) {
+                var prepWrap = stop.querySelector('.order-details-container');
+                if (prepWrap) loadOrderDetails(prepWrap, orderId);
+            }
+            opened = true;
+        } else if (stop.closest('#stopList')) {
+            renderNextStop(stop);
+            setRouteView('now');
+            if (expandOrders) openHeroOrders(orderId);
+            var card = document.getElementById('nextStopCard');
+            if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+            opened = true;
+        } else if (openStopDeliveryFromEl(stop, { expandOrders: expandOrders, autoOpenCamera: false })) {
+            opened = true;
+        }
+        if (opened) clearStopDeepLink(params);
     }
 
     function loadOrderDetails(container, dailyOrderId) {
@@ -344,7 +423,13 @@
             '<button type="button" class="route-btn route-btn--photo photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo || di.im_here) + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo || di.im_here || 'Photo') + '</button>' +
             navigateLink('route-btn route-btn--navigate', stopEl, di.navigate || di.directions || 'Navigate') +
             '<button type="button" class="route-btn route-btn--problem stop-problem-btn" aria-label="' + escapeHtml(di.problem || 'Problem') + '"' + problemButtonAttrs(stopEl) + '>' + actionLabel('problem', di.problem || 'Problem') + '</button>' +
-            '</div>';
+            '</div>' +
+            '<button type="button" class="next-stop-details-toggle" id="nextStopDetailsToggle" data-daily-order-id="' +
+            escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0') + '" aria-expanded="false" aria-controls="nextStopOrderDetails">' +
+            escapeHtml(di.what_delivering || '') + '</button>' +
+            '<div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:none;">' +
+            '<div class="order-details-loading">' + escapeHtml(di.loading_order || '') + '</div>' +
+            '<div class="order-details-content" style="display:none;"></div></div>';
 
         applyNavigateLinks(card);
         bindProblemButtons(card);
@@ -1873,6 +1958,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        if (window.__DRIVER_PAGE_I18N__) di = window.__DRIVER_PAGE_I18N__;
+        boot = window.__DRIVER_ROUTE_BOOT__ || boot;
+        applyDriverDates();
         applyNavigateLinks(document);
         refreshRouteUi();
         bindSkipStopButtons(document);
@@ -2243,6 +2331,14 @@
             if (saverToggle && window.DriverDataSaver) {
                 e.preventDefault();
                 window.DriverDataSaver.set(saverToggle.getAttribute('data-data-saver'));
+                return;
+            }
+            var heroOrdersToggle = targetEl.closest('#nextStopDetailsToggle');
+            if (heroOrdersToggle) {
+                e.preventDefault();
+                var heroOrders = document.getElementById('nextStopOrderDetails');
+                if (heroOrders) loadOrderDetails(heroOrders, heroOrdersToggle.getAttribute('data-daily-order-id') || '0');
+                heroOrdersToggle.setAttribute('aria-expanded', heroOrders && heroOrders.style.display === 'block' ? 'true' : 'false');
                 return;
             }
             var prepOrdersBtn = targetEl.closest('.route-prep-stop .stop-orders-btn');
