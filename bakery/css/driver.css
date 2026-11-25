@@ -2594,7 +2594,7 @@ html {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 36px;
+    min-height: 44px;
     padding: 0 14px;
     border-radius: 999px;
     background: #eef8f6;
@@ -4981,8 +4981,8 @@ body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route 
 
     .route-day-nav-arrow,
     .route-day-nav-current {
-        min-height: 62px;
-        border-radius: 18px;
+        min-height: 44px;
+        border-radius: 14px;
     }
 
     .route-day-nav-date {
@@ -5550,7 +5550,7 @@ body.skip-stop-modal-open {
 }
 
 .route-adjust-toggle {
-    min-height: 40px;
+    min-height: 44px;
     padding: 6px 12px;
     border-radius: 999px;
     font-size: 0.78rem;
@@ -6497,7 +6497,7 @@ body.route-prep-saving .route-prep-move-btn {
 }
 
 .route-prep-edit-link {
-    min-height: 32px;
+    min-height: 44px;
     font-size: 0.72rem;
 }
 
@@ -6569,7 +6569,7 @@ body.route-prep-saving .route-prep-move-btn {
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
-    min-height: 36px;
+    min-height: 44px;
     padding: 4px 10px;
     border: 1px solid #c7d8d4;
     border-radius: 999px;
@@ -7139,7 +7139,7 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
 }
 
 .delivery-totals-line button {
-    min-height: 40px;
+    min-height: 44px;
     padding: 4px 12px;
     border: 1px solid #c7d8d4;
     border-radius: 10px;
@@ -7247,8 +7247,9 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
 @media (max-width: 720px) {
     body.driver-workflow-page {
         color-scheme: light;
-        --driver-nav-h: calc(62px + env(safe-area-inset-bottom, 0px));
-        --driver-dock-h: 72px;
+        --driver-nav-h: calc(48px + env(safe-area-inset-bottom, 0px));
+        --driver-dock-h: 52px;
+        --driver-action-bar: 112px;
     }
 
     body.driver-workflow-page button,
@@ -7264,20 +7265,22 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     }
 
     body.driver-workflow-page .route-day-nav {
-        top: 44px;
-        z-index: 25;
+        position: static;
+        top: auto;
+        z-index: 1;
     }
 
     .now-strip {
-        position: sticky;
-        top: 0;
-        z-index: 30;
+        position: static;
+        top: auto;
+        z-index: 1;
         display: flex;
         align-items: center;
         gap: 8px;
         min-height: 44px;
-        margin: 0 -12px 8px;
-        padding: 4px 12px;
+        margin: 0 0 8px;
+        max-width: 100%;
+        padding: 4px 0;
         border-bottom: 1px solid #dbe7e4;
         background: rgba(246, 250, 249, 0.97);
         backdrop-filter: blur(10px);
@@ -7325,7 +7328,7 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     }
 
     body.driver-workflow-page .route-sticky-btn {
-        min-height: 56px;
+        min-height: 44px;
     }
 
     body.driver-workflow-page .route-adjust-dock {
@@ -7475,16 +7478,35 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     }
 
     .photo-modal.is-inline .delivery-photo-modal-content {
-        position: static !important;
+        position: relative !important;
+        display: flex !important;
+        flex-direction: column;
         width: 100% !important;
         max-width: none !important;
         height: auto !important;
-        max-height: none !important;
+        max-height: calc(100svh - var(--driver-nav-h) - 8px) !important;
         margin: 0 !important;
         border-radius: 16px !important;
         box-shadow: 0 6px 18px rgba(16, 42, 49, 0.12) !important;
         transform: none !important;
-        overflow: visible !important;
+        overflow: hidden !important;
+    }
+
+    .photo-modal.is-inline .photo-modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        padding-bottom: calc(var(--driver-action-bar) + env(safe-area-inset-bottom, 0px)) !important;
+        scroll-padding-bottom: calc(var(--driver-action-bar) + env(safe-area-inset-bottom, 0px));
+    }
+
+    .photo-modal.is-inline .photo-modal-body input,
+    .photo-modal.is-inline .photo-modal-body textarea {
+        scroll-margin-bottom: calc(var(--driver-action-bar) + env(safe-area-inset-bottom, 0px) + 12px);
+        scroll-margin-top: 12px;
     }
 
     .photo-modal.is-inline #deliveryWizardSteps {
@@ -7538,10 +7560,19 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
 
     .photo-modal.is-inline .photo-modal-footer {
         position: sticky;
-        bottom: var(--driver-nav-h);
-        z-index: 5;
+        bottom: 0;
+        z-index: 6;
+        flex: 0 0 auto;
+        margin-top: calc(-1 * (var(--driver-action-bar) + env(safe-area-inset-bottom, 0px)));
         padding: 8px 0;
         background: #fff;
+    }
+
+    .photo-modal.is-inline.delivery-step-photo #deliveryCameraFrame.is-camera-idle {
+        aspect-ratio: auto;
+        min-height: 0 !important;
+        height: 72px !important;
+        max-height: 72px !important;
     }
 
     .photo-modal.is-inline #deliveryWizardPrimaryBtn {
@@ -7649,10 +7680,81 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         display: grid;
         grid-template-columns: 1fr 1.4fr;
         gap: 8px;
-        margin: 8px -16px 0;
+        margin: 8px 0 0;
         padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
         background: #fff;
         border-top: 1px solid rgba(15, 61, 54, 0.1);
+    }
+
+    /* Staging stays visible, one thin line, and does not cover the date row. */
+    body.driver-workflow-page .local-env-banner {
+        padding: 3px 8px;
+        font-size: 0.72rem;
+        line-height: 1.25;
+        border-bottom-width: 1px;
+    }
+
+    body.driver-workflow-page .bakery-nav--focused {
+        z-index: 1400;
+    }
+
+    body.driver-workflow-page .bakery-nav--focused .bakery-nav__inner {
+        min-height: 48px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+
+    body.driver-workflow-page .bakery-nav--focused .bakery-nav__direct,
+    body.driver-workflow-page .bakery-nav--focused .bakery-nav__more-toggle {
+        min-height: 44px;
+    }
+
+    /* More opens above the dock and the bottom nav, and scrolls inside the screen. */
+    body.driver-workflow-page .bakery-nav--driver .bakery-nav__more[open] .bakery-nav__more-sheet {
+        position: fixed;
+        left: 8px;
+        right: 8px;
+        top: auto;
+        bottom: calc(var(--driver-nav-h) + 8px);
+        width: auto;
+        min-width: 0;
+        max-height: calc(100svh - var(--driver-nav-h) - 16px - env(safe-area-inset-top, 0px));
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        z-index: 2;
+    }
+
+    body.driver-workflow-page.route-has-sticky-dock:not(.now-capture-open) .bakery-nav--driver .bakery-nav__more[open] .bakery-nav__more-sheet {
+        bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);
+        max-height: calc(100svh - var(--driver-nav-h) - var(--driver-dock-h) - 16px - env(safe-area-inset-top, 0px));
+    }
+
+    body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route {
+        padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 28px);
+    }
+
+    body.driver-route-prep .route-prep-add-dock {
+        display: none !important;
+    }
+
+    body.driver-route-prep.driver-field-mode.driver-workflow-page .driver-route {
+        padding-bottom: calc(var(--driver-nav-h) + 24px);
+    }
+
+    .driver-route .stop-item,
+    .driver-route .stop-item-name,
+    .route-prep-stop,
+    .route-prep-stop-name {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    html:has(body.driver-workflow-page),
+    body.driver-workflow-page {
+        scroll-padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 16px);
     }
 }
 

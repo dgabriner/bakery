@@ -99,6 +99,12 @@
                 (photoBtn && photoBtn.getAttribute('data-date')) ||
                 (root && root.getAttribute('data-date')) ||
                 '',
+            assignmentId: parseInt(
+                (photoBtn && photoBtn.getAttribute('data-assignment-id')) ||
+                stop.getAttribute('data-assignment-id') ||
+                '0',
+                10
+            ) || 0,
             photoMode:
                 (photoBtn && photoBtn.getAttribute('data-photo-mode')) ||
                 (status === 'delivered' ? 'review' : 'capture'),
@@ -2050,36 +2056,82 @@
         if (completedButton) completedButton.addEventListener('click', function () { openPastHistory(completedButton); });
         if (pastButton) pastButton.addEventListener('click', function () { openPastHistory(pastButton); });
 
-        document.addEventListener('click', function (e) {
-            var adjustToggle = e.target.closest('#routeAdjustToggle');
-            if (adjustToggle) {
-                e.preventDefault();
-                if (routeAdjust.open) {
-                    closeRouteAdjust(true);
-                } else {
-                    openRouteAdjust();
+        var reorderToggleAt = 0;
+        function toggleReorderFromTap(event) {
+            event.preventDefault();
+            var now = Date.now();
+            // A touchend and the click it synthesizes both reach this handler.
+            // The second one used to close the mode the first one had just opened.
+            if (now - reorderToggleAt < 450) return;
+            reorderToggleAt = now;
+            if (routeAdjust.open) {
+                closeRouteAdjust(true);
+            } else {
+                openRouteAdjust();
+            }
+        }
+
+        var reorderBtn = document.getElementById('routeAdjustToggle');
+        if (reorderBtn) {
+            reorderBtn.addEventListener('pointerup', function (event) {
+                if (event.pointerType === 'mouse' || event.button > 0) return;
+                toggleReorderFromTap(event);
+            });
+        }
+
+        function bindOneTapDetails(root) {
+            (root || document).querySelectorAll('details.bakery-nav__more, details.next-stop-more').forEach(function (details) {
+                var summary = details.querySelector('summary');
+                if (!summary || summary.getAttribute('data-one-tap') === '1') return;
+                summary.setAttribute('data-one-tap', '1');
+                var last = 0;
+                function toggleOnce(event) {
+                    event.preventDefault();
+                    var now = Date.now();
+                    if (now - last < 450) return;
+                    last = now;
+                    details.open = !details.open;
                 }
+                summary.addEventListener('pointerup', function (event) {
+                    if (event.pointerType === 'mouse' || event.button > 0) return;
+                    toggleOnce(event);
+                });
+                summary.addEventListener('click', function (event) {
+                    // Native summary toggles on click. preventDefault keeps that
+                    // from undoing the pointerup toggle, and mouse clicks toggle once.
+                    toggleOnce(event);
+                });
+            });
+        }
+        bindOneTapDetails(document);
+
+        document.addEventListener('click', function (e) {
+            var targetEl = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentElement);
+            if (!targetEl || !targetEl.closest) return;
+            var adjustToggle = targetEl.closest('#routeAdjustToggle');
+            if (adjustToggle) {
+                toggleReorderFromTap(e);
                 return;
             }
-            var changeNext = e.target.closest('.change-next-btn');
+            var changeNext = targetEl.closest('.change-next-btn');
             if (changeNext) {
                 e.preventDefault();
                 openRouteAdjust();
                 return;
             }
-            var cancelAdjust = e.target.closest('#routeAdjustCancel');
+            var cancelAdjust = targetEl.closest('#routeAdjustCancel');
             if (cancelAdjust) {
                 e.preventDefault();
                 closeRouteAdjust(true);
                 return;
             }
-            var saveAdjust = e.target.closest('#routeAdjustSave');
+            var saveAdjust = targetEl.closest('#routeAdjustSave');
             if (saveAdjust) {
                 e.preventDefault();
                 saveRouteAdjust();
                 return;
             }
-            var goNextBtn = e.target.closest('.stop-go-next');
+            var goNextBtn = targetEl.closest('.stop-go-next');
             if (goNextBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2088,7 +2140,7 @@
                 });
                 return;
             }
-            var moveUpBtn = e.target.closest('.stop-move-up, .stop-move-down');
+            var moveUpBtn = targetEl.closest('.stop-move-up, .stop-move-down');
             if (moveUpBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2096,7 +2148,7 @@
                 moveStopInAdjust(moveUpBtn.getAttribute('data-daily-order-id'), moveUpBtn.classList.contains('stop-move-up') ? 'up' : 'down');
                 return;
             }
-            var problemBtn = e.target.closest('.stop-problem-btn');
+            var problemBtn = targetEl.closest('.stop-problem-btn');
             if (problemBtn && problemBtn.getAttribute('data-problem-bound') !== '1') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2107,7 +2159,7 @@
                 );
                 return;
             }
-            var stepBtn = e.target.closest('[data-start-step]');
+            var stepBtn = targetEl.closest('[data-start-step]');
             if (stepBtn && stepBtn.getAttribute('data-photo-bound') !== '1' && window.DriverDelivery && typeof window.DriverDelivery.openModal === 'function') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2126,51 +2178,51 @@
                 });
                 return;
             }
-            var problemChip = e.target.closest('[data-problem-action]');
+            var problemChip = targetEl.closest('[data-problem-action]');
             if (problemChip) {
                 e.preventDefault();
                 runProblemAction(problemChip.getAttribute('data-problem-action'));
                 return;
             }
-            var viewTarget = e.target.closest('[data-route-view-target]');
+            var viewTarget = targetEl.closest('[data-route-view-target]');
             if (viewTarget) {
                 e.preventDefault();
                 setRouteView(viewTarget.getAttribute('data-route-view-target'), { push: true });
                 return;
             }
-            if (e.target.closest('#routeSuggestBtn')) {
+            if (targetEl.closest('#routeSuggestBtn')) {
                 e.preventDefault();
                 suggestRouteOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-accept')) {
+            if (targetEl.closest('.route-suggest-accept')) {
                 e.preventDefault();
                 acceptSuggestedOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-dismiss')) {
+            if (targetEl.closest('.route-suggest-dismiss')) {
                 e.preventDefault();
                 hideSuggestPreview();
                 return;
             }
-            var notesBtn = e.target.closest('#nextStopNotes');
+            var notesBtn = targetEl.closest('#nextStopNotes');
             if (notesBtn) {
                 var clamped = notesBtn.classList.toggle('is-clamped');
                 notesBtn.setAttribute('aria-expanded', clamped ? 'false' : 'true');
                 return;
             }
-            if (e.target.closest('#vanLoadedBtn')) {
+            if (targetEl.closest('#vanLoadedBtn')) {
                 e.preventDefault();
                 markVanLoaded();
                 return;
             }
-            if (e.target.closest('#nowStripDate')) {
+            if (targetEl.closest('#nowStripDate')) {
                 e.preventDefault();
                 var disclosure = document.getElementById('routeDateDisclosure');
                 if (disclosure) disclosure.open = !disclosure.open;
                 return;
             }
-            if (e.target.closest('#driverNavProblem')) {
+            if (targetEl.closest('#driverNavProblem')) {
                 e.preventDefault();
                 var nextCard = document.getElementById('nextStopCard');
                 var problemOrderId = nextCard && nextCard.getAttribute('data-daily-order-id');
@@ -2187,13 +2239,13 @@
                 if (problemOrderId) openFailStopModal(problemOrderId, problemAssignmentId || '', problemCustomer || '');
                 return;
             }
-            var saverToggle = e.target.closest('[data-data-saver]');
+            var saverToggle = targetEl.closest('[data-data-saver]');
             if (saverToggle && window.DriverDataSaver) {
                 e.preventDefault();
                 window.DriverDataSaver.set(saverToggle.getAttribute('data-data-saver'));
                 return;
             }
-            var prepOrdersBtn = e.target.closest('.route-prep-stop .stop-orders-btn');
+            var prepOrdersBtn = targetEl.closest('.route-prep-stop .stop-orders-btn');
             if (prepOrdersBtn) {
                 e.preventDefault();
                 var prepStop = prepOrdersBtn.closest('.route-prep-stop');
@@ -2201,29 +2253,22 @@
                 if (prepWrap) loadOrderDetails(prepWrap, prepOrdersBtn.getAttribute('data-daily-order-id') || '0');
                 return;
             }
-            var mapsChoice = e.target.closest('[data-maps-app]');
+            var mapsChoice = targetEl.closest('[data-maps-app]');
             if (mapsChoice) {
                 e.preventDefault();
                 setMapsApp(mapsChoice.getAttribute('data-maps-app'));
                 return;
             }
 
-            var stop = e.target.closest('.stop-item');
+            var stop = targetEl.closest('.stop-item');
             if (!stop) return;
-            if (e.target.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label')) {
+            if (targetEl.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label, summary')) {
                 return;
             }
             if (document.body.classList.contains('route-adjust-open')) {
                 return;
             }
-            var status = stop.getAttribute('data-status') || '';
-            if (stop.closest('#stopList') && status !== 'delivered' && status !== 'cancelled' && status !== 'failed') {
-                renderNextStop(stop);
-                setRouteView('now', { push: true });
-                var card = document.getElementById('nextStopCard');
-                if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
-                return;
-            }
+            if ((stop.getAttribute('data-status') || '') === 'cancelled') return;
             openStopDeliveryFromEl(stop, { autoOpenCamera: false });
         });
 

@@ -761,6 +761,9 @@ window.DriverDataSaver = (function () {
     };
 })();
 document.body.classList.add('driver-workflow-page');
+<?php if ($nextStop && empty($routePrepMode)): ?>
+document.body.classList.add('route-has-sticky-dock');
+<?php endif; ?>
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
 <?php endif; ?>
