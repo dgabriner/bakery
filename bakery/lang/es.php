@@ -3582,6 +3582,7 @@ return [
     'driver.view_route' => 'Ruta',
     'driver.show_map' => 'Mostrar mapa',
     'driver.reorder' => 'Reordenar',
+    'driver.discard_changes' => '¿Descartar los cambios?',
     'driver.suggest_order' => 'Sugerir orden',
     'driver.suggest_preview' => 'El nuevo orden mueve :moves paradas y ahorra unos :minutes min.',
     'driver.suggest_no_gain' => 'Tu orden actual ya es casi el más rápido.',

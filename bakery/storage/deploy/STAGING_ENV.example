@@ -18,7 +18,12 @@ BASE_URL=/
 # Never bakery.sourflour.org/bake.
 
 MAIL_DRIVER=log
+# Driver Route tiles need both of these. MAPS_ENABLED=true and a browser
+# GOOGLE_MAPS_API_KEY with the Maps JavaScript API enabled. The key's HTTP
+# referrer list must include this staging origin. Do not commit the key.
+# MAPS_ENABLED=false leaves the Route tab on the "map tiles unavailable" stub.
 MAPS_ENABLED=false
+GOOGLE_MAPS_API_KEY=
 SQUARE_ENV=sandbox
 SQUARE_ACCESS_TOKEN=
 SQUARE_APPLICATION_ID=

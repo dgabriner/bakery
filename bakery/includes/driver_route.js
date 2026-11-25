@@ -658,7 +658,21 @@
         if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function closeRouteAdjust(restore) {
+    function reorderIsDirty() {
+        if (!routeAdjust.open || !routeAdjust.snapshot.length) return false;
+        var current = remainingAdjustIds();
+        var original = routeAdjust.snapshot.map(function (row) {
+            return parseInt(String(row.id || 0), 10);
+        }).filter(function (id) { return id > 0; });
+        if (current.length !== original.length) return true;
+        for (var i = 0; i < current.length; i++) {
+            if (current[i] !== original[i]) return true;
+        }
+        return false;
+    }
+
+    function closeRouteAdjust(restore, opts) {
+        opts = opts || {};
         if (!routeAdjust.open && !restore) {
             setRouteAdjustOpen(false);
             return;
@@ -682,7 +696,7 @@
             if (pick) pick.textContent = '';
         });
         setRouteAdjustOpen(false);
-        popLayerIfOurs('adjust');
+        if (!opts.fromPop) popLayerIfOurs('adjust');
     }
 
     // Map taps in Reorder build the order: each tapped stop goes right after the last one tapped.
@@ -1178,6 +1192,21 @@
     }
 
     var failModalState = { dailyOrderId: 0, assignmentId: 0, customerName: '', submitting: false };
+    var problemDraftNotes = {};
+
+    function rememberProblemNote() {
+        var id = String(failModalState.dailyOrderId || '');
+        if (!id || id === '0') return;
+        var noteInput = document.getElementById('failStopNote');
+        problemDraftNotes[id] = noteInput ? noteInput.value : '';
+    }
+
+    function forgetProblemNote(id) {
+        var key = String(id || failModalState.dailyOrderId || '');
+        if (key) delete problemDraftNotes[key];
+        var noteInput = document.getElementById('failStopNote');
+        if (noteInput) noteInput.value = '';
+    }
 
     function failHqReasonLabel() {
         var form = document.getElementById('failStopForm');
@@ -1224,7 +1253,14 @@
         if (customerEl) customerEl.textContent = customerName || '';
         if (orderInput) orderInput.value = String(failModalState.dailyOrderId);
         if (assignmentInput) assignmentInput.value = String(failModalState.assignmentId);
-        if (noteInput) noteInput.value = '';
+        if (noteInput) {
+            var draftNote = problemDraftNotes[String(failModalState.dailyOrderId)];
+            noteInput.value = draftNote == null ? '' : draftNote;
+        }
+        if (noteInput && noteInput.getAttribute('data-draft-bound') !== '1') {
+            noteInput.setAttribute('data-draft-bound', '1');
+            noteInput.addEventListener('input', rememberProblemNote);
+        }
         if (errorEl) {
             errorEl.hidden = true;
             errorEl.textContent = '';
@@ -1246,14 +1282,17 @@
         }
     }
 
-    function closeFailStopModal() {
+    function closeFailStopModal(opts) {
+        opts = opts || {};
         var modal = document.getElementById('failStopModal');
         if (!modal) return;
+        if (opts.fromPop) rememberProblemNote();
+        else forgetProblemNote();
         modal.hidden = true;
         modal.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('fail-stop-modal-open');
         failModalState.submitting = false;
-        popLayerIfOurs('problem');
+        if (!opts.fromPop) popLayerIfOurs('problem');
     }
 
     async function submitFailStop() {
@@ -1377,20 +1416,93 @@
     }
 
     var historyState = { ignorePop: false };
+    var layerStack = [];
+    var layerGuard = { suppress: false };
 
     function pushLayer(name) {
+        if (layerGuard.suppress) return;
         if (!window.history || typeof window.history.pushState !== 'function') return;
+        var state = window.history.state;
+        if (state && state.driverLayer === name) {
+            if (!layerStack.length || layerStack[layerStack.length - 1] !== name) layerStack.push(name);
+            return;
+        }
         try {
             window.history.pushState({ driverLayer: name }, '');
+            layerStack.push(name);
         } catch (err) { /* ignore */ }
     }
 
     function popLayerIfOurs(name) {
+        if (layerGuard.suppress) return;
+        if (layerStack.length && layerStack[layerStack.length - 1] === name) layerStack.pop();
         var state = window.history ? window.history.state : null;
         if (state && state.driverLayer === name) {
             historyState.ignorePop = true;
             window.history.back();
         }
+    }
+
+    function forceDriverSheetsClosed() {
+        var dateDisclosure = document.getElementById('routeDateDisclosure');
+        var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+        layerGuard.suppress = true;
+        if (dateDisclosure && dateDisclosure.open) dateDisclosure.open = false;
+        if (moreMenu && moreMenu.open) moreMenu.open = false;
+        layerGuard.suppress = false;
+    }
+
+    function closeNamedLayer(name) {
+        if (name === 'more') {
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) {
+                layerGuard.suppress = true;
+                moreMenu.open = false;
+                layerGuard.suppress = false;
+            }
+            return true;
+        }
+        if (name === 'date') {
+            var dateDisclosure = document.getElementById('routeDateDisclosure');
+            if (dateDisclosure && dateDisclosure.open) {
+                layerGuard.suppress = true;
+                dateDisclosure.open = false;
+                layerGuard.suppress = false;
+            }
+            return true;
+        }
+        if (name === 'capture') {
+            var delivery = window.DriverDelivery;
+            if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) {
+                if (typeof delivery.isBusy === 'function' && delivery.isBusy()) {
+                    pushLayer('capture');
+                    return true;
+                }
+                delivery.closeModal();
+            }
+            return true;
+        }
+        if (name === 'problem') {
+            var failModal = document.getElementById('failStopModal');
+            if (failModal && !failModal.hidden) closeFailStopModal({ fromPop: true });
+            return true;
+        }
+        if (name === 'adjust') {
+            if (routeAdjust.open && reorderIsDirty()) {
+                var discard = window.confirm(di.discard_changes || 'Discard changes?');
+                if (!discard) {
+                    pushLayer('adjust');
+                    return true;
+                }
+            }
+            if (routeAdjust.open) closeRouteAdjust(true, { fromPop: true });
+            return true;
+        }
+        if (name === 'view-route') {
+            if (currentRouteView() === 'route') setRouteView('now', { fromPop: true });
+            return true;
+        }
+        return false;
     }
 
     function setRouteView(view, opts) {
@@ -1427,6 +1539,7 @@
     function initRouteView() {
         var root = routeRoot();
         if (!root) return;
+        forceDriverSheetsClosed();
         if (!root.getAttribute('data-route-view')) root.setAttribute('data-route-view', 'now');
         if (history.state && history.state.driverLayer && typeof history.replaceState === 'function') {
             try { history.replaceState(null, ''); } catch (e) {}
@@ -1438,6 +1551,10 @@
             if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) return true;
             var failModal = document.getElementById('failStopModal');
             if (failModal && !failModal.hidden) return true;
+            var dateSheet = document.getElementById('routeDateDisclosure');
+            if (dateSheet && dateSheet.open) return true;
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) return true;
             return !!routeAdjust.open || dragState.active;
         };
 
@@ -1449,26 +1566,34 @@
                 historyState.ignorePop = false;
                 return;
             }
+            var top = layerStack.length ? layerStack.pop() : '';
+            if (top && closeNamedLayer(top)) return;
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) {
+                closeNamedLayer('more');
+                return;
+            }
+            var dateSheet = document.getElementById('routeDateDisclosure');
+            if (dateSheet && dateSheet.open) {
+                closeNamedLayer('date');
+                return;
+            }
             var delivery = window.DriverDelivery;
             if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) {
-                if (typeof delivery.isBusy === 'function' && delivery.isBusy()) {
-                    pushLayer('capture');
-                    return;
-                }
-                delivery.closeModal();
+                closeNamedLayer('capture');
                 return;
             }
             var failModal = document.getElementById('failStopModal');
             if (failModal && !failModal.hidden) {
-                closeFailStopModal({ fromPop: true });
+                closeNamedLayer('problem');
                 return;
             }
             if (routeAdjust.open) {
-                closeRouteAdjust(true);
+                closeNamedLayer('adjust');
                 return;
             }
             if (currentRouteView() === 'route') {
-                setRouteView('now', { fromPop: true });
+                closeNamedLayer('view-route');
             }
         });
     }
@@ -1881,7 +2006,6 @@
         var dateNavToggle = document.getElementById('routeDateNavToggle');
         var dateNavOpen = document.getElementById('routeDayNavOpen');
         var dateBackdrop = document.getElementById('routeDateBackdrop');
-        var dateOpenKey = 'driver-route-date-open';
 
         function syncRouteDateChrome() {
             var isOpen = !!(dateDisclosure && dateDisclosure.open);
@@ -1896,22 +2020,30 @@
             if (dateBackdrop) {
                 dateBackdrop.hidden = !isOpen;
             }
-            try {
-                window.sessionStorage.setItem(dateOpenKey, isOpen ? '1' : '0');
-            } catch (err) { /* ignore */ }
             if (isOpen && selectedDay && selectedDay.scrollIntoView) {
                 selectedDay.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
             }
         }
 
         if (dateDisclosure) {
-            try {
-                if (window.sessionStorage.getItem(dateOpenKey) === '1') {
-                    dateDisclosure.open = true;
-                }
-            } catch (err) { /* ignore */ }
-            dateDisclosure.addEventListener('toggle', syncRouteDateChrome);
+            forceDriverSheetsClosed();
+            dateDisclosure.addEventListener('toggle', function () {
+                syncRouteDateChrome();
+                if (layerGuard.suppress) return;
+                if (dateDisclosure.open) pushLayer('date');
+                else popLayerIfOurs('date');
+            });
             syncRouteDateChrome();
+        }
+
+        var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+        if (moreMenu) {
+            forceDriverSheetsClosed();
+            moreMenu.addEventListener('toggle', function () {
+                if (layerGuard.suppress) return;
+                if (moreMenu.open) pushLayer('more');
+                else popLayerIfOurs('more');
+            });
         }
 
         if (dateNavToggle && dateDisclosure) {

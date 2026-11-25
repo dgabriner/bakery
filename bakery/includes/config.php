@@ -138,15 +138,17 @@ if (PHP_SAPI !== 'cli') {
 
     if (!IS_LOCAL && !isDevelopment()) {
         // Allow Google Maps JS API tiles/fonts, plus the Sour Flour Google tag (gtag.js)
-        // on bakery and hosted staging. Do not disable this CSP.
+        // on bakery and hosted staging. Tile fetches also need *.googleapis.com,
+        // *.gstatic.com, and *.google.com or the Route map never receives tiles.
+        // Do not disable this CSP.
         header(
             "Content-Security-Policy: " .
             "default-src 'self'; " .
-            "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://www.googleadservices.com https://www.google.com; " .
+            "script-src 'self' 'unsafe-inline' blob: https://maps.googleapis.com https://*.googleapis.com https://maps.gstatic.com https://*.gstatic.com https://*.ggpht.com https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://www.googleadservices.com https://www.google.com https://*.google.com; " .
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
             "img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com https://*.google.com https://*.googleusercontent.com https://www.google-analytics.com https://www.googletagmanager.com https://*.google-analytics.com https://*.googletagmanager.com https://*.g.doubleclick.net; " .
             "font-src 'self' https://fonts.gstatic.com; " .
-            "connect-src 'self' https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.googleadservices.com https://*.g.doubleclick.net; " .
+            "connect-src 'self' https://maps.googleapis.com https://*.googleapis.com https://maps.gstatic.com https://*.gstatic.com https://*.google.com https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.googleadservices.com https://*.g.doubleclick.net data: blob:; " .
             "frame-src https://www.googletagmanager.com https://www.googleadservices.com; " .
             "worker-src 'self' blob:"
         );

@@ -188,6 +188,77 @@ driver_ux_assert(
         && strpos($mapJs, 'optimizeWaypoints: true') !== false
 );
 
+driver_ux_assert(
+    'date sheet starts closed and is not restored from sessionStorage',
+    strpos($routeJs, 'sessionStorage') === false
+        && strpos($routeJs, 'function forceDriverSheetsClosed()') !== false
+        && strpos($routeJs, "pushLayer('date')") !== false
+);
+driver_ux_assert(
+    'Back closes the date sheet and the More menu without leaving the page',
+    strpos($routeJs, "pushLayer('more')") !== false
+        && strpos($routeJs, "closeNamedLayer('date')") !== false
+        && strpos($routeJs, "closeNamedLayer('more')") !== false
+        && strpos($routeJs, "window.addEventListener('popstate'") !== false
+);
+
+$openFailAt = strpos($routeJs, 'function openFailStopModal(');
+$closeFailAt = strpos($routeJs, 'function closeFailStopModal(', $openFailAt === false ? 0 : $openFailAt);
+$openFail = ($openFailAt !== false && $closeFailAt !== false)
+    ? substr($routeJs, $openFailAt, $closeFailAt - $openFailAt)
+    : '';
+driver_ux_assert(
+    'Back keeps the problem note until the sheet is submitted or cancelled',
+    $openFail !== ''
+        && strpos($openFail, 'problemDraftNotes') !== false
+        && strpos($openFail, "noteInput.value = ''") === false
+        && strpos($routeJs, 'function rememberProblemNote()') !== false
+        && strpos($routeJs, 'function forgetProblemNote(') !== false
+        && strpos($routeJs, 'closeFailStopModal({ fromPop: true })') !== false
+);
+driver_ux_assert(
+    'unsaved reorder asks once before Back discards it',
+    strpos($routeJs, 'function reorderIsDirty()') !== false
+        && strpos($routeJs, "di.discard_changes || 'Discard changes?'") !== false
+        && strpos($routeJs, 'closeRouteAdjust(true, { fromPop: true })') !== false
+        && (string)$english['driver.discard_changes'] === 'Discard changes?'
+        && (string)$spanish['driver.discard_changes'] === '¿Descartar los cambios?'
+        && strpos($page, "bakery_t('driver.discard_changes')") !== false
+);
+
+$createAt = strpos($mapJs, 'function createMap()');
+$bindAt = $createAt === false ? false : strpos($mapJs, 'function bindChrome()', $createAt);
+$createMap = ($createAt !== false && $bindAt !== false) ? substr($mapJs, $createAt, $bindAt - $createAt) : '';
+$routeHideAt = strpos($styles, '.driver-route[data-route-view="route"] .route-map-horizon');
+$routeHide = $routeHideAt === false ? '' : substr($styles, $routeHideAt, 420);
+driver_ux_assert(
+    'Follow stays on the Route tab and is labeled when the map is created',
+    strpos($page, 'id="routeMapFollow"') !== false
+        && $createMap !== ''
+        && strpos($createMap, 'syncFollowButton()') !== false
+        && strpos($createMap, "followBtn.hidden = false") !== false
+        && strpos($routeHide, '#routeMapFollow') === false
+        && strpos($routeHide, '#routeMapExpand') !== false
+);
+$config = (string)file_get_contents($root . '/includes/config.php');
+preg_match('/connect-src[^;]+;/', $config, $connectSrc);
+$connect = $connectSrc[0] ?? '';
+driver_ux_assert(
+    'map tile hosts are allowed on connect-src',
+    strpos($connect, 'https://*.googleapis.com') !== false
+        && strpos($connect, 'https://*.gstatic.com') !== false
+        && strpos($connect, 'https://*.google.com') !== false
+);
+driver_ux_assert(
+    'the unavailable map message waits until the Maps script fails',
+    strpos($page, '__driverMapScriptPending') !== false
+        && strpos($page, 'tag.onerror') !== false
+        && strpos($page, 'gm_authFailure') !== false
+        && strpos($mapJs, 'if (!window.__driverMapScriptPending) showFallback();') !== false
+        && strpos($mapJs, 'DriverRouteMap') !== false
+        && strpos($mapJs, 'fail: function ()') !== false
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);
