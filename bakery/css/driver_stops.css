@@ -106,8 +106,20 @@
 .is-current .driver-stop-number { background: var(--stops-green); border-color: var(--stops-green); color: #fff; }
 .is-complete .driver-stop-number { background: #e5f2e8; border-color: #b7d8bf; color: #237047; }
 .driver-stop-content { min-width: 0; flex: 1 1 auto; }
-.driver-stop-title-row { align-items: center; display: flex; gap: 8px; min-width: 0; }
-.driver-stop-title-row h3 { color: var(--stops-ink); font-size: 0.98rem; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.driver-stop-title-row { align-items: flex-start; display: flex; gap: 8px; min-width: 0; }
+.driver-stop-title-row h3 {
+    color: var(--stops-ink);
+    flex: 1 1 auto;
+    font-size: 0.98rem;
+    line-height: 1.25;
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+}
 .is-complete .driver-stop-title-row h3 { color: #71827d; text-decoration: line-through; }
 .driver-stop-status,
 .driver-stop-current-badge { border-radius: 999px; flex: 0 0 auto; font-size: 0.66rem; font-weight: 800; padding: 4px 7px; text-transform: uppercase; }
@@ -117,7 +129,21 @@
 .driver-stop-status--failed { background: #fdeaea; color: #a33d3d; }
 .driver-stop-status--in_transit { background: #e4f1f7; color: #1a6580; }
 .driver-stop-status--pending { background: #f8f1df; color: #8a691e; }
-.driver-stop-content > p { color: var(--stops-muted); font-size: 0.84rem; line-height: 1.35; margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.driver-stop-content > p {
+    color: var(--stops-muted);
+    font-size: 0.84rem;
+    line-height: 1.35;
+    margin: 3px 0 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+}
+.driver-current-stop h2,
+.driver-current-stop p {
+    overflow-wrap: anywhere;
+}
 .driver-stop-meta { color: #84938e; display: flex; flex-wrap: wrap; font-size: 0.72rem; gap: 8px; margin-top: 4px; }
 .driver-stop-orders,
 .driver-stop-navigate { align-items: center; border: 1px solid #c9ded7; border-radius: 10px; color: var(--stops-green); display: inline-flex; font-weight: 800; height: 40px; justify-content: center; text-decoration: none; }

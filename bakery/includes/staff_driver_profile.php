@@ -115,6 +115,58 @@ function bakery_staff_driving_as_self(?PDO $db, ?array $user, int $selectedDrive
     return $own > 0 && $own === $selectedDriverId;
 }
 
+/**
+ * Driver tools a manager keeps while they are driving their own route.
+ * Any other page drops them back to the manager workspace.
+ *
+ * @return list<string>
+ */
+function bakery_staff_driver_tool_pages(): array
+{
+    return ['driver', 'driver_stops', 'pack_list', 'call_headquarters', 'survey', 'qr_login', 'time_clock'];
+}
+
+/** Remember which driver profile this staff member is driving. 0 means not driving. */
+function bakery_staff_driver_mode_driver_id(): int
+{
+    return (int)($_SESSION['bakery_staff_driver_mode'] ?? 0);
+}
+
+function bakery_staff_enter_driver_mode(int $driverId): void
+{
+    if ($driverId <= 0) {
+        bakery_staff_leave_driver_mode();
+        return;
+    }
+    $_SESSION['bakery_staff_driver_mode'] = $driverId;
+}
+
+function bakery_staff_leave_driver_mode(): void
+{
+    unset($_SESSION['bakery_staff_driver_mode']);
+}
+
+/**
+ * Route workers are always in the driver workspace. A manager or administrator
+ * stays in it only after opening their own route, and only on driver tools.
+ * Opening any other page clears that choice.
+ */
+function bakery_staff_in_driver_workspace(?array $user, string $page): bool
+{
+    $role = (string)($user['role_slug'] ?? '');
+    if (function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($role)) {
+        return true;
+    }
+    if (!bakery_staff_can_drive_as_self($user)) {
+        return false;
+    }
+    if (!in_array($page, bakery_staff_driver_tool_pages(), true)) {
+        bakery_staff_leave_driver_mode();
+        return false;
+    }
+    return bakery_staff_driver_mode_driver_id() > 0;
+}
+
 /** Direct My Route link: skips the "who is driving" picker when a profile matches. */
 function bakery_staff_my_route_href(string $baseUrl, ?string $date = null): string
 {

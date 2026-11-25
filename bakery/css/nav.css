@@ -1781,3 +1781,46 @@
   gap: 8px;
   align-items: center;
 }
+
+/* Now / Route / Problem live on the phone route bar. Desktop keeps My Route. */
+.bakery-nav__route-tab {
+  display: none;
+}
+
+.bakery-nav--driver .bakery-nav__more-link.bakery-nav__more-link--survey-phone,
+.bakery-nav--driver .bakery-nav__more-link.bakery-nav__more-link--tomorrow-phone {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .bakery-nav--driver-route .bakery-nav__driver-bar,
+  .bakery-nav--driver-route .bakery-nav__my-route,
+  .bakery-nav--driver-route .bakery-nav__date-toggle,
+  .bakery-nav--driver-route .bakery-nav__survey {
+    display: none !important;
+  }
+
+  .bakery-nav--driver-route .bakery-nav__route-tab {
+    display: flex;
+  }
+
+  .bakery-nav--driver-route .bakery-nav__route-tab[aria-pressed="true"] {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .bakery-nav--driver-route .bakery-nav__more-link.bakery-nav__more-link--survey-phone,
+  .bakery-nav--driver-route .bakery-nav__more-link.bakery-nav__more-link--tomorrow-phone {
+    display: flex;
+  }
+
+  body.driver-route-prep .bakery-nav--driver-route .bakery-nav__route-tab,
+  body.driver-route-prep .bakery-nav--driver-route .bakery-nav__more-link.bakery-nav__more-link--survey-phone {
+    display: none !important;
+  }
+
+  body.driver-route-prep .bakery-nav--driver-route .bakery-nav__my-route,
+  body.driver-route-prep .bakery-nav--driver-route .bakery-nav__date-toggle,
+  body.driver-route-prep .bakery-nav--driver-route .bakery-nav__survey {
+    display: flex !important;
+  }
+}

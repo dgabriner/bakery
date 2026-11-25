@@ -49,6 +49,22 @@ $assert(
     'Sunday (typical SF bake for Monday) → next delivery is Monday'
 );
 $assert(
+    bakery_survey_current_sell_date('2026-11-24') === '2026-11-24',
+    'a driver survey on a sell day stays on that day'
+);
+$assert(
+    bakery_survey_next_sell_date('2026-11-24') === '2026-11-25',
+    'HQ planning still starts on the next sell day'
+);
+$assert(
+    bakery_survey_current_sell_date('2026-11-22', [1, 2, 3, 4, 5]) === '2026-11-23',
+    'a closed Sunday moves the driver to the next sell day'
+);
+$assert(
+    bakery_survey_current_sell_date('2026-11-22', [1, 2, 3, 4, 5], ['2026-11-22']) === '2026-11-22',
+    'a dated order keeps Sunday as the driver sell day'
+);
+$assert(
     bakery_survey_next_delivery_date('2026-08-24', [1, 2, 3, 4, 5, 6]) === '2026-08-25',
     'Monday delivery day → next is Tuesday'
 );
@@ -587,7 +603,12 @@ $assert(
     preg_match("/action === 'switch_day'[\\s\\S]{0,2200}bakery_survey_ensure_day_pair/", $surveyPhp) === 1,
     'choosing a day opens that day\'s survey'
 );
-$assert(strpos($surveyPhp, '$isManager ? 0') !== false, 'manager hub always mints HQ all-drivers surveys');
+$assert(strpos($surveyPhp, '$useHqHub ? 0') !== false, 'managers outside driver mode mint HQ all-drivers surveys');
+$assert(strpos($surveyPhp, '$isManager && !$inDriverWorkspace') !== false, 'driver mode does not open the everyone hub');
+$assert(strpos($surveyPhp, 'survey.hub_sub_driver') !== false, 'driver survey hub names step 1 and step 2');
+$assert(strpos($surveyPhp, 'texts.survey_step1_title') !== false, 'driver survey hub labels step 1');
+$assert(strpos($surveyPhp, 'texts.survey_step2_title') !== false, 'driver survey hub labels step 2');
+$assert(strpos($surveyPhp, 'bakery_survey_current_sell_date_from_db') !== false, 'driver survey hub defaults to the current sell date');
 $assert(strpos($surveyPhp, 'includes/header.php') !== false, 'logged-in survey hub uses app chrome');
 $assert(strpos($surveyPhp, 'hub_title_manager') !== false, 'manager hub uses everyone title');
 

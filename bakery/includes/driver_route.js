@@ -1560,6 +1560,15 @@
             try { history.replaceState(null, ''); } catch (e) {}
         }
         setRouteView(currentRouteView());
+        var routeQuery = null;
+        try { routeQuery = new URLSearchParams(window.location.search); } catch (e) { routeQuery = null; }
+        if (routeQuery && routeQuery.get('view') === 'route') {
+            setRouteView('route');
+        }
+        if (routeQuery && routeQuery.get('problem') === '1') {
+            var problemNav = document.getElementById('driverNavProblem');
+            if (problemNav) problemNav.click();
+        }
 
         window.bakeryClientRefreshHold = function () {
             var delivery = window.DriverDelivery;

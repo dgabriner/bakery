@@ -131,6 +131,38 @@ function bakery_survey_next_delivery_date(string $fromDate, array $deliveryWeekd
 }
 
 /**
+ * The sell day a driver is on now. Today when today itself sells, otherwise
+ * the next sell day. Headquarters planning still uses bakery_survey_next_sell_date,
+ * which always starts tomorrow.
+ *
+ * @param list<int> $deliveryWeekdays ISO-8601 weekdays (1=Mon through 7=Sun)
+ * @param list<string> $datedSellDates Y-m-d dates that have dated orders
+ */
+function bakery_survey_current_sell_date(string $fromDate, array $deliveryWeekdays = [1, 2, 3, 4, 5, 6, 7], array $datedSellDates = []): string
+{
+    $fromDate = bakery_survey_validate_ymd($fromDate);
+    $days = bakery_survey_weekday_set($deliveryWeekdays);
+    $extra = [];
+    foreach ($datedSellDates as $date) {
+        $date = trim((string)$date);
+        if ($date === '') {
+            continue;
+        }
+        try {
+            $extra[bakery_survey_validate_ymd($date)] = true;
+        } catch (RuntimeException $e) {
+            continue;
+        }
+    }
+    $cursor = new DateTime($fromDate);
+    $weekday = (int)$cursor->format('N');
+    if (isset($days[$weekday]) || isset($extra[$fromDate])) {
+        return $fromDate;
+    }
+    return bakery_survey_next_sell_date($fromDate, $deliveryWeekdays, array_keys($extra));
+}
+
+/**
  * @param list<array{id:int,name:string}> $stores
  * @param list<int> $assignedIds
  * @return array{assigned:list<array{id:int,name:string}>,other:list<array{id:int,name:string}>}
@@ -903,6 +935,24 @@ function bakery_survey_next_sell_date_from_db(PDO $db, string $fromDate): string
         $fromDate,
         bakery_survey_delivery_weekdays($db),
         bakery_survey_dated_sell_dates($db, $fromDate)
+    );
+}
+
+function bakery_survey_current_sell_date_from_db(PDO $db, string $fromDate): string
+{
+    $fromDate = bakery_survey_validate_ymd($fromDate);
+    $dated = bakery_survey_dated_sell_dates($db, $fromDate);
+    if (function_exists('table_exists') && table_exists($db, 'daily_orders')) {
+        $todayOrders = $db->prepare('SELECT 1 FROM daily_orders WHERE order_date = ? LIMIT 1');
+        $todayOrders->execute([$fromDate]);
+        if ($todayOrders->fetchColumn()) {
+            $dated[] = $fromDate;
+        }
+    }
+    return bakery_survey_current_sell_date(
+        $fromDate,
+        bakery_survey_delivery_weekdays($db),
+        $dated
     );
 }
 
