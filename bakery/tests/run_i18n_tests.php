@@ -192,8 +192,29 @@ bakery_set_locale('es', false);
 $oct9 = DateTime::createFromFormat('!Y-m-d', '2026-10-09');
 i18n_assert(
     'Spanish date helper names octubre',
-    $oct9 instanceof DateTimeInterface && strpos(bakery_localized_date_label($oct9, true), 'octubre') !== false
+    $oct9 instanceof DateTimeInterface && bakery_localized_date_label($oct9, true) === '9 de octubre de 2026'
 );
+$nov24 = DateTimeImmutable::createFromFormat('!Y-m-d', '2026-11-24');
+i18n_assert(
+    'Spanish calendar date reads day de month',
+    $nov24 instanceof DateTimeInterface && bakery_localized_date_label($nov24) === '24 de noviembre'
+);
+i18n_assert(
+    'Spanish driver date reads weekday day de month',
+    $nov24 instanceof DateTimeInterface && bakery_localized_date_label($nov24, false, true) === 'martes 24 de noviembre'
+);
+i18n_assert(
+    'Spanish compact date keeps the day first',
+    $nov24 instanceof DateTimeInterface && bakery_localized_compact_date($nov24) === '24 nov'
+);
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('en', false);
+i18n_assert('English date stays November 24', bakery_localized_date_label($nov24) === 'November 24');
+i18n_assert('English date with year stays November 24, 2026', bakery_localized_date_label($nov24, true) === 'November 24, 2026');
+i18n_assert('English weekday flag does not change the date', bakery_localized_date_label($nov24, false, true) === 'November 24');
+i18n_assert('English compact date stays Nov 24', bakery_localized_compact_date($nov24) === 'Nov 24');
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('es', false);
 i18n_assert('Spanish demand stage label', bakery_t('ux.stage.demand') === 'Demanda');
 i18n_assert('Spanish one daily order', bakery_t('ux.cc.daily_order_one', ['count' => 1]) === '1 pedido del día');
 i18n_assert('Spanish short count', bakery_t('ux.cc.short_many', ['count' => 2]) === '2 con falta');

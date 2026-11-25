@@ -91,6 +91,32 @@
         return true;
     }
 
+    function findStopByOrderId(orderId) {
+        var selector = '[data-daily-order-id="' + String(orderId) + '"]';
+        return document.querySelector('#stopList .stop-item' + selector)
+            || document.querySelector('#pastStopsList .stop-item' + selector)
+            || document.querySelector('#routePrepList .route-prep-stop' + selector);
+    }
+
+    function clearStopDeepLink(params) {
+        params.delete('open_stop');
+        params.delete('view_orders');
+        params.delete('daily_order_id');
+        var qs = params.toString();
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        }
+    }
+
+    function openHeroOrders(dailyOrderId) {
+        var wrap = document.getElementById('nextStopOrderDetails');
+        var toggle = document.getElementById('nextStopDetailsToggle');
+        if (!wrap) return;
+        wrap.style.display = 'none';
+        if (toggle) toggle.setAttribute('aria-expanded', 'true');
+        loadOrderDetails(wrap, dailyOrderId);
+    }
+
     function tryOpenStopFromUrl() {
         var params = new URLSearchParams(window.location.search);
         if (params.get('open_stop') !== '1') {
@@ -101,15 +127,29 @@
             return;
         }
         var expandOrders = params.get('view_orders') === '1';
-        var stop = document.querySelector('.stop-item[data-daily-order-id="' + orderId + '"]');
-        if (!stop || !openStopDeliveryFromEl(stop, { expandOrders: expandOrders })) {
+        var stop = findStopByOrderId(orderId);
+        if (!stop || (stop.getAttribute('data-status') || '') === 'cancelled') {
             return;
         }
-        params.delete('open_stop');
-        params.delete('view_orders');
-        params.delete('daily_order_id');
-        var qs = params.toString();
-        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        var opened = false;
+        if (stop.classList.contains('route-prep-stop')) {
+            if (stop.scrollIntoView) stop.scrollIntoView({ block: 'center' });
+            if (expandOrders) {
+                var prepWrap = stop.querySelector('.order-details-container');
+                if (prepWrap) loadOrderDetails(prepWrap, orderId);
+            }
+            opened = true;
+        } else if (stop.closest('#stopList')) {
+            renderNextStop(stop);
+            setRouteView('now');
+            if (expandOrders) openHeroOrders(orderId);
+            var card = document.getElementById('nextStopCard');
+            if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+            opened = true;
+        } else if (openStopDeliveryFromEl(stop, { expandOrders: expandOrders, autoOpenCamera: false })) {
+            opened = true;
+        }
+        if (opened) clearStopDeepLink(params);
     }
 
     function loadOrderDetails(container, dailyOrderId) {
@@ -318,7 +358,13 @@
             '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.im_here || di.arrival_photo) + '</button>' +
             navigateLink('route-btn route-btn--navigate', stopEl, di.directions) +
             '<button type="button" class="route-btn route-btn--problem stop-problem-btn"' + problemButtonAttrs(stopEl) + '>' + escapeHtml(di.problem) + '</button>' +
-            '</div>';
+            '</div>' +
+            '<button type="button" class="next-stop-details-toggle" id="nextStopDetailsToggle" data-daily-order-id="' +
+            escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0') + '" aria-expanded="false" aria-controls="nextStopOrderDetails">' +
+            escapeHtml(di.what_delivering || '') + '</button>' +
+            '<div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:none;">' +
+            '<div class="order-details-loading">' + escapeHtml(di.loading_order || '') + '</div>' +
+            '<div class="order-details-content" style="display:none;"></div></div>';
 
         applyNavigateLinks(card);
         if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
@@ -1830,6 +1876,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        if (window.__DRIVER_PAGE_I18N__) di = window.__DRIVER_PAGE_I18N__;
         applyNavigateLinks(document);
         refreshRouteUi();
         bindSkipStopButtons(document);
@@ -2124,6 +2171,14 @@
             if (saverToggle && window.DriverDataSaver) {
                 e.preventDefault();
                 window.DriverDataSaver.set(saverToggle.getAttribute('data-data-saver'));
+                return;
+            }
+            var heroOrdersToggle = e.target.closest('#nextStopDetailsToggle');
+            if (heroOrdersToggle) {
+                e.preventDefault();
+                var heroOrders = document.getElementById('nextStopOrderDetails');
+                if (heroOrders) loadOrderDetails(heroOrders, heroOrdersToggle.getAttribute('data-daily-order-id') || '0');
+                heroOrdersToggle.setAttribute('aria-expanded', heroOrders && heroOrders.style.display === 'block' ? 'true' : 'false');
                 return;
             }
             var prepOrdersBtn = e.target.closest('.route-prep-stop .stop-orders-btn');

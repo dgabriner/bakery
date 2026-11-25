@@ -188,6 +188,60 @@ driver_ux_assert(
         && strpos($mapJs, 'optimizeWaypoints: true') !== false
 );
 
+$openStopFn = '';
+$openStopAt = strpos($routeJs, 'function tryOpenStopFromUrl()');
+if ($openStopAt !== false) {
+    $openStopFn = substr($routeJs, $openStopAt, 1800);
+}
+driver_ux_assert(
+    'open_stop puts that daily order on the hero instead of the photo modal',
+    strpos($page, "\$_GET['open_stop']") !== false
+        && strpos($page, '$heroStop = $candidateStop;') !== false
+        && strpos($openStopFn, "stop.closest('#stopList')") !== false
+        && strpos($openStopFn, 'renderNextStop(stop);') !== false
+        && strpos($openStopFn, 'openHeroOrders(orderId);') !== false
+        && strpos($openStopFn, 'openStopDeliveryFromEl(stop, { expandOrders: expandOrders, autoOpenCamera: false })') !== false
+);
+driver_ux_assert(
+    'view_orders expands the hero order list',
+    strpos($routeJs, 'function openHeroOrders(') !== false
+        && strpos($routeJs, "e.target.closest('#nextStopDetailsToggle')") !== false
+        && strpos($page, '$openStopOrders') !== false
+);
+driver_ux_assert(
+    'prep map header counts pending prep stops and saves Route complete for an empty queue',
+    strpos($mapJs, '#routePrepList .route-prep-stop') !== false
+        && strpos($mapJs, "el.closest('#routePrepList')") !== false
+        && strpos($mapJs, "status !== 'delivered' && status !== 'cancelled'") !== false
+        && strpos($mapJs, "bits.push(t('route_complete', 'Route complete'));") !== false
+);
+
+$spanishNext = (string)$spanish['driver.next_stop'];
+$spanishAfter = (string)$spanish['driver.map_remaining_after'];
+$spanishOff = (string)$spanish['driver.map_no_location'];
+$spanishFollow = (string)$spanish['driver.map_follow'];
+$spanishBy = (string)$spanish['driver.map_window_by'];
+$spanishMore = (string)$spanish['driver.lines_more'];
+driver_ux_assert(
+    'driver chrome strings QA saw in English are Spanish in es.php',
+    $spanishNext === 'Siguiente parada'
+        && $spanishAfter === ':count después'
+        && $spanishOff === 'Ubicación apagada'
+        && $spanishFollow === 'Seguir'
+        && $spanishBy === 'Antes de :time'
+        && $spanishMore === '+:count más'
+        && (string)$english['driver.next_stop'] === 'Next stop'
+        && (string)$english['driver.map_window_by'] === 'By :time'
+        && (string)$english['driver.lines_more'] === '+:count more'
+        && (string)$english['driver.map_follow'] === 'Follow'
+);
+driver_ux_assert(
+    'driver dates use the weekday Spanish label and keep the English month-day form',
+    strpos($page, 'bakery_localized_date_label($selectedDateObject, false, true)') !== false
+        && strpos($page, 'bakery_localized_compact_date($selectedDateObject)') !== false
+        && strpos($page, "->format('M j')") === false
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);

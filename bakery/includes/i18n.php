@@ -229,15 +229,41 @@ function bakery_today_label(): string {
 /**
  * Format a calendar date using the active locale without relying on the server locale.
  */
-function bakery_localized_date_label(DateTimeInterface $date, bool $withYear = false): string {
+function bakery_localized_date_label(DateTimeInterface $date, bool $withYear = false, bool $withWeekday = false): string {
     $month = (int)$date->format('n');
     $day = $date->format('j');
     $year = $date->format('Y');
-    $months = bakery_locale() === 'es'
-        ? ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-        : ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    if (bakery_locale() === 'es') {
+        $months = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        $label = $day . ' de ' . $months[$month];
+        if ($withYear) {
+            $label .= ' de ' . $year;
+        }
+        if ($withWeekday) {
+            $names = bakery_day_names(false);
+            $weekday = (string)($names[(int)$date->format('N')] ?? '');
+            if ($weekday !== '') {
+                $weekday = function_exists('mb_strtolower')
+                    ? mb_strtolower($weekday, 'UTF-8')
+                    : strtolower($weekday);
+                $label = $weekday . ' ' . $label;
+            }
+        }
+        return $label;
+    }
+    $months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     $label = $months[$month] . ' ' . $day;
     return $withYear ? $label . ', ' . $year : $label;
+}
+
+/**
+ * Short date for tight driver chrome. English stays "Nov 24". Spanish is "24 nov".
+ */
+function bakery_localized_compact_date(DateTimeInterface $date): string {
+    if (bakery_locale() === 'es') {
+        return $date->format('j') . ' ' . bakery_localized_month_short($date);
+    }
+    return $date->format('M j');
 }
 
 function bakery_localized_month_day(DateTimeInterface $date): string {
