@@ -199,7 +199,7 @@ $route = (string)file_get_contents($root . '/includes/driver_route.js');
 assert_true(strpos($driverPhp, 'id="deliverySecondPhotoBtn"') !== false, 'the charge screen has a Photo 2 button');
 assert_true(strpos($driverPhp, 'id="deliveryInAppCameraBtn"') !== false, 'the capture screen can switch back to the in-app camera');
 assert_true(strpos($script, 'function startSecondPhoto(') !== false, 'Photo 2 can start before Delivered');
-assert_true(strpos($script, "(state.photoReturnStep === 'complete' || state.secondPhoto) ? 'After' : 'Before'") !== false, 'Photo 2 is saved as an After photo');
+assert_true(strpos($script, "state.currentStep === 'leave'") !== false && strpos($script, "? 'After' : 'Before'") !== false, 'the final photo and Photo 2 are saved as After photos');
 assert_true(strpos($script, "var CAMERA_PREF_KEY = 'bakeryDriverCameraPref';") !== false, 'the camera choice is remembered per phone');
 assert_true(strpos($script, "state.currentStep === 'photo' || state.photoMode === 'review'") !== false, 'the in-app camera still starts in review mode (Add a photo after Delivered)');
 assert_true(strpos($script, 'openReviewAddPhoto: openReviewAddPhoto') !== false, 'the Add photo toast can reopen the camera after Delivered');

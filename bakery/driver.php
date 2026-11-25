@@ -398,6 +398,17 @@ function bakery_render_driver_stop_item(
         <?php if (!$isPastList && !$isDone): ?>
         <div class="stop-row-actions">
             <button type="button"
+                class="stop-photo-btn photo-complete-btn"
+                data-start-step="photo"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
+            <button type="button"
                 class="stop-open-delivery photo-complete-btn"
                 data-start-step="delivery"
                 data-driver-id="<?php echo (int)$selectedDriverId; ?>"
@@ -407,7 +418,7 @@ function bakery_render_driver_stop_item(
                 data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.confirm'); ?></button>
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.step_amounts'); ?></button>
             <button type="button"
                 class="stop-go-next"
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
@@ -425,6 +436,17 @@ function bakery_render_driver_stop_item(
         </div>
         <?php endif; ?>
         <div class="contact-actions"<?php echo $isDone ? '' : ' hidden'; ?>>
+            <?php if ($isDone && in_array($status, ['delivered', 'failed', 'office_flag'], true)): ?>
+            <button type="button"
+                class="contact-link contact-link--photo"
+                data-open-store-photo
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.add_store_photo'); ?></button>
+            <?php endif; ?>
             <?php if ($isDone && $status === 'delivered'): ?>
             <button type="button"
                 class="contact-link photo-complete-btn"
@@ -492,6 +514,7 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
             <?php endif; ?>
         </div>
         <div class="route-prep-stop-actions">
+            <button type="button" class="route-prep-action" data-open-store-photo data-customer-id="<?php echo (int)$stop['customer_id']; ?>" data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
             <?php if ($movable): ?>
             <button type="button" class="route-prep-action stop-orders-btn" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"><?php bakery_te('driver.store_orders'); ?></button>
             <?php if ($phoneHref): ?>
@@ -1023,7 +1046,7 @@ document.body.classList.add('driver-route-prep');
                 data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>"
                 data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.arrival_photo'); ?></button>
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.im_here'); ?></button>
             <?php if ($mapsHref): ?>
                 <a class="route-btn route-btn--navigate js-navigate-link"
                 href="<?php echo htmlspecialchars($mapsHref); ?>"
@@ -1247,7 +1270,7 @@ document.body.classList.add('driver-route-prep');
 </div>
 
 <div class="route-sticky-dock" id="routeStickyDock" <?php echo ($nextStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($nextStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
-    <div class="route-sticky-dock-inner" id="routeStickyDockInner"></div>
+    <div class="route-sticky-dock-inner" id="routeStickyDockInner"><?php if ($nextStop && empty($routePrepMode)): ?><?php $dockMapsHref = bakery_driver_maps_url($nextStop['customer_address'] ?? '', bakery_driver_stop_coords($nextStop)); ?><?php if ($dockMapsHref !== ''): ?><a class="route-sticky-btn route-sticky-btn--nav js-navigate-stop" href="<?php echo htmlspecialchars($dockMapsHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><?php bakery_te('driver.directions'); ?></a><?php endif; ?><button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="arrive" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-driver-name="<?php echo htmlspecialchars($nextStop['driver_name'] ?? ($driver['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>" data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.im_here'); ?></button><?php endif; ?></div>
 </div>
 
 <div class="route-adjust-dock" id="routeAdjustDock" hidden>
@@ -1273,24 +1296,29 @@ document.body.classList.add('driver-route-prep');
         </div>
 
         <nav class="delivery-wizard-steps" id="deliveryWizardSteps" aria-label="<?php echo htmlspecialchars(bakery_t('driver.delivery_steps')); ?>">
-            <button type="button" class="delivery-wizard-step is-active" data-step="photo" id="deliveryWizardStepPhoto">
+            <button type="button" class="delivery-wizard-step is-active" data-step="arrive" id="deliveryWizardStepArrive">
                 <span class="delivery-wizard-step-num">1</span>
                 <span class="delivery-wizard-step-label"><?php bakery_te('driver.arrive'); ?></span>
             </button>
-            <button type="button" class="delivery-wizard-step" data-step="delivery" id="deliveryWizardStepDelivery">
+            <button type="button" class="delivery-wizard-step" data-step="photo" id="deliveryWizardStepPhoto">
                 <span class="delivery-wizard-step-num">2</span>
-                <span class="delivery-wizard-step-label"><?php bakery_te('driver.confirm'); ?></span>
+                <span class="delivery-wizard-step-label"><?php bakery_te('driver.photo'); ?></span>
             </button>
-            <button type="button" class="delivery-wizard-step" data-step="invoice" id="deliveryWizardStepInvoice">
+            <button type="button" class="delivery-wizard-step" data-step="delivery" id="deliveryWizardStepDelivery">
                 <span class="delivery-wizard-step-num">3</span>
-                <span class="delivery-wizard-step-label"><?php bakery_te('driver.next'); ?></span>
+                <span class="delivery-wizard-step-label"><?php bakery_te('driver.step_amounts'); ?></span>
+            </button>
+            <button type="button" class="delivery-wizard-step" data-step="leave" id="deliveryWizardStepLeave">
+                <span class="delivery-wizard-step-num">4</span>
+                <span class="delivery-wizard-step-label"><?php bakery_te('driver.step_final'); ?></span>
             </button>
         </nav>
 
         <div class="photo-modal-body">
             <div class="photo-assignment-confirm" id="deliveryPhotoAssignment"></div>
 
-            <div class="delivery-step-panel is-active" id="deliveryStepPhoto" data-step-panel="photo">
+            <div class="delivery-step-panel is-active" id="deliveryStepArrive" data-step-panel="arrive">
+                <p class="delivery-step-lead" id="deliveryArriveLead"><?php bakery_te('driver.arrive_lead'); ?></p>
                 <div class="delivery-arrive-orders" id="deliveryArriveOrders">
                     <button type="button" class="delivery-orders-toggle" id="deliveryOrdersToggle"
                         aria-expanded="false" aria-controls="deliveryOrderDetails"><?php bakery_te('driver.what_delivering'); ?></button>
@@ -1299,6 +1327,9 @@ document.body.classList.add('driver-route-prep');
                         <div class="order-details-content" hidden></div>
                     </div>
                 </div>
+            </div>
+
+            <div class="delivery-step-panel" id="deliveryStepPhoto" data-step-panel="photo" hidden>
                 <div class="photo-upload-section delivery-camera-section" id="deliveryCameraSection">
                     <div class="delivery-camera-title-row">
                         <h4 id="deliveryCameraHeading"><?php bakery_te('driver.take_photo'); ?></h4>
@@ -1360,6 +1391,7 @@ document.body.classList.add('driver-route-prep');
 
             <div class="delivery-step-panel" id="deliveryStepDelivery" data-step-panel="delivery" hidden>
                 <div class="delivery-photo-strip" id="deliveryPhotoStrip">
+                    <button type="button" class="btn btn-primary delivery-inline-take-photo" id="deliveryInlineTakePhotoBtn" hidden>&#128247; <?php bakery_te('driver.take_photo_now'); ?></button>
                     <div class="delivery-inline-proof" id="deliveryInlineProof" data-proof-state="" hidden>
                         <img id="deliveryInlineThumb" alt="<?php echo htmlspecialchars(bakery_t('driver.captured_photo_preview'), ENT_QUOTES, 'UTF-8'); ?>" hidden>
                         <span class="delivery-inline-proof-text">
@@ -1398,35 +1430,35 @@ document.body.classList.add('driver-route-prep');
                     </div>
                     <div class="delivery-ordered-ref" id="deliveryOrderedRef" aria-live="polite"></div>
                     <p class="delivery-confirmation-breakdown" id="deliveryConfirmationBreakdown" aria-live="polite"></p>
-                    <details class="delivery-adjust" id="deliveryAdjustDetails" open>
+                    <div class="delivery-confirmation-fields">
+                        <label class="delivery-qty-label"><?php bakery_te('driver.pieces_delivered'); ?>
+                            <div class="quantity-stepper quantity-stepper--large">
+                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_pieces')); ?>">−</button>
+                                <input type="number" id="deliveryPiecesInput" min="0" step="1" inputmode="numeric" pattern="[0-9]*">
+                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
+                            </div>
+                        </label>
+                        <div id="deliveryProductCounts" class="delivery-product-counts" hidden>
+                            <p id="deliveryProductCountsPrompt"></p>
+                            <div id="deliveryProductCountList"></div>
+                        </div>
+                        <div id="deliverySpecialCounts" class="delivery-special-counts" hidden>
+                            <p id="deliverySpecialCountsLabel" class="delivery-special-counts__label"></p>
+                            <div id="deliverySpecialCountList"></div>
+                        </div>
+                        <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
+                            <div class="quantity-stepper quantity-stepper--large">
+                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
+                                <input type="number" id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric" pattern="[0-9]*">
+                                <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_credits')); ?>">+</button>
+                            </div>
+                        </label>
+                    </div>
+                    <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
+                    <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
+                    <details class="delivery-adjust" id="deliveryAdjustDetails">
                         <summary class="delivery-adjust-summary"><?php bakery_te('driver.adjust_delivery'); ?></summary>
                         <div class="delivery-adjust-body">
-                            <div class="delivery-confirmation-fields">
-                                <label class="delivery-qty-label"><?php bakery_te('driver.pieces_delivered'); ?>
-                                    <div class="quantity-stepper quantity-stepper--large">
-                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_pieces')); ?>">−</button>
-                                        <input type="number" id="deliveryPiecesInput" min="0" step="1" inputmode="numeric" pattern="[0-9]*">
-                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryPiecesInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_pieces')); ?>">+</button>
-                                    </div>
-                                </label>
-                                <div id="deliveryProductCounts" class="delivery-product-counts" hidden>
-                                    <p id="deliveryProductCountsPrompt"></p>
-                                    <div id="deliveryProductCountList"></div>
-                                </div>
-                                <div id="deliverySpecialCounts" class="delivery-special-counts" hidden>
-                                    <p id="deliverySpecialCountsLabel" class="delivery-special-counts__label"></p>
-                                    <div id="deliverySpecialCountList"></div>
-                                </div>
-                                <label class="delivery-qty-label"><?php bakery_te('driver.credits_back'); ?>
-                                    <div class="quantity-stepper quantity-stepper--large">
-                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="-1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.decrease_credits')); ?>">−</button>
-                                        <input type="number" id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric" pattern="[0-9]*">
-                                        <button type="button" class="quantity-stepper-btn" data-quantity-target="deliveryCreditsInput" data-quantity-step="1" aria-label="<?php echo htmlspecialchars(bakery_t('driver.increase_credits')); ?>">+</button>
-                                    </div>
-                                </label>
-                            </div>
-                            <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
-                            <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
                             <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
                                 <div class="delivery-pricing-alert" role="alert">
                                     <strong><?php bakery_te('driver.no_price_title'); ?></strong>
@@ -1705,6 +1737,9 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'fail_error' => bakery_t('exception_desk.report_error'),
     'view_invoice_photos' => bakery_t('driver.view_invoice_photos'),
     'photo' => bakery_t('driver.photo'),
+    'photo_btn' => bakery_t('driver.photo_btn'),
+    'add_store_photo' => bakery_t('driver.add_store_photo'),
+    'take_photo_now' => bakery_t('driver.take_photo_now'),
     'call' => bakery_t('driver.call'),
     'status_delivered' => bakery_t('driver.status_delivered'),
     'status_office_flag' => bakery_t('driver.status_office_flag'),
@@ -1833,6 +1868,12 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'totals_as_ordered' => bakery_t('driver.totals_as_ordered', ['count' => ':count']),
     'totals_delivering' => bakery_t('driver.totals_delivering', ['count' => ':count']),
     'im_here' => bakery_t('driver.im_here'),
+    'arrive' => bakery_t('driver.arrive'),
+    'step_amounts' => bakery_t('driver.step_amounts'),
+    'step_final' => bakery_t('driver.step_final'),
+    'take_final_photo' => bakery_t('driver.take_final_photo'),
+    'skip_to_amounts' => bakery_t('driver.skip_to_amounts'),
+    'finish_without_final' => bakery_t('driver.finish_without_final'),
     'problem' => bakery_t('driver.problem'),
     'view_now' => bakery_t('driver.view_now'),
     'view_route' => bakery_t('driver.view_route'),

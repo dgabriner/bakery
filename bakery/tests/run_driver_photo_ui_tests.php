@@ -104,12 +104,26 @@ driver_photo_assert(
     'driver session refresh returns and applies the current CSRF token',
     strpos($ping, "'csrf_token' => bakery_csrf_token()") !== false
         && strpos($csrfScript, 'window.bakerySetCsrfToken = setToken;') !== false
-        && strpos($script, 'async function refreshRouteSession()') !== false
+        && strpos($script, 'async function refreshRouteSession(') !== false
         && strpos($script, 'applyCsrfToken(data.csrf_token);') !== false
 );
 driver_photo_assert(
     'photo upload and delivery confirmation refresh CSRF immediately before saving',
-    substr_count($script, 'await refreshRouteSession();') >= 3
+    substr_count($script, 'await refreshRouteSession();') >= 2
+        && substr_count($script, 'refreshRouteSession()') >= 5
+        && preg_match('/Promise\.all\(\[\s*getCoords\([^)]*\),\s*refreshRouteSession\(\)\s*\]\)/', $script) === 1
+);
+driver_photo_assert(
+    'a recent session ping is reused so photo and Delivered do not each pay a round trip',
+    strpos($script, 'var SESSION_FRESH_MS = 90 * 1000;') !== false
+        && strpos($script, 'options && options.force') !== false
+        && strpos($script, 'return { ok: true, cached: true };') !== false
+);
+driver_photo_assert(
+    'capture announcements never throw when CustomEvent is missing',
+    strpos($script, 'function announceCapture(name)') !== false
+        && strpos($script, "typeof CustomEvent === 'function'") !== false
+        && strpos($script, "document.dispatchEvent(new CustomEvent('driver:capture") === false
 );
 driver_photo_assert(
     'returning from the native camera immediately refreshes the route session',
@@ -382,6 +396,24 @@ driver_photo_assert(
         && strpos($page, 'class="next-stop-actions-primary"') !== false
         && strpos($page, 'class="next-stop-more"') !== false
         && strpos($page, 'route-prep-tomorrow-cta') === false
+);
+driver_photo_assert(
+    'a chosen photo leaves the camera before the resize finishes',
+    strpos($script, 'function onFileChosen') !== false
+        && strpos(driver_photo_section($script, 'async function onFileChosen', 'function onGalleryClick'), "goToStep('delivery')") !== false
+        && strpos(driver_photo_section($script, 'async function onFileChosen', 'function onGalleryClick'), 'await preparePhotoForUpload') !== false
+);
+$chosenSection = driver_photo_section($script, 'async function onFileChosen', 'function onGalleryClick');
+driver_photo_assert(
+    'the amounts step is shown before photo preparation awaits',
+    $chosenSection !== '' && strpos($chosenSection, "goToStep('delivery')") < strpos($chosenSection, 'await preparePhotoForUpload')
+);
+driver_photo_assert(
+    'the phone Take photo button opens the native camera on the tap',
+    strpos($script, 'function takePhotoNow()') !== false
+        && strpos(driver_photo_section($script, 'function takePhotoNow()', 'function goToStep'), 'openNativeCameraPicker()') !== false
+        && strpos($page, 'data-step="arrive"') !== false
+        && strpos($page, 'data-step="leave"') !== false
 );
 driver_photo_assert(
     'happy-path confirm saves quantities with one Delivered tap after the arrival photo',

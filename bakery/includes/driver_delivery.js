@@ -119,10 +119,13 @@
       && !cameraDeniedRecently();
   }
 
-  // A driver who picked "Use phone camera" keeps getting the phone's own
-  // camera app until they switch back; the in-app viewfinder is the default.
+  // Phones default to the native rear camera (1-tap OS camera, no getUserMedia
+  // prompt/stall) unless the user explicitly opted into the in-app viewfinder.
   function phoneCameraPreferred() {
-    return storageGet(CAMERA_PREF_KEY) === 'phone';
+    var pref = storageGet(CAMERA_PREF_KEY);
+    if (pref === 'inapp') return false;
+    if (pref === 'phone') return true;
+    return usesCompactCapture();
   }
 
   function inlineCameraAvailable() {
@@ -142,7 +145,7 @@
     return url;
   }
 
-  var STEPS = ['photo', 'delivery', 'invoice'];
+  var STEPS = ['arrive', 'photo', 'delivery', 'leave', 'invoice'];
 
   function i18n(key, fallback) {
     var di = window.__DRIVER_PAGE_I18N__ || {};
@@ -602,9 +605,10 @@
 
   function openNativeCameraPicker() {
     var input = $('deliveryFileInput');
-    if (!input || input.disabled || state.uploading || state.preparing) {
+    if (!input || state.uploading || state.preparing) {
       return false;
     }
+    input.disabled = false;
 
     // iPhone and Android only allow the native camera picker to open while the
     // original tap is still active. Keep this call synchronous: do not move it
@@ -650,7 +654,7 @@
   function resumeAfterSavedArrival() {
     if (!state.resumeIfPhotographed) return;
     state.resumeIfPhotographed = false;
-    if (state.currentStep !== 'photo' || state.blob || state.uploading || state.preparing) return;
+    if ((state.currentStep !== 'photo' && state.currentStep !== 'arrive') || state.blob || state.uploading || state.preparing) return;
     var arrival = null;
     state.photos.forEach(function (photo) {
       if (!arrival && String(photo.photo_type || '').toLowerCase() === 'before') arrival = photo;
@@ -675,7 +679,7 @@
       if (state.photoMode === 'review') {
         typeSelect.value = (state.reviewAddAfter || hasPhotoType('Before')) ? 'After' : 'Before';
       } else {
-        typeSelect.value = (state.photoReturnStep === 'complete' || state.secondPhoto) ? 'After' : 'Before';
+        typeSelect.value = (state.photoReturnStep === 'complete' || state.secondPhoto || state.currentStep === 'leave') ? 'After' : 'Before';
       }
     }
 
@@ -726,64 +730,154 @@
     if (eyebrow) eyebrow.textContent = isReview ? i18n('delivery_photos') : i18n('stop_workflow');
   }
 
+  function isFinalShot() {
+    return state.currentStep === 'leave'
+      || state.photoReturnStep === 'complete'
+      || (!!state.secondPhoto && state.photoMode !== 'review');
+  }
+
+  function finalPhotoReady() {
+    return state.secondState === 'uploading'
+      || state.secondState === 'saved'
+      || state.secondState === 'queued'
+      || hasPhotoType('After');
+  }
+
+  // One full-width action plus one skip. Step tabs are how the driver jumps.
+  function syncWizardActions() {
+    var primaryBtn = $('deliveryWizardPrimaryBtn');
+    var skipBtn = $('deliveryWizardSkipBtn');
+    var backBtn = $('deliveryWizardBackBtn');
+    var step = state.currentStep;
+    if (backBtn) backBtn.hidden = true;
+    if (!primaryBtn || !skipBtn || state.photoMode === 'review' || step === 'invoice') return;
+    primaryBtn.hidden = false;
+    primaryBtn.disabled = !!state.submitting;
+    primaryBtn.classList.remove('has-saved-photo');
+    skipBtn.disabled = !!state.submitting;
+    skipBtn.hidden = false;
+    if (step === 'arrive') {
+      primaryBtn.textContent = i18n('take_photo');
+      primaryBtn.setAttribute('data-wizard-action', 'photo');
+      skipBtn.textContent = i18n('skip_to_amounts');
+      skipBtn.setAttribute('data-wizard-action', 'skip-photo');
+    } else if (step === 'photo') {
+      primaryBtn.textContent = i18n('take_photo');
+      primaryBtn.setAttribute('data-wizard-action', 'shutter');
+      skipBtn.textContent = i18n('skip_photo');
+      skipBtn.setAttribute('data-wizard-action', 'skip-photo');
+    } else if (step === 'delivery') {
+      primaryBtn.textContent = i18n('take_final_photo');
+      primaryBtn.setAttribute('data-wizard-action', 'leave');
+      skipBtn.textContent = i18n('finish_without_final');
+      skipBtn.setAttribute('data-wizard-action', 'save');
+    } else if (step === 'leave') {
+      if (finalPhotoReady()) {
+        primaryBtn.textContent = i18n('delivered');
+        primaryBtn.setAttribute('data-wizard-action', 'save');
+        skipBtn.hidden = true;
+      } else {
+        primaryBtn.textContent = i18n('take_final_photo');
+        primaryBtn.setAttribute('data-wizard-action', 'shutter');
+        skipBtn.textContent = i18n('finish_without_final');
+        skipBtn.setAttribute('data-wizard-action', 'save');
+      }
+    }
+  }
+
+  function takePhotoNow() {
+    if (state.submitting || state.uploading || state.preparing) return;
+    if (state.cameraActive && state.stream && inlineCameraAvailable()) {
+      captureFromVideo();
+      return;
+    }
+    // Phones only open the native camera during the tap that asked for it.
+    if (phoneCameraPreferred() || !inlineCameraAvailable()) {
+      useNativeCamera();
+      openNativeCameraPicker();
+      return;
+    }
+    captureFromVideo();
+  }
+
   function goToStep(step) {
-    if (STEPS.indexOf(step) === -1) step = 'photo';
-    // Photo 2 is a detour from the charge screen; any other destination ends it.
-    if (step !== 'photo') state.secondPhoto = false;
+    if (STEPS.indexOf(step) === -1) step = 'arrive';
+    // The final photo is its own step. Leaving that step ends the Photo 2 detour.
+    if (step !== 'photo' && step !== 'leave') state.secondPhoto = false;
     state.currentStep = step;
+    if (window.bakeryUsageTrack) {
+      window.bakeryUsageTrack({ action: 'delivery_step', outcome: 'started', choices: { step: step } });
+    }
     state.invoiceReady = step === 'invoice';
-    var isDeparturePhoto = step === 'photo' && state.photoReturnStep === 'complete';
-    var visualStep = isDeparturePhoto ? 'invoice' : step;
+    var cameraStep = step === 'photo' || step === 'leave';
+    var visualStep = step === 'invoice' ? 'leave' : step;
 
     STEPS.forEach(function (s) {
       var panel = document.querySelector('[data-step-panel="' + s + '"]');
       var stepBtn = document.querySelector('.delivery-wizard-step[data-step="' + s + '"]');
       var isReview = state.photoMode === 'review';
-      var showPanel = isReview
-        ? (s === 'photo' || s === 'invoice')
-        : (s === step);
+      var showPanel = false;
+      if (isReview) {
+        showPanel = s === 'photo' || s === 'invoice';
+      } else if (s === 'photo') {
+        showPanel = cameraStep;
+      } else {
+        showPanel = s === step;
+      }
       if (panel) {
         panel.hidden = !showPanel;
         panel.classList.toggle('is-active', showPanel);
       }
       if (stepBtn && !isReview) {
         stepBtn.classList.toggle('is-active', s === visualStep);
-        stepBtn.classList.toggle('is-done', STEPS.indexOf(s) < STEPS.indexOf(visualStep));
-        stepBtn.disabled = state.submitting || isDeparturePhoto;
+        stepBtn.classList.toggle('is-done', s !== 'invoice' && STEPS.indexOf(s) < STEPS.indexOf(visualStep));
+        stepBtn.disabled = !!state.submitting;
       }
     });
 
     var modal = $('deliveryPhotoModal');
     if (modal) {
+      modal.classList.toggle('delivery-step-arrive', step === 'arrive');
       modal.classList.toggle('delivery-step-invoice', step === 'invoice');
       modal.classList.toggle('delivery-step-delivery', step === 'delivery');
-      modal.classList.toggle('delivery-step-photo', step === 'photo');
-      modal.classList.toggle('delivery-step-departure', step === 'photo' && state.photoReturnStep === 'complete');
+      modal.classList.toggle('delivery-step-photo', cameraStep);
+      modal.classList.toggle('delivery-step-leave', step === 'leave');
+      modal.classList.toggle('delivery-step-departure', step === 'leave');
       modal.classList.toggle('delivery-mode-review', state.photoMode === 'review');
     }
 
     if (state.photoMode === 'review') {
-      var invoiceFooter = $('deliveryInvoiceFooterActions');
-      if (invoiceFooter) invoiceFooter.hidden = false;
+      var reviewFooter = $('deliveryInvoiceFooterActions');
+      if (reviewFooter) reviewFooter.hidden = false;
       return;
     }
 
     var wizardActions = $('deliveryWizardActions');
     var invoiceFooter = $('deliveryInvoiceFooterActions');
-    var backBtn = $('deliveryWizardBackBtn');
-    var skipBtn = $('deliveryWizardSkipBtn');
-    var primaryBtn = $('deliveryWizardPrimaryBtn');
     var title = $('deliveryPhotoModalTitle');
     var eyebrow = $('deliveryModalEyebrow');
 
+    if (title && eyebrow) {
+      if (step === 'arrive') {
+        title.textContent = i18n('im_here');
+        eyebrow.textContent = i18n('arrive');
+      } else if (step === 'photo') {
+        title.textContent = i18n('take_arrival_photo');
+        eyebrow.textContent = i18n('photo');
+      } else if (step === 'delivery') {
+        title.textContent = i18n('step_amounts');
+        eyebrow.textContent = i18n('confirm');
+      } else if (step === 'leave') {
+        title.textContent = finalPhotoReady() ? i18n('delivered') : i18n('take_final_photo');
+        eyebrow.textContent = i18n('step_final');
+      } else if (step === 'invoice') {
+        title.textContent = i18n('delivery_invoice');
+        eyebrow.textContent = i18n('confirm');
+      }
+    }
+
     if (step === 'delivery') {
-      if (title) title.textContent = i18n('confirm_delivery');
-      if (eyebrow) eyebrow.textContent = i18n('confirm');
-      openDeliveryAdjust();
       ensureAdjustOpenForRequiredFields();
-    } else if (step === 'invoice') {
-      if (title) title.textContent = i18n('delivery_invoice');
-      if (eyebrow) eyebrow.textContent = i18n('confirm');
     }
 
     updateNativeCameraControls();
@@ -795,47 +889,34 @@
     } else {
       if (wizardActions) wizardActions.hidden = false;
       if (invoiceFooter) invoiceFooter.hidden = true;
-      if (step === 'photo') {
-        showLivePreview();
-        if (title) {
-          title.textContent = isDeparturePhoto
-            ? i18n('take_departure_photo')
-            : (state.secondPhoto ? i18n('second_photo_title') : i18n('arrival_photo'));
+      if (cameraStep) {
+        var typeSelect = $('deliveryPhotoType');
+        var leaveDone = step === 'leave' && finalPhotoReady();
+        var cameraSection = $('deliveryCameraSection');
+        if (cameraSection) cameraSection.hidden = leaveDone;
+        if (typeSelect && !state.retakePhotoId && !leaveDone) {
+          typeSelect.value = step === 'leave' ? 'After' : 'Before';
         }
-        if (eyebrow) eyebrow.textContent = isDeparturePhoto ? i18n('leave') : i18n('stop_workflow');
-        if (state.photoMode !== 'review') {
-          beginPhotoCapture();
+        if (!leaveDone) {
+          showLivePreview();
+          if (state.photoMode !== 'review') {
+            beginPhotoCapture();
+          }
+        } else {
+          stopCamera();
         }
-      } else if (step === 'delivery') {
+      } else if (step === 'delivery' || step === 'arrive') {
         stopCamera();
+        syncInlineTakePhotoBtn();
       }
     }
 
-    if (backBtn) backBtn.hidden = step === 'photo';
-    if (skipBtn) {
-      skipBtn.hidden = step !== 'photo';
-      skipBtn.textContent = state.secondPhoto ? i18n('back') : i18n('skip_photo');
-    }
     updateSecondPhotoUi();
-    if (primaryBtn) {
-      if (step === 'photo') {
-        primaryBtn.hidden = true;
-        primaryBtn.classList.remove('has-saved-photo');
-      } else if (step === 'delivery') {
-        primaryBtn.hidden = false;
-        primaryBtn.textContent = i18n('delivered');
-        primaryBtn.classList.remove('has-saved-photo');
-      }
-      primaryBtn.disabled = state.submitting;
-    }
+    syncWizardActions();
     var reviewBtn = $('deliveryWizardReviewBtn');
     if (reviewBtn) {
       reviewBtn.hidden = step !== 'delivery';
       reviewBtn.disabled = state.submitting;
-    }
-
-    if (step === 'delivery') {
-      // Prefill is the happy path — do not steal focus into Adjust steppers.
     }
 
     if (step === 'invoice') {
@@ -1019,10 +1100,10 @@
    * The arrival photo uploads while the driver checks the totals. Delivered
    * waits on state.uploadPromise, so the stop never saves ahead of its photo.
    */
-  function startBackgroundUpload(blob, filename, objectUrl) {
-    var second = !!state.secondPhoto && state.currentStep === 'photo' && state.photoMode !== 'review';
-    var guided = state.photoMode !== 'review' && !state.retakePhotoId && state.currentStep === 'photo';
-    // Read the type now: the select is reset as soon as the charge screen returns.
+  function startBackgroundUpload(blob, filename, objectUrl, forcedFinal) {
+    var second = forcedFinal === true || isFinalShot();
+    var guided = state.photoMode !== 'review' && !state.retakePhotoId && (state.currentStep === 'arrive' || state.currentStep === 'photo' || state.currentStep === 'delivery' || state.currentStep === 'leave');
+    // Read the type now: the select is reset as soon as the amounts screen returns.
     var typeSelect = $('deliveryPhotoType');
     var photoType = second ? 'After' : ((typeSelect && typeSelect.value) || 'Before');
     if (second) {
@@ -1033,11 +1114,15 @@
     }
     if (guided && second) {
       setSecondState('uploading', objectUrl);
-      goToStep('delivery');
+      if (state.currentStep === 'photo' || state.currentStep === 'arrive' || state.currentStep === 'delivery') {
+        goToStep('leave');
+      } else {
+        syncWizardActions();
+      }
       setPhotoTypeForNextShot();
     } else if (guided) {
       setProofState('uploading', objectUrl);
-      goToStep('delivery');
+      if (state.currentStep === 'photo' || state.currentStep === 'arrive') goToStep('delivery');
     } else {
       setStatus(i18n('photo_captured_saving'), 'loading');
     }
@@ -1095,13 +1180,14 @@
       label.textContent = text;
     }
     updateSecondPhotoUi();
+    if (state.currentStep === 'leave') syncWizardActions();
   }
 
   function updateSecondPhotoUi() {
     var btn = $('deliverySecondPhotoBtn');
     var actions = $('deliveryWizardActions');
-    var onCharge = state.currentStep === 'delivery' && state.photoMode !== 'review';
-    // Photo 2 is optional and never blocks Delivered. It stays tappable on the amounts step.
+    var onCharge = false;
+    // The final-photo step is Photo 2. It stays optional and never blocks Delivered.
     var show = onCharge && !state.secondState && !state.submitting;
     if (btn) btn.hidden = !show;
     if (actions) actions.classList.toggle('has-photo2', show);
@@ -1128,7 +1214,7 @@
   function startSecondPhoto(options) {
     options = options || {};
     if (state.submitting || state.uploading || state.preparing) return;
-    if (state.currentStep !== 'delivery' || state.photoMode === 'review') return;
+    if ((state.currentStep !== 'delivery' && state.currentStep !== 'leave') || state.photoMode === 'review') return;
     state.secondPhoto = true;
     state.blob = null;
     var existing = options.retake ? savedAfterPhoto() : null;
@@ -1136,7 +1222,7 @@
     var typeSelect = $('deliveryPhotoType');
     if (typeSelect) typeSelect.value = 'After';
     updatePhotoWorkflowUi(false);
-    goToStep('photo');
+    goToStep('leave');
   }
 
   function cancelSecondPhoto() {
@@ -1149,8 +1235,17 @@
     goToStep('delivery');
   }
 
+  function syncInlineTakePhotoBtn() {
+    var btn = $('deliveryInlineTakePhotoBtn');
+    if (!btn) return;
+    var hasProof = state.proofState === 'uploading' || state.proofState === 'saved' || state.proofState === 'queued' || stopHasProofPhoto();
+    btn.hidden = hasProof || state.photoMode === 'review';
+    btn.disabled = !!(state.uploading || state.preparing || state.submitting);
+  }
+
   function setProofState(kind, objectUrl) {
     state.proofState = kind;
+    syncInlineTakePhotoBtn();
     var box = $('deliveryInlineProof');
     var thumb = $('deliveryInlineThumb');
     var label = $('deliveryInlineProofLabel');
@@ -1375,6 +1470,10 @@
       updatePhotoWorkflowUi(true);
       resumeAfterSavedArrival();
       syncSecondPhotoFromList();
+      if (state.currentStep === 'delivery' && !state.proofState && state.photos.length > 0) {
+        setProofState('saved', thumbUrl(state.photos[0]));
+      }
+      syncInlineTakePhotoBtn();
       if (state.photos.length > 0) {
         maybeEnableGpsTracking();
       }
@@ -1714,8 +1813,8 @@
         state.secondPhoto = false;
         setSecondState(data.queued ? 'queued' : 'saved');
         setStatus(data.queued ? i18n('outbox_queued') : i18n('second_photo_added'), 'success');
-        if (state.currentStep !== 'delivery') goToStep('delivery');
-        setPhotoTypeForNextShot();
+        if (state.currentStep !== 'leave') goToStep('leave');
+        else syncWizardActions();
         return;
       }
       if (state.proofState === 'uploading') {
@@ -1735,7 +1834,8 @@
         state.awaitingProof = false;
         state.photoReturnStep = null;
         setStatus(data.queued ? i18n('outbox_queued') : (photoType === 'Before' ? i18n('arrival_saved') : i18n('departure_saved')), 'success');
-        if (state.currentStep !== 'delivery') goToStep('delivery');
+        if (state.currentStep === 'photo' || state.currentStep === 'arrive') goToStep('delivery');
+        else syncWizardActions();
       }
     } catch (err) {
       if (isSecond) {
@@ -1744,15 +1844,15 @@
         state.retakePhotoId = null;
         var keptAfter = savedAfterPhoto();
         setSecondState(keptAfter ? 'saved' : '', keptAfter ? thumbUrl(keptAfter) : '');
-        if (state.currentStep !== 'delivery') goToStep('delivery');
-        setPhotoTypeForNextShot();
+        if (state.currentStep !== 'leave') goToStep('leave');
+        else syncWizardActions();
         setStatus(err.message || i18n('upload_failed'), 'error');
         return;
       }
       if (state.proofState === 'uploading') {
         setProofState('');
         state.proofAccepted = false;
-        goToStep('photo');
+        syncWizardActions();
         setStatus(err.message || i18n('upload_failed'), 'error');
         return;
       }
@@ -1873,10 +1973,10 @@
     if (primaryBtn) {
       primaryBtn.disabled = isSubmitting;
       primaryBtn.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
-      if (isSubmitting && state.currentStep === 'delivery') {
+      if (isSubmitting) {
         primaryBtn.textContent = i18n('saving');
-      } else if (state.currentStep === 'delivery') {
-        primaryBtn.textContent = i18n('delivered');
+      } else {
+        syncWizardActions();
       }
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
@@ -2599,6 +2699,9 @@
     if (!state.proofAccepted && !state.explicitProofSkip && !stopHasProofPhoto()) {
       setSubmitting(false);
       state.awaitingProof = true;
+      if (window.bakeryUsageTrack) {
+        window.bakeryUsageTrack({ action: 'delivery_completed', outcome: 'started', choices: { step: 'proof' } });
+      }
       if (state.currentStep !== 'photo') goToStep('photo');
       showNoPhotoReasons(false);
       setStatus(i18n('proof_photo_required'), 'error');
@@ -2640,6 +2743,9 @@
       var data = null;
       var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       if (offline && outbox && typeof outbox.enqueueConfirm === 'function') {
+        if (window.bakeryUsageTrack) {
+          window.bakeryUsageTrack({ action: 'delivery_completed', outcome: 'started', choices: { step: 'queued' } });
+        }
         await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
         data = {
           success: true,
@@ -2649,6 +2755,9 @@
           payment_collection: state.paymentCollection
         };
       } else {
+        if (window.bakeryUsageTrack) {
+          window.bakeryUsageTrack({ action: 'delivery_completed', outcome: 'started', choices: { step: 'confirm' } });
+        }
         try {
           var response = await fetch('complete_delivery.php', {
             method: 'POST',
@@ -2687,6 +2796,9 @@
       setSubmitting(false);
       finishDeliveryUi(successMessage);
     } catch (err) {
+      if (window.bakeryUsageTrack) {
+        window.bakeryUsageTrack({ action: 'delivery_completed', outcome: 'errored', choices: { step: 'confirm' } });
+      }
       if (err && err.isSessionError) {
         setStatus(err.message, 'error');
         setSubmitting(false);
@@ -2834,8 +2946,8 @@
     if ($('deliveryPhotoType')) $('deliveryPhotoType').value = 'Before';
     setPhotoMode(opts.photoMode);
     state.photoReturnStep = null;
-    var startStep = opts.startStep || (opts.photoMode === 'review' ? 'invoice' : 'photo');
-    state.resumeIfPhotographed = !opts.startStep && opts.photoMode !== 'review';
+    var startStep = opts.startStep || (opts.photoMode === 'review' ? 'invoice' : 'arrive');
+    state.resumeIfPhotographed = opts.photoMode !== 'review' && (!opts.startStep || opts.startStep === 'arrive' || opts.startStep === 'photo');
     if (opts.photoMode !== 'review' && opts.startStep === 'delivery') {
       startStep = 'delivery';
     }
@@ -2862,7 +2974,9 @@
     }
     modal.classList.remove('is-closing', 'has-saved-photo', 'delivery-invoice-open', 'delivery-invoice-fullstep', 'native-camera-mode', 'camera-unavailable', 'is-photo-uploading');
     var inlineHost = $('nowCaptureHost');
-    state.inline = !!inlineHost && isPhoneLayout() && opts.photoMode !== 'review';
+    var routeRootForView = $('driverRouteRoot');
+    var currentRouteView = routeRootForView ? (routeRootForView.getAttribute('data-route-view') || 'now') : 'now';
+    state.inline = !!inlineHost && currentRouteView === 'now' && isPhoneLayout() && opts.photoMode !== 'review';
     if (state.inline) {
       inlineHost.appendChild(modal);
       inlineHost.hidden = false;
@@ -2993,29 +3107,58 @@
       setStatus(i18n('choose_image'), 'error');
       return;
     }
+    var objectUrl = URL.createObjectURL(file);
+    var finalShot = isFinalShot();
+    var guided = state.photoMode !== 'review' && !state.retakePhotoId;
     state.blob = file;
-    showCapturedPreview(URL.createObjectURL(file));
+    showCapturedPreview(objectUrl);
+    // Leave the camera as soon as the phone returns a picture. Resizing can
+    // take several seconds and must not trap the driver on this step.
+    if (guided && finalShot) {
+      setSecondState('uploading', objectUrl);
+      if (state.currentStep !== 'leave') goToStep('leave');
+      else {
+        var cameraSection = $('deliveryCameraSection');
+        if (cameraSection) cameraSection.hidden = true;
+        stopCamera();
+        var readyTitle = $('deliveryPhotoModalTitle');
+        if (readyTitle) readyTitle.textContent = i18n('delivered');
+        syncWizardActions();
+      }
+    } else if (guided) {
+      setProofState('uploading', objectUrl);
+      goToStep('delivery');
+    }
     state.preparing = true;
     setPhotoControlsBusy(true);
     var modal = $('deliveryPhotoModal');
     if (modal) modal.classList.add('is-photo-uploading');
     setStatus(i18n('preparing_photo'), 'loading');
+    state.uploadPromise = (async function () {
+      try {
+        var prepared = await preparePhotoForUpload(file);
+        state.blob = prepared.blob;
+        state.preparing = false;
+        setPhotoControlsBusy(false);
+        if (modal) modal.classList.remove('is-photo-uploading');
+        setStatus(i18n('photo_selected_saving'), 'loading');
+        await startBackgroundUpload(prepared.blob, prepared.filename || 'arrival-photo.jpg', objectUrl, finalShot);
+      } catch (err) {
+        state.preparing = false;
+        setPhotoControlsBusy(false);
+        if (modal) modal.classList.remove('is-photo-uploading');
+        if (state.proofState === 'uploading') setProofState('');
+        syncWizardActions();
+        setStatus((err && err.message) || i18n('upload_failed'), 'error');
+      }
+    })();
     try {
-      var prepared = await preparePhotoForUpload(file);
-      state.blob = prepared.blob;
+      await state.uploadPromise;
+    } finally {
       state.preparing = false;
-      setPhotoControlsBusy(false);
-      setStatus(i18n('photo_selected_saving'), 'loading');
-      if (modal) modal.classList.remove('is-photo-uploading');
-      await startBackgroundUpload(prepared.blob, prepared.filename || 'arrival-photo.jpg', state.previewUrl);
-    } catch (err) {
-      state.preparing = false;
-      setPhotoControlsBusy(false);
-      if (modal) modal.classList.remove('is-photo-uploading');
-      retakeCapture({
-        message: err.message || i18n('upload_failed'),
-        kind: 'error'
-      });
+      if (state.uploadPromise) {
+        // uploadBlob replaces this promise while a save is still in flight.
+      }
     }
   }
 
@@ -3112,14 +3255,23 @@
         toggleModalOrderDetails();
       });
     }
-    $('deliveryCaptureBtn').addEventListener('click', captureFromVideo);
+    $('deliveryCaptureBtn').addEventListener('click', function () {
+      takePhotoNow();
+    });
     $('deliveryRetakeBtn').addEventListener('click', retakeCapture);
     $('deliveryWizardPrimaryBtn').addEventListener('click', function () {
       if (state.submitting) return;
-      if (state.currentStep === 'photo') {
-        goToStep('delivery');
-      } else if (state.currentStep === 'delivery') {
+      var action = $('deliveryWizardPrimaryBtn').getAttribute('data-wizard-action') || '';
+      if (action === 'save') {
         confirmDelivery(false);
+      } else if (action === 'leave') {
+        goToStep('leave');
+        if (!state.preparing && !state.uploading) takePhotoNow();
+      } else if (action === 'photo') {
+        goToStep('photo');
+        takePhotoNow();
+      } else {
+        takePhotoNow();
       }
     });
     var reviewBtn = $('deliveryWizardReviewBtn');
@@ -3132,17 +3284,23 @@
     }
     $('deliveryWizardBackBtn').addEventListener('click', function () {
       if (state.submitting) return;
-      if (state.currentStep === 'delivery') goToStep('photo');
-      else if (state.currentStep === 'invoice') returnToDeliveryEdit();
+      if (state.currentStep === 'invoice') returnToDeliveryEdit();
+      else if (state.currentStep === 'leave') goToStep('delivery');
+      else if (state.currentStep === 'delivery') goToStep('photo');
+      else if (state.currentStep === 'photo') goToStep('arrive');
     });
     function skipPhotoStep() {
       if (state.submitting) return;
-      // Photo 2 is optional: Back returns to the charge screen with no reason prompt.
-      if (state.secondPhoto) {
+      var action = ($('deliveryWizardSkipBtn') && $('deliveryWizardSkipBtn').getAttribute('data-wizard-action')) || '';
+      if (action === 'save' || state.currentStep === 'leave' || state.currentStep === 'delivery') {
+        confirmDelivery(false);
+        return;
+      }
+      if (state.secondPhoto && state.currentStep === 'photo') {
         cancelSecondPhoto();
         return;
       }
-      showNoPhotoReasons(true);
+      chooseNoPhotoReason('other');
     }
     var secondPhotoBtn = $('deliverySecondPhotoBtn');
     if (secondPhotoBtn) secondPhotoBtn.addEventListener('click', function () { startSecondPhoto(); });
@@ -3203,16 +3361,8 @@
       stepBtn.addEventListener('click', function () {
         if (state.submitting || state.photoMode === 'review') return;
         var target = stepBtn.getAttribute('data-step');
-        if (target === 'invoice') {
-          if (!state.summaryReady) return;
-          var validated = validateDeliveryInputs();
-          if (!validated) return;
-          populateInvoicePreview();
-        } else if (target === 'delivery') {
-          goToStep('delivery');
-        } else {
-          goToStep('photo');
-        }
+        if (!target || target === state.currentStep) return;
+        goToStep(target);
       });
     });
     $('deliveryVarianceCancelBtn').addEventListener('click', hideVarianceConfirm);
@@ -3305,11 +3455,32 @@
     var inAppCameraBtn = $('deliveryInAppCameraBtn');
     if (inAppCameraBtn) {
       inAppCameraBtn.addEventListener('click', function () {
-        storageSet(CAMERA_PREF_KEY, null);
+        storageSet(CAMERA_PREF_KEY, 'inapp');
         showLivePreview();
         beginPhotoCapture();
       });
     }
+    var inlineTakePhotoBtn = $('deliveryInlineTakePhotoBtn');
+    if (inlineTakePhotoBtn) {
+      inlineTakePhotoBtn.addEventListener('click', function () {
+        state.secondPhoto = false;
+        state.retakePhotoId = null;
+        var typeSelect = $('deliveryPhotoType');
+        if (typeSelect) typeSelect.value = 'Before';
+        if (phoneCameraPreferred() || !inlineCameraSupported()) {
+          useNativeCamera();
+          openNativeCameraPicker();
+        } else {
+          goToStep('photo');
+        }
+      });
+    }
+    document.addEventListener('bakery:store-photo-saved', function (ev) {
+      var detail = ev && ev.detail ? ev.detail : {};
+      if (state.customerId && String(detail.customerId || '') === String(state.customerId)) {
+        loadPhotos();
+      }
+    });
     $('deliveryGalleryPickerBtn').addEventListener('click', function () {
       $('deliveryGalleryInput').click();
     });
