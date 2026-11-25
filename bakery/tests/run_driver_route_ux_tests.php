@@ -188,6 +188,53 @@ driver_ux_assert(
         && strpos($mapJs, 'optimizeWaypoints: true') !== false
 );
 
+driver_ux_assert(
+    'filled photo buttons are not painted the tan link color',
+    strpos($styles, "body.driver-workflow-page .contact-actions .photo-complete-btn {\n    border-color: #e9bf87;\n    color: #9b5c16;\n}") !== false
+        && strpos($styles, "body.driver-workflow-page .photo-complete-btn {\n    border-color: #e9bf87;\n    color: #9b5c16;\n}") === false
+        && strpos($styles, 'body.driver-workflow-page .route-btn.photo-complete-btn') !== false
+);
+driver_ux_assert(
+    'hero actions are Photo, Navigate, and Problem with inline icons',
+    strpos($page, "bakery_driver_action_label('photo', bakery_t('driver.photo'))") !== false
+        && strpos($page, "bakery_driver_action_label('navigate', bakery_t('driver.navigate'))") !== false
+        && strpos($page, "bakery_driver_action_label('problem', bakery_t('driver.problem'))") !== false
+        && strpos($page, 'class="route-action-icon"') !== false
+        && strpos($routeJs, "actionLabel('photo'") !== false
+        && strpos($routeJs, "di.navigate || di.directions") !== false
+);
+driver_ux_assert(
+    'Amounts opens delivery entry even when the photo button was not pre-bound',
+    strpos($page, 'data-start-step="delivery"') !== false
+        && strpos($page, "bakery_t('driver.amounts')") !== false
+        && strpos($routeJs, "stepBtn.getAttribute('data-start-step')") !== false
+        && isset($english['driver.amounts'], $spanish['driver.amounts'])
+        && $english['driver.amounts'] === 'Amounts'
+        && $spanish['driver.amounts'] === 'Cantidades'
+);
+driver_ux_assert(
+    'row Problem and bottom-nav Problem open the problem sheet directly',
+    strpos($routeJs, 'function bindProblemButtons') !== false
+        && strpos($routeJs, 'openFailStopModal(problemOrderId') !== false
+        && strpos($routeJs, 'cardProblem.click()') === false
+);
+driver_ux_assert(
+    'phone hero actions stay visible and the route clears the dock and nav',
+    strpos($styles, 'body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions') !== false
+        && strpos($styles, "display: none;\n    }\n\n    /* Route view") === false
+        && strpos($styles, 'padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 16px);') !== false
+);
+$nav = (string)file_get_contents($root . '/includes/nav.php');
+$navCss = (string)file_get_contents($root . '/css/nav.css');
+driver_ux_assert(
+    'phone bottom nav uses a short HQ label and can wrap inside its cell',
+    strpos($nav, "bakery_te('nav.call_hq_short')") !== false
+        && isset($english['nav.call_hq_short'], $spanish['nav.call_hq_short'])
+        && $english['nav.call_hq_short'] !== ''
+        && $spanish['nav.call_hq_short'] !== ''
+        && strpos($navCss, 'overflow-wrap: anywhere;') !== false
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);
