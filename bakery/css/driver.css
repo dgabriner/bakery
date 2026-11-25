@@ -5321,6 +5321,16 @@ body.route-has-sticky-dock .route-success-toast {
     width: 100%;
 }
 
+#deliveryPhotoModal .delivery-qty-error {
+    margin: 8px 0 0;
+    color: #b91c1c;
+    font-weight: 700;
+}
+
+#deliveryPhotoModal .delivery-qty-error[hidden] {
+    display: none;
+}
+
 #deliveryPhotoModal .delivery-variance-alert {
     margin: 10px 0 0;
     padding: 10px 12px;
