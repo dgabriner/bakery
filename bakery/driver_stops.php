@@ -106,7 +106,7 @@ require_once 'includes/nav.php';
         <div>
             <p class="driver-stops-eyebrow"><?php bakery_te('driver.stops_today'); ?></p>
             <h1><?php echo htmlspecialchars($driver['name'] ?? ($user['display_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></h1>
-            <p class="driver-stops-date"><?php echo htmlspecialchars(bakery_localized_date_label(new DateTimeImmutable($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="driver-stops-date" data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(bakery_driver_chrome_date(new DateTimeImmutable($selectedDate), 'weekday'), ENT_QUOTES, 'UTF-8'); ?></p>
         </div>
         <div class="driver-stops-count" aria-label="<?php echo htmlspecialchars(bakery_t('driver.done_count', ['done' => $completedCount, 'total' => count($stops)]), ENT_QUOTES, 'UTF-8'); ?>">
             <strong><?php echo (int)$completedCount; ?>/<?php echo (int)count($stops); ?></strong>
