@@ -1614,10 +1614,16 @@
   }
 
   .bakery-nav--driver.bakery-nav--focused .bakery-nav__direct,
-  .bakery-nav--driver.bakery-nav--focused .bakery-nav__logout-btn {
+  .bakery-nav--driver.bakery-nav--focused .bakery-nav__logout-btn,
+  .bakery-nav--driver.bakery-nav--focused .bakery-nav__more-toggle {
+    min-width: 0;
+    max-width: 100%;
     font-size: 0.68rem;
+    line-height: 1.15;
     min-height: 48px;
-    padding: 5px 2px;
+    padding: 4px 2px;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 

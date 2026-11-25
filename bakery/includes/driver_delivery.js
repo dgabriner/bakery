@@ -2893,6 +2893,7 @@
       modal.setAttribute('aria-modal', 'true');
     }
     modal.style.display = 'flex';
+    modal.classList.add('is-open');
     modal.setAttribute('aria-hidden', 'false');
     var routeRoot = $('driverRouteRoot');
     if (state.inline) {
