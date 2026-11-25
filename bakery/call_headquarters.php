@@ -493,7 +493,7 @@ require_once 'includes/nav.php';
         <p><?php bakery_te('hq.lead'); ?></p>
         <?php if (bakery_user_has_role('administrator')): ?>
         <button type="button" id="hqDebugBtn" onclick="testFunction()" style="background: #f39c12; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin: 10px 0; cursor: pointer; font-size: 0.9rem;">
-            🧪 Test Function (Debug)
+            <?php bakery_te('hq.debug_test'); ?>
         </button>
         <?php endif; ?>
     </div>
@@ -529,35 +529,35 @@ require_once 'includes/nav.php';
         </div>
         
         <div class="webrtc-setup">
-            <h4>🌐 Browser-Based Calling Features</h4>
-            <p><strong>Video & Voice calls work directly in your browser - no apps needed!</strong></p>
+            <h4><?php bakery_te('hq.browser_title'); ?></h4>
+            <p><strong><?php bakery_te('hq.browser_lead'); ?></strong></p>
             
             <div class="step">
                 <span class="step-number">1</span>
-                <span>Click "Video Call" or "Voice Call" to start a browser-based call</span>
+                <span><?php bakery_te('hq.browser_step1'); ?></span>
             </div>
             <div class="step">
                 <span class="step-number">2</span>
-                <span>Allow camera/microphone permissions when prompted</span>
+                <span><?php bakery_te('hq.browser_step2'); ?></span>
             </div>
             <div class="step">
                 <span class="step-number">3</span>
-                <span>Share the meeting room link with headquarters</span>
+                <span><?php bakery_te('hq.browser_step3'); ?></span>
             </div>
             <div class="step">
                 <span class="step-number">4</span>
-                <span>Start your conversation with crystal-clear quality</span>
+                <span><?php bakery_te('hq.browser_step4'); ?></span>
             </div>
             
-            <p><strong>Benefits:</strong> No downloads, works on any device, secure encrypted calls, screen sharing available.</p>
+            <p><?php bakery_te('hq.browser_benefits'); ?></p>
         </div>
     </div>
     
     <div class="contact-info">
-        <h3>📍 Contact Information</h3>
+        <h3><?php bakery_te('hq.contact_heading'); ?></h3>
         <div class="contact-detail">
             <span class="detail-icon">🏢</span>
-            <span>Bakery Headquarters</span>
+            <span><?php bakery_te('hq.contact_place'); ?></span>
         </div>
         <div class="contact-detail">
             <span class="detail-icon">📞</span>
@@ -565,29 +565,29 @@ require_once 'includes/nav.php';
         </div>
         <div class="contact-detail">
             <span class="detail-icon">🕒</span>
-            <span>Available during business hours</span>
+            <span><?php bakery_te('hq.contact_hours'); ?></span>
         </div>
     </div>
     
     <div class="quick-actions">
         <div class="action-card">
-            <h4>🚨 Emergency Contact</h4>
-            <p>For urgent delivery issues, production problems, or immediate assistance</p>
+            <h4><?php bakery_te('hq.card_emergency_title'); ?></h4>
+            <p><?php bakery_te('hq.card_emergency_body'); ?></p>
         </div>
         
         <div class="action-card">
-            <h4>📋 General Support</h4>
-            <p>Questions about orders, customer issues, or operational guidance</p>
+            <h4><?php bakery_te('hq.card_support_title'); ?></h4>
+            <p><?php bakery_te('hq.card_support_body'); ?></p>
         </div>
         
         <div class="action-card">
-            <h4>📊 Reporting</h4>
-            <p>Daily reports, route updates, or system-related inquiries</p>
+            <h4><?php bakery_te('hq.card_reporting_title'); ?></h4>
+            <p><?php bakery_te('hq.card_reporting_body'); ?></p>
         </div>
         
         <div class="action-card">
-            <h4>💼 Administrative</h4>
-            <p>HR matters, scheduling changes, or policy questions</p>
+            <h4><?php bakery_te('hq.card_admin_title'); ?></h4>
+            <p><?php bakery_te('hq.card_admin_body'); ?></p>
         </div>
     </div>
 </div>
@@ -597,17 +597,17 @@ require_once 'includes/nav.php';
     <div class="call-modal-content">
         <div class="call-header">
             <div>
-                <h3 class="call-title" id="callTitle">Connecting to Headquarters...</h3>
-                <p class="call-status" id="callStatus">Initializing call...</p>
+                <h3 class="call-title" id="callTitle"><?php bakery_te('hq.call_connecting'); ?></h3>
+                <p class="call-status" id="callStatus"><?php bakery_te('hq.call_initializing'); ?></p>
             </div>
-            <button class="close-call" onclick="endCall()">End Call</button>
+            <button class="close-call" onclick="endCall()"><?php bakery_te('hq.call_end'); ?></button>
         </div>
         <div class="call-content" id="callContent">
             <div class="call-avatar">🏢</div>
             <div class="call-info">
-                <h3>Bakery Headquarters</h3>
+                <h3><?php bakery_te('hq.contact_place'); ?></h3>
                 <p>(415) 509-1210</p>
-                <p id="callInstructions">Setting up your call room...</p>
+                <p id="callInstructions"><?php bakery_te('hq.call_room_setup'); ?></p>
             </div>
             <div class="jitsi-container" id="jitsiContainer" style="display: none;">
                 <div id="jitsi-meet"></div>
@@ -617,6 +617,44 @@ require_once 'includes/nav.php';
 </div>
 
 <script>
+var hqCopy = <?php echo json_encode([
+    'connecting' => bakery_t('hq.call_connecting'),
+    'initializing' => bakery_t('hq.call_initializing'),
+    'room_setup' => bakery_t('hq.call_room_setup'),
+    'video_title' => bakery_t('hq.call_video_title'),
+    'voice_title' => bakery_t('hq.call_voice_title'),
+    'alt_status' => bakery_t('hq.call_alt_status'),
+    'setup_status' => bakery_t('hq.call_setup_status'),
+    'preparing' => bakery_t('hq.call_preparing'),
+    'next' => bakery_t('hq.call_next'),
+    'next_1' => bakery_t('hq.call_next_1'),
+    'next_2' => bakery_t('hq.call_next_2'),
+    'next_3' => bakery_t('hq.call_next_3'),
+    'secure' => bakery_t('hq.call_secure'),
+    'ready' => bakery_t('hq.call_ready'),
+    'send_link' => bakery_t('hq.call_send_link'),
+    'or_phone' => bakery_t('hq.call_or_phone'),
+    'any_device' => bakery_t('hq.call_any_device'),
+    'connected' => bakery_t('hq.call_connected'),
+    'joined' => bakery_t('hq.call_joined'),
+    'in_progress' => bakery_t('hq.call_in_progress'),
+    'left' => bakery_t('hq.call_left'),
+    'copy_link' => bakery_t('hq.copy_link'),
+    'copied' => bakery_t('hq.copied'),
+    'call_hq' => bakery_t('hq.call_hq'),
+    'open_meeting' => bakery_t('hq.open_meeting'),
+    'quick_options' => bakery_t('hq.quick_options'),
+    'option_phone' => bakery_t('hq.option_phone'),
+    'option_web' => bakery_t('hq.option_web'),
+    'option_other' => bakery_t('hq.option_other'),
+    'copy_failed' => bakery_t('hq.copy_failed'),
+    'whatsapp' => bakery_t('hq.whatsapp_message'),
+    'field_team' => bakery_t('hq.field_team'),
+    'phone_call' => bakery_t('hq.phone_call'),
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+function hqT(key) {
+    return Object.prototype.hasOwnProperty.call(hqCopy, key) ? hqCopy[key] : '';
+}
 let jitsiApi = null;
 let currentCallType = null;
 
@@ -731,43 +769,43 @@ function showSimpleCallInterface(type) {
     const callStatus = document.getElementById('callStatus');
     const callInstructions = document.getElementById('callInstructions');
     
-    callTitle.textContent = `${type === 'video' ? 'Video' : 'Voice'} Call to Headquarters`;
-    callStatus.textContent = 'Alternative calling methods';
+    callTitle.textContent = type === 'video' ? hqT('video_title') : hqT('voice_title');
+    callStatus.textContent = hqT('alt_status');
     
     const roomName = 'bakery-hq-' + Date.now();
     const meetingLink = `https://meet.jit.si/${roomName}`;
     
     callInstructions.innerHTML = `
-        <strong>📞 Quick Call Options:</strong><br><br>
+        <strong>${hqT('quick_options')}</strong><br><br>
         
         <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <strong>Option 1: Direct Phone Call</strong><br>
+            <strong>${hqT('option_phone')}</strong><br>
             <button onclick="window.open('tel:+14155091210')" style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; margin: 10px 0; font-size: 1rem;">
-                📞 Call (415) 509-1210
+                ${hqT('call_hq')}
             </button>
         </div>
         
         <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <strong>Option 2: Web Meeting</strong><br>
-            Send this link to headquarters:<br>
+            <strong>${hqT('option_web')}</strong><br>
+            ${hqT('send_link')}<br>
             <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin: 10px 0; font-family: monospace; word-break: break-all; font-size: 0.9rem;">
                 ${meetingLink}
             </div>
             <button onclick="copyToClipboard('${meetingLink}')" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px;">
-                📋 Copy Link
+                ${hqT('copy_link')}
             </button>
             <button onclick="window.open('${meetingLink}', '_blank')" style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px;">
-                🚀 Open Meeting
+                ${hqT('open_meeting')}
             </button>
         </div>
         
         <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <strong>Option 3: Other Platforms</strong><br>
+            <strong>${hqT('option_other')}</strong><br>
             <button onclick="openWhatsApp()" style="background: #25D366; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px;">
-                💬 WhatsApp
+                WhatsApp
             </button>
             <button onclick="openFaceTime()" style="background: #007aff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px;">
-                📹 FaceTime
+                FaceTime
             </button>
         </div>
     `;
@@ -791,15 +829,15 @@ function initializeCall(videoEnabled, audioEnabled) {
     const callStatus = document.getElementById('callStatus');
     const callInstructions = document.getElementById('callInstructions');
     
-    callTitle.textContent = videoEnabled ? 'Video Call to Headquarters' : 'Voice Call to Headquarters';
-    callStatus.textContent = 'Setting up secure connection...';
+    callTitle.textContent = videoEnabled ? hqT('video_title') : hqT('voice_title');
+    callStatus.textContent = hqT('setup_status');
     callInstructions.innerHTML = `
-        <strong>Your ${videoEnabled ? 'video' : 'voice'} call room is being prepared...</strong><br><br>
-        📋 <strong>Next Steps:</strong><br>
-        1. Copy the meeting link that will appear<br>
-        2. Send it to headquarters via text/email<br>
-        3. Wait for them to join the call<br><br>
-        🔒 Your call is encrypted and secure
+        <strong>${hqT('preparing')}</strong><br><br>
+        <strong>${hqT('next')}</strong><br>
+        1. ${hqT('next_1')}<br>
+        2. ${hqT('next_2')}<br>
+        3. ${hqT('next_3')}<br><br>
+        ${hqT('secure')}
     `;
     
     // Generate a unique room name for this call
@@ -855,7 +893,7 @@ function initializeCall(videoEnabled, audioEnabled) {
             DEFAULT_WELCOME_PAGE_LOGO_URL: ''
         },
         userInfo: {
-            displayName: 'Bakery Field Team'
+            displayName: hqT('field_team')
         }
     };
     
@@ -864,40 +902,40 @@ function initializeCall(videoEnabled, audioEnabled) {
     
     // Set up event listeners
     jitsiApi.addEventListener('videoConferenceJoined', function(participant) {
-        callStatus.textContent = 'Connected! Waiting for headquarters to join...';
+        callStatus.textContent = hqT('connected');
         document.getElementById('jitsiContainer').style.display = 'block';
         
         // Generate shareable link
         const meetingLink = `https://meet.jit.si/${roomName}`;
         callInstructions.innerHTML = `
-            <strong>✅ Your call room is ready!</strong><br><br>
-            📋 <strong>Send this link to headquarters:</strong><br>
+            <strong>${hqT('ready')}</strong><br><br>
+            <strong>${hqT('send_link')}</strong><br>
             <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; margin: 10px 0; font-family: monospace; word-break: break-all;">
                 ${meetingLink}
             </div>
-            📱 Or call them at (415) 509-1210 and share the room name:<br>
+            ${hqT('or_phone')}<br>
             <strong>${roomName}</strong><br><br>
-            🎯 They can join from any device by visiting the link above
+            ${hqT('any_device')}
         `;
         
         // Add copy link functionality
         const copyButton = document.createElement('button');
-        copyButton.textContent = '📋 Copy Link';
+        copyButton.textContent = hqT('copy_link');
         copyButton.style.cssText = `
             background: #007bff; color: white; border: none; padding: 8px 16px;
             border-radius: 6px; cursor: pointer; margin: 10px 5px; font-size: 0.9rem;
         `;
         copyButton.onclick = function() {
             navigator.clipboard.writeText(meetingLink).then(() => {
-                copyButton.textContent = '✅ Copied!';
+                copyButton.textContent = hqT('copied');
                 setTimeout(() => {
-                    copyButton.textContent = '📋 Copy Link';
+                    copyButton.textContent = hqT('copy_link');
                 }, 2000);
             });
         };
         
         const phoneButton = document.createElement('button');
-        phoneButton.textContent = '📞 Call HQ';
+        phoneButton.textContent = hqT('call_hq');
         phoneButton.style.cssText = `
             background: #28a745; color: white; border: none; padding: 8px 16px;
             border-radius: 6px; cursor: pointer; margin: 10px 5px; font-size: 0.9rem;
@@ -912,12 +950,12 @@ function initializeCall(videoEnabled, audioEnabled) {
     });
     
     jitsiApi.addEventListener('participantJoined', function(participant) {
-        callStatus.textContent = 'Headquarters has joined the call!';
-        callInstructions.innerHTML = '<strong>🎉 Call in progress with headquarters</strong>';
+        callStatus.textContent = hqT('joined');
+        callInstructions.innerHTML = '<strong>' + hqT('in_progress') + '</strong>';
     });
     
     jitsiApi.addEventListener('participantLeft', function(participant) {
-        callStatus.textContent = 'Participant left the call';
+        callStatus.textContent = hqT('left');
     });
     
     jitsiApi.addEventListener('videoConferenceLeft', function() {
@@ -943,9 +981,9 @@ function endCall() {
     document.getElementById('jitsi-meet').innerHTML = '';
     
     // Reset status
-    document.getElementById('callTitle').textContent = 'Connecting to Headquarters...';
-    document.getElementById('callStatus').textContent = 'Initializing call...';
-    document.getElementById('callInstructions').textContent = 'Setting up your call room...';
+    document.getElementById('callTitle').textContent = hqT('connecting');
+    document.getElementById('callStatus').textContent = hqT('initializing');
+    document.getElementById('callInstructions').textContent = hqT('room_setup');
     
     currentCallType = null;
 }
@@ -971,9 +1009,9 @@ function copyToClipboard(text) {
         navigator.clipboard.writeText(text).then(() => {
             console.log('Link copied to clipboard');
             // Visual feedback
-            event.target.textContent = '✅ Copied!';
+            event.target.textContent = hqT('copied');
             setTimeout(() => {
-                event.target.textContent = '📋 Copy Link';
+                event.target.textContent = hqT('copy_link');
             }, 2000);
         }).catch(err => {
             console.error('Failed to copy:', err);
@@ -993,21 +1031,21 @@ function fallbackCopyTextToClipboard(text) {
     try {
         const successful = document.execCommand('copy');
         if (successful) {
-            event.target.textContent = '✅ Copied!';
+            event.target.textContent = hqT('copied');
             setTimeout(() => {
-                event.target.textContent = '📋 Copy Link';
+                event.target.textContent = hqT('copy_link');
             }, 2000);
         }
     } catch (err) {
         console.error('Fallback: Oops, unable to copy', err);
-        alert('Please manually copy this link: ' + text);
+        alert(hqT('copy_failed') + ' ' + text);
     }
     document.body.removeChild(textArea);
 }
 
 function openWhatsApp() {
     const phone = '+14155091210';
-    const message = encodeURIComponent('Hi! I need to speak with headquarters. Can we have a quick call?');
+    const message = encodeURIComponent(hqT('whatsapp'));
     const whatsappUrl = `https://wa.me/${phone}?text=${message}`;
     window.open(whatsappUrl, '_blank');
 }
@@ -1028,7 +1066,7 @@ function openFaceTime() {
 // Test function for debugging
 function testFunction() {
     console.log('Test function called!');
-    alert('Test function works! Check console for more details.');
+    alert(hqT('debug_test'));
     
     console.log('Available functions:');
     console.log('- startVideoCall:', typeof startVideoCall);

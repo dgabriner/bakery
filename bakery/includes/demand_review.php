@@ -83,6 +83,34 @@ function bakery_demand_review_build(PDO $db, $date, array $filters = []) {
         $standingSql .= ' AND so.product_id = ?';
         $standingParams[] = $productId;
     }
+    if ($driverId > 0) {
+        // Standing lines for this driver only: their route, or a customer
+        // already assigned to them today. Other drivers stay out of the scan.
+        $standingSql .= ' AND (
+            EXISTS (
+                SELECT 1 FROM standing_routes sr_drv
+                WHERE sr_drv.customer_id = so.customer_id
+                  AND sr_drv.driver_id = ?
+                  AND sr_drv.day_of_week ' . $dayClause['sql'] . '
+            )
+            OR EXISTS (
+                SELECT 1 FROM daily_orders do_drv
+                LEFT JOIN daily_order_assignments doa_drv
+                  ON doa_drv.daily_order_id = do_drv.id
+                 AND doa_drv.delivery_date = do_drv.order_date
+                WHERE do_drv.customer_id = so.customer_id
+                  AND do_drv.order_date = ?
+                  AND (do_drv.driver_id = ? OR doa_drv.driver_id = ?)
+            )
+        )';
+        $standingParams[] = $driverId;
+        foreach ($dayClause['values'] as $standingDayValue) {
+            $standingParams[] = $standingDayValue;
+        }
+        $standingParams[] = $date;
+        $standingParams[] = $driverId;
+        $standingParams[] = $driverId;
+    }
     $standingStmt = $db->prepare($standingSql);
     $standingStmt->execute($standingParams);
     $standingRows = $standingStmt->fetchAll(PDO::FETCH_ASSOC);

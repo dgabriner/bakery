@@ -11,6 +11,7 @@ require_once 'includes/product_pack_yields.php';
 require_once 'includes/pack_list.php';
 require_once 'includes/production_plan.php';
 require_once 'includes/kitchen_segments.php';
+require_once 'includes/staff_driver_profile.php';
 bakery_baker_redirect_to_day('pack');
 
 $page_title = bakery_t('page.pack_list');
@@ -58,7 +59,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['exception_desk_mutation'] 
 
 $days = bakery_day_names();
 
-$defaultDate = date('Y-m-d', strtotime('+1 day'));
+$packListUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
+$packForDriver = bakery_staff_in_driver_workspace($packListUser, 'pack_list');
+// Bakers and managers pack tomorrow's sell day. A driver is on today's route.
+$defaultDate = $packForDriver ? date('Y-m-d') : date('Y-m-d', strtotime('+1 day'));
 
 if (!function_exists('bakery_pack_list_date_for_day')) {
     /** Calendar date for a standing weekday, anchored from a reference date (default tomorrow). */
@@ -108,7 +112,20 @@ if (is_array($bakerProductIds)) {
 }
 
 $isBaker = function_exists('bakery_user_has_role') && bakery_user_has_role(['baker']);
-$isDriver = function_exists('bakery_user_has_role') && bakery_user_has_role(bakery_driver_route_roles());
+$isDriver = (function_exists('bakery_user_has_role') && bakery_user_has_role(bakery_driver_route_roles()))
+    || $packForDriver;
+$packDriverId = 0;
+if ($packForDriver) {
+    if (function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role((string)($packListUser['role_slug'] ?? ''))) {
+        $packDriverId = bakery_route_worker_driver_id($db, $packListUser, $selectedDate);
+    }
+    if ($packDriverId <= 0) {
+        $packDriverId = bakery_staff_driver_mode_driver_id();
+    }
+    if ($packDriverId <= 0) {
+        $packDriverId = bakery_staff_own_driver_id($db, $packListUser);
+    }
+}
 $inventoryReady = bakery_inventory_ready($db);
 $hasDailyOrders = false;
 $lineItems = [];
@@ -124,7 +141,8 @@ $packDeskNotice = !empty($_GET['notice']) ? substr(trim((string)$_GET['notice'])
 
 try {
     require_once __DIR__ . '/includes/demand_review.php';
-    $lineItems = bakery_operating_demand_lines($db, $selectedDate);
+    $demandFilters = ($packForDriver && $packDriverId > 0) ? ['driver_id' => $packDriverId] : [];
+    $lineItems = bakery_operating_demand_lines($db, $selectedDate, $demandFilters);
     if ($isBaker && is_array($bakerProductIds)) {
         if (empty($bakerProductIds)) {
             $lineItems = [];
@@ -153,17 +171,21 @@ try {
 
     // Dated assignments win; standing routes fill gaps for customers not yet assigned today.
     if (table_exists($db, 'daily_order_assignments') && table_exists($db, 'daily_orders')) {
-        $assignStmt = $db->prepare(
-            'SELECT do.customer_id, doa.driver_id, d.name AS driver_name,
+        $assignSql = 'SELECT do.customer_id, doa.driver_id, d.name AS driver_name,
                     COALESCE(doa.route_order, 2147483647) AS route_order
              FROM daily_orders do
              JOIN daily_order_assignments doa
                ON doa.daily_order_id = do.id AND doa.delivery_date = do.order_date
              JOIN drivers d ON d.id = doa.driver_id
-             WHERE do.order_date = ?
-             ORDER BY doa.driver_id, COALESCE(doa.route_order, 2147483647), doa.id'
-        );
-        $assignStmt->execute([$selectedDate]);
+             WHERE do.order_date = ?';
+        $assignParams = [$selectedDate];
+        if ($packDriverId > 0) {
+            $assignSql .= ' AND doa.driver_id = ?';
+            $assignParams[] = $packDriverId;
+        }
+        $assignSql .= ' ORDER BY doa.driver_id, COALESCE(doa.route_order, 2147483647), doa.id';
+        $assignStmt = $db->prepare($assignSql);
+        $assignStmt->execute($assignParams);
         foreach ($assignStmt->fetchAll(PDO::FETCH_ASSOC) as $assign) {
             $cid = (int)$assign['customer_id'];
             if (isset($customerRouteById[$cid])) {
@@ -178,17 +200,21 @@ try {
     }
     if (table_exists($db, 'standing_routes')) {
         $dayClause = bakery_standing_day_in_clause($selectedDay);
-        $standingRouteStmt = $db->prepare(
-            "SELECT sr.customer_id, sr.driver_id, d.name AS driver_name,
+        $standingRouteSql = "SELECT sr.customer_id, sr.driver_id, d.name AS driver_name,
                     COALESCE(sr.route_order, 2147483647) AS route_order
              FROM standing_routes sr
              JOIN drivers d ON d.id = sr.driver_id
              JOIN customers c ON c.id = sr.customer_id AND COALESCE(c.is_active, 1) = 1
                  " . bakery_sfb_ops_origin_clause('c', $db) . "
-             WHERE sr.day_of_week {$dayClause['sql']}
-             ORDER BY sr.driver_id, COALESCE(sr.route_order, 2147483647), sr.id"
-        );
-        $standingRouteStmt->execute($dayClause['values']);
+             WHERE sr.day_of_week {$dayClause['sql']}";
+        $standingRouteParams = $dayClause['values'];
+        if ($packDriverId > 0) {
+            $standingRouteSql .= ' AND sr.driver_id = ?';
+            $standingRouteParams[] = $packDriverId;
+        }
+        $standingRouteSql .= ' ORDER BY sr.driver_id, COALESCE(sr.route_order, 2147483647), sr.id';
+        $standingRouteStmt = $db->prepare($standingRouteSql);
+        $standingRouteStmt->execute($standingRouteParams);
         foreach ($standingRouteStmt->fetchAll(PDO::FETCH_ASSOC) as $route) {
             $cid = (int)$route['customer_id'];
             if (isset($customerRouteById[$cid])) {
@@ -346,7 +372,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pack_
     }
 }
 
-$canBackfillProduction = $inventoryReady
+$canBackfillProduction = !$packForDriver
+    && $inventoryReady
     && function_exists('bakery_user_has_role')
     && bakery_user_has_role(['baker', 'manager', 'administrator']);
 $missingProductionTargets = [];
@@ -578,7 +605,7 @@ if ((string)($_GET['loads'] ?? '') === '1') {
 }
 
 $packerCountRows = [];
-if ($inventoryReady) {
+if ($inventoryReady && !$packForDriver) {
     try {
         $packerCountRows = bakery_pack_day_count_rows(
             $db,
@@ -598,7 +625,8 @@ foreach ($packerCountRows as $countRow) {
     }
     $packerCountShort += (int)$countRow['short'];
 }
-$canPackerCount = $inventoryReady
+$canPackerCount = !$packForDriver
+    && $inventoryReady
     && function_exists('bakery_user_has_role')
     && bakery_user_has_role(['baker', 'manager', 'administrator']);
 
@@ -606,7 +634,7 @@ $totalCustomers = count($byCustomer);
 $totalProducts = count($byProduct);
 $totalMadeUnits = array_sum($producedByProduct);
 $orderSourceLabel = $hasDailyOrders ? bakery_t('pack_list.daily_orders') : bakery_t('pack_list.standing_schedule');
-$dateLabel = $days[$selectedDay] . ', ' . date('M j, Y', strtotime($selectedDate));
+$dateLabel = $days[$selectedDay] . ', ' . bakery_localized_date_label(new DateTimeImmutable($selectedDate), true);
 $productionHref = 'production.php?' . http_build_query(bakery_ops_workflow_query(['date' => $selectedDate]));
 $packPhoneFocusKeys = $isBaker
     ? bakery_pack_phone_focus_keys($viewMode, $byProduct, $byCustomer, $byRouteList)
@@ -632,20 +660,24 @@ $productionCenterHref = function_exists('bakery_ops_link_production_center')
     )
     : ('production_center.php?date=' . rawurlencode($selectedDate));
 // Visible on every non-driver role: quantities are demand until a manager commits the bake.
-$planUncommitted = !$isDriver && bakery_pack_plan_uncommitted($db, $selectedDate);
+$planUncommitted = !$isDriver && !$packForDriver && bakery_pack_plan_uncommitted($db, $selectedDate);
 $unpackedLineCount = bakery_pack_unpacked_count(array_keys($allLineKeys), $checkedMap);
 $workflowStages = [];
-try {
-    require_once __DIR__ . '/includes/production_workflow_strip.php';
-    $workflowStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
-} catch (Throwable $e) {
-    error_log('pack_list workflow strip: ' . $e->getMessage());
-}
 $pageExceptions = [];
-try {
-    $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
-} catch (Throwable $e) {
-    error_log('pack_list exceptions: ' . $e->getMessage());
+// The kitchen strip and the command center are the slow manager actions
+// (including Commit production plan). A driver pack list does not need them.
+if (!$packForDriver) {
+    try {
+        require_once __DIR__ . '/includes/production_workflow_strip.php';
+        $workflowStages = bakery_production_workflow_kitchen_stages($db, $selectedDate);
+    } catch (Throwable $e) {
+        error_log('pack_list workflow strip: ' . $e->getMessage());
+    }
+    try {
+        $pageExceptions = bakery_ops_exceptions_for_date($db, $selectedDate, $pageReturnKey);
+    } catch (Throwable $e) {
+        error_log('pack_list exceptions: ' . $e->getMessage());
+    }
 }
 
 require_once 'includes/header.php';
