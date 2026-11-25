@@ -379,7 +379,8 @@ driver_photo_assert(
     strpos($styles, '.route-dashboard:not(.route-dashboard--prep) .route-primary-column') !== false
         && strpos($styles, 'display: contents;') !== false
         && strpos($styles, '.route-section-next,') !== false
-        && strpos($page, 'class="next-stop-actions-primary"') !== false
+        && strpos($page, 'route-btn route-btn--photo photo-complete-btn') !== false
+        && strpos($page, 'route-btn route-btn--problem stop-problem-btn') !== false
         && strpos($page, 'class="next-stop-more"') !== false
         && strpos($page, 'route-prep-tomorrow-cta') === false
 );

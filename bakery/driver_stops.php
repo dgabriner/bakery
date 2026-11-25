@@ -7,6 +7,11 @@ require_once 'includes/database.php';
 
 $user = function_exists('bakery_current_user') ? bakery_current_user() : null;
 $selectedDate = date('Y-m-d');
+$requestedStopsDate = trim((string)($_GET['date'] ?? ''));
+$requestedStopsObject = DateTimeImmutable::createFromFormat('!Y-m-d', $requestedStopsDate);
+if ($requestedStopsObject && $requestedStopsObject->format('Y-m-d') === $requestedStopsDate) {
+    $selectedDate = $requestedStopsDate;
+}
 $selectedDriverId = ($user && bakery_is_driver_route_role($user['role_slug'] ?? ''))
     ? bakery_route_worker_driver_id($db, $user, $selectedDate)
     : (function_exists('bakery_get_selected_driver_id') ? (int)bakery_get_selected_driver_id() : 0);
@@ -106,7 +111,7 @@ require_once 'includes/nav.php';
         <div>
             <p class="driver-stops-eyebrow"><?php bakery_te('driver.stops_today'); ?></p>
             <h1><?php echo htmlspecialchars($driver['name'] ?? ($user['display_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></h1>
-            <p class="driver-stops-date"><?php echo htmlspecialchars(bakery_localized_date_label(new DateTimeImmutable($selectedDate)), ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="driver-stops-date" data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(bakery_driver_chrome_date(new DateTimeImmutable($selectedDate), 'weekday'), ENT_QUOTES, 'UTF-8'); ?></p>
         </div>
         <div class="driver-stops-count" aria-label="<?php echo htmlspecialchars(bakery_t('driver.done_count', ['done' => $completedCount, 'total' => count($stops)]), ENT_QUOTES, 'UTF-8'); ?>">
             <strong><?php echo (int)$completedCount; ?>/<?php echo (int)count($stops); ?></strong>
@@ -144,7 +149,6 @@ require_once 'includes/nav.php';
             <p><?php echo htmlspecialchars($currentStop['customer_address'] ?: bakery_t('driver.no_address'), ENT_QUOTES, 'UTF-8'); ?></p>
             <button type="button" class="driver-stop-photo-btn" data-open-store-photo data-customer-id="<?php echo (int)$currentStop['customer_id']; ?>" data-customer-name="<?php echo htmlspecialchars($currentStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-daily-order-id="<?php echo (int)$currentStop['daily_order_id']; ?>" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.take_photo'); ?></button>
             <?php if ($currentMapsUrl): ?><a class="driver-current-stop-action" href="<?php echo htmlspecialchars($currentMapsUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><?php bakery_te('driver.navigate'); ?> <span aria-hidden="true">↗</span></a><?php endif; ?>
-            <a class="driver-current-stop-action driver-current-stop-action--qr" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>qr_login.php">Generate customer QR login</a>
         </section>
         <?php else: ?>
         <section class="driver-route-complete" role="status">

@@ -1,6 +1,45 @@
 (function () {
     var di = window.__DRIVER_PAGE_I18N__ || {};
     var boot = window.__DRIVER_ROUTE_BOOT__ || {};
+
+    var DRIVER_MONTHS_ES = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    var DRIVER_MONTHS_EN = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    var DRIVER_MONTHS_SHORT_ES = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    var DRIVER_MONTHS_SHORT_EN = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var DRIVER_WEEKDAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    function bakeryFormatDriverDate(iso, style) {
+        var match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return '';
+        var year = Number(match[1]);
+        var month = Number(match[2]);
+        var day = Number(match[3]);
+        if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+        var locale = window.__BAKERY_LOCALE__ || boot.locale || 'en';
+        var es = locale === 'es';
+        var utc = new Date(Date.UTC(year, month - 1, day));
+        if (es) {
+            if (style === 'compact') return String(day) + ' ' + DRIVER_MONTHS_SHORT_ES[month];
+            return DRIVER_WEEKDAYS_ES[utc.getUTCDay()] + ' ' + String(day) + ' de ' + DRIVER_MONTHS_ES[month];
+        }
+        if (style === 'compact') return DRIVER_MONTHS_SHORT_EN[month] + ' ' + String(day);
+        return DRIVER_MONTHS_EN[month] + ' ' + String(day);
+    }
+    window.bakeryFormatDriverDate = bakeryFormatDriverDate;
+
+    function applyDriverDates() {
+        var iso = boot.routeDate || '';
+        document.querySelectorAll('[data-driver-date]').forEach(function (el) {
+            var elIso = el.getAttribute('data-driver-date-iso') || iso;
+            var text = bakeryFormatDriverDate(elIso, el.getAttribute('data-driver-date') || 'weekday');
+            if (text) el.textContent = text;
+        });
+        if (!iso) return;
+        var header = document.querySelector('.route-day-nav-date');
+        if (header) header.textContent = bakeryFormatDriverDate(iso, 'weekday');
+        var chip = document.querySelector('.now-strip-date strong');
+        if (chip) chip.textContent = bakeryFormatDriverDate(iso, 'compact');
+    }
     function mapsDirectionsUrl(address, lat, lng) {
         var q = '';
         var nlat = Number(lat);
@@ -44,6 +83,24 @@
             .replace(/"/g, '&quot;');
     }
 
+    function actionIcon(name) {
+        var common = ' class="route-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
+        if (name === 'photo') {
+            return '<svg' + common + '><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="2"></circle></svg>';
+        }
+        if (name === 'navigate') {
+            return '<svg' + common + '><path d="M12 2l7 19-7-4-7 4 7-19z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>';
+        }
+        if (name === 'amounts') {
+            return '<svg' + common + '><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>';
+        }
+        return '<svg' + common + '><path d="M12 3l10 18H2L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg>';
+    }
+
+    function actionLabel(icon, text) {
+        return actionIcon(icon) + '<span class="route-action-label">' + escapeHtml(text) + '</span>';
+    }
+
     function openStopDeliveryFromEl(stop, opts) {
         opts = opts || {};
         if (document.body.classList.contains('route-adjust-open')) {
@@ -81,6 +138,12 @@
                 (photoBtn && photoBtn.getAttribute('data-date')) ||
                 (root && root.getAttribute('data-date')) ||
                 '',
+            assignmentId: parseInt(
+                (photoBtn && photoBtn.getAttribute('data-assignment-id')) ||
+                stop.getAttribute('data-assignment-id') ||
+                '0',
+                10
+            ) || 0,
             photoMode:
                 (photoBtn && photoBtn.getAttribute('data-photo-mode')) ||
                 (status === 'delivered' ? 'review' : 'capture'),
@@ -89,6 +152,32 @@
             startStep: opts.startStep || ''
         });
         return true;
+    }
+
+    function findStopByOrderId(orderId) {
+        var selector = '[data-daily-order-id="' + String(orderId) + '"]';
+        return document.querySelector('#stopList .stop-item' + selector)
+            || document.querySelector('#pastStopsList .stop-item' + selector)
+            || document.querySelector('#routePrepList .route-prep-stop' + selector);
+    }
+
+    function clearStopDeepLink(params) {
+        params.delete('open_stop');
+        params.delete('view_orders');
+        params.delete('daily_order_id');
+        var qs = params.toString();
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        }
+    }
+
+    function openHeroOrders(dailyOrderId) {
+        var wrap = document.getElementById('nextStopOrderDetails');
+        var toggle = document.getElementById('nextStopDetailsToggle');
+        if (!wrap) return;
+        wrap.style.display = 'none';
+        if (toggle) toggle.setAttribute('aria-expanded', 'true');
+        loadOrderDetails(wrap, dailyOrderId);
     }
 
     function tryOpenStopFromUrl() {
@@ -101,15 +190,29 @@
             return;
         }
         var expandOrders = params.get('view_orders') === '1';
-        var stop = document.querySelector('.stop-item[data-daily-order-id="' + orderId + '"]');
-        if (!stop || !openStopDeliveryFromEl(stop, { expandOrders: expandOrders })) {
+        var stop = findStopByOrderId(orderId);
+        if (!stop || (stop.getAttribute('data-status') || '') === 'cancelled') {
             return;
         }
-        params.delete('open_stop');
-        params.delete('view_orders');
-        params.delete('daily_order_id');
-        var qs = params.toString();
-        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        var opened = false;
+        if (stop.classList.contains('route-prep-stop')) {
+            if (stop.scrollIntoView) stop.scrollIntoView({ block: 'center' });
+            if (expandOrders) {
+                var prepWrap = stop.querySelector('.order-details-container');
+                if (prepWrap) loadOrderDetails(prepWrap, orderId);
+            }
+            opened = true;
+        } else if (stop.closest('#stopList')) {
+            renderNextStop(stop);
+            setRouteView('now');
+            if (expandOrders) openHeroOrders(orderId);
+            var card = document.getElementById('nextStopCard');
+            if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+            opened = true;
+        } else if (openStopDeliveryFromEl(stop, { expandOrders: expandOrders, autoOpenCamera: false })) {
+            opened = true;
+        }
+        if (opened) clearStopDeepLink(params);
     }
 
     function loadOrderDetails(container, dailyOrderId) {
@@ -237,7 +340,7 @@
             '" data-address="' + escapeHtml(address) +
             '" data-lat="' + escapeHtml(lat) +
             '" data-lng="' + escapeHtml(lng) +
-            '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
+            '" target="_blank" rel="noopener" aria-label="' + escapeHtml(label) + '">' + actionLabel('navigate', label) + '</a>';
     }
 
     var NOW_LINE_LIMIT = 6;
@@ -291,6 +394,8 @@
         var isFirst = active[0] === stopEl;
 
         card.setAttribute('data-daily-order-id', stopEl.getAttribute('data-daily-order-id') || '0');
+        card.setAttribute('data-assignment-id', stopEl.getAttribute('data-assignment-id') || '0');
+        card.setAttribute('data-customer-name', stopEl.getAttribute('data-customer-name') || '');
         card.innerHTML =
             '<div class="now-card-head">' +
             '<p class="next-stop-eyebrow"><span>' + escapeHtml(di.next_stop) +
@@ -315,12 +420,19 @@
                   escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0') + '">' + escapeHtml(di.make_next) + '</button></p>'
                 : '') +
             '<div class="next-stop-actions">' +
-            '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.im_here || di.arrival_photo) + '</button>' +
-            navigateLink('route-btn route-btn--navigate', stopEl, di.directions) +
-            '<button type="button" class="route-btn route-btn--problem stop-problem-btn"' + problemButtonAttrs(stopEl) + '>' + escapeHtml(di.problem) + '</button>' +
-            '</div>';
+            '<button type="button" class="route-btn route-btn--photo photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo || di.im_here) + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo || di.im_here || 'Photo') + '</button>' +
+            navigateLink('route-btn route-btn--navigate', stopEl, di.navigate || di.directions || 'Navigate') +
+            '<button type="button" class="route-btn route-btn--problem stop-problem-btn" aria-label="' + escapeHtml(di.problem || 'Problem') + '"' + problemButtonAttrs(stopEl) + '>' + actionLabel('problem', di.problem || 'Problem') + '</button>' +
+            '</div>' +
+            '<button type="button" class="next-stop-details-toggle" id="nextStopDetailsToggle" data-daily-order-id="' +
+            escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0') + '" aria-expanded="false" aria-controls="nextStopOrderDetails">' +
+            escapeHtml(di.what_delivering || '') + '</button>' +
+            '<div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:none;">' +
+            '<div class="order-details-loading">' + escapeHtml(di.loading_order || '') + '</div>' +
+            '<div class="order-details-content" style="display:none;"></div></div>';
 
         applyNavigateLinks(card);
+        bindProblemButtons(card);
         if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
             window.DriverDelivery.bindPhotoButtons(card);
         }
@@ -329,8 +441,8 @@
             stickyDock.hidden = false;
             stickyDock.setAttribute('aria-hidden', 'false');
             stickyInner.innerHTML =
-                navigateLink('route-sticky-btn route-sticky-btn--nav', stopEl, di.directions) +
-                '<button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.im_here || di.arrival_photo) + '</button>';
+                navigateLink('route-sticky-btn route-sticky-btn--nav', stopEl, di.navigate || di.directions || 'Navigate') +
+                '<button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo || di.im_here) + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo || di.im_here || 'Photo') + '</button>';
             applyNavigateLinks(stickyInner);
             if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
                 window.DriverDelivery.bindPhotoButtons(stickyInner);
@@ -389,11 +501,28 @@
             || document.querySelector('#stopList ' + selector);
     }
 
+    function syncNextStopLabel(stopEl, isNext) {
+        if (!stopEl) return;
+        var label = stopEl.querySelector('.stop-item-next-label');
+        if (!isNext) {
+            if (label && label.parentNode) label.parentNode.removeChild(label);
+            return;
+        }
+        if (label) return;
+        var heading = stopEl.querySelector('.stop-item-heading');
+        if (!heading) return;
+        label = document.createElement('span');
+        label.className = 'stop-item-next-label';
+        label.textContent = di.next_label || 'Next';
+        heading.appendChild(label);
+    }
+
     function moveStopToPastList(stopEl) {
         var pastList = document.getElementById('pastStopsList');
         if (!stopEl || !pastList) return;
         stopEl.classList.remove('stop-item--next', 'stop-item--upcoming');
         stopEl.classList.add('stop-item--past');
+        syncNextStopLabel(stopEl, false);
         pastList.appendChild(stopEl);
         sortStopsByRouteOrder(pastList);
     }
@@ -409,8 +538,8 @@
     function rowActionsHtml(stopEl) {
         var id = escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0');
         var name = stopEl.getAttribute('data-customer-name') || '';
-        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo"' + photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '</button>' +
-            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.confirm || 'Confirm') + '</button>' +
+        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo_btn || di.photo || 'Photo') + '</button>' +
+            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery" aria-label="' + escapeHtml(di.amounts || di.confirm || 'Amounts') + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('amounts', di.amounts || di.confirm || 'Amounts') + '</button>' +
             '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
             '<div class="stop-adjust-moves">' +
             '<button type="button" class="stop-move-up" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_up) + '">&#9650;</button>' +
@@ -456,6 +585,13 @@
         if (status === 'delivered') {
             html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
                 photoButtonAttrs(stopEl) + '>' + escapeHtml(di.view_invoice_photos) + '</button>';
+            var routeRoot = document.getElementById('driverRouteRoot');
+            var routeDate = routeRoot ? (routeRoot.getAttribute('data-date') || '') : '';
+            var today = routeRoot ? (routeRoot.getAttribute('data-today') || '') : '';
+            if (routeDate !== '' && routeDate === today) {
+                html += '<button type="button" class="contact-link photo-complete-btn" data-start-step="delivery" data-edit-amounts="1"' +
+                    photoButtonAttrs(stopEl) + '>' + escapeHtml(di.edit_amounts || 'Edit amounts') + '</button>';
+            }
         }
         if (status === 'cancelled') {
             stopEl.classList.add('stop-item--skipped');
@@ -513,14 +649,20 @@
             el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
             if (status === 'delivered' || status === 'cancelled' || status === 'failed' || status === 'office_flag') {
                 moveStopToPastList(el);
+                syncNextStopLabel(el, false);
                 return;
             }
             if (!nextAssigned) {
                 el.classList.add('stop-item--next');
                 nextAssigned = true;
+                syncNextStopLabel(el, true);
             } else {
                 el.classList.add('stop-item--upcoming');
+                syncNextStopLabel(el, false);
             }
+        });
+        getPastStops().forEach(function (el) {
+            syncNextStopLabel(el, false);
         });
 
         var past = getPastStops();
@@ -658,7 +800,21 @@
         if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function closeRouteAdjust(restore) {
+    function reorderIsDirty() {
+        if (!routeAdjust.open || !routeAdjust.snapshot.length) return false;
+        var current = remainingAdjustIds();
+        var original = routeAdjust.snapshot.map(function (row) {
+            return parseInt(String(row.id || 0), 10);
+        }).filter(function (id) { return id > 0; });
+        if (current.length !== original.length) return true;
+        for (var i = 0; i < current.length; i++) {
+            if (current[i] !== original[i]) return true;
+        }
+        return false;
+    }
+
+    function closeRouteAdjust(restore, opts) {
+        opts = opts || {};
         if (!routeAdjust.open && !restore) {
             setRouteAdjustOpen(false);
             return;
@@ -682,7 +838,7 @@
             if (pick) pick.textContent = '';
         });
         setRouteAdjustOpen(false);
-        popLayerIfOurs('adjust');
+        if (!opts.fromPop) popLayerIfOurs('adjust');
     }
 
     // Map taps in Reorder build the order: each tapped stop goes right after the last one tapped.
@@ -1154,6 +1310,22 @@
         }
     }
 
+    function bindProblemButtons(root) {
+        (root || document).querySelectorAll('.stop-problem-btn').forEach(function (btn) {
+            if (btn.getAttribute('data-problem-bound') === '1') return;
+            btn.setAttribute('data-problem-bound', '1');
+            btn.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openFailStopModal(
+                    btn.getAttribute('data-daily-order-id'),
+                    btn.getAttribute('data-assignment-id') || '',
+                    btn.getAttribute('data-customer-name') || ''
+                );
+            });
+        });
+    }
+
     function bindFailStopButtons(root) {
         (root || document).querySelectorAll('.fail-stop-btn').forEach(function (btn) {
             if (btn.getAttribute('data-fail-bound') === '1') return;
@@ -1178,6 +1350,21 @@
     }
 
     var failModalState = { dailyOrderId: 0, assignmentId: 0, customerName: '', submitting: false };
+    var problemDraftNotes = {};
+
+    function rememberProblemNote() {
+        var id = String(failModalState.dailyOrderId || '');
+        if (!id || id === '0') return;
+        var noteInput = document.getElementById('failStopNote');
+        problemDraftNotes[id] = noteInput ? noteInput.value : '';
+    }
+
+    function forgetProblemNote(id) {
+        var key = String(id || failModalState.dailyOrderId || '');
+        if (key) delete problemDraftNotes[key];
+        var noteInput = document.getElementById('failStopNote');
+        if (noteInput) noteInput.value = '';
+    }
 
     function failHqReasonLabel() {
         var form = document.getElementById('failStopForm');
@@ -1224,7 +1411,14 @@
         if (customerEl) customerEl.textContent = customerName || '';
         if (orderInput) orderInput.value = String(failModalState.dailyOrderId);
         if (assignmentInput) assignmentInput.value = String(failModalState.assignmentId);
-        if (noteInput) noteInput.value = '';
+        if (noteInput) {
+            var draftNote = problemDraftNotes[String(failModalState.dailyOrderId)];
+            noteInput.value = draftNote == null ? '' : draftNote;
+        }
+        if (noteInput && noteInput.getAttribute('data-draft-bound') !== '1') {
+            noteInput.setAttribute('data-draft-bound', '1');
+            noteInput.addEventListener('input', rememberProblemNote);
+        }
         if (errorEl) {
             errorEl.hidden = true;
             errorEl.textContent = '';
@@ -1246,14 +1440,17 @@
         }
     }
 
-    function closeFailStopModal() {
+    function closeFailStopModal(opts) {
+        opts = opts || {};
         var modal = document.getElementById('failStopModal');
         if (!modal) return;
+        if (opts.fromPop) rememberProblemNote();
+        else forgetProblemNote();
         modal.hidden = true;
         modal.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('fail-stop-modal-open');
         failModalState.submitting = false;
-        popLayerIfOurs('problem');
+        if (!opts.fromPop) popLayerIfOurs('problem');
     }
 
     async function submitFailStop() {
@@ -1377,20 +1574,93 @@
     }
 
     var historyState = { ignorePop: false };
+    var layerStack = [];
+    var layerGuard = { suppress: false };
 
     function pushLayer(name) {
+        if (layerGuard.suppress) return;
         if (!window.history || typeof window.history.pushState !== 'function') return;
+        var state = window.history.state;
+        if (state && state.driverLayer === name) {
+            if (!layerStack.length || layerStack[layerStack.length - 1] !== name) layerStack.push(name);
+            return;
+        }
         try {
             window.history.pushState({ driverLayer: name }, '');
+            layerStack.push(name);
         } catch (err) { /* ignore */ }
     }
 
     function popLayerIfOurs(name) {
+        if (layerGuard.suppress) return;
+        if (layerStack.length && layerStack[layerStack.length - 1] === name) layerStack.pop();
         var state = window.history ? window.history.state : null;
         if (state && state.driverLayer === name) {
             historyState.ignorePop = true;
             window.history.back();
         }
+    }
+
+    function forceDriverSheetsClosed() {
+        var dateDisclosure = document.getElementById('routeDateDisclosure');
+        var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+        layerGuard.suppress = true;
+        if (dateDisclosure && dateDisclosure.open) dateDisclosure.open = false;
+        if (moreMenu && moreMenu.open) moreMenu.open = false;
+        layerGuard.suppress = false;
+    }
+
+    function closeNamedLayer(name) {
+        if (name === 'more') {
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) {
+                layerGuard.suppress = true;
+                moreMenu.open = false;
+                layerGuard.suppress = false;
+            }
+            return true;
+        }
+        if (name === 'date') {
+            var dateDisclosure = document.getElementById('routeDateDisclosure');
+            if (dateDisclosure && dateDisclosure.open) {
+                layerGuard.suppress = true;
+                dateDisclosure.open = false;
+                layerGuard.suppress = false;
+            }
+            return true;
+        }
+        if (name === 'capture') {
+            var delivery = window.DriverDelivery;
+            if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) {
+                if (typeof delivery.isBusy === 'function' && delivery.isBusy()) {
+                    pushLayer('capture');
+                    return true;
+                }
+                delivery.closeModal();
+            }
+            return true;
+        }
+        if (name === 'problem') {
+            var failModal = document.getElementById('failStopModal');
+            if (failModal && !failModal.hidden) closeFailStopModal({ fromPop: true });
+            return true;
+        }
+        if (name === 'adjust') {
+            if (routeAdjust.open && reorderIsDirty()) {
+                var discard = window.confirm(di.discard_changes || 'Discard changes?');
+                if (!discard) {
+                    pushLayer('adjust');
+                    return true;
+                }
+            }
+            if (routeAdjust.open) closeRouteAdjust(true, { fromPop: true });
+            return true;
+        }
+        if (name === 'view-route') {
+            if (currentRouteView() === 'route') setRouteView('now', { fromPop: true });
+            return true;
+        }
+        return false;
     }
 
     function setRouteView(view, opts) {
@@ -1427,17 +1697,31 @@
     function initRouteView() {
         var root = routeRoot();
         if (!root) return;
+        forceDriverSheetsClosed();
         if (!root.getAttribute('data-route-view')) root.setAttribute('data-route-view', 'now');
         if (history.state && history.state.driverLayer && typeof history.replaceState === 'function') {
             try { history.replaceState(null, ''); } catch (e) {}
         }
         setRouteView(currentRouteView());
+        var routeQuery = null;
+        try { routeQuery = new URLSearchParams(window.location.search); } catch (e) { routeQuery = null; }
+        if (routeQuery && routeQuery.get('view') === 'route') {
+            setRouteView('route');
+        }
+        if (routeQuery && routeQuery.get('problem') === '1') {
+            var problemNav = document.getElementById('driverNavProblem');
+            if (problemNav) problemNav.click();
+        }
 
         window.bakeryClientRefreshHold = function () {
             var delivery = window.DriverDelivery;
             if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) return true;
             var failModal = document.getElementById('failStopModal');
             if (failModal && !failModal.hidden) return true;
+            var dateSheet = document.getElementById('routeDateDisclosure');
+            if (dateSheet && dateSheet.open) return true;
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) return true;
             return !!routeAdjust.open || dragState.active;
         };
 
@@ -1449,26 +1733,34 @@
                 historyState.ignorePop = false;
                 return;
             }
+            var top = layerStack.length ? layerStack.pop() : '';
+            if (top && closeNamedLayer(top)) return;
+            var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+            if (moreMenu && moreMenu.open) {
+                closeNamedLayer('more');
+                return;
+            }
+            var dateSheet = document.getElementById('routeDateDisclosure');
+            if (dateSheet && dateSheet.open) {
+                closeNamedLayer('date');
+                return;
+            }
             var delivery = window.DriverDelivery;
             if (delivery && typeof delivery.isOpen === 'function' && delivery.isOpen()) {
-                if (typeof delivery.isBusy === 'function' && delivery.isBusy()) {
-                    pushLayer('capture');
-                    return;
-                }
-                delivery.closeModal();
+                closeNamedLayer('capture');
                 return;
             }
             var failModal = document.getElementById('failStopModal');
             if (failModal && !failModal.hidden) {
-                closeFailStopModal({ fromPop: true });
+                closeNamedLayer('problem');
                 return;
             }
             if (routeAdjust.open) {
-                closeRouteAdjust(true);
+                closeNamedLayer('adjust');
                 return;
             }
             if (currentRouteView() === 'route') {
-                setRouteView('now', { fromPop: true });
+                closeNamedLayer('view-route');
             }
         });
     }
@@ -1830,11 +2122,15 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        if (window.__DRIVER_PAGE_I18N__) di = window.__DRIVER_PAGE_I18N__;
+        boot = window.__DRIVER_ROUTE_BOOT__ || boot;
+        applyDriverDates();
         applyNavigateLinks(document);
         refreshRouteUi();
         bindSkipStopButtons(document);
         bindUnskipStopButtons(document);
         bindFailStopButtons(document);
+        bindProblemButtons(document);
         tryOpenStopFromUrl();
 
         var skipCancelBtn = document.getElementById('skipStopCancelBtn');
@@ -1881,7 +2177,6 @@
         var dateNavToggle = document.getElementById('routeDateNavToggle');
         var dateNavOpen = document.getElementById('routeDayNavOpen');
         var dateBackdrop = document.getElementById('routeDateBackdrop');
-        var dateOpenKey = 'driver-route-date-open';
 
         function syncRouteDateChrome() {
             var isOpen = !!(dateDisclosure && dateDisclosure.open);
@@ -1896,22 +2191,30 @@
             if (dateBackdrop) {
                 dateBackdrop.hidden = !isOpen;
             }
-            try {
-                window.sessionStorage.setItem(dateOpenKey, isOpen ? '1' : '0');
-            } catch (err) { /* ignore */ }
             if (isOpen && selectedDay && selectedDay.scrollIntoView) {
                 selectedDay.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
             }
         }
 
         if (dateDisclosure) {
-            try {
-                if (window.sessionStorage.getItem(dateOpenKey) === '1') {
-                    dateDisclosure.open = true;
-                }
-            } catch (err) { /* ignore */ }
-            dateDisclosure.addEventListener('toggle', syncRouteDateChrome);
+            forceDriverSheetsClosed();
+            dateDisclosure.addEventListener('toggle', function () {
+                syncRouteDateChrome();
+                if (layerGuard.suppress) return;
+                if (dateDisclosure.open) pushLayer('date');
+                else popLayerIfOurs('date');
+            });
             syncRouteDateChrome();
+        }
+
+        var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
+        if (moreMenu) {
+            forceDriverSheetsClosed();
+            moreMenu.addEventListener('toggle', function () {
+                if (layerGuard.suppress) return;
+                if (moreMenu.open) pushLayer('more');
+                else popLayerIfOurs('more');
+            });
         }
 
         if (dateNavToggle && dateDisclosure) {
@@ -2012,36 +2315,82 @@
         if (completedButton) completedButton.addEventListener('click', function () { openPastHistory(completedButton); });
         if (pastButton) pastButton.addEventListener('click', function () { openPastHistory(pastButton); });
 
-        document.addEventListener('click', function (e) {
-            var adjustToggle = e.target.closest('#routeAdjustToggle');
-            if (adjustToggle) {
-                e.preventDefault();
-                if (routeAdjust.open) {
-                    closeRouteAdjust(true);
-                } else {
-                    openRouteAdjust();
+        var reorderToggleAt = 0;
+        function toggleReorderFromTap(event) {
+            event.preventDefault();
+            var now = Date.now();
+            // A touchend and the click it synthesizes both reach this handler.
+            // The second one used to close the mode the first one had just opened.
+            if (now - reorderToggleAt < 450) return;
+            reorderToggleAt = now;
+            if (routeAdjust.open) {
+                closeRouteAdjust(true);
+            } else {
+                openRouteAdjust();
+            }
+        }
+
+        var reorderBtn = document.getElementById('routeAdjustToggle');
+        if (reorderBtn) {
+            reorderBtn.addEventListener('pointerup', function (event) {
+                if (event.pointerType === 'mouse' || event.button > 0) return;
+                toggleReorderFromTap(event);
+            });
+        }
+
+        function bindOneTapDetails(root) {
+            (root || document).querySelectorAll('details.bakery-nav__more, details.next-stop-more').forEach(function (details) {
+                var summary = details.querySelector('summary');
+                if (!summary || summary.getAttribute('data-one-tap') === '1') return;
+                summary.setAttribute('data-one-tap', '1');
+                var last = 0;
+                function toggleOnce(event) {
+                    event.preventDefault();
+                    var now = Date.now();
+                    if (now - last < 450) return;
+                    last = now;
+                    details.open = !details.open;
                 }
+                summary.addEventListener('pointerup', function (event) {
+                    if (event.pointerType === 'mouse' || event.button > 0) return;
+                    toggleOnce(event);
+                });
+                summary.addEventListener('click', function (event) {
+                    // Native summary toggles on click. preventDefault keeps that
+                    // from undoing the pointerup toggle, and mouse clicks toggle once.
+                    toggleOnce(event);
+                });
+            });
+        }
+        bindOneTapDetails(document);
+
+        document.addEventListener('click', function (e) {
+            var targetEl = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentElement);
+            if (!targetEl || !targetEl.closest) return;
+            var adjustToggle = targetEl.closest('#routeAdjustToggle');
+            if (adjustToggle) {
+                toggleReorderFromTap(e);
                 return;
             }
-            var changeNext = e.target.closest('.change-next-btn');
+            var changeNext = targetEl.closest('.change-next-btn');
             if (changeNext) {
                 e.preventDefault();
                 openRouteAdjust();
                 return;
             }
-            var cancelAdjust = e.target.closest('#routeAdjustCancel');
+            var cancelAdjust = targetEl.closest('#routeAdjustCancel');
             if (cancelAdjust) {
                 e.preventDefault();
                 closeRouteAdjust(true);
                 return;
             }
-            var saveAdjust = e.target.closest('#routeAdjustSave');
+            var saveAdjust = targetEl.closest('#routeAdjustSave');
             if (saveAdjust) {
                 e.preventDefault();
                 saveRouteAdjust();
                 return;
             }
-            var goNextBtn = e.target.closest('.stop-go-next');
+            var goNextBtn = targetEl.closest('.stop-go-next');
             if (goNextBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2050,7 +2399,7 @@
                 });
                 return;
             }
-            var moveUpBtn = e.target.closest('.stop-move-up, .stop-move-down');
+            var moveUpBtn = targetEl.closest('.stop-move-up, .stop-move-down');
             if (moveUpBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2058,8 +2407,8 @@
                 moveStopInAdjust(moveUpBtn.getAttribute('data-daily-order-id'), moveUpBtn.classList.contains('stop-move-up') ? 'up' : 'down');
                 return;
             }
-            var problemBtn = e.target.closest('.stop-problem-btn');
-            if (problemBtn) {
+            var problemBtn = targetEl.closest('.stop-problem-btn');
+            if (problemBtn && problemBtn.getAttribute('data-problem-bound') !== '1') {
                 e.preventDefault();
                 e.stopPropagation();
                 openFailStopModal(
@@ -2069,64 +2418,101 @@
                 );
                 return;
             }
-            var problemChip = e.target.closest('[data-problem-action]');
+            var stepBtn = targetEl.closest('[data-start-step]');
+            if (stepBtn && stepBtn.getAttribute('data-photo-bound') !== '1' && window.DriverDelivery && typeof window.DriverDelivery.openModal === 'function') {
+                e.preventDefault();
+                e.stopPropagation();
+                window.DriverDelivery.openModal({
+                    driverId: parseInt(stepBtn.getAttribute('data-driver-id'), 10) || parseInt((routeRoot() && routeRoot().getAttribute('data-driver-id')) || '0', 10) || 0,
+                    driverName: stepBtn.getAttribute('data-driver-name') || (routeRoot() && routeRoot().getAttribute('data-driver-name')) || '',
+                    customerId: parseInt(stepBtn.getAttribute('data-customer-id'), 10) || 0,
+                    dailyOrderId: parseInt(stepBtn.getAttribute('data-daily-order-id'), 10) || 0,
+                    customerName: stepBtn.getAttribute('data-customer-name') || '',
+                    address: stepBtn.getAttribute('data-address') || '',
+                    date: stepBtn.getAttribute('data-date') || (routeRoot() && routeRoot().getAttribute('data-date')) || '',
+                    assignmentId: parseInt(stepBtn.getAttribute('data-assignment-id'), 10) || 0,
+                    photoMode: stepBtn.getAttribute('data-photo-mode') || 'capture',
+                    startStep: stepBtn.getAttribute('data-start-step') || '',
+                    autoOpenCamera: false
+                });
+                return;
+            }
+            var problemChip = targetEl.closest('[data-problem-action]');
             if (problemChip) {
                 e.preventDefault();
                 runProblemAction(problemChip.getAttribute('data-problem-action'));
                 return;
             }
-            var viewTarget = e.target.closest('[data-route-view-target]');
+            var viewTarget = targetEl.closest('[data-route-view-target]');
             if (viewTarget) {
                 e.preventDefault();
                 setRouteView(viewTarget.getAttribute('data-route-view-target'), { push: true });
                 return;
             }
-            if (e.target.closest('#routeSuggestBtn')) {
+            if (targetEl.closest('#routeSuggestBtn')) {
                 e.preventDefault();
                 suggestRouteOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-accept')) {
+            if (targetEl.closest('.route-suggest-accept')) {
                 e.preventDefault();
                 acceptSuggestedOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-dismiss')) {
+            if (targetEl.closest('.route-suggest-dismiss')) {
                 e.preventDefault();
                 hideSuggestPreview();
                 return;
             }
-            var notesBtn = e.target.closest('#nextStopNotes');
+            var notesBtn = targetEl.closest('#nextStopNotes');
             if (notesBtn) {
                 var clamped = notesBtn.classList.toggle('is-clamped');
                 notesBtn.setAttribute('aria-expanded', clamped ? 'false' : 'true');
                 return;
             }
-            if (e.target.closest('#vanLoadedBtn')) {
+            if (targetEl.closest('#vanLoadedBtn')) {
                 e.preventDefault();
                 markVanLoaded();
                 return;
             }
-            if (e.target.closest('#nowStripDate')) {
+            if (targetEl.closest('#nowStripDate')) {
                 e.preventDefault();
                 var disclosure = document.getElementById('routeDateDisclosure');
                 if (disclosure) disclosure.open = !disclosure.open;
                 return;
             }
-            if (e.target.closest('#driverNavProblem')) {
+            if (targetEl.closest('#driverNavProblem')) {
                 e.preventDefault();
                 var nextCard = document.getElementById('nextStopCard');
-                var cardProblem = nextCard && nextCard.querySelector('.stop-problem-btn');
-                if (cardProblem) cardProblem.click();
+                var problemOrderId = nextCard && nextCard.getAttribute('data-daily-order-id');
+                var problemAssignmentId = nextCard && nextCard.getAttribute('data-assignment-id');
+                var problemCustomer = nextCard && nextCard.getAttribute('data-customer-name');
+                if (!problemOrderId) {
+                    var heroStop = getActiveStops()[0];
+                    if (heroStop) {
+                        problemOrderId = heroStop.getAttribute('data-daily-order-id');
+                        problemAssignmentId = heroStop.getAttribute('data-assignment-id');
+                        problemCustomer = heroStop.getAttribute('data-customer-name');
+                    }
+                }
+                if (problemOrderId) openFailStopModal(problemOrderId, problemAssignmentId || '', problemCustomer || '');
                 return;
             }
-            var saverToggle = e.target.closest('[data-data-saver]');
+            var saverToggle = targetEl.closest('[data-data-saver]');
             if (saverToggle && window.DriverDataSaver) {
                 e.preventDefault();
                 window.DriverDataSaver.set(saverToggle.getAttribute('data-data-saver'));
                 return;
             }
-            var prepOrdersBtn = e.target.closest('.route-prep-stop .stop-orders-btn');
+            var heroOrdersToggle = targetEl.closest('#nextStopDetailsToggle');
+            if (heroOrdersToggle) {
+                e.preventDefault();
+                var heroOrders = document.getElementById('nextStopOrderDetails');
+                if (heroOrders) loadOrderDetails(heroOrders, heroOrdersToggle.getAttribute('data-daily-order-id') || '0');
+                heroOrdersToggle.setAttribute('aria-expanded', heroOrders && heroOrders.style.display === 'block' ? 'true' : 'false');
+                return;
+            }
+            var prepOrdersBtn = targetEl.closest('.route-prep-stop .stop-orders-btn');
             if (prepOrdersBtn) {
                 e.preventDefault();
                 var prepStop = prepOrdersBtn.closest('.route-prep-stop');
@@ -2134,31 +2520,40 @@
                 if (prepWrap) loadOrderDetails(prepWrap, prepOrdersBtn.getAttribute('data-daily-order-id') || '0');
                 return;
             }
-            var mapsChoice = e.target.closest('[data-maps-app]');
+            var mapsChoice = targetEl.closest('[data-maps-app]');
             if (mapsChoice) {
                 e.preventDefault();
                 setMapsApp(mapsChoice.getAttribute('data-maps-app'));
                 return;
             }
 
-            var stop = e.target.closest('.stop-item');
+            var stop = targetEl.closest('.stop-item');
             if (!stop) return;
-            if (e.target.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label')) {
+            if (targetEl.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label, summary')) {
                 return;
             }
             if (document.body.classList.contains('route-adjust-open')) {
                 return;
             }
-            var status = stop.getAttribute('data-status') || '';
-            if (stop.closest('#stopList') && status !== 'delivered' && status !== 'cancelled' && status !== 'failed') {
-                renderNextStop(stop);
-                setRouteView('now', { push: true });
-                var card = document.getElementById('nextStopCard');
-                if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
-                return;
-            }
+            if ((stop.getAttribute('data-status') || '') === 'cancelled') return;
             openStopDeliveryFromEl(stop, { autoOpenCamera: false });
         });
+
+        function syncDriverChrome() {
+            var nav = document.querySelector('.bakery-nav--focused');
+            var dock = document.getElementById('routeStickyDock');
+            if (nav) {
+                var navH = Math.ceil(nav.getBoundingClientRect().height);
+                if (navH > 0) document.body.style.setProperty('--driver-nav-h', navH + 'px');
+            }
+            var dockVisible = dock && !dock.hidden && dock.getAttribute('aria-hidden') !== 'true';
+            if (dockVisible) {
+                var dockH = Math.ceil(dock.getBoundingClientRect().height);
+                if (dockH > 0) document.body.style.setProperty('--driver-dock-h', dockH + 'px');
+            }
+        }
+        syncDriverChrome();
+        window.addEventListener('resize', syncDriverChrome);
 
         bindReorderDrag();
         initRouteView();

@@ -34,9 +34,18 @@ $navPackLabel = $navRouteDate === date('Y-m-d')
 require_once __DIR__ . '/staff_driver_profile.php';
 $navStaffOwnDriverId = (isset($db) && $db instanceof PDO) ? bakery_staff_own_driver_id($db, $navUser) : 0;
 $navStaffMyRouteHref = bakery_staff_my_route_href(BASE_URL, $navRouteDate);
-$navDrivingAsSelf = $navStaffOwnDriverId > 0
-    && in_array($currentPage, ['driver', 'driver_stops'], true)
-    && (int)$navSelectedDriverId === $navStaffOwnDriverId;
+// Own-route screens turn driver mode on or off. Tool pages opened from that
+// route (pack list, Call HQ, survey) keep the driver bar until a manager page.
+if (in_array($currentPage, ['driver', 'driver_stops'], true) && bakery_staff_can_drive_as_self($navUser)) {
+    $navSelectedForMode = (int)$navSelectedDriverId;
+    if ($navStaffOwnDriverId > 0 && $navSelectedForMode === $navStaffOwnDriverId) {
+        bakery_staff_enter_driver_mode($navStaffOwnDriverId);
+    } elseif ($navStaffOwnDriverId > 0 && $navSelectedForMode > 0 && $navSelectedForMode !== $navStaffOwnDriverId) {
+        bakery_staff_leave_driver_mode();
+    }
+}
+$navDrivingAsSelf = bakery_staff_can_drive_as_self($navUser)
+    && bakery_staff_in_driver_workspace($navUser, $currentPage);
 $navCraftPreview = function_exists('bakery_admin_craft_preview') ? bakery_admin_craft_preview() : '';
 $navCraftAllowed = function_exists('bakery_admin_craft_preview_allowed') && bakery_admin_craft_preview_allowed($navUser);
 $navDriverPreview = $navCraftPreview === 'driver';
@@ -98,8 +107,36 @@ if (!$navDriverDateObject || $navDriverDateObject->format('Y-m-d') !== (string)$
     $navDriverDateObject = new DateTimeImmutable('today');
 }
 $navDriverDateIsToday = $navDriverDateObject->format('Y-m-d') === date('Y-m-d');
-$navDriverDateShort = $navDriverDateIsToday ? bakery_t('common.today') : $navDriverDateObject->format('M j');
+if (!function_exists('bakery_driver_chrome_date')) {
+    function bakery_driver_chrome_date(DateTimeInterface $date, string $style = 'weekday'): string {
+        $es = function_exists('bakery_locale') && bakery_locale() === 'es';
+        $day = $date->format('j');
+        $monthIndex = (int)$date->format('n');
+        if (!$es) {
+            return $style === 'compact' ? $date->format('M j') : $date->format('F j');
+        }
+        $months = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        $short = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+        if ($style === 'compact') {
+            return $day . ' ' . $short[$monthIndex];
+        }
+        $weekdays = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábado', 7 => 'domingo'];
+        return $weekdays[(int)$date->format('N')] . ' ' . $day . ' de ' . $months[$monthIndex];
+    }
+}
+$navDriverDateShort = $navDriverDateIsToday
+    ? bakery_t('common.today')
+    : bakery_driver_chrome_date($navDriverDateObject, 'compact');
+$navDriverDateAttrs = $navDriverDateIsToday
+    ? ''
+    : ' data-driver-date="compact" data-driver-date-iso="' . htmlspecialchars($navDriverDateObject->format('Y-m-d'), ENT_QUOTES, 'UTF-8') . '"';
+$navDriverRouteChrome = in_array($currentPage, ['driver', 'driver_stops'], true);
 $navDriverShowDateToggle = $currentPage === 'driver';
+$navTomorrowDate = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
+$navTomorrowHref = BASE_URL . 'driver.php?date=' . rawurlencode($navTomorrowDate);
+$navDriverNowHref = $navDriverRouteHref;
+$navDriverRouteViewHref = $navDriverRouteHref . '&view=route';
+$navDriverProblemHref = $navDriverRouteHref . '&problem=1';
 $navSelectedDriverName = function_exists('bakery_get_selected_driver_name') ? bakery_get_selected_driver_name() : '';
 if ($navSelectedDriverName === '' && $navUser) {
     $navSelectedDriverName = (string)($navUser['display_name'] ?? '');
@@ -114,7 +151,7 @@ if (isset($db) && $db instanceof PDO) {
 }
 $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
 ?>
-<nav class="bakery-nav bakery-nav--focused bakery-nav--driver<?php echo $navDriverShowDateToggle ? ' bakery-nav--with-date bakery-nav--driver-route' : ''; ?>" aria-label="<?php bakery_te('nav.driver_workspace_aria'); ?>">
+<nav class="bakery-nav bakery-nav--focused bakery-nav--driver<?php echo $navDriverRouteChrome ? ' bakery-nav--with-date bakery-nav--driver-route' : ''; ?>" aria-label="<?php bakery_te('nav.driver_workspace_aria'); ?>">
   <?php if ($navSelectedDriverName !== ''): ?>
   <div class="bakery-nav__driver-bar" aria-label="<?php bakery_te('nav.active_driver'); ?>">
     <span class="bakery-nav__live-dot" aria-hidden="true"></span>
@@ -132,13 +169,11 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
     </form>
     <?php endif; ?>
     <?php
-      $navTomorrowDate = (new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d');
       $navOnTomorrow = $currentPage === 'driver' && $navDriverDateObject->format('Y-m-d') === $navTomorrowDate;
-      $navTomorrowHref = BASE_URL . 'driver.php?date=' . rawurlencode($navTomorrowDate);
     ?>
     <a class="bakery-nav__tomorrow<?php echo $navOnTomorrow ? ' bakery-nav__tomorrow--active' : ''; ?>" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $navOnTomorrow ? ' aria-current="page"' : ''; ?>><?php bakery_te('nav.tomorrow_route'); ?></a>
     <?php if ($navDriverShowDateToggle): ?>
-    <span class="bakery-nav__date-hint"><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
+    <span class="bakery-nav__date-hint"<?php echo $navDriverDateAttrs; ?>><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
     <?php endif; ?>
   </div>
   <?php endif; ?>
@@ -156,7 +191,8 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.my_route'); ?></span>
         <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.my_route_short'); ?></span>
       </a>
-      <?php if ($navDriverShowDateToggle): ?>
+      <?php if ($navDriverRouteChrome): ?>
+      <?php if ($currentPage === 'driver'): ?>
       <button type="button" class="bakery-nav__direct bakery-nav__route-tab" data-route-view-target="now" aria-pressed="true">
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('driver.view_now'); ?></span>
         <span class="bakery-nav__label-short"><?php bakery_te('driver.view_now'); ?></span>
@@ -169,11 +205,25 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('driver.problem'); ?></span>
         <span class="bakery-nav__label-short"><?php bakery_te('driver.problem'); ?></span>
       </button>
+      <?php else: ?>
+      <a class="bakery-nav__direct bakery-nav__route-tab" href="<?php echo htmlspecialchars($navDriverNowHref, ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('driver.view_now'); ?></span>
+        <span class="bakery-nav__label-short"><?php bakery_te('driver.view_now'); ?></span>
+      </a>
+      <a class="bakery-nav__direct bakery-nav__route-tab" href="<?php echo htmlspecialchars($navDriverRouteViewHref, ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('driver.view_route'); ?></span>
+        <span class="bakery-nav__label-short"><?php bakery_te('driver.view_route'); ?></span>
+      </a>
+      <a class="bakery-nav__direct bakery-nav__route-tab bakery-nav__problem-tab" href="<?php echo htmlspecialchars($navDriverProblemHref, ENT_QUOTES, 'UTF-8'); ?>">
+        <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('driver.problem'); ?></span>
+        <span class="bakery-nav__label-short"><?php bakery_te('driver.problem'); ?></span>
+      </a>
+      <?php endif; ?>
       <?php endif; ?>
       <?php if ($navDriverShowDateToggle): ?>
       <button type="button" class="bakery-nav__direct bakery-nav__date-toggle" id="routeDateNavToggle" aria-expanded="false" aria-controls="routeDateDisclosure" aria-label="<?php bakery_te('nav.choose_route_date'); ?>">
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.date'); ?></span>
-        <span class="bakery-nav__label-short" aria-hidden="true"><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
+        <span class="bakery-nav__label-short" aria-hidden="true"<?php echo $navDriverDateAttrs; ?>><?php echo htmlspecialchars($navDriverDateShort, ENT_QUOTES, 'UTF-8'); ?></span>
       </button>
       <?php endif; ?>
       <a class="bakery-nav__direct bakery-nav__survey <?php echo $currentPage === 'survey' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php bakery_te('nav.survey_route'); ?>"<?php echo $currentPage === 'survey' ? ' aria-current="page"' : ''; ?>>
@@ -182,7 +232,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'call_headquarters' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>call_headquarters.php" aria-label="<?php bakery_te('nav.call_hq'); ?>"<?php echo $currentPage === 'call_headquarters' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
-        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
+        <span class="bakery-nav__label-short"><?php bakery_te('nav.call_hq_short'); ?></span>
       </a>
       <details class="bakery-nav__more<?php echo in_array($currentPage, ['driver_stops', 'pack_list', 'qr_login', 'time_clock'], true) ? ' bakery-nav__more--active' : ''; ?>">
         <summary class="bakery-nav__direct bakery-nav__more-toggle" aria-label="<?php bakery_te('nav.more_aria'); ?>">
@@ -209,8 +259,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
                   : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?></button>
             </form>
             <?php endif; ?>
-            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . 'driver.php?date=' . rawurlencode((new DateTimeImmutable('today'))->modify('+1 day')->format('Y-m-d')), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>
-            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.survey_route'); ?></a>
+            <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>
             <div class="bakery-nav__more-choice" role="group" aria-label="<?php bakery_te('nav.data_saver'); ?>">
               <span><?php bakery_te('nav.data_saver'); ?></span>
               <button type="button" data-data-saver="on" aria-pressed="false"><?php bakery_te('driver.data_saver_on'); ?></button>
@@ -223,6 +272,10 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
             </div>
           </div>
           <?php endif; ?>
+          <?php if ($navDriverRouteChrome && !$navDriverShowDateToggle): ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--tomorrow-phone" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>
+          <?php endif; ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--survey-phone <?php echo $currentPage === 'survey' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'survey.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.survey_route'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'time_clock' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL . 'time_clock.php', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.time_clock'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'pack_list' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverPackHref, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($navPackLabel, ENT_QUOTES, 'UTF-8'); ?></a>
           <a class="bakery-nav__more-link <?php echo $currentPage === 'driver_stops' ? 'bakery-nav__more-link--active' : ''; ?>" href="<?php echo htmlspecialchars($navDriverStopsHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.stops'); ?></a>

@@ -55,6 +55,7 @@
     uploadPromise: null,
     proofSkipReason: '',
     proofState: '',
+    editingAmounts: false,
     secondPhoto: false,
     secondState: '',
     secondThumbUrl: '',
@@ -150,6 +151,66 @@
   function i18n(key, fallback) {
     var di = window.__DRIVER_PAGE_I18N__ || {};
     return di[key] || fallback || key;
+  }
+
+  /* bakery-count-parse:start */
+  function bakeryParseDeliveryCount(raw) {
+    var text = String(raw == null ? '' : raw).trim();
+    if (text === '') {
+      return { state: 'empty', value: null };
+    }
+    if (!/^(?:0|[1-9]\d*)$/.test(text)) {
+      return { state: 'invalid', value: null };
+    }
+    return { state: 'ok', value: parseInt(text, 10) };
+  }
+
+  function bakeryCreditsBackSuffix(count, oneTemplate, manyTemplate) {
+    var n = parseInt(count, 10);
+    if (!Number.isInteger(n) || n <= 0) return '';
+    var template = n === 1 ? oneTemplate : manyTemplate;
+    return String(template == null ? '' : template).split(':credits').join(String(n));
+  }
+  /* bakery-count-parse:end */
+
+  function readDeliveryCounts() {
+    var piecesInput = $('deliveryPiecesInput');
+    var creditsInput = $('deliveryCreditsInput');
+    return {
+      pieces: bakeryParseDeliveryCount(piecesInput ? piecesInput.value : ''),
+      credits: bakeryParseDeliveryCount(creditsInput ? creditsInput.value : '')
+    };
+  }
+
+  function deliveryQtyBlocksFinish(counts) {
+    counts = counts || readDeliveryCounts();
+    return counts.pieces.state === 'invalid' || counts.credits.state !== 'ok';
+  }
+
+  function setQtyError(message) {
+    var el = $('deliveryQtyError');
+    if (!el) return;
+    el.textContent = message || '';
+    el.hidden = !message;
+  }
+
+  function syncDeliveryQtyState() {
+    var counts = readDeliveryCounts();
+    var message = '';
+    if (counts.pieces.state === 'invalid' || counts.credits.state === 'invalid' || counts.credits.state === 'empty') {
+      message = i18n('qty_invalid');
+    }
+    setQtyError(message);
+    var blocked = deliveryQtyBlocksFinish(counts);
+    var primaryBtn = $('deliveryWizardPrimaryBtn');
+    if (primaryBtn && state.currentStep === 'delivery' && !state.submitting) {
+      primaryBtn.disabled = blocked || state.photoMode === 'review';
+    }
+    var confirmBtn = $('deliveryInvoiceConfirmBtn');
+    if (confirmBtn && !state.submitting) {
+      confirmBtn.disabled = blocked || counts.pieces.state === 'empty';
+    }
+    return counts;
   }
 
   function $(id) {
@@ -738,6 +799,7 @@
     var isDeparturePhoto = step === 'photo' && state.photoReturnStep === 'complete';
     var visualStep = isDeparturePhoto ? 'invoice' : step;
 
+    var photoSkipped = state.proofState === 'skipped';
     STEPS.forEach(function (s) {
       var panel = document.querySelector('[data-step-panel="' + s + '"]');
       var stepBtn = document.querySelector('.delivery-wizard-step[data-step="' + s + '"]');
@@ -751,7 +813,10 @@
       }
       if (stepBtn && !isReview) {
         stepBtn.classList.toggle('is-active', s === visualStep);
-        stepBtn.classList.toggle('is-done', STEPS.indexOf(s) < STEPS.indexOf(visualStep));
+        var markDone = STEPS.indexOf(s) < STEPS.indexOf(visualStep);
+        if (s === 'photo' && photoSkipped) markDone = false;
+        stepBtn.classList.toggle('is-done', markDone);
+        stepBtn.classList.toggle('is-skipped', s === 'photo' && photoSkipped && visualStep !== 'photo');
         stepBtn.disabled = state.submitting || isDeparturePhoto;
       }
     });
@@ -821,6 +886,7 @@
       skipBtn.textContent = state.secondPhoto ? i18n('back') : i18n('skip_photo');
     }
     updateSecondPhotoUi();
+    if (step === 'delivery') syncCaptureActionBar();
     if (primaryBtn) {
       if (step === 'photo') {
         primaryBtn.hidden = true;
@@ -828,9 +894,10 @@
       } else if (step === 'delivery') {
         primaryBtn.hidden = false;
         primaryBtn.textContent = i18n('delivered');
+        if (state.editingAmounts) primaryBtn.textContent = i18n('save_amounts');
         primaryBtn.classList.remove('has-saved-photo');
       }
-      primaryBtn.disabled = state.submitting;
+      primaryBtn.disabled = state.submitting || (step === 'delivery' && deliveryQtyBlocksFinish());
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
     if (reviewBtn) {
@@ -847,7 +914,31 @@
       if (scrollEl) scrollEl.scrollTop = 0;
     }
 
+    syncPhotoStepChrome();
     setStatus('');
+  }
+
+  function syncPhotoStepChrome() {
+    var stepBtn = document.querySelector('.delivery-wizard-step[data-step="photo"]');
+    var skipped = state.proofState === 'skipped';
+    var showingPhoto = state.currentStep === 'photo';
+    if (stepBtn) {
+      stepBtn.classList.toggle('is-skipped', skipped && !showingPhoto);
+      if (skipped && !showingPhoto) stepBtn.classList.remove('is-done');
+      var label = stepBtn.querySelector('.delivery-wizard-step-label');
+      if (label) {
+        if (!label.getAttribute('data-default-label')) {
+          label.setAttribute('data-default-label', label.textContent || '');
+        }
+        label.textContent = (skipped && !showingPhoto)
+          ? i18n('photo_skipped', 'Skipped')
+          : (label.getAttribute('data-default-label') || label.textContent);
+      }
+    }
+    var retake = $('deliveryInlineRetake');
+    if (retake) {
+      retake.textContent = skipped ? i18n('take_photo_action', 'Take photo') : i18n('retake', 'Retake');
+    }
   }
 
   function updateWizardPrimaryLabel() {
@@ -1106,7 +1197,7 @@
     var actions = $('deliveryWizardActions');
     var onCharge = state.currentStep === 'delivery' && state.photoMode !== 'review';
     // Photo 2 is optional and never blocks Delivered. It stays tappable on the amounts step.
-    var show = onCharge && !state.secondState && !state.submitting;
+    var show = onCharge && !state.secondState && !state.submitting && state.proofState !== 'skipped';
     if (btn) btn.hidden = !show;
     if (actions) actions.classList.toggle('has-photo2', show);
   }
@@ -1153,10 +1244,29 @@
     goToStep('delivery');
   }
 
+  function scrollCaptureFieldIntoView(field) {
+    if (!field || typeof field.scrollIntoView !== 'function') return;
+    var run = function () {
+      syncCaptureActionBar();
+      field.scrollIntoView({ block: 'center', inline: 'nearest' });
+    };
+    run();
+    window.setTimeout(run, 280);
+  }
+
+  function syncCaptureActionBar() {
+    var footer = document.querySelector('#deliveryPhotoModal.is-inline .photo-modal-footer');
+    if (!footer) return;
+    var height = Math.ceil(footer.getBoundingClientRect().height);
+    if (height > 0) {
+      document.body.style.setProperty('--driver-action-bar', height + 'px');
+    }
+  }
+
   function syncInlineTakePhotoBtn() {
     var btn = $('deliveryInlineTakePhotoBtn');
     if (!btn) return;
-    var hasProof = state.proofState === 'uploading' || state.proofState === 'saved' || state.proofState === 'queued' || stopHasProofPhoto();
+    var hasProof = state.proofState === 'uploading' || state.proofState === 'saved' || state.proofState === 'queued' || state.proofState === 'skipped' || stopHasProofPhoto();
     btn.hidden = hasProof || state.photoMode === 'review';
     btn.disabled = !!(state.uploading || state.preparing || state.submitting);
   }
@@ -1168,7 +1278,11 @@
     var thumb = $('deliveryInlineThumb');
     var label = $('deliveryInlineProofLabel');
     if (!box) return;
-    box.hidden = !kind;
+    var hasShot = kind === 'uploading' || kind === 'saved' || kind === 'queued';
+    var retake = box.querySelector('.delivery-inline-retake');
+    if (retake) retake.hidden = !hasShot;
+    // Before any photo, show Take photo. "No photo" + Retake is only for a shot that exists.
+    box.hidden = !hasShot;
     box.setAttribute('data-proof-state', kind || '');
     if (thumb) {
       if (objectUrl) {
@@ -1185,9 +1299,10 @@
       if (kind === 'uploading') text = i18n('saving_photo');
       else if (kind === 'saved') text = i18n('first_photo_saved');
       else if (kind === 'queued') text = i18n('outbox_queued');
-      else if (kind === 'skipped') text = i18n('no_photo_reason_' + state.proofSkipReason, i18n('no_photo'));
+      else if (kind === 'skipped') text = i18n('photo_skipped', 'Skipped');
       label.textContent = text;
     }
+    syncPhotoStepChrome();
   }
 
   function retakeCapture(options) {
@@ -1888,12 +2003,13 @@
     var skipBtn = $('deliveryWizardSkipBtn');
     var closeBtn = $('deliveryPhotoModalClose');
     if (primaryBtn) {
-      primaryBtn.disabled = isSubmitting;
+      primaryBtn.disabled = isSubmitting || (state.currentStep === 'delivery' && deliveryQtyBlocksFinish());
       primaryBtn.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
       if (isSubmitting && state.currentStep === 'delivery') {
         primaryBtn.textContent = i18n('saving');
       } else if (state.currentStep === 'delivery') {
         primaryBtn.textContent = i18n('delivered');
+        if (state.editingAmounts) primaryBtn.textContent = i18n('save_amounts');
       }
     }
     var reviewBtn = $('deliveryWizardReviewBtn');
@@ -2079,19 +2195,32 @@
     var creditsInput = $('deliveryCreditsInput');
     if (!alertEl || !piecesInput) return;
 
-    var pieces = Math.max(0, parseInt(piecesInput.value, 10) || 0);
-    var credits = Math.max(0, parseInt(creditsInput && creditsInput.value, 10) || 0);
+    var wellOverEl = $('deliveryWellOverWarning');
+    var piecesParsed = bakeryParseDeliveryCount(piecesInput.value);
+    var creditsParsed = bakeryParseDeliveryCount(creditsInput && creditsInput.value);
+    if (piecesParsed.state !== 'ok' || creditsParsed.state !== 'ok') {
+      if (orderedRef) orderedRef.textContent = '';
+      if (wellOverEl) {
+        wellOverEl.hidden = true;
+        wellOverEl.textContent = '';
+      }
+      alertEl.hidden = true;
+      if (textEl) textEl.textContent = '';
+      return;
+    }
+    var pieces = piecesParsed.value;
+    var credits = creditsParsed.value;
     var ordered = state.orderedPieces;
     var diff = pieces - ordered;
 
     if (orderedRef) {
+      var creditText = bakeryCreditsBackSuffix(credits, i18n('credits_suffix_one'), i18n('credits_suffix'));
       orderedRef.textContent = ordered > 0
-        ? i18n('ordered_recording').replace(':ordered', ordered).replace(':pieces', pieces).replace(':credits', credits > 0 ? i18n('credits_suffix').replace(':credits', credits) : '')
+        ? i18n('ordered_recording').replace(':ordered', ordered).replace(':pieces', pieces).replace(':credits', creditText)
         : '';
     }
 
     var countsPanel = $('deliveryProductCounts');
-    var wellOverEl = $('deliveryWellOverWarning');
     var countsPrompt = $('deliveryProductCountsPrompt');
     var orderEmpty = state.orderEmpty === true;
     var askForCounts = !orderEmpty && ordered >= 0 && pieces > ordered && (state.invoiceItems || []).length > 0;
@@ -2223,12 +2352,23 @@
 
   function updateDeliveryPreview() {
     updateTotalsLine();
-    var piecesInput = $('deliveryPiecesInput');
-    var creditsInput = $('deliveryCreditsInput');
+    var counts = syncDeliveryQtyState();
     var totalEl = $('deliveryConfirmationTotal');
     var breakdownEl = $('deliveryConfirmationBreakdown');
-    var pieces = Math.max(0, parseInt(piecesInput && piecesInput.value, 10) || 0);
-    var credits = Math.max(0, parseInt(creditsInput && creditsInput.value, 10) || 0);
+    if (counts.pieces.state !== 'ok' || counts.credits.state !== 'ok') {
+      if (totalEl) totalEl.textContent = '—';
+      if (breakdownEl) breakdownEl.textContent = '';
+      var allocEl = $('deliveryCreditAllocNote');
+      if (allocEl) {
+        allocEl.hidden = true;
+        allocEl.textContent = '';
+      }
+      updateVarianceUi();
+      updatePricingUi();
+      return;
+    }
+    var pieces = counts.pieces.value;
+    var credits = counts.credits.value;
     var billable = Math.max(0, pieces - credits);
     var perPiece = getEffectivePricePerPiece();
     var panTotal = state.photoMode === 'review' && state.isSaved ? state.savedTotal : billable * perPiece;
@@ -2262,10 +2402,13 @@
   }
 
   function validateDeliveryInputs() {
-    var piecesInput = $('deliveryPiecesInput');
-    var creditsInput = $('deliveryCreditsInput');
-    var pieces = Math.max(0, parseInt(piecesInput && piecesInput.value, 10) || 0);
-    var credits = Math.max(0, parseInt(creditsInput && creditsInput.value, 10) || 0);
+    var counts = syncDeliveryQtyState();
+    if (counts.pieces.state !== 'ok' || counts.credits.state !== 'ok') {
+      setStatus(counts.pieces.state === 'empty' && counts.credits.state === 'ok' ? i18n('pieces_empty_confirm') : i18n('qty_invalid'), 'error');
+      return null;
+    }
+    var pieces = counts.pieces.value;
+    var credits = counts.credits.value;
     if (credits > pieces) {
       setStatus(i18n('credits_exceed_pieces'), 'error');
       return null;
@@ -2304,6 +2447,22 @@
     state.pendingVarianceConfirm = null;
   }
 
+  function showEmptyPiecesConfirm(onConfirm) {
+    var panel = $('deliveryVarianceConfirm');
+    var textEl = $('deliveryVarianceConfirmText');
+    if (!panel) {
+      onConfirm();
+      return;
+    }
+    if (textEl) textEl.textContent = i18n('pieces_empty_confirm');
+    state.pendingVarianceConfirm = onConfirm;
+    panel.hidden = false;
+    var okBtn = $('deliveryVarianceOkBtn');
+    if (okBtn && typeof okBtn.focus === 'function') {
+      okBtn.focus({ preventScroll: false });
+    }
+  }
+
   function showNoPhotoReasons(show) {
     var panel = $('deliveryNoPhotoReasons');
     if (panel) panel.hidden = !show;
@@ -2324,8 +2483,12 @@
   function updateTotalsLine() {
     var line = $('deliveryTotalsText');
     if (!line) return;
-    var pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
-    var count = Number.isInteger(pieces) ? pieces : state.orderedPieces;
+    var parsed = bakeryParseDeliveryCount($('deliveryPiecesInput') && $('deliveryPiecesInput').value);
+    if (parsed.state !== 'ok') {
+      line.textContent = '';
+      return;
+    }
+    var count = parsed.value;
     var key = state.orderedPieces > 0 && count === state.orderedPieces ? 'totals_as_ordered' : 'totals_delivering';
     line.textContent = String(i18n(key, ':count pieces')).split(':count').join(String(count || 0));
   }
@@ -2497,7 +2660,7 @@
       }
       var primaryBtn = $('deliveryWizardPrimaryBtn');
       if (primaryBtn && state.currentStep === 'delivery') {
-        primaryBtn.disabled = state.photoMode === 'review' || state.submitting;
+        primaryBtn.disabled = state.photoMode === 'review' || state.submitting || deliveryQtyBlocksFinish();
       }
       if (state.photoMode === 'review' && state.summaryReady) {
         populateInvoicePreview();
@@ -2520,10 +2683,31 @@
 
   async function confirmDelivery(skipVarianceCheck) {
     if (state.submitting) return;
-    var pieces = parseInt($('deliveryPiecesInput') && $('deliveryPiecesInput').value, 10);
-    var credits = parseInt($('deliveryCreditsInput') && $('deliveryCreditsInput').value, 10);
+    if (state.editingAmounts && !state.summaryReady) {
+      setStatus(i18n('still_loading_pricing'), 'loading');
+      return;
+    }
+    var counts = syncDeliveryQtyState();
+    if (counts.pieces.state === 'invalid' || counts.credits.state !== 'ok') {
+      setStatus(i18n('qty_invalid'), 'error');
+      return;
+    }
+    if (state.orderEmpty) {
+      syncEmptyOrderPiecesFromLines();
+      counts = syncDeliveryQtyState();
+    }
+    if (counts.pieces.state === 'empty' && !skipVarianceCheck) {
+      if (state.orderedPieces > 0) {
+        showVarianceConfirm(0, function () { confirmDelivery(true); });
+      } else {
+        showEmptyPiecesConfirm(function () { confirmDelivery(true); });
+      }
+      return;
+    }
+    var pieces = counts.pieces.state === 'empty' ? 0 : counts.pieces.value;
+    var credits = counts.credits.value;
     if (!Number.isInteger(pieces) || pieces < 0 || !Number.isInteger(credits) || credits < 0) {
-      setStatus(i18n('whole_numbers_required'), 'error');
+      setStatus(i18n('qty_invalid'), 'error');
       return;
     }
     if (credits > pieces) {
@@ -2613,7 +2797,7 @@
         // uploadBlob reports its own failure and returns the driver to the camera.
       }
     }
-    if (!state.proofAccepted && !state.explicitProofSkip && !stopHasProofPhoto()) {
+    if (!state.editingAmounts && !state.proofAccepted && !state.explicitProofSkip && !stopHasProofPhoto()) {
       setSubmitting(false);
       state.awaitingProof = true;
       if (state.currentStep !== 'photo') goToStep('photo');
@@ -2652,6 +2836,9 @@
       }
       if (state.explicitProofSkip) {
         body += '&proof_skip=1&proof_skip_reason=' + encodeURIComponent(state.proofSkipReason || 'other');
+      }
+      if (state.editingAmounts) {
+        body += '&edit_amounts=1';
       }
 
       var data = null;
@@ -2709,7 +2896,9 @@
         setSubmitting(false);
         return;
       }
-      setStatus((err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry'), 'error');
+      var failText = (err.message || i18n('could_not_complete_delivery')) + ', ' + i18n('nothing_saved_retry');
+      setQtyError(err.message || i18n('qty_invalid'));
+      setStatus(failText, 'error');
       setSubmitting(false);
     }
   }
@@ -2825,6 +3014,8 @@
     state.stopFinished = false;
     state.uploadPromise = null;
     state.proofSkipReason = '';
+    state.editingAmounts = opts.editAmounts === true;
+    if (state.editingAmounts) state.proofAccepted = true;
     state.secondPhoto = false;
     state.reviewAddAfter = false;
     revokeSecondThumb();
@@ -2841,6 +3032,7 @@
       state.closeTimer = null;
     }
     hideVarianceConfirm();
+    setQtyError('');
     state.previousFocus = document.activeElement;
     if (confirm) {
       confirm.textContent = state.customerName;
@@ -2893,6 +3085,7 @@
       modal.setAttribute('aria-modal', 'true');
     }
     modal.style.display = 'flex';
+    modal.classList.add('is-open');
     modal.setAttribute('aria-hidden', 'false');
     var routeRoot = $('driverRouteRoot');
     if (state.inline) {
@@ -3071,6 +3264,7 @@
       assignmentId: parseInt(btn.getAttribute('data-assignment-id'), 10) || 0,
       photoMode: btn.getAttribute('data-photo-mode') || 'capture',
       startStep: btn.getAttribute('data-start-step') || '',
+      editAmounts: btn.getAttribute('data-edit-amounts') === '1',
       autoOpenCamera: false
       });
     } catch (err) {
@@ -3198,10 +3392,23 @@
       totalsAdjust.addEventListener('click', function () {
         var details = $('deliveryAdjustDetails');
         if (!details) return;
-        details.open = !details.open;
-        totalsAdjust.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+        details.open = true;
+        totalsAdjust.setAttribute('aria-expanded', 'true');
+        var pieces = $('deliveryPiecesInput');
+        if (!pieces) return;
+        if (typeof pieces.focus === 'function') {
+          try { pieces.focus({ preventScroll: true }); } catch (err) { pieces.focus(); }
+        }
+        scrollCaptureFieldIntoView(pieces);
       });
     }
+    ['deliveryPiecesInput', 'deliveryCreditsInput', 'deliveryCashCollectedInput', 'deliveryPricePerPieceInput', 'deliveryCodOverrideReason'].forEach(function (id) {
+      var field = $(id);
+      if (!field) return;
+      field.addEventListener('focus', function () {
+        scrollCaptureFieldIntoView(field);
+      });
+    });
     var seeInvoice = $('deliverySeeInvoice');
     if (seeInvoice) {
       seeInvoice.addEventListener('click', function () {
@@ -3406,6 +3613,8 @@
     refreshRouteSession().catch(function () {});
   }
 
+  window.bakeryParseDeliveryCount = bakeryParseDeliveryCount;
+  window.bakeryCreditsBackSuffix = bakeryCreditsBackSuffix;
   window.DriverDelivery = {
     bindPhotoButtons: bindPhotoButtons,
     openModal: openModal,

@@ -196,14 +196,26 @@ $codeDescribedBy = $error !== '' ? ' aria-invalid="true" aria-describedby="login
         input.focus();
       }
 
-      var submitting = false;
+      var posted = false;
+      form.addEventListener('submit', function (event) {
+        if (posted) {
+          event.preventDefault();
+          return;
+        }
+        posted = true;
+      });
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && posted) {
+          event.preventDefault();
+        }
+      });
       input.addEventListener('input', function () {
         this.value = this.value.replace(/\D/g, '').slice(0, 4);
-        if (this.value.length === 4 && !submitting && form.checkValidity()) {
-          submitting = true;
+        if (this.value.length === 4 && !posted && form.checkValidity()) {
           if (form.requestSubmit) {
             form.requestSubmit();
           } else {
+            posted = true;
             form.submit();
           }
         }

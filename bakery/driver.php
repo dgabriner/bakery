@@ -93,6 +93,34 @@ if ($routeDayDiff < -1) {
     $routeDateKind = 'future';
     $routeDateRelative = bakery_t('driver.route_upcoming');
 }
+if (!function_exists('bakery_driver_chrome_date')) {
+    /**
+     * Used when includes/i18n.php on the server is older than this page.
+     * Spanish stays day-first. English stays month-day.
+     */
+    function bakery_driver_chrome_date(DateTimeInterface $date, string $style = 'weekday'): string {
+        $es = function_exists('bakery_locale') && bakery_locale() === 'es';
+        $day = $date->format('j');
+        $monthIndex = (int)$date->format('n');
+        if (!$es) {
+            if ($style === 'compact') {
+                return $date->format('M j');
+            }
+            return function_exists('bakery_localized_date_label')
+                ? bakery_localized_date_label($date)
+                : $date->format('F j');
+        }
+        $months = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        $short = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+        if ($style === 'compact') {
+            return $day . ' ' . $short[$monthIndex];
+        }
+        $weekdays = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábado', 7 => 'domingo'];
+        return $weekdays[(int)$date->format('N')] . ' ' . $day . ' de ' . $months[$monthIndex];
+    }
+}
+$routeDateLabel = bakery_driver_chrome_date($selectedDateObject, 'weekday');
+$routeDateCompact = bakery_driver_chrome_date($selectedDateObject, 'compact');
 $routeView = strtolower(trim((string)($_GET['view'] ?? '')));
 // Tomorrow and every past day open the same drive route. Prep stays a choice.
 $routePrepMode = $routeView === 'prep' && $routeDateKind !== 'past';
@@ -312,6 +340,30 @@ function bakery_driver_stop_lines_json(array $stop, string $date): string
 }
 
 /**
+ * Inline icon for a route action. SVG stays in the page so CSP does not have to allow an icon font.
+ */
+function bakery_driver_action_icon(string $name): string
+{
+    $common = ' class="route-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
+    if ($name === 'photo') {
+        return '<svg' . $common . '><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="2"></circle></svg>';
+    }
+    if ($name === 'navigate') {
+        return '<svg' . $common . '><path d="M12 2l7 19-7-4-7 4 7-19z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>';
+    }
+    if ($name === 'amounts') {
+        return '<svg' . $common . '><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>';
+    }
+    return '<svg' . $common . '><path d="M12 3l10 18H2L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg>';
+}
+
+function bakery_driver_action_label(string $icon, string $text): string
+{
+    $safe = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+    return bakery_driver_action_icon($icon) . '<span class="route-action-label">' . $safe . '</span>';
+}
+
+/**
  * Render one driver route stop card for the active queue or history panel.
  */
 function bakery_render_driver_stop_item(
@@ -407,7 +459,8 @@ function bakery_render_driver_stop_item(
                 data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">&#128247; <?php bakery_te('driver.photo_btn'); ?></button>
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo_btn'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('photo', bakery_t('driver.photo_btn')); ?></button>
             <button type="button"
                 class="stop-open-delivery photo-complete-btn"
                 data-start-step="delivery"
@@ -418,7 +471,8 @@ function bakery_render_driver_stop_item(
                 data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.confirm'); ?></button>
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.amounts'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('amounts', bakery_t('driver.amounts')); ?></button>
             <button type="button"
                 class="stop-go-next"
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
@@ -458,6 +512,20 @@ function bakery_render_driver_stop_item(
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.view_invoice_photos'); ?></button>
+            <?php if ($selectedDate === date('Y-m-d')): ?>
+            <button type="button"
+                class="contact-link photo-complete-btn"
+                data-start-step="delivery"
+                data-edit-amounts="1"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.edit_amounts'); ?></button>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if ($isDone && $status === 'cancelled'): ?>
             <button type="button"
@@ -481,6 +549,7 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
     $phoneHref = preg_replace('/\D+/', '', bakery_driver_stop_phone($stop));
     $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
     $displayPhone = bakery_driver_stop_phone($stop);
+    $stopCoords = bakery_driver_valid_latlng($stop['latitude'] ?? null, $stop['longitude'] ?? null);
     $itemClass = 'route-prep-stop';
     if ($locked) {
         $itemClass .= ' route-prep-stop--locked';
@@ -492,8 +561,15 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
         data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
         data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
         data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+        data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
         data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>"
-        data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        data-route-order="<?php echo htmlspecialchars((string)($stop['route_order'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+        data-ordered-pieces="<?php echo (int)($stop['ordered_pieces'] ?? 0); ?>"
+        data-scheduled-time="<?php echo !empty($stop['scheduled_delivery_time']) ? htmlspecialchars(bakery_locale_time(strtotime($stop['scheduled_delivery_time'])), ENT_QUOTES, 'UTF-8') : ''; ?>"
+        data-deliver-after="<?php echo htmlspecialchars((string)($stop['deliver_after'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+        data-deliver-by="<?php echo htmlspecialchars((string)($stop['deliver_by'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+        data-lat="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
+        data-lng="<?php echo $stopCoords ? htmlspecialchars((string)$stopCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>">
         <div class="route-prep-stop-top">
             <span class="route-prep-stop-num" aria-hidden="true"><?php echo (int)$stop['route_order'] ?: ($index + 1); ?></span>
             <div class="route-prep-stop-body">
@@ -669,6 +745,21 @@ foreach ($orderedStops as $stop) {
 }
 
 $showSelector = !$isAuthenticatedDriver && ($changeDriver || $selectedDriverId <= 0 || !$driver);
+$heroStop = $nextStop;
+$openStopOrderId = (string)($_GET['open_stop'] ?? '') === '1' ? (int)($_GET['daily_order_id'] ?? 0) : 0;
+$openStopOrders = $openStopOrderId > 0 && (string)($_GET['view_orders'] ?? '') === '1';
+if ($openStopOrderId > 0) {
+    foreach ($orderedStops as $candidateStop) {
+        if ((int)($candidateStop['daily_order_id'] ?? 0) !== $openStopOrderId) {
+            continue;
+        }
+        $candidateStatus = (string)($candidateStop['delivery_status'] ?? 'pending');
+        if (!in_array($candidateStatus, ['delivered', 'cancelled', 'failed', 'office_flag'], true)) {
+            $heroStop = $candidateStop;
+        }
+        break;
+    }
+}
 $remainingStops = count($upcomingStops) + ($nextStop ? 1 : 0);
 $pastStopCount = count($pastStops);
 $prepPieceTotal = 0;
@@ -735,6 +826,9 @@ window.DriverDataSaver = (function () {
     };
 })();
 document.body.classList.add('driver-workflow-page');
+<?php if ($heroStop && empty($routePrepMode)): ?>
+document.body.classList.add('route-has-sticky-dock');
+<?php endif; ?>
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
 <?php endif; ?>
@@ -750,6 +844,7 @@ document.body.classList.add('driver-route-prep');
     data-driver-id="<?php echo (int)$selectedDriverId; ?>"
     data-driver-name="<?php echo htmlspecialchars($driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
     data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+    data-today="<?php echo htmlspecialchars($todayDate, ENT_QUOTES, 'UTF-8'); ?>"
     data-total="<?php echo (int)$totalStops; ?>"
     data-completed="<?php echo (int)$driverCompletedStops; ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
@@ -796,7 +891,7 @@ document.body.classList.add('driver-route-prep');
     <div class="now-strip" id="nowStrip">
         <button type="button" class="now-strip-date" id="nowStripDate" aria-controls="routeDateDisclosure" aria-expanded="false" aria-label="<?php echo htmlspecialchars(bakery_t('nav.choose_route_date'), ENT_QUOTES, 'UTF-8'); ?>">
             <span class="now-strip-date-kind"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
-            <strong><?php echo htmlspecialchars($selectedDateObject->format('M j'), ENT_QUOTES, 'UTF-8'); ?></strong>
+            <strong data-driver-date="compact" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateCompact, ENT_QUOTES, 'UTF-8'); ?></strong>
         </button>
         <span class="now-strip-progress" id="nowStripProgress" aria-live="polite"<?php echo $totalStops > 0 ? '' : ' hidden'; ?>><?php echo (int)$driverCompletedStops; ?>/<?php echo (int)$totalStops; ?></span>
         <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
@@ -820,7 +915,7 @@ document.body.classList.add('driver-route-prep');
                 aria-expanded="false"
                 aria-controls="routeDateDisclosure">
             <span class="route-day-nav-kicker"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
-            <strong class="route-day-nav-date"><?php echo htmlspecialchars(bakery_localized_date_label($selectedDateObject)); ?></strong>
+            <strong class="route-day-nav-date" data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
             <span class="route-day-nav-picker-hint"><?php bakery_te('driver.change_date'); ?></span>
         </button>
         <?php if ($routeForwardDate !== ''): ?>
@@ -849,7 +944,7 @@ document.body.classList.add('driver-route-prep');
     <details class="route-date-disclosure route-date-dock" id="routeDateDisclosure">
         <summary class="route-date-summary">
             <span class="route-date-label">
-                <?php echo $selectedDate === $todayDate ? htmlspecialchars(bakery_t('common.today') . ' · ') : ''; ?><?php echo htmlspecialchars(bakery_localized_date_label($selectedDateObject)); ?>
+                <?php echo $selectedDate === $todayDate ? htmlspecialchars(bakery_t('common.today') . ' · ') : ''; ?><span data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?></span>
             </span>
             <span class="route-date-summary-action">
                 <span class="route-date-summary-action-open"><?php bakery_te('driver.change_date'); ?></span>
@@ -992,41 +1087,41 @@ document.body.classList.add('driver-route-prep');
         <?php if (!$routePrepMode): ?>
         <div class="route-primary-column">
             <!-- Next stop (primary on-route view — first on mobile) -->
-            <section class="next-stop route-section-next" id="nextStopCard" <?php echo $nextStop ? '' : 'hidden'; ?> aria-live="polite">
-        <?php if ($nextStop):
-            $nextDisplayPhone = bakery_driver_stop_phone($nextStop);
+            <section class="next-stop route-section-next" id="nextStopCard" <?php echo $heroStop ? '' : 'hidden'; ?> aria-live="polite"<?php if ($heroStop): ?> data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
+        <?php if ($heroStop):
+            $nextDisplayPhone = bakery_driver_stop_phone($heroStop);
             $phoneHref = preg_replace('/\D+/', '', $nextDisplayPhone);
             $phoneHref = $phoneHref !== '' ? 'tel:' . $phoneHref : '';
-            $nextReceivingHours = bakery_driver_receiving_hours_label($nextStop);
-            $nextCoords = bakery_driver_valid_latlng($nextStop['latitude'] ?? null, $nextStop['longitude'] ?? null);
+            $nextReceivingHours = bakery_driver_receiving_hours_label($heroStop);
+            $nextCoords = bakery_driver_valid_latlng($heroStop['latitude'] ?? null, $heroStop['longitude'] ?? null);
             $mapsHref = bakery_driver_maps_url(
-                $nextStop['customer_address'] ?? '',
+                $heroStop['customer_address'] ?? '',
                 $nextCoords['lat'] ?? null,
                 $nextCoords['lng'] ?? null
             );
-            $stopNotes = bakery_driver_stop_notes($nextStop);
-            $nextStatus = $nextStop['delivery_status'] ?? 'pending';
+            $stopNotes = bakery_driver_stop_notes($heroStop);
+            $nextStatus = $heroStop['delivery_status'] ?? 'pending';
             $nextStatusClass = in_array($nextStatus, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $nextStatus : 'pending';
         ?>
         <p class="next-stop-eyebrow">
-            <span><?php bakery_te('driver.next_stop'); ?><?php if ($nextStop['route_order']): ?> &middot; #<?php echo (int)$nextStop['route_order']; ?><?php endif; ?></span>
+            <span><?php bakery_te('driver.next_stop'); ?><?php if ($heroStop['route_order']): ?> &middot; #<?php echo (int)$heroStop['route_order']; ?><?php endif; ?></span>
             <?php if ($remainingStops > 1): ?>
             <button type="button" class="change-next-btn" id="changeNextStopBtn"><?php bakery_te('driver.change_next'); ?></button>
             <?php endif; ?>
         </p>
         <div class="next-stop-heading-row">
-            <h2 class="next-stop-store" id="nextStopStore"><?php echo htmlspecialchars($nextStop['customer_name']); ?></h2>
+            <h2 class="next-stop-store" id="nextStopStore"><?php echo htmlspecialchars($heroStop['customer_name']); ?></h2>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($nextStatusClass); ?>" id="nextStopStatus"><?php echo htmlspecialchars(bakery_t('driver.status_' . $nextStatusClass)); ?></span>
         </div>
-        <p class="next-stop-address" id="nextStopAddress"><?php echo htmlspecialchars($nextStop['customer_address'] ?: bakery_t('driver.no_address')); ?></p>
+        <p class="next-stop-address" id="nextStopAddress"><?php echo htmlspecialchars($heroStop['customer_address'] ?: bakery_t('driver.no_address')); ?></p>
         <?php if ($phoneHref): ?>
         <a class="next-stop-phone" id="nextStopPhone" href="<?php echo htmlspecialchars($phoneHref); ?>"><?php echo htmlspecialchars($nextDisplayPhone); ?></a>
         <?php endif; ?>
         <div class="next-stop-meta" id="nextStopMeta">
-            <?php if (!empty($nextStop['zone'])): ?><span><?php echo htmlspecialchars($nextStop['zone']); ?></span><?php endif; ?>
+            <?php if (!empty($heroStop['zone'])): ?><span><?php echo htmlspecialchars($heroStop['zone']); ?></span><?php endif; ?>
             <?php if ($nextReceivingHours !== ''): ?><span><?php echo htmlspecialchars($nextReceivingHours); ?></span><?php endif; ?>
-            <?php if (!empty($nextStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($nextStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
-            <?php if ((int)($nextStop['ordered_pieces'] ?? 0) > 0): ?><span><?php echo htmlspecialchars(bakery_t('driver.pieces_ordered', ['count' => number_format((int)$nextStop['ordered_pieces'])])); ?></span><?php endif; ?>
+            <?php if (!empty($heroStop['scheduled_delivery_time'])): ?><span><?php echo htmlspecialchars(bakery_locale_time(strtotime($heroStop['scheduled_delivery_time']))); ?></span><?php endif; ?>
+            <?php if ((int)($heroStop['ordered_pieces'] ?? 0) > 0): ?><span><?php echo htmlspecialchars(bakery_t('driver.pieces_ordered', ['count' => number_format((int)$heroStop['ordered_pieces'])])); ?></span><?php endif; ?>
         </div>
         <?php if ($stopNotes !== ''): ?>
         <div class="next-stop-notes" id="nextStopNotes">
@@ -1036,27 +1131,35 @@ document.body.classList.add('driver-route-prep');
         <?php endif; ?>
 
         <div class="next-stop-actions">
-            <div class="next-stop-actions-primary">
             <button type="button"
                 class="route-btn route-btn--photo photo-complete-btn"
+                data-start-step="photo"
                 data-driver-id="<?php echo (int)$selectedDriverId; ?>"
-                data-driver-name="<?php echo htmlspecialchars($nextStop['driver_name'] ?? $driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>"
-                data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
-                data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>"
-                data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
-                data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.arrival_photo'); ?></button>
+                data-driver-name="<?php echo htmlspecialchars($heroStop['driver_name'] ?? $driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$heroStop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($heroStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('photo', bakery_t('driver.photo')); ?></button>
             <?php if ($mapsHref): ?>
                 <a class="route-btn route-btn--navigate js-navigate-link"
                 href="<?php echo htmlspecialchars($mapsHref); ?>"
-                data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($heroStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-lat="<?php echo $nextCoords ? htmlspecialchars((string)$nextCoords['lat'], ENT_QUOTES, 'UTF-8') : ''; ?>"
                 data-lng="<?php echo $nextCoords ? htmlspecialchars((string)$nextCoords['lng'], ENT_QUOTES, 'UTF-8') : ''; ?>"
-                target="_blank" rel="noopener"><?php bakery_te('driver.directions'); ?></a>
+                target="_blank" rel="noopener"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('navigate', bakery_t('driver.navigate')); ?></a>
             <?php endif; ?>
-            </div>
-            <details class="next-stop-more">
+            <button type="button"
+                class="route-btn route-btn--problem stop-problem-btn"
+                data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                aria-label="<?php echo htmlspecialchars(bakery_t('driver.problem'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('problem', bakery_t('driver.problem')); ?></button>
+        </div>
+        <details class="next-stop-more">
                 <summary class="next-stop-more-toggle"><?php bakery_te('driver.more_actions'); ?></summary>
                 <div class="next-stop-more-body">
             <?php if ($phoneHref): ?>
@@ -1064,25 +1167,26 @@ document.body.classList.add('driver-route-prep');
             <?php endif; ?>
             <button type="button"
                 class="route-btn route-btn--skip skip-stop-btn"
-                data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
-                data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.skip_stop'); ?></button>
+                data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.skip_stop'); ?></button>
             <button type="button"
                 class="route-btn fail-stop-btn"
-                data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
-                data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>"
-                data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
+                data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('exception_desk.cant_deliver'); ?></button>
             <?php if ($remainingStops > 1): ?>
             <button type="button" class="route-btn route-btn--adjust change-next-btn"><?php bakery_te('driver.adjust_route'); ?></button>
             <?php endif; ?>
                 </div>
             </details>
-        </div>
-        <?php echo bakery_exception_desk_driver_fail_form($nextStop, 'driver.php?date=' . rawurlencode($selectedDate)); ?>
+        <?php echo bakery_exception_desk_driver_fail_form($heroStop, 'driver.php?date=' . rawurlencode($selectedDate)); ?>
 
         <button type="button" class="next-stop-details-toggle" id="nextStopDetailsToggle"
-            data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>"
-            data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>"><?php bakery_te('driver.what_delivering'); ?></button>
-        <div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:none;">
+            data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>"
+            data-customer-id="<?php echo (int)$heroStop['customer_id']; ?>"
+            aria-expanded="<?php echo ($openStopOrders && (int)$heroStop['daily_order_id'] === $openStopOrderId) ? 'true' : 'false'; ?>"
+            aria-controls="nextStopOrderDetails"><?php bakery_te('driver.what_delivering'); ?></button>
+        <div class="order-details-container next-stop-order-details" id="nextStopOrderDetails" style="display:<?php echo ($openStopOrders && (int)$heroStop['daily_order_id'] === $openStopOrderId) ? 'block' : 'none'; ?>;">
             <div class="order-details-loading"><?php bakery_te('driver.loading_order'); ?></div>
             <div class="order-details-content" style="display:none;"></div>
         </div>
@@ -1094,7 +1198,7 @@ document.body.classList.add('driver-route-prep');
         <h2><?php bakery_te('driver.route_complete'); ?></h2>
         <p><?php echo htmlspecialchars(bakery_t('driver.all_stops_done_for', [
             'driver' => $driver['name'],
-            'date' => $selectedDate === $todayDate ? bakery_t('common.today') : bakery_localized_date_label($selectedDateObject),
+            'date' => $selectedDate === $todayDate ? bakery_t('common.today') : $routeDateLabel,
         ])); ?></p>
     </section>
 
@@ -1252,7 +1356,7 @@ document.body.classList.add('driver-route-prep');
         <h3><?php bakery_te($selectedDate === $todayDate ? 'driver.no_stops' : 'driver.no_stops_for_date'); ?></h3>
         <p><?php echo htmlspecialchars(bakery_t('driver.nothing_assigned', [
             'driver' => $driver['name'],
-            'date' => bakery_localized_date_label($selectedDateObject),
+            'date' => $routeDateLabel,
         ])); ?></p>
         <?php if ($routeDateKind !== 'past'): ?>
         <p><a class="route-prep-empty-edit" href="<?php echo htmlspecialchars($prepEditUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_edit_route'); ?></a></p>
@@ -1269,8 +1373,8 @@ document.body.classList.add('driver-route-prep');
     <?php endif; ?>
 </div>
 
-<div class="route-sticky-dock" id="routeStickyDock" <?php echo ($nextStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($nextStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
-    <div class="route-sticky-dock-inner" id="routeStickyDockInner"><?php if ($nextStop && empty($routePrepMode)): ?><?php $dockMapsHref = bakery_driver_maps_url($nextStop['customer_address'] ?? '', bakery_driver_stop_coords($nextStop)); ?><?php if ($dockMapsHref !== ''): ?><a class="route-sticky-btn route-sticky-btn--nav js-navigate-stop" href="<?php echo htmlspecialchars($dockMapsHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener"><?php bakery_te('driver.directions'); ?></a><?php endif; ?><button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-driver-name="<?php echo htmlspecialchars($nextStop['driver_name'] ?? ($driver['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-customer-id="<?php echo (int)$nextStop['customer_id']; ?>" data-daily-order-id="<?php echo (int)$nextStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($nextStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($nextStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-address="<?php echo htmlspecialchars($nextStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.im_here'); ?></button><?php endif; ?></div>
+<div class="route-sticky-dock" id="routeStickyDock" <?php echo ($heroStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($heroStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
+    <div class="route-sticky-dock-inner" id="routeStickyDockInner"><?php if ($heroStop && empty($routePrepMode)): ?><?php $dockMapsHref = bakery_driver_maps_url($heroStop['customer_address'] ?? '', bakery_driver_stop_coords($heroStop)); ?><?php if ($dockMapsHref !== ''): ?><a class="route-sticky-btn route-sticky-btn--nav js-navigate-stop" href="<?php echo htmlspecialchars($dockMapsHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('navigate', bakery_t('driver.navigate')); ?></a><?php endif; ?><button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-driver-name="<?php echo htmlspecialchars($heroStop['driver_name'] ?? ($driver['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-customer-id="<?php echo (int)$heroStop['customer_id']; ?>" data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-address="<?php echo htmlspecialchars($heroStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('photo', bakery_t('driver.photo')); ?></button><?php endif; ?></div>
 </div>
 
 <div class="route-adjust-dock" id="routeAdjustDock" hidden>
@@ -1449,6 +1553,7 @@ document.body.classList.add('driver-route-prep');
                                     </div>
                                 </label>
                             </div>
+                            <p id="deliveryQtyError" class="delivery-qty-error" hidden role="alert"></p>
                             <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
                             <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
                             <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
@@ -1615,6 +1720,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'stop_workflow' => bakery_t('driver.stop_workflow'),
     'leave' => bakery_t('driver.leave'),
     'confirm' => bakery_t('driver.confirm'),
+    'amounts' => bakery_t('driver.amounts'),
     'confirm_delivery' => bakery_t('driver.confirm_delivery'),
     'delivery_invoice' => bakery_t('driver.delivery_invoice'),
     'continue_to_delivery' => bakery_t('driver.continue_to_delivery'),
@@ -1785,6 +1891,14 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'photo_saved_loading' => bakery_t('driver.photo_saved_loading'),
     'ordered_recording' => bakery_t('driver.ordered_recording'),
     'credits_suffix' => bakery_t('driver.credits_suffix'),
+    'credits_suffix_one' => bakery_t('driver.credits_suffix_one'),
+    'qty_invalid' => bakery_t('driver.qty_invalid'),
+    'pieces_empty_confirm' => bakery_t('driver.pieces_empty_confirm'),
+    'photo_skipped' => bakery_t('driver.photo_skipped'),
+    'take_photo_action' => bakery_t('driver.take_photo_action'),
+    'edit_amounts' => bakery_t('driver.edit_amounts'),
+    'save_amounts' => bakery_t('driver.save_amounts'),
+    'amounts_updated' => bakery_t('driver.amounts_updated'),
     'delivering_more' => bakery_t('driver.delivering_more'),
     'delivering_fewer' => bakery_t('driver.delivering_fewer'),
     'product_counts_prompt' => bakery_t('driver.product_counts_prompt'),
@@ -1870,6 +1984,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'lines_more' => bakery_t('driver.lines_more', ['count' => ':count']),
     'done_row' => bakery_t('driver.done_row', ['count' => ':count']),
     'reorder' => bakery_t('driver.reorder'),
+    'discard_changes' => bakery_t('driver.discard_changes'),
     'suggest_order' => bakery_t('driver.suggest_order'),
     'suggest_preview' => bakery_t('driver.suggest_preview', ['moves' => ':moves', 'minutes' => ':minutes']),
     'suggest_no_gain' => bakery_t('driver.suggest_no_gain'),
@@ -1902,6 +2017,8 @@ window.__DRIVER_ROUTE_BOOT__ = <?php echo json_encode([
     'nextDayUrl' => $routeForwardDate !== '' ? bakery_driver_route_day_url((int)$selectedDriverId, (string)$routeForwardDate) : '',
     'previousDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$previousDate),
     'isToday' => $selectedDate === $todayDate,
+    'routeDate' => $selectedDate,
+    'locale' => function_exists('bakery_locale') ? bakery_locale() : 'en',
     'prepMode' => !empty($routePrepMode),
     'snapshotHash' => ($selectedDriverId > 0 && !empty($driver) && $totalStops > 0)
         ? bakery_driver_route_snapshot($db, (int)$selectedDriverId, $selectedDate)['hash']
@@ -1928,6 +2045,19 @@ window.bakeryInitDriverRouteMap = window.bakeryInitDriverRouteMap || function ()
         var tag = document.createElement('script');
         tag.async = true;
         tag.src = src;
+        window.__driverMapScriptPending = true;
+        tag.onerror = function () {
+            window.__driverMapScriptPending = false;
+            if (window.DriverRouteMap && typeof window.DriverRouteMap.fail === 'function') {
+                window.DriverRouteMap.fail();
+            }
+        };
+        window.gm_authFailure = function () {
+            window.__driverMapScriptPending = false;
+            if (window.DriverRouteMap && typeof window.DriverRouteMap.fail === 'function') {
+                window.DriverRouteMap.fail();
+            }
+        };
         document.head.appendChild(tag);
     }
     window.bakeryLoadDriverMap = loadMap;
