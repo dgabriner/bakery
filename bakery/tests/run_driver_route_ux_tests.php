@@ -291,6 +291,43 @@ driver_ux_assert(
         && strpos($styles, '.photo-modal.is-inline.delivery-step-photo #deliveryCameraFrame.is-camera-idle') !== false
 );
 driver_ux_assert(
+    'phone hero keeps Photo, Navigate, and Problem with readable labels',
+    strpos($styles, 'body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions') !== false
+        && strpos($styles, 'grid-template-columns: repeat(3, minmax(0, 1fr));') !== false
+        && strpos($styles, '.next-stop-actions .route-action-label') !== false
+        && strpos($page, "bakery_driver_action_label('photo'") !== false
+        && strpos($page, "bakery_driver_action_label('navigate'") !== false
+        && strpos($page, "bakery_driver_action_label('problem'") !== false
+);
+driver_ux_assert(
+    'phone log out sits in the More sheet, above the dock, and is not labelled Out',
+    strpos($styles, 'body.driver-workflow-page .bakery-nav__more-sheet .bakery-nav__logout') !== false
+        && strpos($styles, 'bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);') !== false
+        && $english['common.log_out_short'] === 'Log out'
+        && $spanish['common.log_out_short'] === 'Salir'
+        && $english['common.log_out_short'] !== 'Out'
+);
+driver_ux_assert(
+    'past stops are not trapped in a short scroller under the dock',
+    strpos($styles, 'body.driver-workflow-page .past-stops-list') !== false
+        && strpos($styles, "max-height: none;\n        overflow: visible;") !== false
+        && strpos($styles, 'padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 28px);') !== false
+);
+driver_ux_assert(
+    'the date sheet sits above the Directions dock',
+    strpos($styles, 'body.driver-field-mode.driver-workflow-page.route-has-sticky-dock .route-date-dock') !== false
+        && strpos($styles, 'bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);') !== false
+        && strpos($routeJs, 'dateDisclosure.open = true') !== false
+);
+$loginPage = (string)file_get_contents($root . '/login.php');
+driver_ux_assert(
+    'login ignores a second Enter after the 4th digit auto-submits',
+    strpos($loginPage, 'if (posted)') !== false
+        && strpos($loginPage, 'event.preventDefault();') !== false
+        && strpos($loginPage, "event.key === 'Enter' && posted") !== false
+        && strpos($loginPage, 'var submitting = false;') === false
+);
+driver_ux_assert(
     'Today chip and Add / remove stops are at least 44px',
     strpos($styles, ".now-strip-date {\n    display: inline-flex;\n    align-items: baseline;\n    gap: 6px;\n    min-height: 44px;") !== false
         && strpos($styles, ".route-prep-edit-link {\n    min-height: 44px;") !== false

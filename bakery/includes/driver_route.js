@@ -2272,6 +2272,22 @@
             openStopDeliveryFromEl(stop, { autoOpenCamera: false });
         });
 
+        function syncDriverChrome() {
+            var nav = document.querySelector('.bakery-nav--focused');
+            var dock = document.getElementById('routeStickyDock');
+            if (nav) {
+                var navH = Math.ceil(nav.getBoundingClientRect().height);
+                if (navH > 0) document.body.style.setProperty('--driver-nav-h', navH + 'px');
+            }
+            var dockVisible = dock && !dock.hidden && dock.getAttribute('aria-hidden') !== 'true';
+            if (dockVisible) {
+                var dockH = Math.ceil(dock.getBoundingClientRect().height);
+                if (dockH > 0) document.body.style.setProperty('--driver-dock-h', dockH + 'px');
+            }
+        }
+        syncDriverChrome();
+        window.addEventListener('resize', syncDriverChrome);
+
         bindReorderDrag();
         initRouteView();
         initWakeLock();

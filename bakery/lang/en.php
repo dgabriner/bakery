@@ -11,7 +11,7 @@ return [
 
     // Common
     'common.log_out' => 'Log out',
-    'common.log_out_short' => 'Out',
+    'common.log_out_short' => 'Log out',
     'common.menu' => 'Menu',
     'common.close' => 'Close',
     'common.close_menu' => 'Close menu',

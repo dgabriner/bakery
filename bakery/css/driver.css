@@ -7247,8 +7247,8 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
 @media (max-width: 720px) {
     body.driver-workflow-page {
         color-scheme: light;
-        --driver-nav-h: calc(48px + env(safe-area-inset-bottom, 0px));
-        --driver-dock-h: 52px;
+        --driver-nav-h: calc(64px + env(safe-area-inset-bottom, 0px));
+        --driver-dock-h: 64px;
         --driver-action-bar: 112px;
     }
 
@@ -7399,9 +7399,31 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         padding: 14px 14px 10px;
     }
 
-    body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions {
+    body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions,
+    body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions > .route-btn,
+    body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions > a.route-btn {
+        display: inline-flex;
+        grid-column: auto;
+        min-width: 0;
+        min-height: 52px;
+        padding: 6px 4px;
+        font-size: 0.8rem;
+        line-height: 1.15;
+        color: #fff;
+        white-space: normal;
+    }
+
+    body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions .route-action-label {
+        display: inline;
+        min-width: 0;
+        font-size: 0.78rem;
+        line-height: 1.15;
+        white-space: normal;
     }
 
     body.driver-workflow-page .next-stop {
@@ -7724,11 +7746,42 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
         z-index: 2;
+        padding-bottom: 16px;
     }
 
     body.driver-workflow-page.route-has-sticky-dock:not(.now-capture-open) .bakery-nav--driver .bakery-nav__more[open] .bakery-nav__more-sheet {
         bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);
         max-height: calc(100svh - var(--driver-nav-h) - var(--driver-dock-h) - 16px - env(safe-area-inset-top, 0px));
+    }
+
+    body.driver-workflow-page .bakery-nav__more-sheet .bakery-nav__logout {
+        flex: 1 0 100%;
+        width: 100%;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.22);
+    }
+
+    body.driver-workflow-page .bakery-nav__more-sheet .bakery-nav__logout-btn {
+        background: #8a3d32;
+        color: #fff;
+    }
+
+    body.driver-field-mode.driver-workflow-page.route-has-sticky-dock .route-date-dock {
+        bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);
+    }
+
+    body.driver-field-mode.driver-workflow-page.route-has-sticky-dock .route-date-dock[open] {
+        max-height: calc(100svh - var(--driver-nav-h) - var(--driver-dock-h) - 24px);
+        padding-bottom: 16px;
+        overflow: auto;
+        transition: none;
+    }
+
+    body.driver-workflow-page .past-stops-list {
+        max-height: none;
+        overflow: visible;
+        padding-bottom: 8px;
     }
 
     body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route {
