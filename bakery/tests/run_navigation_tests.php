@@ -35,13 +35,13 @@ function navigation_test_group_keys($role) {
 if (!defined('BASE_URL')) {
     define('BASE_URL', '/');
 }
-function navigation_test_render_nav($role, $page = 'index', $mode = 'full') {
-    $_SESSION = [
+function navigation_test_render_nav($role, $page = 'index', $mode = 'full', array $extraSession = []) {
+    $_SESSION = array_merge([
         'user_id' => 999,
         'user_role_slug' => $role,
         'user_display_name' => 'Navigation Test',
         'admin_workspace_mode' => $mode,
-    ];
+    ], $extraSession);
     $_SERVER['PHP_SELF'] = '/' . $page . '.php';
     ob_start();
     include dirname(__DIR__) . '/includes/nav.php';
@@ -287,6 +287,36 @@ if (preg_match('/bakery-nav__groups">(.*?)<\/div>\s*<\/div>\s*<\/nav>/s', $drive
     $driverHqGroups = $driverHqMatch[1];
 }
 navigation_test_assert(substr_count($driverHqGroups, 'bakery-nav__direct') >= 4, 'driver non-date bar has Survey among primary directs');
+$surveyBeforePhone = strstr($driverNav, 'bakery-nav__more-link--survey-phone', true);
+navigation_test_assert($surveyBeforePhone !== false && substr_count($surveyBeforePhone, 'survey.php') === 1, 'driver More does not list Survey twice');
+navigation_test_assert(strpos($driverNav, 'bakery-nav__more-link--survey-phone') !== false, 'phone route bar keeps one Survey fallback in More');
+
+$driverToolSession = ['bakery_staff_driver_mode' => 7];
+foreach (['pack_list', 'call_headquarters', 'survey', 'driver_stops'] as $driverToolPage) {
+    $toolNav = navigation_test_render_nav('manager', $driverToolPage, 'full', $driverToolSession);
+    navigation_test_assert(strpos($toolNav, 'bakery-nav--driver') !== false, 'manager driving as self keeps the driver bar on ' . $driverToolPage);
+    navigation_test_assert(strpos($toolNav, 'bakery-nav--manager') === false, 'manager driving as self does not switch to the manager bar on ' . $driverToolPage);
+}
+$managerPack = navigation_test_render_nav('manager', 'pack_list');
+navigation_test_assert(strpos($managerPack, 'bakery-nav--manager') !== false, 'a manager outside driver mode keeps the manager bar on pack list');
+navigation_test_assert(strpos($managerPack, 'bakery-nav--driver') === false, 'a manager outside driver mode does not see the driver bar on pack list');
+navigation_test_render_nav('manager', 'manager', 'full', $driverToolSession);
+navigation_test_assert(empty($_SESSION['bakery_staff_driver_mode']), 'opening the manager workspace leaves driver mode');
+
+$stopsNav = navigation_test_render_nav('driver', 'driver_stops');
+navigation_test_assert(strpos($stopsNav, 'bakery-nav--driver-route') !== false, 'driver stops uses the same route chrome as My Route');
+navigation_test_assert(strpos($stopsNav, 'view=route') !== false, 'driver stops Route tab returns to the route list');
+navigation_test_assert(strpos($stopsNav, 'problem=1') !== false, 'driver stops Problem tab returns to the route problem sheet');
+$stopsSrc = (string)file_get_contents(dirname(__DIR__) . '/driver_stops.php');
+navigation_test_assert(strpos($stopsSrc, 'Generate customer QR login') === false, 'driver stops does not hard-code the English QR action');
+$stopsCss = (string)file_get_contents(dirname(__DIR__) . '/css/driver_stops.css');
+navigation_test_assert(substr_count($stopsCss, '-webkit-line-clamp: 2') >= 2, 'stop names and addresses wrap to two lines');
+navigation_test_assert(strpos($stopsCss, 'text-overflow: ellipsis') === false, 'stop names are not truncated with an ellipsis');
+
+$packSrc = (string)file_get_contents(dirname(__DIR__) . '/pack_list.php');
+navigation_test_assert(strpos($packSrc, '$packForDriver ? date(\'Y-m-d\')') !== false, 'driver pack list defaults to today\'s sell date');
+navigation_test_assert(strpos($packSrc, 'if (!$packForDriver)') !== false, 'driver pack list skips the manager command center and commit strip');
+navigation_test_assert(strpos($packSrc, 'bakery_ops_exceptions_for_date') !== false, 'manager pack list still loads row actions');
 
 echo "=== Catalog is the role allowlist ===\n";
 require_once dirname(__DIR__) . '/includes/customer_portal.php';
