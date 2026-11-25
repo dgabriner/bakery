@@ -44,6 +44,24 @@
             .replace(/"/g, '&quot;');
     }
 
+    function actionIcon(name) {
+        var common = ' class="route-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
+        if (name === 'photo') {
+            return '<svg' + common + '><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="2"></circle></svg>';
+        }
+        if (name === 'navigate') {
+            return '<svg' + common + '><path d="M12 2l7 19-7-4-7 4 7-19z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>';
+        }
+        if (name === 'amounts') {
+            return '<svg' + common + '><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>';
+        }
+        return '<svg' + common + '><path d="M12 3l10 18H2L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg>';
+    }
+
+    function actionLabel(icon, text) {
+        return actionIcon(icon) + '<span class="route-action-label">' + escapeHtml(text) + '</span>';
+    }
+
     function openStopDeliveryFromEl(stop, opts) {
         opts = opts || {};
         if (document.body.classList.contains('route-adjust-open')) {
@@ -81,6 +99,12 @@
                 (photoBtn && photoBtn.getAttribute('data-date')) ||
                 (root && root.getAttribute('data-date')) ||
                 '',
+            assignmentId: parseInt(
+                (photoBtn && photoBtn.getAttribute('data-assignment-id')) ||
+                stop.getAttribute('data-assignment-id') ||
+                '0',
+                10
+            ) || 0,
             photoMode:
                 (photoBtn && photoBtn.getAttribute('data-photo-mode')) ||
                 (status === 'delivered' ? 'review' : 'capture'),
@@ -237,7 +261,7 @@
             '" data-address="' + escapeHtml(address) +
             '" data-lat="' + escapeHtml(lat) +
             '" data-lng="' + escapeHtml(lng) +
-            '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
+            '" target="_blank" rel="noopener" aria-label="' + escapeHtml(label) + '">' + actionLabel('navigate', label) + '</a>';
     }
 
     var NOW_LINE_LIMIT = 6;
@@ -291,6 +315,8 @@
         var isFirst = active[0] === stopEl;
 
         card.setAttribute('data-daily-order-id', stopEl.getAttribute('data-daily-order-id') || '0');
+        card.setAttribute('data-assignment-id', stopEl.getAttribute('data-assignment-id') || '0');
+        card.setAttribute('data-customer-name', stopEl.getAttribute('data-customer-name') || '');
         card.innerHTML =
             '<div class="now-card-head">' +
             '<p class="next-stop-eyebrow"><span>' + escapeHtml(di.next_stop) +
@@ -315,12 +341,13 @@
                   escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0') + '">' + escapeHtml(di.make_next) + '</button></p>'
                 : '') +
             '<div class="next-stop-actions">' +
-            '<button type="button" class="route-btn route-btn--photo photo-complete-btn"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.im_here || di.arrival_photo) + '</button>' +
-            navigateLink('route-btn route-btn--navigate', stopEl, di.directions) +
-            '<button type="button" class="route-btn route-btn--problem stop-problem-btn"' + problemButtonAttrs(stopEl) + '>' + escapeHtml(di.problem) + '</button>' +
+            '<button type="button" class="route-btn route-btn--photo photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo || di.im_here) + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo || di.im_here || 'Photo') + '</button>' +
+            navigateLink('route-btn route-btn--navigate', stopEl, di.navigate || di.directions || 'Navigate') +
+            '<button type="button" class="route-btn route-btn--problem stop-problem-btn" aria-label="' + escapeHtml(di.problem || 'Problem') + '"' + problemButtonAttrs(stopEl) + '>' + actionLabel('problem', di.problem || 'Problem') + '</button>' +
             '</div>';
 
         applyNavigateLinks(card);
+        bindProblemButtons(card);
         if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
             window.DriverDelivery.bindPhotoButtons(card);
         }
@@ -329,8 +356,8 @@
             stickyDock.hidden = false;
             stickyDock.setAttribute('aria-hidden', 'false');
             stickyInner.innerHTML =
-                navigateLink('route-sticky-btn route-sticky-btn--nav', stopEl, di.directions) +
-                '<button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.im_here || di.arrival_photo) + '</button>';
+                navigateLink('route-sticky-btn route-sticky-btn--nav', stopEl, di.navigate || di.directions || 'Navigate') +
+                '<button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo || di.im_here) + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo || di.im_here || 'Photo') + '</button>';
             applyNavigateLinks(stickyInner);
             if (window.DriverDelivery && typeof window.DriverDelivery.bindPhotoButtons === 'function') {
                 window.DriverDelivery.bindPhotoButtons(stickyInner);
@@ -409,8 +436,8 @@
     function rowActionsHtml(stopEl) {
         var id = escapeHtml(stopEl.getAttribute('data-daily-order-id') || '0');
         var name = stopEl.getAttribute('data-customer-name') || '';
-        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo"' + photoButtonAttrs(stopEl) + '>&#128247; ' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '</button>' +
-            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery"' + photoButtonAttrs(stopEl) + '>' + escapeHtml(di.confirm || 'Confirm') + '</button>' +
+        return '<button type="button" class="stop-photo-btn photo-complete-btn" data-start-step="photo" aria-label="' + escapeHtml(di.photo_btn || di.photo || 'Photo') + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('photo', di.photo_btn || di.photo || 'Photo') + '</button>' +
+            '<button type="button" class="stop-open-delivery photo-complete-btn" data-start-step="delivery" aria-label="' + escapeHtml(di.amounts || di.confirm || 'Amounts') + '"' + photoButtonAttrs(stopEl) + '>' + actionLabel('amounts', di.amounts || di.confirm || 'Amounts') + '</button>' +
             '<button type="button" class="stop-go-next" data-daily-order-id="' + id + '" data-customer-name="' + escapeHtml(name) + '">' + escapeHtml(di.make_next) + '</button>' +
             '<div class="stop-adjust-moves">' +
             '<button type="button" class="stop-move-up" data-daily-order-id="' + id + '" aria-label="' + escapeHtml(di.move_up) + '">&#9650;</button>' +
@@ -1154,6 +1181,22 @@
         }
     }
 
+    function bindProblemButtons(root) {
+        (root || document).querySelectorAll('.stop-problem-btn').forEach(function (btn) {
+            if (btn.getAttribute('data-problem-bound') === '1') return;
+            btn.setAttribute('data-problem-bound', '1');
+            btn.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openFailStopModal(
+                    btn.getAttribute('data-daily-order-id'),
+                    btn.getAttribute('data-assignment-id') || '',
+                    btn.getAttribute('data-customer-name') || ''
+                );
+            });
+        });
+    }
+
     function bindFailStopButtons(root) {
         (root || document).querySelectorAll('.fail-stop-btn').forEach(function (btn) {
             if (btn.getAttribute('data-fail-bound') === '1') return;
@@ -1835,6 +1878,7 @@
         bindSkipStopButtons(document);
         bindUnskipStopButtons(document);
         bindFailStopButtons(document);
+        bindProblemButtons(document);
         tryOpenStopFromUrl();
 
         var skipCancelBtn = document.getElementById('skipStopCancelBtn');
@@ -2012,36 +2056,82 @@
         if (completedButton) completedButton.addEventListener('click', function () { openPastHistory(completedButton); });
         if (pastButton) pastButton.addEventListener('click', function () { openPastHistory(pastButton); });
 
-        document.addEventListener('click', function (e) {
-            var adjustToggle = e.target.closest('#routeAdjustToggle');
-            if (adjustToggle) {
-                e.preventDefault();
-                if (routeAdjust.open) {
-                    closeRouteAdjust(true);
-                } else {
-                    openRouteAdjust();
+        var reorderToggleAt = 0;
+        function toggleReorderFromTap(event) {
+            event.preventDefault();
+            var now = Date.now();
+            // A touchend and the click it synthesizes both reach this handler.
+            // The second one used to close the mode the first one had just opened.
+            if (now - reorderToggleAt < 450) return;
+            reorderToggleAt = now;
+            if (routeAdjust.open) {
+                closeRouteAdjust(true);
+            } else {
+                openRouteAdjust();
+            }
+        }
+
+        var reorderBtn = document.getElementById('routeAdjustToggle');
+        if (reorderBtn) {
+            reorderBtn.addEventListener('pointerup', function (event) {
+                if (event.pointerType === 'mouse' || event.button > 0) return;
+                toggleReorderFromTap(event);
+            });
+        }
+
+        function bindOneTapDetails(root) {
+            (root || document).querySelectorAll('details.bakery-nav__more, details.next-stop-more').forEach(function (details) {
+                var summary = details.querySelector('summary');
+                if (!summary || summary.getAttribute('data-one-tap') === '1') return;
+                summary.setAttribute('data-one-tap', '1');
+                var last = 0;
+                function toggleOnce(event) {
+                    event.preventDefault();
+                    var now = Date.now();
+                    if (now - last < 450) return;
+                    last = now;
+                    details.open = !details.open;
                 }
+                summary.addEventListener('pointerup', function (event) {
+                    if (event.pointerType === 'mouse' || event.button > 0) return;
+                    toggleOnce(event);
+                });
+                summary.addEventListener('click', function (event) {
+                    // Native summary toggles on click. preventDefault keeps that
+                    // from undoing the pointerup toggle, and mouse clicks toggle once.
+                    toggleOnce(event);
+                });
+            });
+        }
+        bindOneTapDetails(document);
+
+        document.addEventListener('click', function (e) {
+            var targetEl = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentElement);
+            if (!targetEl || !targetEl.closest) return;
+            var adjustToggle = targetEl.closest('#routeAdjustToggle');
+            if (adjustToggle) {
+                toggleReorderFromTap(e);
                 return;
             }
-            var changeNext = e.target.closest('.change-next-btn');
+            var changeNext = targetEl.closest('.change-next-btn');
             if (changeNext) {
                 e.preventDefault();
                 openRouteAdjust();
                 return;
             }
-            var cancelAdjust = e.target.closest('#routeAdjustCancel');
+            var cancelAdjust = targetEl.closest('#routeAdjustCancel');
             if (cancelAdjust) {
                 e.preventDefault();
                 closeRouteAdjust(true);
                 return;
             }
-            var saveAdjust = e.target.closest('#routeAdjustSave');
+            var saveAdjust = targetEl.closest('#routeAdjustSave');
             if (saveAdjust) {
                 e.preventDefault();
                 saveRouteAdjust();
                 return;
             }
-            var goNextBtn = e.target.closest('.stop-go-next');
+            var goNextBtn = targetEl.closest('.stop-go-next');
             if (goNextBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2050,7 +2140,7 @@
                 });
                 return;
             }
-            var moveUpBtn = e.target.closest('.stop-move-up, .stop-move-down');
+            var moveUpBtn = targetEl.closest('.stop-move-up, .stop-move-down');
             if (moveUpBtn) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2058,8 +2148,8 @@
                 moveStopInAdjust(moveUpBtn.getAttribute('data-daily-order-id'), moveUpBtn.classList.contains('stop-move-up') ? 'up' : 'down');
                 return;
             }
-            var problemBtn = e.target.closest('.stop-problem-btn');
-            if (problemBtn) {
+            var problemBtn = targetEl.closest('.stop-problem-btn');
+            if (problemBtn && problemBtn.getAttribute('data-problem-bound') !== '1') {
                 e.preventDefault();
                 e.stopPropagation();
                 openFailStopModal(
@@ -2069,64 +2159,93 @@
                 );
                 return;
             }
-            var problemChip = e.target.closest('[data-problem-action]');
+            var stepBtn = targetEl.closest('[data-start-step]');
+            if (stepBtn && stepBtn.getAttribute('data-photo-bound') !== '1' && window.DriverDelivery && typeof window.DriverDelivery.openModal === 'function') {
+                e.preventDefault();
+                e.stopPropagation();
+                window.DriverDelivery.openModal({
+                    driverId: parseInt(stepBtn.getAttribute('data-driver-id'), 10) || parseInt((routeRoot() && routeRoot().getAttribute('data-driver-id')) || '0', 10) || 0,
+                    driverName: stepBtn.getAttribute('data-driver-name') || (routeRoot() && routeRoot().getAttribute('data-driver-name')) || '',
+                    customerId: parseInt(stepBtn.getAttribute('data-customer-id'), 10) || 0,
+                    dailyOrderId: parseInt(stepBtn.getAttribute('data-daily-order-id'), 10) || 0,
+                    customerName: stepBtn.getAttribute('data-customer-name') || '',
+                    address: stepBtn.getAttribute('data-address') || '',
+                    date: stepBtn.getAttribute('data-date') || (routeRoot() && routeRoot().getAttribute('data-date')) || '',
+                    assignmentId: parseInt(stepBtn.getAttribute('data-assignment-id'), 10) || 0,
+                    photoMode: stepBtn.getAttribute('data-photo-mode') || 'capture',
+                    startStep: stepBtn.getAttribute('data-start-step') || '',
+                    autoOpenCamera: false
+                });
+                return;
+            }
+            var problemChip = targetEl.closest('[data-problem-action]');
             if (problemChip) {
                 e.preventDefault();
                 runProblemAction(problemChip.getAttribute('data-problem-action'));
                 return;
             }
-            var viewTarget = e.target.closest('[data-route-view-target]');
+            var viewTarget = targetEl.closest('[data-route-view-target]');
             if (viewTarget) {
                 e.preventDefault();
                 setRouteView(viewTarget.getAttribute('data-route-view-target'), { push: true });
                 return;
             }
-            if (e.target.closest('#routeSuggestBtn')) {
+            if (targetEl.closest('#routeSuggestBtn')) {
                 e.preventDefault();
                 suggestRouteOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-accept')) {
+            if (targetEl.closest('.route-suggest-accept')) {
                 e.preventDefault();
                 acceptSuggestedOrder();
                 return;
             }
-            if (e.target.closest('.route-suggest-dismiss')) {
+            if (targetEl.closest('.route-suggest-dismiss')) {
                 e.preventDefault();
                 hideSuggestPreview();
                 return;
             }
-            var notesBtn = e.target.closest('#nextStopNotes');
+            var notesBtn = targetEl.closest('#nextStopNotes');
             if (notesBtn) {
                 var clamped = notesBtn.classList.toggle('is-clamped');
                 notesBtn.setAttribute('aria-expanded', clamped ? 'false' : 'true');
                 return;
             }
-            if (e.target.closest('#vanLoadedBtn')) {
+            if (targetEl.closest('#vanLoadedBtn')) {
                 e.preventDefault();
                 markVanLoaded();
                 return;
             }
-            if (e.target.closest('#nowStripDate')) {
+            if (targetEl.closest('#nowStripDate')) {
                 e.preventDefault();
                 var disclosure = document.getElementById('routeDateDisclosure');
                 if (disclosure) disclosure.open = !disclosure.open;
                 return;
             }
-            if (e.target.closest('#driverNavProblem')) {
+            if (targetEl.closest('#driverNavProblem')) {
                 e.preventDefault();
                 var nextCard = document.getElementById('nextStopCard');
-                var cardProblem = nextCard && nextCard.querySelector('.stop-problem-btn');
-                if (cardProblem) cardProblem.click();
+                var problemOrderId = nextCard && nextCard.getAttribute('data-daily-order-id');
+                var problemAssignmentId = nextCard && nextCard.getAttribute('data-assignment-id');
+                var problemCustomer = nextCard && nextCard.getAttribute('data-customer-name');
+                if (!problemOrderId) {
+                    var heroStop = getActiveStops()[0];
+                    if (heroStop) {
+                        problemOrderId = heroStop.getAttribute('data-daily-order-id');
+                        problemAssignmentId = heroStop.getAttribute('data-assignment-id');
+                        problemCustomer = heroStop.getAttribute('data-customer-name');
+                    }
+                }
+                if (problemOrderId) openFailStopModal(problemOrderId, problemAssignmentId || '', problemCustomer || '');
                 return;
             }
-            var saverToggle = e.target.closest('[data-data-saver]');
+            var saverToggle = targetEl.closest('[data-data-saver]');
             if (saverToggle && window.DriverDataSaver) {
                 e.preventDefault();
                 window.DriverDataSaver.set(saverToggle.getAttribute('data-data-saver'));
                 return;
             }
-            var prepOrdersBtn = e.target.closest('.route-prep-stop .stop-orders-btn');
+            var prepOrdersBtn = targetEl.closest('.route-prep-stop .stop-orders-btn');
             if (prepOrdersBtn) {
                 e.preventDefault();
                 var prepStop = prepOrdersBtn.closest('.route-prep-stop');
@@ -2134,31 +2253,40 @@
                 if (prepWrap) loadOrderDetails(prepWrap, prepOrdersBtn.getAttribute('data-daily-order-id') || '0');
                 return;
             }
-            var mapsChoice = e.target.closest('[data-maps-app]');
+            var mapsChoice = targetEl.closest('[data-maps-app]');
             if (mapsChoice) {
                 e.preventDefault();
                 setMapsApp(mapsChoice.getAttribute('data-maps-app'));
                 return;
             }
 
-            var stop = e.target.closest('.stop-item');
+            var stop = targetEl.closest('.stop-item');
             if (!stop) return;
-            if (e.target.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label')) {
+            if (targetEl.closest('.contact-actions, .stop-row-actions, a, button, input, select, textarea, label, summary')) {
                 return;
             }
             if (document.body.classList.contains('route-adjust-open')) {
                 return;
             }
-            var status = stop.getAttribute('data-status') || '';
-            if (stop.closest('#stopList') && status !== 'delivered' && status !== 'cancelled' && status !== 'failed') {
-                renderNextStop(stop);
-                setRouteView('now', { push: true });
-                var card = document.getElementById('nextStopCard');
-                if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
-                return;
-            }
+            if ((stop.getAttribute('data-status') || '') === 'cancelled') return;
             openStopDeliveryFromEl(stop, { autoOpenCamera: false });
         });
+
+        function syncDriverChrome() {
+            var nav = document.querySelector('.bakery-nav--focused');
+            var dock = document.getElementById('routeStickyDock');
+            if (nav) {
+                var navH = Math.ceil(nav.getBoundingClientRect().height);
+                if (navH > 0) document.body.style.setProperty('--driver-nav-h', navH + 'px');
+            }
+            var dockVisible = dock && !dock.hidden && dock.getAttribute('aria-hidden') !== 'true';
+            if (dockVisible) {
+                var dockH = Math.ceil(dock.getBoundingClientRect().height);
+                if (dockH > 0) document.body.style.setProperty('--driver-dock-h', dockH + 'px');
+            }
+        }
+        syncDriverChrome();
+        window.addEventListener('resize', syncDriverChrome);
 
         bindReorderDrag();
         initRouteView();

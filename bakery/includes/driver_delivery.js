@@ -821,6 +821,7 @@
       skipBtn.textContent = state.secondPhoto ? i18n('back') : i18n('skip_photo');
     }
     updateSecondPhotoUi();
+    if (step === 'delivery') syncCaptureActionBar();
     if (primaryBtn) {
       if (step === 'photo') {
         primaryBtn.hidden = true;
@@ -1153,6 +1154,25 @@
     goToStep('delivery');
   }
 
+  function scrollCaptureFieldIntoView(field) {
+    if (!field || typeof field.scrollIntoView !== 'function') return;
+    var run = function () {
+      syncCaptureActionBar();
+      field.scrollIntoView({ block: 'center', inline: 'nearest' });
+    };
+    run();
+    window.setTimeout(run, 280);
+  }
+
+  function syncCaptureActionBar() {
+    var footer = document.querySelector('#deliveryPhotoModal.is-inline .photo-modal-footer');
+    if (!footer) return;
+    var height = Math.ceil(footer.getBoundingClientRect().height);
+    if (height > 0) {
+      document.body.style.setProperty('--driver-action-bar', height + 'px');
+    }
+  }
+
   function syncInlineTakePhotoBtn() {
     var btn = $('deliveryInlineTakePhotoBtn');
     if (!btn) return;
@@ -1168,7 +1188,11 @@
     var thumb = $('deliveryInlineThumb');
     var label = $('deliveryInlineProofLabel');
     if (!box) return;
-    box.hidden = !kind;
+    var hasShot = kind === 'uploading' || kind === 'saved' || kind === 'queued';
+    var retake = box.querySelector('.delivery-inline-retake');
+    if (retake) retake.hidden = !hasShot;
+    // Before any photo, show Take photo. "No photo" + Retake is only for a shot that exists.
+    box.hidden = !hasShot;
     box.setAttribute('data-proof-state', kind || '');
     if (thumb) {
       if (objectUrl) {
@@ -2893,6 +2917,7 @@
       modal.setAttribute('aria-modal', 'true');
     }
     modal.style.display = 'flex';
+    modal.classList.add('is-open');
     modal.setAttribute('aria-hidden', 'false');
     var routeRoot = $('driverRouteRoot');
     if (state.inline) {
@@ -3198,10 +3223,23 @@
       totalsAdjust.addEventListener('click', function () {
         var details = $('deliveryAdjustDetails');
         if (!details) return;
-        details.open = !details.open;
-        totalsAdjust.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+        details.open = true;
+        totalsAdjust.setAttribute('aria-expanded', 'true');
+        var pieces = $('deliveryPiecesInput');
+        if (!pieces) return;
+        if (typeof pieces.focus === 'function') {
+          try { pieces.focus({ preventScroll: true }); } catch (err) { pieces.focus(); }
+        }
+        scrollCaptureFieldIntoView(pieces);
       });
     }
+    ['deliveryPiecesInput', 'deliveryCreditsInput', 'deliveryCashCollectedInput', 'deliveryPricePerPieceInput', 'deliveryCodOverrideReason'].forEach(function (id) {
+      var field = $(id);
+      if (!field) return;
+      field.addEventListener('focus', function () {
+        scrollCaptureFieldIntoView(field);
+      });
+    });
     var seeInvoice = $('deliverySeeInvoice');
     if (seeInvoice) {
       seeInvoice.addEventListener('click', function () {

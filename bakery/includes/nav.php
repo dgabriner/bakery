@@ -182,7 +182,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       </a>
       <a class="bakery-nav__direct <?php echo $currentPage === 'call_headquarters' ? 'bakery-nav__direct--active' : ''; ?>" href="<?php echo htmlspecialchars(BASE_URL, ENT_QUOTES, 'UTF-8'); ?>call_headquarters.php" aria-label="<?php bakery_te('nav.call_hq'); ?>"<?php echo $currentPage === 'call_headquarters' ? ' aria-current="page"' : ''; ?>>
         <span class="bakery-nav__label-full" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
-        <span class="bakery-nav__label-short" aria-hidden="true"><?php bakery_te('nav.call_hq'); ?></span>
+        <span class="bakery-nav__label-short"><?php bakery_te('nav.call_hq_short'); ?></span>
       </a>
       <details class="bakery-nav__more<?php echo in_array($currentPage, ['driver_stops', 'pack_list', 'qr_login', 'time_clock'], true) ? ' bakery-nav__more--active' : ''; ?>">
         <summary class="bakery-nav__direct bakery-nav__more-toggle" aria-label="<?php bakery_te('nav.more_aria'); ?>">

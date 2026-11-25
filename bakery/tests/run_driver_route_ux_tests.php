@@ -188,6 +188,152 @@ driver_ux_assert(
         && strpos($mapJs, 'optimizeWaypoints: true') !== false
 );
 
+driver_ux_assert(
+    'filled photo buttons are not painted the tan link color',
+    strpos($styles, "body.driver-workflow-page .contact-actions .photo-complete-btn {\n    border-color: #e9bf87;\n    color: #9b5c16;\n}") !== false
+        && strpos($styles, "body.driver-workflow-page .photo-complete-btn {\n    border-color: #e9bf87;\n    color: #9b5c16;\n}") === false
+        && strpos($styles, 'body.driver-workflow-page .route-btn.photo-complete-btn') !== false
+);
+driver_ux_assert(
+    'hero actions are Photo, Navigate, and Problem with inline icons',
+    strpos($page, "bakery_driver_action_label('photo', bakery_t('driver.photo'))") !== false
+        && strpos($page, "bakery_driver_action_label('navigate', bakery_t('driver.navigate'))") !== false
+        && strpos($page, "bakery_driver_action_label('problem', bakery_t('driver.problem'))") !== false
+        && strpos($page, 'class="route-action-icon"') !== false
+        && strpos($routeJs, "actionLabel('photo'") !== false
+        && strpos($routeJs, "di.navigate || di.directions") !== false
+);
+driver_ux_assert(
+    'Amounts opens delivery entry even when the photo button was not pre-bound',
+    strpos($page, 'data-start-step="delivery"') !== false
+        && strpos($page, "bakery_t('driver.amounts')") !== false
+        && strpos($routeJs, "stepBtn.getAttribute('data-start-step')") !== false
+        && isset($english['driver.amounts'], $spanish['driver.amounts'])
+        && $english['driver.amounts'] === 'Amounts'
+        && $spanish['driver.amounts'] === 'Cantidades'
+);
+driver_ux_assert(
+    'row Problem and bottom-nav Problem open the problem sheet directly',
+    strpos($routeJs, 'function bindProblemButtons') !== false
+        && strpos($routeJs, 'openFailStopModal(problemOrderId') !== false
+        && strpos($routeJs, 'cardProblem.click()') === false
+);
+driver_ux_assert(
+    'phone hero actions stay visible and the route clears the dock and nav',
+    strpos($styles, 'body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions') !== false
+        && strpos($styles, "display: none;\n    }\n\n    /* Route view") === false
+        && strpos($styles, 'padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 16px);') !== false
+);
+$nav = (string)file_get_contents($root . '/includes/nav.php');
+$navCss = (string)file_get_contents($root . '/css/nav.css');
+driver_ux_assert(
+    'phone bottom nav uses a short HQ label and can wrap inside its cell',
+    strpos($nav, "bakery_te('nav.call_hq_short')") !== false
+        && isset($english['nav.call_hq_short'], $spanish['nav.call_hq_short'])
+        && $english['nav.call_hq_short'] !== ''
+        && $spanish['nav.call_hq_short'] !== ''
+        && strpos($navCss, 'overflow-wrap: anywhere;') !== false
+);
+
+driver_ux_assert(
+    'phone amounts panel scrolls above the fixed action bar and the keyboard',
+    strpos($styles, 'padding-bottom: calc(var(--driver-action-bar) + env(safe-area-inset-bottom, 0px)) !important;') !== false
+        && strpos($styles, 'scroll-padding-bottom: calc(var(--driver-action-bar) + env(safe-area-inset-bottom, 0px));') !== false
+        && strpos($page, 'id="deliveryPiecesInput" min="0" step="1" inputmode="numeric"') !== false
+        && strpos($page, 'id="deliveryCreditsInput" min="0" step="1" value="0" inputmode="numeric"') !== false
+);
+driver_ux_assert(
+    'phone More menu is fixed inside the viewport and scrolls internally',
+    strpos($styles, 'body.driver-workflow-page .bakery-nav--driver .bakery-nav__more[open] .bakery-nav__more-sheet') !== false
+        && strpos($styles, 'max-height: calc(100svh - var(--driver-nav-h) - var(--driver-dock-h) - 16px - env(safe-area-inset-top, 0px));') !== false
+        && strpos($styles, 'overflow-y: auto;') !== false
+);
+driver_ux_assert(
+    'More and Reorder ignore the extra tap that used to close them',
+    strpos($routeJs, 'function bindOneTapDetails') !== false
+        && strpos($routeJs, 'function toggleReorderFromTap') !== false
+        && strpos($routeJs, 'now - reorderToggleAt < 450') !== false
+        && strpos($routeJs, 'now - last < 450') !== false
+);
+driver_ux_assert(
+    'tapping a stop row opens that stop and rows do not select text',
+    strpos($routeJs, 'openStopDeliveryFromEl(stop, { autoOpenCamera: false })') !== false
+        && strpos($routeJs, "renderNextStop(stop);\n                setRouteView('now'") === false
+        && strpos($styles, '.driver-route .stop-item-name') !== false
+        && strpos($styles, 'user-select: none;') !== false
+);
+driver_ux_assert(
+    'small screens slim the date bar and keep the staging banner from covering it',
+    strpos($styles, 'body.driver-workflow-page .route-day-nav') !== false
+        && strpos($styles, "position: static;\n        top: auto;") !== false
+        && strpos($styles, 'body.driver-workflow-page .local-env-banner') !== false
+        && strpos($styles, 'padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 28px);') !== false
+);
+driver_ux_assert(
+    'the route strip no longer hangs past the screen edge',
+    strpos($styles, 'margin: 0 -12px 8px;') === false
+        && strpos($styles, ".now-strip {\n        position: static;") !== false
+);
+driver_ux_assert(
+    'prep hides the floating Add a stop dock that covered the list',
+    strpos($styles, 'bottom: calc(118px') !== false
+        && strpos($styles, 'body.driver-route-prep .route-prep-add-dock') !== false
+        && strpos($styles, 'display: none !important;') !== false
+        && strpos($page, 'id="routePrepAddListBtn"') !== false
+);
+$deliveryJs = (string)file_get_contents($root . '/includes/driver_delivery.js');
+driver_ux_assert(
+    'amounts shows Take photo before a shot and Adjust moves to the pieces field',
+    strpos($deliveryJs, 'function scrollCaptureFieldIntoView') !== false
+        && strpos($deliveryJs, 'var hasShot = kind === \'uploading\' || kind === \'saved\' || kind === \'queued\'') !== false
+        && strpos($deliveryJs, 'box.hidden = !hasShot;') !== false
+        && strpos($deliveryJs, 'scrollCaptureFieldIntoView(pieces)') !== false
+        && strpos($styles, '.photo-modal.is-inline.delivery-step-photo #deliveryCameraFrame.is-camera-idle') !== false
+);
+driver_ux_assert(
+    'phone hero keeps Photo, Navigate, and Problem with readable labels',
+    strpos($styles, 'body.driver-workflow-page .driver-route[data-route-view="now"] .next-stop-actions') !== false
+        && strpos($styles, 'grid-template-columns: repeat(3, minmax(0, 1fr));') !== false
+        && strpos($styles, '.next-stop-actions .route-action-label') !== false
+        && strpos($page, "bakery_driver_action_label('photo'") !== false
+        && strpos($page, "bakery_driver_action_label('navigate'") !== false
+        && strpos($page, "bakery_driver_action_label('problem'") !== false
+);
+driver_ux_assert(
+    'phone log out sits in the More sheet, above the dock, and is not labelled Out',
+    strpos($styles, 'body.driver-workflow-page .bakery-nav__more-sheet .bakery-nav__logout') !== false
+        && strpos($styles, 'bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);') !== false
+        && $english['common.log_out_short'] === 'Log out'
+        && $spanish['common.log_out_short'] === 'Salir'
+        && $english['common.log_out_short'] !== 'Out'
+);
+driver_ux_assert(
+    'past stops are not trapped in a short scroller under the dock',
+    strpos($styles, 'body.driver-workflow-page .past-stops-list') !== false
+        && strpos($styles, "max-height: none;\n        overflow: visible;") !== false
+        && strpos($styles, 'padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 28px);') !== false
+);
+driver_ux_assert(
+    'the date sheet sits above the Directions dock',
+    strpos($styles, 'body.driver-field-mode.driver-workflow-page.route-has-sticky-dock .route-date-dock') !== false
+        && strpos($styles, 'bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);') !== false
+        && strpos($routeJs, 'dateDisclosure.open = true') !== false
+);
+$loginPage = (string)file_get_contents($root . '/login.php');
+driver_ux_assert(
+    'login ignores a second Enter after the 4th digit auto-submits',
+    strpos($loginPage, 'if (posted)') !== false
+        && strpos($loginPage, 'event.preventDefault();') !== false
+        && strpos($loginPage, "event.key === 'Enter' && posted") !== false
+        && strpos($loginPage, 'var submitting = false;') === false
+);
+driver_ux_assert(
+    'Today chip and Add / remove stops are at least 44px',
+    strpos($styles, ".now-strip-date {\n    display: inline-flex;\n    align-items: baseline;\n    gap: 6px;\n    min-height: 44px;") !== false
+        && strpos($styles, ".route-prep-edit-link {\n    min-height: 44px;") !== false
+        && strpos($styles, ".route-adjust-toggle {\n    min-height: 44px;") !== false
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);

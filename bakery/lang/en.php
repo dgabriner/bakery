@@ -11,7 +11,7 @@ return [
 
     // Common
     'common.log_out' => 'Log out',
-    'common.log_out_short' => 'Out',
+    'common.log_out_short' => 'Log out',
     'common.menu' => 'Menu',
     'common.close' => 'Close',
     'common.close_menu' => 'Close menu',
@@ -398,6 +398,7 @@ return [
     'nav.stops' => 'Stops',
     'nav.stops_short' => 'Stops',
     'nav.call_hq' => 'Call HQ',
+    'nav.call_hq_short' => 'HQ',
     'nav.choose_route_date' => 'Choose route date',
     'nav.date' => 'Date',
     'nav.more' => 'More',
@@ -3761,6 +3762,7 @@ return [
     'driver.delivery_steps' => 'Delivery steps',
     'driver.arrive' => 'Arrive',
     'driver.confirm' => 'Confirm',
+    'driver.amounts' => 'Amounts',
     'driver.leave' => 'Leave',
     'driver.photo_type' => 'Photo type',
     'driver.arrival_before' => 'Arrival · Before',
