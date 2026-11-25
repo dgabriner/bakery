@@ -3716,6 +3716,7 @@ return [
     'driver.view_route' => 'Route',
     'driver.show_map' => 'Show map',
     'driver.reorder' => 'Reorder',
+    'driver.discard_changes' => 'Discard changes?',
     'driver.suggest_order' => 'Suggest order',
     'driver.suggest_preview' => 'New order moves :moves stops and saves about :minutes min.',
     'driver.suggest_no_gain' => 'Your current order is already about the fastest.',
