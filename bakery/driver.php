@@ -93,8 +93,34 @@ if ($routeDayDiff < -1) {
     $routeDateKind = 'future';
     $routeDateRelative = bakery_t('driver.route_upcoming');
 }
-$routeDateLabel = bakery_localized_date_label($selectedDateObject, false, true);
-$routeDateCompact = bakery_localized_compact_date($selectedDateObject);
+if (!function_exists('bakery_driver_chrome_date')) {
+    /**
+     * Used when includes/i18n.php on the server is older than this page.
+     * Spanish stays day-first. English stays month-day.
+     */
+    function bakery_driver_chrome_date(DateTimeInterface $date, string $style = 'weekday'): string {
+        $es = function_exists('bakery_locale') && bakery_locale() === 'es';
+        $day = $date->format('j');
+        $monthIndex = (int)$date->format('n');
+        if (!$es) {
+            if ($style === 'compact') {
+                return $date->format('M j');
+            }
+            return function_exists('bakery_localized_date_label')
+                ? bakery_localized_date_label($date)
+                : $date->format('F j');
+        }
+        $months = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        $short = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+        if ($style === 'compact') {
+            return $day . ' ' . $short[$monthIndex];
+        }
+        $weekdays = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábado', 7 => 'domingo'];
+        return $weekdays[(int)$date->format('N')] . ' ' . $day . ' de ' . $months[$monthIndex];
+    }
+}
+$routeDateLabel = bakery_driver_chrome_date($selectedDateObject, 'weekday');
+$routeDateCompact = bakery_driver_chrome_date($selectedDateObject, 'compact');
 $routeView = strtolower(trim((string)($_GET['view'] ?? '')));
 // Tomorrow and every past day open the same drive route. Prep stays a choice.
 $routePrepMode = $routeView === 'prep' && $routeDateKind !== 'past';
@@ -821,7 +847,7 @@ document.body.classList.add('driver-route-prep');
     <div class="now-strip" id="nowStrip">
         <button type="button" class="now-strip-date" id="nowStripDate" aria-controls="routeDateDisclosure" aria-expanded="false" aria-label="<?php echo htmlspecialchars(bakery_t('nav.choose_route_date'), ENT_QUOTES, 'UTF-8'); ?>">
             <span class="now-strip-date-kind"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
-            <strong><?php echo htmlspecialchars($routeDateCompact, ENT_QUOTES, 'UTF-8'); ?></strong>
+            <strong data-driver-date="compact" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateCompact, ENT_QUOTES, 'UTF-8'); ?></strong>
         </button>
         <span class="now-strip-progress" id="nowStripProgress" aria-live="polite"<?php echo $totalStops > 0 ? '' : ' hidden'; ?>><?php echo (int)$driverCompletedStops; ?>/<?php echo (int)$totalStops; ?></span>
         <button type="button" class="driver-outbox-chip" id="driverOutboxChip" hidden></button>
@@ -845,7 +871,7 @@ document.body.classList.add('driver-route-prep');
                 aria-expanded="false"
                 aria-controls="routeDateDisclosure">
             <span class="route-day-nav-kicker"><?php echo htmlspecialchars($routeDateRelative, ENT_QUOTES, 'UTF-8'); ?></span>
-            <strong class="route-day-nav-date"><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
+            <strong class="route-day-nav-date" data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
             <span class="route-day-nav-picker-hint"><?php bakery_te('driver.change_date'); ?></span>
         </button>
         <?php if ($routeForwardDate !== ''): ?>
@@ -874,7 +900,7 @@ document.body.classList.add('driver-route-prep');
     <details class="route-date-disclosure route-date-dock" id="routeDateDisclosure">
         <summary class="route-date-summary">
             <span class="route-date-label">
-                <?php echo $selectedDate === $todayDate ? htmlspecialchars(bakery_t('common.today') . ' · ') : ''; ?><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?>
+                <?php echo $selectedDate === $todayDate ? htmlspecialchars(bakery_t('common.today') . ' · ') : ''; ?><span data-driver-date="weekday" data-driver-date-iso="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($routeDateLabel, ENT_QUOTES, 'UTF-8'); ?></span>
             </span>
             <span class="route-date-summary-action">
                 <span class="route-date-summary-action-open"><?php bakery_te('driver.change_date'); ?></span>
@@ -1930,6 +1956,8 @@ window.__DRIVER_ROUTE_BOOT__ = <?php echo json_encode([
     'nextDayUrl' => $routeForwardDate !== '' ? bakery_driver_route_day_url((int)$selectedDriverId, (string)$routeForwardDate) : '',
     'previousDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$previousDate),
     'isToday' => $selectedDate === $todayDate,
+    'routeDate' => $selectedDate,
+    'locale' => function_exists('bakery_locale') ? bakery_locale() : 'en',
     'prepMode' => !empty($routePrepMode),
     'snapshotHash' => ($selectedDriverId > 0 && !empty($driver) && $totalStops > 0)
         ? bakery_driver_route_snapshot($db, (int)$selectedDriverId, $selectedDate)['hash']

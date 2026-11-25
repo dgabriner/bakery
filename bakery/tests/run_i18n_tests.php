@@ -213,6 +213,23 @@ i18n_assert('English date stays November 24', bakery_localized_date_label($nov24
 i18n_assert('English date with year stays November 24, 2026', bakery_localized_date_label($nov24, true) === 'November 24, 2026');
 i18n_assert('English weekday flag does not change the date', bakery_localized_date_label($nov24, false, true) === 'November 24');
 i18n_assert('English compact date stays Nov 24', bakery_localized_compact_date($nov24) === 'Nov 24');
+i18n_assert(
+    'English driver chrome dates stay month-day',
+    bakery_driver_chrome_date($nov24, 'weekday') === 'November 24'
+        && bakery_driver_chrome_date($nov24, 'compact') === 'Nov 24'
+);
+$GLOBALS['bakery_i18n_catalog'] = null;
+bakery_set_locale('es', false);
+i18n_assert(
+    'Spanish driver chrome header is martes 24 de noviembre',
+    bakery_driver_chrome_date($nov24, 'weekday') === 'martes 24 de noviembre'
+        && !preg_match('/^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre) \d/', bakery_driver_chrome_date($nov24, 'weekday'))
+);
+i18n_assert(
+    'Spanish driver chrome chip is 24 nov',
+    bakery_driver_chrome_date($nov24, 'compact') === '24 nov'
+        && bakery_driver_chrome_date($nov24, 'compact') !== 'Nov 24'
+);
 $GLOBALS['bakery_i18n_catalog'] = null;
 bakery_set_locale('es', false);
 i18n_assert('Spanish demand stage label', bakery_t('ux.stage.demand') === 'Demanda');

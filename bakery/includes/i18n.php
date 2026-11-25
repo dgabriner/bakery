@@ -266,6 +266,24 @@ function bakery_localized_compact_date(DateTimeInterface $date): string {
     return $date->format('M j');
 }
 
+/**
+ * Driver header and chip dates.
+ * weekday: Spanish "martes 24 de noviembre", English "November 24".
+ * compact: Spanish "24 nov", English "Nov 24".
+ */
+function bakery_driver_chrome_date(DateTimeInterface $date, string $style = 'weekday'): string {
+    if (bakery_locale() !== 'es') {
+        if ($style === 'compact') {
+            return $date->format('M j');
+        }
+        return bakery_localized_date_label($date, false);
+    }
+    if ($style === 'compact') {
+        return bakery_localized_compact_date($date);
+    }
+    return bakery_localized_date_label($date, false, true);
+}
+
 function bakery_localized_month_day(DateTimeInterface $date): string {
     return bakery_localized_date_label($date, false);
 }

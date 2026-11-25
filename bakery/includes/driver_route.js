@@ -1,6 +1,45 @@
 (function () {
     var di = window.__DRIVER_PAGE_I18N__ || {};
     var boot = window.__DRIVER_ROUTE_BOOT__ || {};
+
+    var DRIVER_MONTHS_ES = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    var DRIVER_MONTHS_EN = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    var DRIVER_MONTHS_SHORT_ES = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    var DRIVER_MONTHS_SHORT_EN = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var DRIVER_WEEKDAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    function bakeryFormatDriverDate(iso, style) {
+        var match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return '';
+        var year = Number(match[1]);
+        var month = Number(match[2]);
+        var day = Number(match[3]);
+        if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+        var locale = window.__BAKERY_LOCALE__ || boot.locale || 'en';
+        var es = locale === 'es';
+        var utc = new Date(Date.UTC(year, month - 1, day));
+        if (es) {
+            if (style === 'compact') return String(day) + ' ' + DRIVER_MONTHS_SHORT_ES[month];
+            return DRIVER_WEEKDAYS_ES[utc.getUTCDay()] + ' ' + String(day) + ' de ' + DRIVER_MONTHS_ES[month];
+        }
+        if (style === 'compact') return DRIVER_MONTHS_SHORT_EN[month] + ' ' + String(day);
+        return DRIVER_MONTHS_EN[month] + ' ' + String(day);
+    }
+    window.bakeryFormatDriverDate = bakeryFormatDriverDate;
+
+    function applyDriverDates() {
+        var iso = boot.routeDate || '';
+        document.querySelectorAll('[data-driver-date]').forEach(function (el) {
+            var elIso = el.getAttribute('data-driver-date-iso') || iso;
+            var text = bakeryFormatDriverDate(elIso, el.getAttribute('data-driver-date') || 'weekday');
+            if (text) el.textContent = text;
+        });
+        if (!iso) return;
+        var header = document.querySelector('.route-day-nav-date');
+        if (header) header.textContent = bakeryFormatDriverDate(iso, 'weekday');
+        var chip = document.querySelector('.now-strip-date strong');
+        if (chip) chip.textContent = bakeryFormatDriverDate(iso, 'compact');
+    }
     function mapsDirectionsUrl(address, lat, lng) {
         var q = '';
         var nlat = Number(lat);
@@ -1877,6 +1916,8 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         if (window.__DRIVER_PAGE_I18N__) di = window.__DRIVER_PAGE_I18N__;
+        boot = window.__DRIVER_ROUTE_BOOT__ || boot;
+        applyDriverDates();
         applyNavigateLinks(document);
         refreshRouteUi();
         bindSkipStopButtons(document);

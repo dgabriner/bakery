@@ -235,11 +235,84 @@ driver_ux_assert(
         && (string)$english['driver.lines_more'] === '+:count more'
         && (string)$english['driver.map_follow'] === 'Follow'
 );
+$navPhp = (string)file_get_contents($root . '/includes/nav.php');
+$stopsPhp = (string)file_get_contents($root . '/driver_stops.php');
+$navAssignAt = strpos($navPhp, '$navDriverDateShort = ');
+$navAssign = $navAssignAt === false ? '' : substr($navPhp, $navAssignAt, 280);
 driver_ux_assert(
-    'driver dates use the weekday Spanish label and keep the English month-day form',
-    strpos($page, 'bakery_localized_date_label($selectedDateObject, false, true)') !== false
-        && strpos($page, 'bakery_localized_compact_date($selectedDateObject)') !== false
-        && strpos($page, "->format('M j')") === false
+    'driver header and chip dates are locale-aware and the nav chip is not English M j',
+    strpos($page, "bakery_driver_chrome_date(\$selectedDateObject, 'weekday')") !== false
+        && strpos($page, "bakery_driver_chrome_date(\$selectedDateObject, 'compact')") !== false
+        && strpos($page, 'data-driver-date="weekday"') !== false
+        && strpos($page, 'data-driver-date="compact"') !== false
+        && strpos($page, "'routeDate' => \$selectedDate") !== false
+        && strpos($navAssign, 'bakery_driver_chrome_date(') !== false
+        && strpos($navAssign, "format('M j')") === false
+        && strpos($stopsPhp, 'bakery_driver_chrome_date(') !== false
+        && strpos($routeJs, 'function bakeryFormatDriverDate(') !== false
+        && strpos($routeJs, 'function applyDriverDates(') !== false
+        && strpos($routeJs, "header.textContent = bakeryFormatDriverDate(iso, 'weekday')") !== false
+        && strpos($routeJs, "chip.textContent = bakeryFormatDriverDate(iso, 'compact')") !== false
+        && strpos($routeJs, 'toLocaleDateString') === false
+        && strpos($routeJs, 'Intl.DateTimeFormat') === false
+        && strpos($mapJs, 'toLocaleDateString') === false
+        && strpos($mapJs, 'Intl.DateTimeFormat') === false
+);
+
+$dateScript = <<<'JS'
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {
+  window: { __BAKERY_LOCALE__: 'es', __DRIVER_PAGE_I18N__: {}, __DRIVER_ROUTE_BOOT__: { locale: 'es', routeDate: '2026-11-24' } },
+  document: {
+    addEventListener: function () {},
+    getElementById: function () { return null; },
+    querySelector: function () { return null; },
+    querySelectorAll: function () { return []; },
+    documentElement: { classList: { toggle: function () {} } },
+    body: { classList: { add: function () {}, remove: function () {}, contains: function () { return false; }, toggle: function () {} } }
+  },
+  history: { replaceState: function () {}, pushState: function () {}, back: function () {}, state: null },
+  location: { search: '', pathname: '/driver.php', hash: '', assign: function () {} },
+  URLSearchParams: URLSearchParams,
+  console: console,
+  navigator: {},
+  fetch: function () { return Promise.resolve({ json: function () { return Promise.resolve({}); } }); },
+  setTimeout: function () {},
+  clearTimeout: function () {},
+  localStorage: { getItem: function () { return null; }, setItem: function () {} },
+  sessionStorage: { getItem: function () { return null; }, setItem: function () {} }
+};
+sandbox.window.window = sandbox.window;
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), sandbox);
+const format = sandbox.window.bakeryFormatDriverDate;
+const esHeader = format('2026-11-24', 'weekday');
+const esChip = format('2026-11-24', 'compact');
+sandbox.window.__BAKERY_LOCALE__ = 'en';
+const enHeader = format('2026-11-24', 'weekday');
+const enChip = format('2026-11-24', 'compact');
+const monthFirst = /^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December) \d/;
+if (esHeader !== 'martes 24 de noviembre' || monthFirst.test(esHeader)) {
+  console.error('es header ' + esHeader);
+  process.exit(1);
+}
+if (esChip !== '24 nov' || monthFirst.test(esChip) || esChip === 'Nov 24') {
+  console.error('es chip ' + esChip);
+  process.exit(1);
+}
+if (enHeader !== 'November 24' || enChip !== 'Nov 24') {
+  console.error('en ' + enHeader + ' / ' + enChip);
+  process.exit(1);
+}
+console.log(esHeader + ' | ' + esChip + ' | ' + enHeader + ' | ' + enChip);
+JS;
+$dateScriptPath = sys_get_temp_dir() . '/driver_date_format_check.js';
+file_put_contents($dateScriptPath, $dateScript);
+$dateNode = shell_exec('node ' . escapeshellarg($dateScriptPath) . ' ' . escapeshellarg($root . '/includes/driver_route.js') . ' 2>&1');
+driver_ux_assert(
+    'driver JS date formatter prints Spanish day-first and leaves English month-day',
+    is_string($dateNode) && strpos($dateNode, 'martes 24 de noviembre | 24 nov | November 24 | Nov 24') !== false
 );
 
 if ($failures > 0) {
