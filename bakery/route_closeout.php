@@ -37,10 +37,14 @@ if ($isDriverOnly) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     $postDriverId = (int)($_POST['driver_id'] ?? 0);
-    if ($isDriverOnly && $driverScopedId > 0) {
-        $postDriverId = $driverScopedId;
-    }
+    $returnToDriver = (string)($_POST['return'] ?? '') === 'driver';
     try {
+        if ($isDriverOnly) {
+            if ($driverScopedId <= 0 || ($postDriverId > 0 && $postDriverId !== $driverScopedId)) {
+                throw new RuntimeException(bakery_t('driver.closeout_own_route'));
+            }
+            $postDriverId = $driverScopedId;
+        }
         if (!bakery_inventory_closeout_ready($db)) {
             throw new RuntimeException('Route closeout is not installed. Run the database migrations first.');
         }
@@ -64,8 +68,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $selectedDate,
                 $postDriverId,
                 $lines,
-                trim((string)($_POST['notes'] ?? ''))
+                trim((string)($_POST['notes'] ?? '')),
+                $isDriverOnly && (string)($_POST['confirm_open_stops'] ?? '') === '1'
             );
+            if ($returnToDriver) {
+                $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                    'date' => $selectedDate,
+                    'closeout' => '1',
+                    'notice' => bakery_t('driver.closeout_saved'),
+                ]);
+                header('Location: ' . $dest);
+                exit;
+            }
             $returnKey = trim((string)($_POST['return'] ?? $_GET['return'] ?? ''));
             if ($returnKey === 'manager' && empty($_POST['stay'])) {
                 $dest = (defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes';
@@ -83,6 +97,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $focusDriverId = $postDriverId;
         }
     } catch (Throwable $e) {
+        if ($returnToDriver) {
+            $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                'date' => $selectedDate,
+                'closeout' => '1',
+                'closeout_error' => $e->getMessage(),
+            ]);
+            header('Location: ' . $dest);
+            exit;
+        }
         $error = $e->getMessage();
         $focusDriverId = $postDriverId > 0 ? $postDriverId : $focusDriverId;
     }

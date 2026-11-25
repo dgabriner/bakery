@@ -672,6 +672,43 @@ foreach ([
     );
 }
 
+$closeoutPhp = (string)file_get_contents($root . '/includes/driver_closeout.php');
+$closeoutPage = (string)file_get_contents($root . '/route_closeout.php');
+$navPhp = (string)file_get_contents($root . '/includes/nav.php');
+driver_ux_assert(
+    'Close out route is in the More menu and at the end of a finished route',
+    strpos($navPhp, 'bakery-nav__more-link--closeout') !== false
+        && strpos($page, 'driver-closeout-bar') !== false
+        && strpos($page, 'driver-closeout-end') !== false
+        && strpos($page, 'bakery_driver_closeout_render') !== false
+);
+driver_ux_assert(
+    'closeout bar sits above the bottom dock at 375 and 393 widths',
+    strpos($styles, '@media (max-width: 393px)') !== false
+        && strpos($styles, 'bottom: calc(var(--driver-nav-h) + 8px);') !== false
+        && strpos($styles, '@media (max-width: 720px)') !== false
+);
+driver_ux_assert(
+    'closeout labels are Close out route and Cerrar ruta',
+    ($english['driver.close_route'] ?? '') === 'Close out route'
+        && ($spanish['driver.close_route'] ?? '') === 'Cerrar ruta'
+        && ($english['driver.closeout_submit'] ?? '') === 'Close out route'
+        && ($spanish['driver.closeout_submit'] ?? '') === 'Cerrar ruta'
+);
+driver_ux_assert(
+    'driver closeout posts to the manager route closeout action',
+    strpos($closeoutPhp, "route_closeout.php") !== false
+        && strpos($closeoutPhp, 'value="close_route"') !== false
+        && strpos($closeoutPhp, 'name="confirm_open_stops"') !== false
+        && strpos($closeoutPage, 'confirm_open_stops') !== false
+        && strpos($closeoutPage, 'Only a manager can reopen a closed route.') !== false
+);
+driver_ux_assert(
+    'finishing the last stop reveals the closeout bar without covering the hero dock',
+    strpos($routeJs, "getElementById('driverCloseoutBar')") !== false
+        && strpos($routeJs, "classList.toggle('driver-closeout-ready', show)") !== false
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);

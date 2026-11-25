@@ -13,6 +13,7 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/pan_carry.php';
 require_once 'includes/driver_route_snapshot.php';
+require_once 'includes/driver_closeout.php';
 
 bakery_customer_account_ensure_schema($db);
 
@@ -68,6 +69,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
 }
 if (!empty($_GET['notice'])) {
     $driverDeskNotice = substr(trim((string)$_GET['notice']), 0, 160);
+}
+if (!empty($_GET['closeout_error'])) {
+    $driverDeskError = substr(trim((string)$_GET['closeout_error']), 0, 300);
 }
 
 $todayDate = date('Y-m-d');
@@ -832,6 +836,12 @@ document.body.classList.add('route-has-sticky-dock');
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
 <?php endif; ?>
+<?php if ($selectedDriverId > 0 && $driver && empty($showSelector) && empty($routePrepMode) && $remainingStops === 0 && $totalStops > 0): ?>
+document.body.classList.add('driver-closeout-ready');
+<?php endif; ?>
+<?php if ((string)($_GET['closeout'] ?? '') === '1' && $selectedDriverId > 0 && $driver && empty($showSelector)): ?>
+document.body.classList.add('driver-closeout-open');
+<?php endif; ?>
 <?php if (!empty($routePrepMode) && $selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-route-prep');
 <?php endif; ?>
@@ -993,6 +1003,14 @@ document.body.classList.add('driver-route-prep');
     <?php if (!empty($driverDeskNotice)): ?>
     <p class="exception-desk__reported" role="status"><?php echo htmlspecialchars($driverDeskNotice, ENT_QUOTES, 'UTF-8'); ?></p>
     <?php endif; ?>
+    <?php
+    if ($selectedDriverId > 0 && $driver && empty($showSelector)) {
+        bakery_driver_closeout_render($db, $selectedDate, (int)$selectedDriverId, [
+            'open' => (string)($_GET['closeout'] ?? '') === '1',
+            'driver_only' => (bool)$isAuthenticatedDriver,
+        ]);
+    }
+    ?>
     <?php if ($error): ?>
     <div class="empty-state"><p><?php echo $error; ?></p></div>
     <?php elseif ($routePrepMode || $totalStops > 0): ?>
@@ -1243,7 +1261,7 @@ document.body.classList.add('driver-route-prep');
 
             <?php if ($remainingStops === 0 && $totalStops > 0): ?>
                 <p class="route-closeout-cta">
-                    <a class="route-btn route-btn--primary" href="route_closeout.php?date=<?php echo urlencode($selectedDate); ?>&amp;driver_id=<?php echo (int)$selectedDriverId; ?>">
+                    <a class="route-btn route-btn--primary driver-closeout-end" href="<?php echo htmlspecialchars(bakery_driver_closeout_href($selectedDate, (int)$selectedDriverId), ENT_QUOTES, 'UTF-8'); ?>">
                         <?php bakery_te('driver.close_route'); ?>
                     </a>
                 </p>
@@ -1372,6 +1390,10 @@ document.body.classList.add('driver-route-prep');
     </div>
     <?php endif; ?>
 </div>
+
+<?php if ($selectedDriverId > 0 && $driver && empty($showSelector) && empty($routePrepMode) && $totalStops > 0): ?>
+<a class="driver-closeout-bar" id="driverCloseoutBar" href="<?php echo htmlspecialchars(bakery_driver_closeout_href($selectedDate, (int)$selectedDriverId), ENT_QUOTES, 'UTF-8'); ?>"<?php echo $remainingStops === 0 ? '' : ' hidden'; ?>><?php bakery_te('driver.close_route'); ?></a>
+<?php endif; ?>
 
 <div class="route-sticky-dock" id="routeStickyDock" <?php echo ($heroStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($heroStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
     <div class="route-sticky-dock-inner" id="routeStickyDockInner"><?php if ($heroStop && empty($routePrepMode)): ?><?php $dockMapsHref = bakery_driver_maps_url($heroStop['customer_address'] ?? '', bakery_driver_stop_coords($heroStop)); ?><?php if ($dockMapsHref !== ''): ?><a class="route-sticky-btn route-sticky-btn--nav js-navigate-stop" href="<?php echo htmlspecialchars($dockMapsHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('navigate', bakery_t('driver.navigate')); ?></a><?php endif; ?><button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-driver-name="<?php echo htmlspecialchars($heroStop['driver_name'] ?? ($driver['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-customer-id="<?php echo (int)$heroStop['customer_id']; ?>" data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-address="<?php echo htmlspecialchars($heroStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('photo', bakery_t('driver.photo')); ?></button><?php endif; ?></div>

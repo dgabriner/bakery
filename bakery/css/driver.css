@@ -7826,3 +7826,199 @@ body.driver-workflow-page .route-sticky-btn--finish {
     background: #a8600f;
     color: #fff;
 }
+
+/* Driver route closeout. The bar stays above the bottom dock at phone widths, including 375 and 393. */
+.driver-closeout {
+    margin: 0 0 14px;
+    padding: 14px;
+    border: 1px solid #d7e4df;
+    border-radius: 16px;
+    background: #fff;
+    min-width: 0;
+    scroll-margin-top: 64px;
+}
+
+.driver-closeout[hidden] {
+    display: none !important;
+}
+
+.driver-closeout h2 {
+    margin: 0 0 10px;
+    font-size: 1.25rem;
+}
+
+.driver-closeout h3 {
+    margin: 14px 0 6px;
+    font-size: 1rem;
+}
+
+.driver-closeout-stats,
+.driver-closeout-problems,
+.driver-closeout-open,
+.driver-closeout-lines {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.driver-closeout-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.driver-closeout-stats li,
+.driver-closeout-problems li,
+.driver-closeout-lines li,
+.driver-closeout-open li {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid #d7e4df;
+    border-radius: 12px;
+    background: #f4faf8;
+}
+
+.driver-closeout-stats strong {
+    font-size: 1.15rem;
+}
+
+.driver-closeout-quiet {
+    margin: 8px 0 0;
+    color: #536258;
+}
+
+.driver-closeout-warn {
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #fff6e5;
+    color: #6a4b12;
+    font-weight: 700;
+}
+
+.driver-closeout-problems,
+.driver-closeout-open,
+.driver-closeout-lines {
+    display: grid;
+    gap: 8px;
+}
+
+.driver-closeout-lines label,
+.driver-closeout-note-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-weight: 700;
+}
+
+.driver-closeout-lines input,
+.driver-closeout-note-field input {
+    width: 100%;
+    max-width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid #cbd4cf;
+    border-radius: 10px;
+    font: inherit;
+}
+
+.driver-closeout-confirm {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 12px 0;
+    font-weight: 700;
+}
+
+.driver-closeout-confirm input {
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+    flex: 0 0 auto;
+}
+
+.driver-closeout-submit,
+.route-closeout-cta .driver-closeout-end,
+.driver-closeout-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 14px;
+    background: #1f8a78;
+    color: #fff;
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 800;
+    text-align: center;
+    text-decoration: none;
+}
+
+.driver-closeout-bar {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 12px;
+    z-index: 1038;
+    width: auto;
+    max-width: 720px;
+    margin: 0 auto;
+    box-shadow: 0 8px 24px rgba(16, 42, 49, 0.18);
+}
+
+.driver-closeout-bar[hidden] {
+    display: none !important;
+}
+
+body.driver-closeout-open .driver-closeout-bar,
+body.route-adjust-open .driver-closeout-bar,
+body.route-map-expanded .driver-closeout-bar,
+body.now-capture-open .driver-closeout-bar,
+body.fail-stop-modal-open .driver-closeout-bar,
+body.skip-stop-modal-open .driver-closeout-bar,
+body.route-date-sheet-open .driver-closeout-bar {
+    display: none !important;
+}
+
+@media (max-width: 720px) {
+    .driver-closeout-bar {
+        bottom: calc(var(--driver-nav-h) + 8px);
+        left: 10px;
+        right: 10px;
+        width: auto;
+    }
+
+    body.driver-closeout-ready {
+        padding-bottom: calc(var(--driver-nav-h, 72px) + 76px);
+    }
+
+    body.workspace-manager.driver-workflow-page .driver-closeout-bar {
+        bottom: calc(var(--sf-manager-bar-h, 64px) + var(--sf-manager-bell-reserve, 56px) + 8px);
+    }
+
+    body.workspace-manager.driver-closeout-ready {
+        padding-bottom: calc(var(--sf-manager-bar-h, 64px) + var(--sf-manager-bell-reserve, 56px) + 76px);
+    }
+
+    .driver-closeout-stats {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 375 and 393 stay inside this rule. The action remains above the bottom dock. */
+@media (max-width: 393px) {
+    .driver-closeout {
+        padding: 12px;
+    }
+
+    .driver-closeout-bar {
+        bottom: calc(var(--driver-nav-h) + 8px);
+        left: 8px;
+        right: 8px;
+    }
+}

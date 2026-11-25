@@ -358,6 +358,16 @@
         return html + '</ul>';
     }
 
+    function syncCloseoutBar(routeDone) {
+        var bar = document.getElementById('driverCloseoutBar');
+        if (!bar) return;
+        var root = document.getElementById('driverRouteRoot');
+        var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
+        var show = routeDone && total > 0;
+        bar.hidden = !show;
+        document.body.classList.toggle('driver-closeout-ready', show);
+    }
+
     function renderNextStop(stopEl) {
         var card = document.getElementById('nextStopCard');
         var done = document.getElementById('routeDoneBanner');
@@ -375,8 +385,10 @@
             }
             if (stickyInner) stickyInner.innerHTML = '';
             document.body.classList.remove('route-has-sticky-dock');
+            syncCloseoutBar(true);
             return;
         }
+        syncCloseoutBar(false);
         if (done) done.hidden = true;
         card.hidden = false;
 

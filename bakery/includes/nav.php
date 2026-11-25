@@ -272,6 +272,9 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
             </div>
           </div>
           <?php endif; ?>
+          <?php if ($navDriverShowDateToggle): ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--closeout" href="<?php echo htmlspecialchars($navDriverRouteHref . '&closeout=1#driver-closeout', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.close_route'); ?></a>
+          <?php endif; ?>
           <?php if ($navDriverRouteChrome && !$navDriverShowDateToggle): ?>
           <a class="bakery-nav__more-link bakery-nav__more-link--tomorrow-phone" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>
           <?php endif; ?>
