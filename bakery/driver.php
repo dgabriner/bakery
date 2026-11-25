@@ -512,6 +512,20 @@ function bakery_render_driver_stop_item(
                 data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
                 data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
                 data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.view_invoice_photos'); ?></button>
+            <?php if ($selectedDate === date('Y-m-d')): ?>
+            <button type="button"
+                class="contact-link photo-complete-btn"
+                data-start-step="delivery"
+                data-edit-amounts="1"
+                data-driver-id="<?php echo (int)$selectedDriverId; ?>"
+                data-driver-name="<?php echo htmlspecialchars($stop['driver_name'] ?? $driverName, ENT_QUOTES, 'UTF-8'); ?>"
+                data-customer-id="<?php echo (int)$stop['customer_id']; ?>"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-assignment-id="<?php echo (int)($stop['assignment_id'] ?? 0); ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-address="<?php echo htmlspecialchars($stop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.edit_amounts'); ?></button>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if ($isDone && $status === 'cancelled'): ?>
             <button type="button"
@@ -830,6 +844,7 @@ document.body.classList.add('driver-route-prep');
     data-driver-id="<?php echo (int)$selectedDriverId; ?>"
     data-driver-name="<?php echo htmlspecialchars($driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
     data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
+    data-today="<?php echo htmlspecialchars($todayDate, ENT_QUOTES, 'UTF-8'); ?>"
     data-total="<?php echo (int)$totalStops; ?>"
     data-completed="<?php echo (int)$driverCompletedStops; ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
@@ -1538,6 +1553,7 @@ document.body.classList.add('driver-route-prep');
                                     </div>
                                 </label>
                             </div>
+                            <p id="deliveryQtyError" class="delivery-qty-error" hidden role="alert"></p>
                             <p class="delivery-credit-stock-note" id="deliveryCreditStockNote"><?php bakery_te('driver.credits_return_stock'); ?></p>
                             <p class="delivery-credit-alloc-note" id="deliveryCreditAllocNote" hidden></p>
                             <div class="delivery-pricing-row" id="deliveryPricingRow" hidden>
@@ -1875,6 +1891,14 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'photo_saved_loading' => bakery_t('driver.photo_saved_loading'),
     'ordered_recording' => bakery_t('driver.ordered_recording'),
     'credits_suffix' => bakery_t('driver.credits_suffix'),
+    'credits_suffix_one' => bakery_t('driver.credits_suffix_one'),
+    'qty_invalid' => bakery_t('driver.qty_invalid'),
+    'pieces_empty_confirm' => bakery_t('driver.pieces_empty_confirm'),
+    'photo_skipped' => bakery_t('driver.photo_skipped'),
+    'take_photo_action' => bakery_t('driver.take_photo_action'),
+    'edit_amounts' => bakery_t('driver.edit_amounts'),
+    'save_amounts' => bakery_t('driver.save_amounts'),
+    'amounts_updated' => bakery_t('driver.amounts_updated'),
     'delivering_more' => bakery_t('driver.delivering_more'),
     'delivering_fewer' => bakery_t('driver.delivering_fewer'),
     'product_counts_prompt' => bakery_t('driver.product_counts_prompt'),

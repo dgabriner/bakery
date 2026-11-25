@@ -501,11 +501,28 @@
             || document.querySelector('#stopList ' + selector);
     }
 
+    function syncNextStopLabel(stopEl, isNext) {
+        if (!stopEl) return;
+        var label = stopEl.querySelector('.stop-item-next-label');
+        if (!isNext) {
+            if (label && label.parentNode) label.parentNode.removeChild(label);
+            return;
+        }
+        if (label) return;
+        var heading = stopEl.querySelector('.stop-item-heading');
+        if (!heading) return;
+        label = document.createElement('span');
+        label.className = 'stop-item-next-label';
+        label.textContent = di.next_label || 'Next';
+        heading.appendChild(label);
+    }
+
     function moveStopToPastList(stopEl) {
         var pastList = document.getElementById('pastStopsList');
         if (!stopEl || !pastList) return;
         stopEl.classList.remove('stop-item--next', 'stop-item--upcoming');
         stopEl.classList.add('stop-item--past');
+        syncNextStopLabel(stopEl, false);
         pastList.appendChild(stopEl);
         sortStopsByRouteOrder(pastList);
     }
@@ -568,6 +585,13 @@
         if (status === 'delivered') {
             html += '<button type="button" class="contact-link photo-complete-btn" data-photo-mode="review"' +
                 photoButtonAttrs(stopEl) + '>' + escapeHtml(di.view_invoice_photos) + '</button>';
+            var routeRoot = document.getElementById('driverRouteRoot');
+            var routeDate = routeRoot ? (routeRoot.getAttribute('data-date') || '') : '';
+            var today = routeRoot ? (routeRoot.getAttribute('data-today') || '') : '';
+            if (routeDate !== '' && routeDate === today) {
+                html += '<button type="button" class="contact-link photo-complete-btn" data-start-step="delivery" data-edit-amounts="1"' +
+                    photoButtonAttrs(stopEl) + '>' + escapeHtml(di.edit_amounts || 'Edit amounts') + '</button>';
+            }
         }
         if (status === 'cancelled') {
             stopEl.classList.add('stop-item--skipped');
@@ -625,14 +649,20 @@
             el.classList.remove('stop-item--next', 'stop-item--upcoming', 'stop-item--past');
             if (status === 'delivered' || status === 'cancelled' || status === 'failed' || status === 'office_flag') {
                 moveStopToPastList(el);
+                syncNextStopLabel(el, false);
                 return;
             }
             if (!nextAssigned) {
                 el.classList.add('stop-item--next');
                 nextAssigned = true;
+                syncNextStopLabel(el, true);
             } else {
                 el.classList.add('stop-item--upcoming');
+                syncNextStopLabel(el, false);
             }
+        });
+        getPastStops().forEach(function (el) {
+            syncNextStopLabel(el, false);
         });
 
         var past = getPastStops();

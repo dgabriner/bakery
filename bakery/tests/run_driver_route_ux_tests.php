@@ -532,6 +532,146 @@ driver_ux_assert(
         && strpos($mapJs, 'fail: function ()') !== false
 );
 
+$deliveryJs = (string)file_get_contents($root . '/includes/driver_delivery.js');
+$navPhp = (string)file_get_contents($root . '/includes/nav.php');
+$parseStart = strpos($deliveryJs, '/* bakery-count-parse:start */');
+$parseEnd = strpos($deliveryJs, '/* bakery-count-parse:end */');
+$parseJs = ($parseStart !== false && $parseEnd !== false && $parseEnd > $parseStart)
+    ? substr($deliveryJs, $parseStart, $parseEnd - $parseStart)
+    : '';
+$parseScript = $parseJs . <<<'JS'
+
+const samples = [
+  ['-5', 'invalid', null],
+  ['-2', 'invalid', null],
+  ['abc', 'invalid', null],
+  ['e', 'invalid', null],
+  ['1e2', 'invalid', null],
+  ['5.5', 'invalid', null],
+  ['', 'empty', null],
+  ['   ', 'empty', null],
+  ['0', 'ok', 0],
+  ['5', 'ok', 5],
+  [' 12 ', 'ok', 12]
+];
+let failed = 0;
+samples.forEach(function (row) {
+  const parsed = bakeryParseDeliveryCount(row[0]);
+  const value = parsed && parsed.state === 'ok' ? parsed.value : null;
+  if (!parsed || parsed.state !== row[1] || value !== row[2]) {
+    console.log('PARSE ' + JSON.stringify(row) + ' => ' + JSON.stringify(parsed));
+    failed++;
+  }
+});
+const one = bakeryCreditsBackSuffix(1, ', :credits credit back', ', :credits credits back');
+const many = bakeryCreditsBackSuffix(2, ', :credits credit back', ', :credits credits back');
+const none = bakeryCreditsBackSuffix(0, ', :credits credit back', ', :credits credits back');
+if (one !== ', 1 credit back' || many !== ', 2 credits back' || none !== '') {
+  console.log('SUFFIX ' + JSON.stringify([one, many, none]));
+  failed++;
+}
+if (failed > 0) process.exit(1);
+JS;
+$parseFile = tempnam(sys_get_temp_dir(), 'bakery-count-');
+$parseOk = false;
+$parseOut = '';
+if ($parseJs !== '' && $parseFile !== false) {
+    file_put_contents($parseFile, $parseScript);
+    $parseOut = (string)shell_exec('node ' . escapeshellarg($parseFile) . ' 2>&1');
+    $parseOk = $parseOut === '';
+    @unlink($parseFile);
+}
+driver_ux_assert(
+    'piece and credit counts reject negatives and letters, and pluralize one credit',
+    $parseOk
+);
+if (!$parseOk && $parseOut !== '') {
+    echo $parseOut;
+}
+
+driver_ux_assert(
+    'amounts preview does not coerce a bad count to zero',
+    strpos($deliveryJs, 'Math.max(0, parseInt(piecesInput.value, 10) || 0)') === false
+        && strpos($deliveryJs, 'deliveryQtyBlocksFinish') !== false
+        && strpos($deliveryJs, "i18n('qty_invalid')") !== false
+        && strpos($page, 'id="deliveryQtyError"') !== false
+);
+driver_ux_assert(
+    'empty pieces can be saved only as an explicit 0 or Save anyway',
+    strpos($deliveryJs, "i18n('pieces_empty_confirm')") !== false
+        && strpos($deliveryJs, 'showVarianceConfirm(0,') !== false
+);
+driver_ux_assert(
+    'server rejects a non-whole piece or credit count with the same message',
+    strpos($completeDelivery, 'function bakery_delivery_parse_whole_count') !== false
+        && strpos($completeDelivery, "'/^(?:0|[1-9]\\d*)$/'") !== false
+        && strpos($completeDelivery, "bakery_t('driver.qty_invalid')") !== false
+);
+driver_ux_assert(
+    'a skipped photo is not a green done step and offers Take photo',
+    strpos($deliveryJs, "i18n('photo_skipped'") !== false
+        && strpos($deliveryJs, "i18n('take_photo_action'") !== false
+        && strpos($deliveryJs, 'is-skipped') !== false
+        && strpos($deliveryJs, "s === 'photo' && photoSkipped") !== false
+);
+driver_ux_assert(
+    'NEXT stays only on the next undelivered stop',
+    strpos($routeJs, 'function syncNextStopLabel') !== false
+        && strpos($routeJs, 'syncNextStopLabel(el, false)') !== false
+        && strpos($routeJs, 'syncNextStopLabel(el, true)') !== false
+);
+driver_ux_assert(
+    'a delivered stop can edit amounts on the same invoice the same day',
+    strpos($page, "bakery_te('driver.edit_amounts')") !== false
+        && strpos($page, 'data-edit-amounts="1"') !== false
+        && strpos($page, 'data-today=') !== false
+        && strpos($routeJs, 'data-edit-amounts="1"') !== false
+        && strpos($deliveryJs, 'edit_amounts=1') !== false
+        && strpos($completeDelivery, 'BAKERY_OP_DELIVERY_MODIFIED') !== false
+        && strpos($completeDelivery, "bakery_t('driver.edit_amounts_same_day')") !== false
+        && strpos($completeDelivery, "bakery_t('driver.amounts_updated')") !== false
+        && strpos($completeDelivery, 'actual_delivery_time = COALESCE(actual_delivery_time, CURTIME())') !== false
+);
+driver_ux_assert(
+    'Report says it saves a case and does not text or call HQ',
+    strpos((string)$english['driver.problem_cant_deliver_prompt'], 'does not text, call, or WhatsApp') !== false
+        && strpos((string)$spanish['driver.problem_cant_deliver_prompt'], 'No envía texto, llamada ni WhatsApp') !== false
+        && strpos((string)$english['exception_desk.reported'], 'Nobody was texted, called, or sent a WhatsApp') !== false
+        && strpos((string)$spanish['exception_desk.reported'], 'No se envió texto, llamada ni WhatsApp') !== false
+        && strpos($page, "bakery_te('driver.problem_cant_deliver_prompt')") !== false
+        && strpos($page, "'fail_success' => bakery_t('exception_desk.reported')") !== false
+);
+driver_ux_assert(
+    'one credit is singular and log out is not the clock Out button',
+    ($english['driver.credits_suffix_one'] ?? '') === ', :credits credit back'
+        && ($english['driver.credits_suffix'] ?? '') === ', :credits credits back'
+        && ($spanish['driver.credits_suffix_one'] ?? '') === ', :credits crédito devuelto'
+        && ($spanish['driver.credits_suffix'] ?? '') === ', :credits créditos devueltos'
+        && ($english['common.log_out_short'] ?? '') === 'Log out'
+        && ($spanish['common.log_out_short'] ?? '') === 'Salir'
+        && strpos($navPhp, "bakery_t('common.log_out_short')") !== false
+        && strpos($deliveryJs, 'bakeryCreditsBackSuffix') !== false
+);
+foreach ([
+    'driver.qty_invalid',
+    'driver.pieces_empty_confirm',
+    'driver.photo_skipped',
+    'driver.take_photo_action',
+    'driver.edit_amounts',
+    'driver.save_amounts',
+    'driver.edit_amounts_same_day',
+    'driver.amounts_updated',
+    'driver.credits_suffix_one',
+] as $key) {
+    driver_ux_assert(
+        "{$key} exists in English and Spanish",
+        isset($english[$key], $spanish[$key])
+            && trim((string)$english[$key]) !== ''
+            && trim((string)$spanish[$key]) !== ''
+            && (string)$english[$key] !== (string)$spanish[$key]
+    );
+}
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);

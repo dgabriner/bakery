@@ -138,7 +138,7 @@ function bakery_mark_delivery_delivered(PDO $db, int $dailyOrderId, array $lineQ
     try {
         $assignmentStmt = $db->prepare(
             "UPDATE daily_order_assignments
-             SET delivery_status = 'delivered', actual_delivery_time = CURTIME()
+             SET delivery_status = 'delivered', actual_delivery_time = COALESCE(actual_delivery_time, CURTIME())
              WHERE daily_order_id = ?"
         );
         $assignmentStmt->execute([$dailyOrderId]);
@@ -174,6 +174,34 @@ function bakery_delivery_total_is_well_over_ordered(int $delivered, int $ordered
         return $delivered > 0;
     }
     return $delivered > $ordered && ($delivered - $ordered) * 2 >= $ordered;
+}
+
+/**
+ * Whole piece or credit count from a driver field.
+ * Empty, negatives, and letters (including "e") are not zero.
+ *
+ * @return int|null Null when the text is not a whole number of 0 or more.
+ */
+function bakery_delivery_parse_whole_count($raw): ?int
+{
+    $text = trim((string)$raw);
+    if ($text === '' || preg_match('/^(?:0|[1-9]\d*)$/', $text) !== 1) {
+        return null;
+    }
+    return (int)$text;
+}
+
+function bakery_delivery_qty_invalid_message(): string
+{
+    $fallback = 'Enter a whole number, 0 or more. Negatives and letters are not counted.';
+    if (!function_exists('bakery_t')) {
+        return $fallback;
+    }
+    $text = bakery_t('driver.qty_invalid');
+    if ($text === '' || $text === 'driver.qty_invalid') {
+        return $fallback;
+    }
+    return $text;
 }
 
 function bakery_delivery_product_count_mismatch_message(): string
@@ -1460,10 +1488,30 @@ try {
             }
             $dailyOrderId = (int)$_POST['daily_order_id'];
             bakery_delivery_assert_driver_access($db, $dailyOrderId);
-            $deliveredPieces = filter_var($_POST['delivered_pieces'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
-            $creditsTakenBack = filter_var($_POST['credits_taken_back'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
-            if ($deliveredPieces === false || $creditsTakenBack === false) {
-                throw new Exception('Enter whole numbers of pieces and credits');
+            $deliveredPieces = bakery_delivery_parse_whole_count($_POST['delivered_pieces'] ?? '');
+            $creditsTakenBack = bakery_delivery_parse_whole_count($_POST['credits_taken_back'] ?? '');
+            if ($deliveredPieces === null || $creditsTakenBack === null) {
+                throw new Exception(bakery_delivery_qty_invalid_message());
+            }
+            $priorStmt = $db->prepare(
+                'SELECT status, order_date, delivery_confirmed_at, delivered_pieces, credits_taken_back
+                 FROM daily_orders WHERE id = ?'
+            );
+            $priorStmt->execute([$dailyOrderId]);
+            $priorOrder = $priorStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            $alreadyDelivered = is_array($priorOrder) && (
+                (string)($priorOrder['status'] ?? '') === 'delivered'
+                || (($priorOrder['delivery_confirmed_at'] ?? null) !== null && (string)$priorOrder['delivery_confirmed_at'] !== '')
+            );
+            $editingAmounts = (string)($_POST['edit_amounts'] ?? '') === '1' && $alreadyDelivered;
+            if ($editingAmounts && (string)($priorOrder['order_date'] ?? '') !== date('Y-m-d')) {
+                $sameDay = function_exists('bakery_t')
+                    ? bakery_t('driver.edit_amounts_same_day')
+                    : 'Amounts can only be corrected on the delivery day.';
+                if ($sameDay === '' || $sameDay === 'driver.edit_amounts_same_day') {
+                    $sameDay = 'Amounts can only be corrected on the delivery day.';
+                }
+                throw new Exception($sameDay);
             }
 
             $confirmOptions = [];
@@ -1531,29 +1579,52 @@ try {
                 $customerLabel = $ctx['customer_name'] ?? 'customer';
                 $user = bakery_current_user();
                 $actorName = $user['display_name'] ?? 'Driver';
-                bakery_operational_log_delivery(
-                    $db,
-                    BAKERY_OP_DELIVERY_COMPLETED,
-                    $dailyOrderId,
-                    $actorName . ' completed delivery to ' . $customerLabel,
-                    [
-                        'ordered_pieces' => $confirmed['ordered_pieces'],
-                        'delivered_pieces' => $confirmed['delivered_pieces'],
-                        'credits_taken_back' => $confirmed['credits_taken_back'],
-                        'total' => $confirmed['total'],
-                        'amount_collected' => $confirmed['amount_collected'],
-                        'payment_collection' => $confirmed['payment_collection'],
-                        'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
-                    ],
-                    bakery_delivery_gps_payload($_POST)
-                );
-                bakery_customer_notify_delivery_completed($db, $dailyOrderId);
-                bakery_customer_notify_invoice_available($db, $dailyOrderId);
+                $amountMeta = [
+                    'ordered_pieces' => $confirmed['ordered_pieces'],
+                    'delivered_pieces' => $confirmed['delivered_pieces'],
+                    'credits_taken_back' => $confirmed['credits_taken_back'],
+                    'total' => $confirmed['total'],
+                    'amount_collected' => $confirmed['amount_collected'],
+                    'payment_collection' => $confirmed['payment_collection'],
+                    'photo_attached' => bakery_delivery_has_photo($db, $dailyOrderId),
+                ];
+                if ($editingAmounts) {
+                    $amountMeta['previous_delivered_pieces'] = (int)($priorOrder['delivered_pieces'] ?? 0);
+                    $amountMeta['previous_credits_taken_back'] = (int)($priorOrder['credits_taken_back'] ?? 0);
+                    bakery_operational_log_delivery(
+                        $db,
+                        BAKERY_OP_DELIVERY_MODIFIED,
+                        $dailyOrderId,
+                        $actorName . ' corrected delivery amounts for ' . $customerLabel,
+                        $amountMeta,
+                        bakery_delivery_gps_payload($_POST)
+                    );
+                } else {
+                    bakery_operational_log_delivery(
+                        $db,
+                        BAKERY_OP_DELIVERY_COMPLETED,
+                        $dailyOrderId,
+                        $actorName . ' completed delivery to ' . $customerLabel,
+                        $amountMeta,
+                        bakery_delivery_gps_payload($_POST)
+                    );
+                    bakery_customer_notify_delivery_completed($db, $dailyOrderId);
+                    bakery_customer_notify_invoice_available($db, $dailyOrderId);
+                }
             }
 
+            $confirmMessage = $confirmed['message'];
+            if ($editingAmounts && empty($confirmed['duplicate'])) {
+                $confirmMessage = function_exists('bakery_t')
+                    ? bakery_t('driver.amounts_updated')
+                    : 'Amounts updated on this delivery. The same invoice was saved again.';
+                if ($confirmMessage === '' || $confirmMessage === 'driver.amounts_updated') {
+                    $confirmMessage = 'Amounts updated on this delivery. The same invoice was saved again.';
+                }
+            }
             echo json_encode([
                 'success' => true,
-                'message' => $confirmed['message'],
+                'message' => $confirmMessage,
                 'delivered_pieces' => $confirmed['delivered_pieces'],
                 'credits_taken_back' => $confirmed['credits_taken_back'],
                 'billable_pieces' => $confirmed['billable_pieces'],
@@ -1601,7 +1672,7 @@ try {
             $case = bakery_delivery_recovery_report_failure($db, $assignmentId, $_POST);
             echo json_encode([
                 'success' => true,
-                'message' => function_exists('bakery_t') ? bakery_t('exception_desk.reported') : 'Failed stop reported. HQ will recover it.',
+                'message' => function_exists('bakery_t') ? bakery_t('exception_desk.reported') : 'Stop marked failed and saved for the office. Nobody was texted, called, or sent a WhatsApp.',
                 'recovery_case_id' => (int)($case['id'] ?? 0),
                 'delivery_status' => 'failed',
             ]);
