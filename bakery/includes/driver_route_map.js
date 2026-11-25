@@ -1022,6 +1022,10 @@
       hideSheet();
       syncMarkers(readStops());
     });
+    markMapShown();
+    var followBtn = $('routeMapFollow');
+    if (followBtn) followBtn.hidden = false;
+    syncFollowButton();
     return true;
   }
 
@@ -1089,6 +1093,14 @@
     }
   }
 
+  function markMapShown() {
+    window.__driverMapScriptPending = false;
+    if (window.__driverMapFailTimer) {
+      window.clearTimeout(window.__driverMapFailTimer);
+      window.__driverMapFailTimer = 0;
+    }
+  }
+
   function showFallback(message) {
     var canvas = $('routeMapCanvas');
     if (!canvas) return;
@@ -1130,11 +1142,18 @@
     syncFollowButton();
     syncScopeButtons();
     if (!mapsReady()) {
-      showFallback();
+      if (!window.__driverMapScriptPending) showFallback();
+      else if (!window.__driverMapFailTimer) {
+        window.__driverMapFailTimer = window.setTimeout(function () {
+          window.__driverMapFailTimer = 0;
+          if (!mapsReady()) showFallback();
+        }, 8000);
+      }
       updateLive(readStops());
       startWatch();
       return;
     }
+    markMapShown();
     refresh();
   }
 
@@ -1152,12 +1171,17 @@
     setViewMode: setViewMode,
     suggestOrder: suggestOrder,
     isReady: function () { return !!map; },
+    fail: function () {
+      window.__driverMapScriptPending = false;
+      showFallback();
+    },
     stats: function () {
       return { directionsRequests: directionsRequests, watching: watchId != null, highAccuracy: watchHighAccuracy };
     }
   };
 
   window.bakeryInitDriverRouteMap = function () {
+    window.__driverMapScriptPending = false;
     init();
   };
 

@@ -1960,6 +1960,7 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'lines_more' => bakery_t('driver.lines_more', ['count' => ':count']),
     'done_row' => bakery_t('driver.done_row', ['count' => ':count']),
     'reorder' => bakery_t('driver.reorder'),
+    'discard_changes' => bakery_t('driver.discard_changes'),
     'suggest_order' => bakery_t('driver.suggest_order'),
     'suggest_preview' => bakery_t('driver.suggest_preview', ['moves' => ':moves', 'minutes' => ':minutes']),
     'suggest_no_gain' => bakery_t('driver.suggest_no_gain'),
@@ -2020,6 +2021,19 @@ window.bakeryInitDriverRouteMap = window.bakeryInitDriverRouteMap || function ()
         var tag = document.createElement('script');
         tag.async = true;
         tag.src = src;
+        window.__driverMapScriptPending = true;
+        tag.onerror = function () {
+            window.__driverMapScriptPending = false;
+            if (window.DriverRouteMap && typeof window.DriverRouteMap.fail === 'function') {
+                window.DriverRouteMap.fail();
+            }
+        };
+        window.gm_authFailure = function () {
+            window.__driverMapScriptPending = false;
+            if (window.DriverRouteMap && typeof window.DriverRouteMap.fail === 'function') {
+                window.DriverRouteMap.fail();
+            }
+        };
         document.head.appendChild(tag);
     }
     window.bakeryLoadDriverMap = loadMap;
