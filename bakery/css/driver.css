@@ -1353,9 +1353,15 @@ body.driver-workflow-page .contact-link--skip {
     color: #9b3535;
 }
 
-body.driver-workflow-page .photo-complete-btn {
+body.driver-workflow-page .contact-actions .photo-complete-btn {
     border-color: #e9bf87;
     color: #9b5c16;
+}
+
+body.driver-workflow-page .stop-row-actions .photo-complete-btn,
+body.driver-workflow-page .route-btn.photo-complete-btn,
+body.driver-workflow-page .route-sticky-btn.photo-complete-btn {
+    color: #fff;
 }
 
 body.driver-workflow-page .stop-item--past .contact-actions {
@@ -6728,13 +6734,54 @@ body.driver-workflow-page .next-stop-notes.is-clamped p {
 
 body.driver-workflow-page .next-stop-actions {
     display: grid;
-    grid-template-columns: 1.4fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
 }
 
-body.driver-workflow-page .route-btn--problem {
-    background: rgba(255, 255, 255, 0.12);
+body.driver-workflow-page .next-stop-actions .route-btn,
+body.driver-workflow-page .next-stop-actions .route-btn--navigate,
+body.driver-workflow-page .route-sticky-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    grid-column: auto;
+    min-width: 0;
     color: #fff;
+    line-height: 1.15;
+}
+
+body.driver-workflow-page .next-stop-actions .route-btn--navigate {
+    min-height: 64px;
+    padding-inline: 8px;
+    border: 0;
+    background: #0e7490;
+    box-shadow: none;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+body.driver-workflow-page .route-btn--problem {
+    background: #8a3d32;
+    color: #fff;
+}
+
+.route-action-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+}
+
+.route-action-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.stop-row-actions .route-action-icon {
+    width: 16px;
+    height: 16px;
+    flex-basis: 16px;
 }
 
 /* Stop rows */
@@ -6746,6 +6793,10 @@ body.driver-workflow-page .route-btn--problem {
 }
 
 .stop-row-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     min-width: 44px;
     min-height: 44px;
     padding: 4px 10px;
@@ -7346,7 +7397,20 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     }
 
     body:has(.bakery-nav__problem-tab) .driver-route[data-route-view="now"] .route-section-next .next-stop-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    body.driver-workflow-page .next-stop {
+        overflow: visible;
+    }
+
+    body.driver-workflow-page .next-stop::after {
         display: none;
+    }
+
+    body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route {
+        padding-bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 16px);
     }
 
     /* Route view: the day map and the numbered list */
