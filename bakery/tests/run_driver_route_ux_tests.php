@@ -317,7 +317,7 @@ driver_ux_assert(
     'the date sheet sits above the Directions dock',
     strpos($styles, 'body.driver-field-mode.driver-workflow-page.route-has-sticky-dock .route-date-dock') !== false
         && strpos($styles, 'bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);') !== false
-        && strpos($routeJs, 'dateDisclosure.open = true') !== false
+        && strpos($routeJs, 'dateDisclosure.open = !dateDisclosure.open') !== false
 );
 $loginPage = (string)file_get_contents($root . '/login.php');
 driver_ux_assert(
