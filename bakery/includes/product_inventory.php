@@ -1103,13 +1103,16 @@ function bakery_inventory_closeout_stats(PDO $db, string $date): array {
  * Door credits were already posted at confirm and must not be returned again.
  *
  * @param array<int, array{returned?:int|string, wasted?:int|string}> $lines product_id => quantities
+ * @param bool $allowOpenStops Driver closeout only, after the driver confirms stops are still open.
+ *                             Managers leave this false. The van math below is unchanged.
  */
 function bakery_inventory_reconcile_driver_load(
     PDO $db,
     string $date,
     int $driverId,
     array $lines,
-    ?string $notes = null
+    ?string $notes = null,
+    bool $allowOpenStops = false
 ): void {
     if ($driverId <= 0) {
         throw new InvalidArgumentException('Choose a driver.');
@@ -1120,7 +1123,7 @@ function bakery_inventory_reconcile_driver_load(
     bakery_inventory_validate_date($date);
 
     $open = bakery_inventory_driver_open_stops($db, $date, $driverId);
-    if ($open['open'] > 0) {
+    if ($open['open'] > 0 && !$allowOpenStops) {
         throw new RuntimeException(
             'Finish or resolve open stops before closing this route ('
             . $open['open'] . ' still pending or in transit).'

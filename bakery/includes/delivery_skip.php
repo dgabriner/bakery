@@ -141,6 +141,10 @@ function bakery_unskip_delivery_stop(PDO $db, int $dailyOrderId): void {
             'daily_order_id' => $dailyOrderId,
             'assignment_id' => $ctx['assignment_id'] !== null ? (int)$ctx['assignment_id'] : null,
             'driver_id' => $ctx['driver_id'] !== null ? (int)$ctx['driver_id'] : bakery_operational_driver_id(),
+            'metadata' => [
+                'before' => ['delivery_status' => 'cancelled'],
+                'after' => ['delivery_status' => 'pending'],
+            ],
         ]);
     }
 }

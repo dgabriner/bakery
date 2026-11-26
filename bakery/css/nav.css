@@ -751,6 +751,12 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+.bakery-nav--driver .bakery-nav__more-link.bakery-nav__more-link--closeout {
+  background: #f3fff8;
+  color: #0d5c56;
+  font-weight: 800;
+}
+
 .bakery-nav--manager .bakery-nav__more {
   position: relative;
   min-width: 0;

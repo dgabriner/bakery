@@ -13,6 +13,8 @@ require_once 'includes/operational_exceptions.php';
 require_once 'includes/exception_desk.php';
 require_once 'includes/pan_carry.php';
 require_once 'includes/driver_route_snapshot.php';
+require_once 'includes/driver_closeout.php';
+require_once 'includes/driver_route_control.php';
 
 bakery_customer_account_ensure_schema($db);
 
@@ -68,6 +70,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
 }
 if (!empty($_GET['notice'])) {
     $driverDeskNotice = substr(trim((string)$_GET['notice']), 0, 160);
+}
+if (!empty($_GET['closeout_error'])) {
+    $driverDeskError = substr(trim((string)$_GET['closeout_error']), 0, 300);
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $driverControlAction = (string)($_POST['action'] ?? '');
+    if (in_array($driverControlAction, ['driver_turnin', 'driver_save_load', 'driver_move_stop', 'driver_save_qty'], true)) {
+        try {
+            if (function_exists('bakery_require_csrf')) {
+                bakery_require_csrf();
+            }
+            $driverControlDate = (string)($_POST['route_date'] ?? '');
+            if ($driverControlAction === 'driver_turnin') {
+                $turnin = bakery_driver_route_control_turnin($db, $driverControlDate, (string)($_POST['amount'] ?? ''));
+                $driverControlNotice = $turnin['office_attention']
+                    ? bakery_t('driver.turnin_difference', ['difference' => number_format(abs($turnin['difference']), 2)])
+                    : bakery_t('driver.turnin_done');
+            } elseif ($driverControlAction === 'driver_save_load') {
+                $loaded = $_POST['loaded'] ?? [];
+                if (!is_array($loaded)) {
+                    $loaded = [];
+                }
+                bakery_driver_route_control_save_load($db, $driverControlDate, $loaded);
+                $driverControlNotice = bakery_t('driver.load_done');
+            } elseif ($driverControlAction === 'driver_move_stop') {
+                bakery_driver_route_control_move($db, (int)($_POST['daily_order_id'] ?? 0), (int)($_POST['to_driver_id'] ?? 0));
+                $driverControlNotice = bakery_t('driver.move_done');
+            } else {
+                $qty = $_POST['qty'] ?? [];
+                if (!is_array($qty)) {
+                    $qty = [];
+                }
+                bakery_driver_route_control_save_quantities($db, (int)($_POST['daily_order_id'] ?? 0), $qty);
+                $driverControlNotice = bakery_t('driver.qty_done');
+            }
+            header('Location: driver.php?' . http_build_query([
+                'date' => $driverControlDate !== '' ? $driverControlDate : $selectedDate,
+                'notice' => $driverControlNotice,
+            ]));
+            exit;
+        } catch (Throwable $e) {
+            $driverDeskError = $e->getMessage();
+        }
+    }
 }
 
 $todayDate = date('Y-m-d');
@@ -167,6 +213,13 @@ if ($isAuthenticatedDriver) {
     $selectedDriverId = 0;
 }
 $staffDrivingAsSelf = $staffOwnDriverId > 0 && $selectedDriverId === $staffOwnDriverId;
+$driverRouteControls = $isAuthenticatedDriver && $selectedDate === date('Y-m-d') && $selectedDriverId > 0;
+$driverRouteClosedToday = $driverRouteControls && bakery_driver_route_control_is_closed($db, (int)$selectedDriverId, $selectedDate);
+$GLOBALS['driverRouteControls'] = $driverRouteControls;
+$GLOBALS['driverRouteClosedToday'] = $driverRouteClosedToday;
+$driverOtherDrivers = $driverRouteControls
+    ? bakery_driver_route_control_other_drivers($db, (int)$selectedDriverId)
+    : [];
 
 // Get driver information
 $driver = null;
@@ -306,7 +359,7 @@ function bakery_driver_route_stop_lines(PDO $db, int $driverId, string $date): a
         return $byOrder;
     }
     $stmt = $db->prepare(
-        'SELECT doi.daily_order_id, p.name AS product_name, SUM(doi.quantity) AS quantity
+        'SELECT doi.daily_order_id, p.id AS product_id, p.name AS product_name, SUM(doi.quantity) AS quantity
          FROM daily_order_items doi
          INNER JOIN products p ON p.id = doi.product_id
          INNER JOIN daily_orders do ON do.id = doi.daily_order_id
@@ -318,7 +371,7 @@ function bakery_driver_route_stop_lines(PDO $db, int $driverId, string $date): a
     );
     $stmt->execute([$driverId, $date]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $byOrder[(int)$row['daily_order_id']][] = [(string)$row['product_name'], (int)$row['quantity']];
+        $byOrder[(int)$row['daily_order_id']][] = [(string)$row['product_name'], (int)$row['quantity'], (int)$row['product_id']];
     }
     return $byOrder;
 }
@@ -481,6 +534,20 @@ function bakery_render_driver_stop_item(
                 <button type="button" class="stop-move-up" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.move_up'), ENT_QUOTES, 'UTF-8'); ?>">&#9650;</button>
                 <button type="button" class="stop-move-down" data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.move_down'), ENT_QUOTES, 'UTF-8'); ?>">&#9660;</button>
             </div>
+            <?php if (!empty($GLOBALS['driverRouteControls']) && empty($GLOBALS['driverRouteClosedToday']) && !in_array($status, ['delivered', 'cancelled', 'failed'], true)): ?>
+            <button type="button" class="stop-control-btn" data-control="move"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.move_stop'); ?></button>
+            <button type="button" class="stop-control-btn" data-control="qty"
+                data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
+                data-customer-name="<?php echo htmlspecialchars($stop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                data-lines="<?php echo htmlspecialchars((string)json_encode(array_values(array_filter(array_map(static function ($line) {
+                    if (!is_array($line) || !isset($line[2])) {
+                        return null;
+                    }
+                    return ['product_id' => (int)$line[2], 'name' => (string)$line[0], 'quantity' => (int)$line[1]];
+                }, $stop['lines'] ?? [])))), ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.qty_edit'); ?></button>
+            <?php endif; ?>
             <button type="button"
                 class="stop-problem-btn"
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
@@ -527,7 +594,7 @@ function bakery_render_driver_stop_item(
                 data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.edit_amounts'); ?></button>
             <?php endif; ?>
             <?php endif; ?>
-            <?php if ($isDone && $status === 'cancelled'): ?>
+            <?php if ($isDone && $status === 'cancelled' && !empty($GLOBALS['driverRouteControls']) && empty($GLOBALS['driverRouteClosedToday'])): ?>
             <button type="button"
                 class="contact-link contact-link--unskip unskip-stop-btn"
                 data-daily-order-id="<?php echo (int)$stop['daily_order_id']; ?>"
@@ -832,6 +899,12 @@ document.body.classList.add('route-has-sticky-dock');
 <?php if ($selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-field-mode');
 <?php endif; ?>
+<?php if ($selectedDriverId > 0 && $driver && empty($showSelector) && empty($routePrepMode) && $remainingStops === 0 && $totalStops > 0): ?>
+document.body.classList.add('driver-closeout-ready');
+<?php endif; ?>
+<?php if ((string)($_GET['closeout'] ?? '') === '1' && $selectedDriverId > 0 && $driver && empty($showSelector)): ?>
+document.body.classList.add('driver-closeout-open');
+<?php endif; ?>
 <?php if (!empty($routePrepMode) && $selectedDriverId > 0 && $driver && !$showSelector): ?>
 document.body.classList.add('driver-route-prep');
 <?php endif; ?>
@@ -993,6 +1066,15 @@ document.body.classList.add('driver-route-prep');
     <?php if (!empty($driverDeskNotice)): ?>
     <p class="exception-desk__reported" role="status"><?php echo htmlspecialchars($driverDeskNotice, ENT_QUOTES, 'UTF-8'); ?></p>
     <?php endif; ?>
+    <?php
+    if ($selectedDriverId > 0 && $driver && empty($showSelector)) {
+        bakery_driver_closeout_render($db, $selectedDate, (int)$selectedDriverId, [
+            'open' => (string)($_GET['closeout'] ?? '') === '1',
+            'driver_only' => (bool)$isAuthenticatedDriver,
+            'own_today' => !empty($driverRouteControls) && (int)$selectedDriverId === (int)bakery_route_worker_driver_id($db, $routeUser, $selectedDate),
+        ]);
+    }
+    ?>
     <?php if ($error): ?>
     <div class="empty-state"><p><?php echo $error; ?></p></div>
     <?php elseif ($routePrepMode || $totalStops > 0): ?>
@@ -1243,7 +1325,7 @@ document.body.classList.add('driver-route-prep');
 
             <?php if ($remainingStops === 0 && $totalStops > 0): ?>
                 <p class="route-closeout-cta">
-                    <a class="route-btn route-btn--primary" href="route_closeout.php?date=<?php echo urlencode($selectedDate); ?>&amp;driver_id=<?php echo (int)$selectedDriverId; ?>">
+                    <a class="route-btn route-btn--primary driver-closeout-end" href="<?php echo htmlspecialchars(bakery_driver_closeout_href($selectedDate, (int)$selectedDriverId), ENT_QUOTES, 'UTF-8'); ?>">
                         <?php bakery_te('driver.close_route'); ?>
                     </a>
                 </p>
@@ -1372,6 +1454,53 @@ document.body.classList.add('driver-route-prep');
     </div>
     <?php endif; ?>
 </div>
+
+<?php if ($selectedDriverId > 0 && $driver && empty($showSelector) && empty($routePrepMode) && $totalStops > 0): ?>
+<?php if (!empty($driverRouteControls)):
+    $driverLoadEditor = [];
+    if (function_exists('bakery_inventory_pickup_manifests') && bakery_inventory_ready($db)) {
+        $controlManifests = bakery_inventory_pickup_manifests($db, $selectedDate, [(int)$selectedDriverId]);
+        foreach ($controlManifests[(int)$selectedDriverId] ?? [] as $loadItem) {
+            $driverLoadEditor[] = [
+                'product_id' => (int)($loadItem['product_id'] ?? 0),
+                'name' => (string)($loadItem['name'] ?? ''),
+                'quantity' => (int)($loadItem['loaded_quantity'] ?? 0),
+            ];
+        }
+    }
+?>
+<div id="driverControlSheet" class="driver-control-sheet" hidden>
+    <div class="driver-control-sheet-bar">
+        <button type="button" class="driver-control-back" id="driverControlBack" aria-label="<?php echo htmlspecialchars(bakery_t('driver.control_back'), ENT_QUOTES, 'UTF-8'); ?>">‹</button>
+        <h2 id="driverControlTitle"></h2>
+    </div>
+    <form id="driverControlForm" method="post" action="<?php echo htmlspecialchars('driver.php?date=' . rawurlencode($selectedDate), ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
+        <input type="hidden" name="action" id="driverControlAction" value="">
+        <input type="hidden" name="route_date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="daily_order_id" id="driverControlOrder" value="">
+        <div id="driverControlBody"></div>
+        <button class="driver-control-submit" type="submit" id="driverControlSubmit"></button>
+    </form>
+</div>
+<script>
+window.__DRIVER_CONTROL__ = <?php echo json_encode([
+    'drivers' => $driverOtherDrivers,
+    'load' => $driverLoadEditor,
+    'labels' => [
+        'move' => bakery_t('driver.move_stop'),
+        'qty' => bakery_t('driver.qty_edit'),
+        'load' => bakery_t('driver.load_edit'),
+        'moveSubmit' => bakery_t('driver.move_confirm'),
+        'qtySubmit' => bakery_t('driver.qty_save'),
+        'loadSubmit' => bakery_t('driver.load_save'),
+        'pick' => bakery_t('driver.move_pick'),
+    ],
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
+<?php endif; ?>
+<a class="driver-closeout-bar" id="driverCloseoutBar" href="<?php echo htmlspecialchars(bakery_driver_closeout_href($selectedDate, (int)$selectedDriverId), ENT_QUOTES, 'UTF-8'); ?>"<?php echo $remainingStops === 0 ? '' : ' hidden'; ?>><?php bakery_te('driver.close_route'); ?></a>
+<?php endif; ?>
 
 <div class="route-sticky-dock" id="routeStickyDock" <?php echo ($heroStop && empty($routePrepMode)) ? '' : 'hidden'; ?> aria-hidden="<?php echo ($heroStop && empty($routePrepMode)) ? 'false' : 'true'; ?>">
     <div class="route-sticky-dock-inner" id="routeStickyDockInner"><?php if ($heroStop && empty($routePrepMode)): ?><?php $dockMapsHref = bakery_driver_maps_url($heroStop['customer_address'] ?? '', bakery_driver_stop_coords($heroStop)); ?><?php if ($dockMapsHref !== ''): ?><a class="route-sticky-btn route-sticky-btn--nav js-navigate-stop" href="<?php echo htmlspecialchars($dockMapsHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" aria-label="<?php echo htmlspecialchars(bakery_t('driver.navigate'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('navigate', bakery_t('driver.navigate')); ?></a><?php endif; ?><button type="button" class="route-sticky-btn route-sticky-btn--finish photo-complete-btn" data-start-step="photo" data-driver-id="<?php echo (int)$selectedDriverId; ?>" data-driver-name="<?php echo htmlspecialchars($heroStop['driver_name'] ?? ($driver['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-customer-id="<?php echo (int)$heroStop['customer_id']; ?>" data-daily-order-id="<?php echo (int)$heroStop['daily_order_id']; ?>" data-assignment-id="<?php echo (int)($heroStop['assignment_id'] ?? 0); ?>" data-customer-name="<?php echo htmlspecialchars($heroStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?>" data-address="<?php echo htmlspecialchars($heroStop['customer_address'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" aria-label="<?php echo htmlspecialchars(bakery_t('driver.photo'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo bakery_driver_action_label('photo', bakery_t('driver.photo')); ?></button><?php endif; ?></div>

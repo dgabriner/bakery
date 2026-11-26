@@ -37,10 +37,14 @@ if ($isDriverOnly) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     $postDriverId = (int)($_POST['driver_id'] ?? 0);
-    if ($isDriverOnly && $driverScopedId > 0) {
-        $postDriverId = $driverScopedId;
-    }
+    $returnToDriver = (string)($_POST['return'] ?? '') === 'driver';
     try {
+        if ($isDriverOnly) {
+            if ($driverScopedId <= 0 || ($postDriverId > 0 && $postDriverId !== $driverScopedId)) {
+                throw new RuntimeException(bakery_t('driver.closeout_own_route'));
+            }
+            $postDriverId = $driverScopedId;
+        }
         if (!bakery_inventory_closeout_ready($db)) {
             throw new RuntimeException('Route closeout is not installed. Run the database migrations first.');
         }
@@ -64,8 +68,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $selectedDate,
                 $postDriverId,
                 $lines,
-                trim((string)($_POST['notes'] ?? ''))
+                trim((string)($_POST['notes'] ?? '')),
+                $isDriverOnly && (string)($_POST['confirm_open_stops'] ?? '') === '1'
             );
+            if ($returnToDriver) {
+                $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                    'date' => $selectedDate,
+                    'closeout' => '1',
+                    'notice' => bakery_t('driver.closeout_saved'),
+                ]);
+                header('Location: ' . $dest);
+                exit;
+            }
             $returnKey = trim((string)($_POST['return'] ?? $_GET['return'] ?? ''));
             if ($returnKey === 'manager' && empty($_POST['stay'])) {
                 $dest = (defined('BASE_URL') ? BASE_URL : '') . 'manager.php?date=' . rawurlencode($selectedDate) . '&view=routes';
@@ -75,14 +89,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $notice = 'Route closed. Loaded units are reconciled as delivered, returned, waste, and door credits.';
             $focusDriverId = $postDriverId;
         } elseif ($action === 'reopen_route') {
+            require_once __DIR__ . '/includes/driver_route_control.php';
             if ($isDriverOnly) {
-                throw new RuntimeException('Only a manager can reopen a closed route.');
+                bakery_driver_route_control_reopen($db, $selectedDate, (string)($_POST['confirm_reopen'] ?? ''));
+                $postDriverId = $driverScopedId;
+            } else {
+                bakery_inventory_reopen_driver_closeout($db, $selectedDate, $postDriverId);
+                bakery_driver_route_control_log(
+                    $db,
+                    'driver_route_reopened',
+                    'Manager reopened a route closeout',
+                    $selectedDate,
+                    $postDriverId,
+                    ['status' => 'reconciled'],
+                    ['status' => 'loaded']
+                );
             }
-            bakery_inventory_reopen_driver_closeout($db, $selectedDate, $postDriverId);
+            if ($returnToDriver) {
+                $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                    'date' => $selectedDate,
+                    'closeout' => '1',
+                    'notice' => bakery_t('driver.reopen_done'),
+                ]);
+                header('Location: ' . $dest);
+                exit;
+            }
             $notice = 'Route reopened. Closeout ledger movements were reversed; review pickup and close again when ready.';
             $focusDriverId = $postDriverId;
         }
     } catch (Throwable $e) {
+        if ($returnToDriver) {
+            $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                'date' => $selectedDate,
+                'closeout' => '1',
+                'closeout_error' => $e->getMessage(),
+            ]);
+            header('Location: ' . $dest);
+            exit;
+        }
         $error = $e->getMessage();
         $focusDriverId = $postDriverId > 0 ? $postDriverId : $focusDriverId;
     }

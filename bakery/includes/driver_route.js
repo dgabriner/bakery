@@ -358,6 +358,16 @@
         return html + '</ul>';
     }
 
+    function syncCloseoutBar(routeDone) {
+        var bar = document.getElementById('driverCloseoutBar');
+        if (!bar) return;
+        var root = document.getElementById('driverRouteRoot');
+        var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
+        var show = routeDone && total > 0;
+        bar.hidden = !show;
+        document.body.classList.toggle('driver-closeout-ready', show);
+    }
+
     function renderNextStop(stopEl) {
         var card = document.getElementById('nextStopCard');
         var done = document.getElementById('routeDoneBanner');
@@ -375,8 +385,10 @@
             }
             if (stickyInner) stickyInner.innerHTML = '';
             document.body.classList.remove('route-has-sticky-dock');
+            syncCloseoutBar(true);
             return;
         }
+        syncCloseoutBar(false);
         if (done) done.hidden = true;
         card.hidden = false;
 
@@ -1267,6 +1279,81 @@
         }
     }
 
+    function closeDriverControlSheet() {
+        var sheet = document.getElementById('driverControlSheet');
+        if (sheet) sheet.hidden = true;
+    }
+
+    function openDriverControl(mode, btn) {
+        var sheet = document.getElementById('driverControlSheet');
+        var config = window.__DRIVER_CONTROL__ || {};
+        var labels = config.labels || {};
+        if (!sheet) return;
+        var action = document.getElementById('driverControlAction');
+        var order = document.getElementById('driverControlOrder');
+        var body = document.getElementById('driverControlBody');
+        var title = document.getElementById('driverControlTitle');
+        var submit = document.getElementById('driverControlSubmit');
+        if (order) order.value = btn ? (btn.getAttribute('data-daily-order-id') || '') : '';
+        var html = '';
+        if (mode === 'move') {
+            if (action) action.value = 'driver_move_stop';
+            if (title) title.textContent = labels.move || '';
+            if (submit) submit.textContent = labels.moveSubmit || '';
+            html = '<label class="driver-control-field">' + escapeHtml(labels.pick || '') +
+                '<select name="to_driver_id" required>';
+            (config.drivers || []).forEach(function (driver) {
+                html += '<option value="' + String(driver.id) + '">' + escapeHtml(driver.name || '') + '</option>';
+            });
+            html += '</select></label>';
+        } else if (mode === 'qty') {
+            if (action) action.value = 'driver_save_qty';
+            if (title) title.textContent = labels.qty || '';
+            if (submit) submit.textContent = labels.qtySubmit || '';
+            var lines = [];
+            try { lines = JSON.parse(btn.getAttribute('data-lines') || '[]'); } catch (err) { lines = []; }
+            lines.forEach(function (line) {
+                html += '<label class="driver-control-field">' + escapeHtml(line.name || '') +
+                    '<input name="qty[' + String(line.product_id) + ']" inputmode="numeric" required value="' +
+                    escapeHtml(String(line.quantity == null ? '' : line.quantity)) + '"></label>';
+            });
+        } else {
+            if (action) action.value = 'driver_save_load';
+            if (title) title.textContent = labels.load || '';
+            if (submit) submit.textContent = labels.loadSubmit || '';
+            (config.load || []).forEach(function (line) {
+                html += '<label class="driver-control-field">' + escapeHtml(line.name || '') +
+                    '<input name="loaded[' + String(line.product_id) + ']" inputmode="numeric" required value="' +
+                    escapeHtml(String(line.quantity == null ? '' : line.quantity)) + '"></label>';
+            });
+        }
+        if (body) body.innerHTML = html;
+        sheet.hidden = false;
+        pushLayer('control');
+    }
+
+    function bindDriverControl() {
+        document.querySelectorAll('[data-control]').forEach(function (btn) {
+            if (btn.getAttribute('data-control-bound') === '1') return;
+            btn.setAttribute('data-control-bound', '1');
+            btn.addEventListener('click', function (event) {
+                event.preventDefault();
+                openDriverControl(btn.getAttribute('data-control') || 'load', btn);
+            });
+        });
+        var back = document.getElementById('driverControlBack');
+        if (back && back.getAttribute('data-control-bound') !== '1') {
+            back.setAttribute('data-control-bound', '1');
+            back.addEventListener('click', function () {
+                if (layerStack.length && layerStack[layerStack.length - 1] === 'control') {
+                    window.history.back();
+                    return;
+                }
+                closeDriverControlSheet();
+            });
+        }
+    }
+
     function bindUnskipStopButtons(root) {
         (root || document).querySelectorAll('.unskip-stop-btn').forEach(function (btn) {
             if (btn.getAttribute('data-unskip-bound') === '1') return;
@@ -1289,11 +1376,15 @@
         if (!confirm(di.confirm_restore.replace(':label', label))) return;
 
         try {
-            var body = 'action=unskip_stop&daily_order_id=' + encodeURIComponent(String(orderId));
+            var body = new URLSearchParams();
+            body.set('action', 'unskip_stop');
+            body.set('daily_order_id', String(orderId));
+            var csrf = document.querySelector('meta[name="csrf-token"]');
+            if (csrf && csrf.getAttribute('content')) body.set('csrf_token', csrf.getAttribute('content'));
             var response = await fetch('complete_delivery.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body
+                body: body.toString()
             });
             var data = null;
             try {
@@ -1640,6 +1731,11 @@
             }
             return true;
         }
+        if (name === 'control') {
+            var controlSheet = document.getElementById('driverControlSheet');
+            if (controlSheet) controlSheet.hidden = true;
+            return true;
+        }
         if (name === 'problem') {
             var failModal = document.getElementById('failStopModal');
             if (failModal && !failModal.hidden) closeFailStopModal({ fromPop: true });
@@ -1722,6 +1818,8 @@
             if (dateSheet && dateSheet.open) return true;
             var moreMenu = document.querySelector('.bakery-nav--driver .bakery-nav__more');
             if (moreMenu && moreMenu.open) return true;
+            var controlSheet = document.getElementById('driverControlSheet');
+            if (controlSheet && !controlSheet.hidden) return true;
             return !!routeAdjust.open || dragState.active;
         };
 
@@ -2129,6 +2227,7 @@
         refreshRouteUi();
         bindSkipStopButtons(document);
         bindUnskipStopButtons(document);
+        bindDriverControl();
         bindFailStopButtons(document);
         bindProblemButtons(document);
         tryOpenStopFromUrl();

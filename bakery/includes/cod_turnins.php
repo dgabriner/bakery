@@ -16,7 +16,7 @@ function bakery_cod_turnins_ready(PDO $db): bool
 /**
  * Upsert turned-in amount for a driver/day. Returns the row id.
  */
-function bakery_cod_turnin_record(PDO $db, int $driverId, string $date, float $amount, int $userId): int
+function bakery_cod_turnin_record(PDO $db, int $driverId, string $date, float $amount, int $userId, array $context = []): int
 {
     if ($driverId <= 0) {
         throw new InvalidArgumentException('Driver is required for COD turn-in');
@@ -31,6 +31,7 @@ function bakery_cod_turnin_record(PDO $db, int $driverId, string $date, float $a
     if (!bakery_cod_turnins_ready($db)) {
         throw new RuntimeException('COD turn-in table is not installed. Run migration 080.');
     }
+    $previous = bakery_cod_turnin_get($db, $driverId, $date);
     $amount = round($amount, 2);
     $userId = $userId > 0 ? $userId : null;
     $stmt = $db->prepare(
@@ -53,10 +54,12 @@ function bakery_cod_turnin_record(PDO $db, int $driverId, string $date, float $a
             'operational_date' => $date,
             'driver_id' => $driverId,
             'actor_user_id' => $userId,
-            'metadata' => [
+            'metadata' => array_merge([
                 'cod_turnin_id' => $id,
                 'amount' => $amount,
-            ],
+                'before' => ['amount' => $previous],
+                'after' => ['amount' => $amount],
+            ], $context),
         ]);
     }
     return $id;
