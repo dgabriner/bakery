@@ -1116,6 +1116,62 @@ function bakery_flag_empty_delivery(PDO $db, int $dailyOrderId): array
 }
 
 /**
+ * Replay a confirm that already stored this client_request_id.
+ * Null when that id has not been saved yet.
+ *
+ * @return array<string,mixed>|null
+ */
+function bakery_confirm_delivery_replay(PDO $db, int $dailyOrderId, string $clientRequestId): ?array
+{
+    if ($clientRequestId === '' || !bakery_daily_orders_confirm_request_id_ready($db)) {
+        return null;
+    }
+    $dup = $db->prepare(
+        'SELECT id, delivered_pieces, credits_taken_back, total_amount, amount_collected,
+                delivery_order_total, delivery_pricing_label
+         FROM daily_orders
+         WHERE confirm_request_id = ?
+         LIMIT 1'
+    );
+    $dup->execute([$clientRequestId]);
+    $existing = $dup->fetch(PDO::FETCH_ASSOC);
+    if (!$existing) {
+        return null;
+    }
+    if ((int)$existing['id'] !== $dailyOrderId) {
+        throw new Exception('This confirmation was already recorded for another stop');
+    }
+    $delivered = (int)($existing['delivered_pieces'] ?? 0);
+    $credits = (int)($existing['credits_taken_back'] ?? 0);
+    $total = (float)($existing['total_amount'] ?? $existing['delivery_order_total'] ?? 0);
+    $billable = max(0, $delivered - $credits);
+    $pricePerPiece = $billable > 0 ? round($total / $billable, 4) : 0.0;
+    $custStmt = $db->prepare(
+        'SELECT ' . bakery_payment_terms_pan_dulce_collection_sql($db) . '
+         FROM daily_orders do
+         JOIN customers c ON c.id = do.customer_id
+         WHERE do.id = ?'
+    );
+    $custStmt->execute([$dailyOrderId]);
+    $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
+    $invoice = bakery_delivery_invoice($db, $dailyOrderId);
+    return [
+        'success' => true,
+        'duplicate' => true,
+        'message' => 'Delivery already confirmed.',
+        'delivered_pieces' => $delivered,
+        'credits_taken_back' => $credits,
+        'billable_pieces' => $billable,
+        'price_per_piece' => $pricePerPiece,
+        'total' => $total,
+        'amount_collected' => $existing['amount_collected'] !== null ? (float)$existing['amount_collected'] : null,
+        'payment_collection' => $paymentCollection,
+        'ordered_pieces' => (int)$invoice['ordered_pieces'],
+        'invoice' => $invoice,
+    ];
+}
+
+/**
  * Confirm a delivery: assignment + order status, line delivered quantities,
  * frozen billable snapshot, and FG credit-return movements in one transaction.
  *
@@ -1140,49 +1196,9 @@ function bakery_confirm_delivery(
     }
 
     $clientRequestId = bakery_normalize_client_request_id($options['client_request_id'] ?? '');
-    if ($clientRequestId !== '' && bakery_daily_orders_confirm_request_id_ready($db)) {
-        $dup = $db->prepare(
-            'SELECT id, delivered_pieces, credits_taken_back, total_amount, amount_collected,
-                    delivery_order_total, delivery_pricing_label
-             FROM daily_orders
-             WHERE confirm_request_id = ?
-             LIMIT 1'
-        );
-        $dup->execute([$clientRequestId]);
-        $existing = $dup->fetch(PDO::FETCH_ASSOC);
-        if ($existing) {
-            if ((int)$existing['id'] !== $dailyOrderId) {
-                throw new Exception('This confirmation was already recorded for another stop');
-            }
-            $delivered = (int)($existing['delivered_pieces'] ?? 0);
-            $credits = (int)($existing['credits_taken_back'] ?? 0);
-            $total = (float)($existing['total_amount'] ?? $existing['delivery_order_total'] ?? 0);
-            $billable = max(0, $delivered - $credits);
-            $pricePerPiece = $billable > 0 ? round($total / $billable, 4) : 0.0;
-            $custStmt = $db->prepare(
-                'SELECT ' . bakery_payment_terms_pan_dulce_collection_sql($db) . '
-                 FROM daily_orders do
-                 JOIN customers c ON c.id = do.customer_id
-                 WHERE do.id = ?'
-            );
-            $custStmt->execute([$dailyOrderId]);
-            $paymentCollection = (string)($custStmt->fetchColumn() ?: 'signature');
-            $invoice = bakery_delivery_invoice($db, $dailyOrderId);
-            return [
-                'success' => true,
-                'duplicate' => true,
-                'message' => 'Delivery already confirmed.',
-                'delivered_pieces' => $delivered,
-                'credits_taken_back' => $credits,
-                'billable_pieces' => $billable,
-                'price_per_piece' => $pricePerPiece,
-                'total' => $total,
-                'amount_collected' => $existing['amount_collected'] !== null ? (float)$existing['amount_collected'] : null,
-                'payment_collection' => $paymentCollection,
-                'ordered_pieces' => (int)$invoice['ordered_pieces'],
-                'invoice' => $invoice,
-            ];
-        }
+    $replay = bakery_confirm_delivery_replay($db, $dailyOrderId, $clientRequestId);
+    if ($replay) {
+        return $replay;
     }
 
     $invoice = bakery_delivery_invoice($db, $dailyOrderId);
@@ -1264,6 +1280,20 @@ function bakery_confirm_delivery(
         $db->beginTransaction();
     }
     try {
+        if ($clientRequestId !== '' && bakery_daily_orders_confirm_request_id_ready($db)) {
+            $lockStmt = $db->prepare('SELECT confirm_request_id FROM daily_orders WHERE id = ? FOR UPDATE');
+            $lockStmt->execute([$dailyOrderId]);
+            $lockedRequest = $lockStmt->fetchColumn();
+            if ($lockedRequest !== false && (string)$lockedRequest === $clientRequestId) {
+                if ($ownTransaction && $db->inTransaction()) {
+                    $db->rollBack();
+                }
+                $lockedReplay = bakery_confirm_delivery_replay($db, $dailyOrderId, $clientRequestId);
+                if ($lockedReplay) {
+                    return $lockedReplay;
+                }
+            }
+        }
         if (bakery_delivery_order_is_empty($invoice) && $deliveredPieces > 0) {
             $pendingLines = [];
             if (isset($options['line_quantities']) && is_array($options['line_quantities'])) {
@@ -1363,6 +1393,12 @@ function bakery_confirm_delivery(
     } catch (Throwable $e) {
         if ($ownTransaction && $db->inTransaction()) {
             $db->rollBack();
+        }
+        if ($clientRequestId !== '' && function_exists('bakery_is_duplicate_confirm_error') && bakery_is_duplicate_confirm_error($e)) {
+            $raced = bakery_confirm_delivery_replay($db, $dailyOrderId, $clientRequestId);
+            if ($raced) {
+                return $raced;
+            }
         }
         throw $e;
     }

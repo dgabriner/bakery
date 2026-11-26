@@ -27,6 +27,61 @@
     }
     window.bakeryFormatDriverDate = bakeryFormatDriverDate;
 
+    function cleanInvalidRouteParams() {
+        if (!boot.invalidDate && !boot.missingStop) return;
+        if (!window.history || typeof window.history.replaceState !== 'function') return;
+        var params = new URLSearchParams(window.location.search);
+        if (boot.invalidDate) params.delete('date');
+        if (boot.missingStop) {
+            params.delete('open_stop');
+            params.delete('daily_order_id');
+            params.delete('view_orders');
+        }
+        var qs = params.toString();
+        window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    }
+
+    function closeDriverSheetsForOrientation() {
+        document.querySelectorAll('details[open]').forEach(function (el) {
+            if (el.classList.contains('bakery-nav__more')
+                || el.id === 'routeDateDisclosure'
+                || el.classList.contains('pan-carry-menu')
+                || el.classList.contains('next-stop-more')) {
+                el.open = false;
+            }
+        });
+        document.body.classList.remove('route-date-sheet-open');
+        var failModal = document.getElementById('failStopModal');
+        if (failModal && !failModal.hidden && typeof closeFailStopModal === 'function') closeFailStopModal();
+        var skipModal = document.getElementById('skipStopModal');
+        if (skipModal && !skipModal.hidden && typeof closeSkipStopModal === 'function') closeSkipStopModal();
+        var delivery = window.DriverDelivery;
+        if (delivery && typeof delivery.isBusy === 'function' && !delivery.isBusy() && typeof delivery.closeModal === 'function') {
+            delivery.closeModal();
+        }
+    }
+
+    function bindOrientationChrome() {
+        var coarseShort = null;
+        try {
+            coarseShort = window.matchMedia('(pointer: coarse) and (max-height: 499px)');
+        } catch (err) {
+            coarseShort = null;
+        }
+        function syncCoarseShort() {
+            var on = !!(coarseShort && coarseShort.matches);
+            document.documentElement.classList.toggle('driver-coarse-short', on);
+        }
+        syncCoarseShort();
+        if (coarseShort && typeof coarseShort.addEventListener === 'function') {
+            coarseShort.addEventListener('change', syncCoarseShort);
+        }
+        window.addEventListener('orientationchange', function () {
+            closeDriverSheetsForOrientation();
+            syncCoarseShort();
+        });
+    }
+
     function applyDriverDates() {
         var iso = boot.routeDate || '';
         document.querySelectorAll('[data-driver-date]').forEach(function (el) {
@@ -287,6 +342,16 @@
         container.innerHTML = html;
     }
 
+    function paintVisibleStopNumbers() {
+        var n = 0;
+        getActiveStops().forEach(function (el) {
+            n += 1;
+            el.setAttribute('data-visible-number', String(n));
+            var badge = el.querySelector('.stop-item-order');
+            if (badge) badge.textContent = '#' + n;
+        });
+    }
+
     function getActiveStops() {
         return Array.prototype.slice.call(document.querySelectorAll('#stopList .stop-item')).filter(function (el) {
             var status = el.getAttribute('data-status') || '';
@@ -395,7 +460,12 @@
         var name = stopEl.getAttribute('data-customer-name') || '';
         var address = stopEl.getAttribute('data-address') || '';
         var phone = stopEl.getAttribute('data-phone') || '';
-        var routeOrder = stopEl.getAttribute('data-route-order') || '';
+        var routeOrder = stopEl.getAttribute('data-visible-number') || '';
+        if (!routeOrder) {
+            var activeNow = getActiveStops();
+            var visibleIndex = activeNow.indexOf(stopEl);
+            if (visibleIndex >= 0) routeOrder = String(visibleIndex + 1);
+        }
         var orderedPieces = parseInt(stopEl.getAttribute('data-ordered-pieces') || '0', 10);
         var stopNotes = stopEl.getAttribute('data-stop-notes') || '';
         var windowLabel = stopEl.getAttribute('data-receiving-hours') || stopEl.getAttribute('data-scheduled-time') || '';
@@ -679,11 +749,17 @@
 
         var past = getPastStops();
         var active = getActiveStops();
+        paintVisibleStopNumbers();
         renderNextStop(active[0] || null);
 
         var root = document.getElementById('driverRouteRoot');
         var total = root ? parseInt(root.getAttribute('data-total') || '0', 10) : 0;
         var completed = past.length;
+        var renderedTotal = active.length + past.length;
+        if (renderedTotal > 0) {
+            total = renderedTotal;
+            if (root) root.setAttribute('data-total', String(total));
+        }
         if (root) root.setAttribute('data-completed', String(completed));
         var text = document.getElementById('routeProgressText');
         var fill = document.getElementById('routeProgressFill');
@@ -709,6 +785,7 @@
         if (totalCount) totalCount.textContent = total;
         if (pastCount) pastCount.textContent = past.length;
         if (queueCount) queueCount.textContent = active.length;
+        paintVisibleStopNumbers();
 
         var pastDetails = document.getElementById('pastStopsDetails');
         var completedButton = document.getElementById('routeCompletedButton');
@@ -836,8 +913,6 @@
                 var el = findRouteStop(row.id);
                 if (!el) return;
                 el.setAttribute('data-route-order', row.order);
-                var badge = el.querySelector('.stop-item-order');
-                if (badge) badge.textContent = row.order ? '#' + row.order : '#-';
             });
             routeAdjust.open = false;
             refreshRouteUi();
@@ -1033,8 +1108,6 @@
             var el = findRouteStop(row.daily_order_id);
             if (!el) return;
             el.setAttribute('data-route-order', String(row.route_order));
-            var badge = el.querySelector('.stop-item-order');
-            if (badge) badge.textContent = '#' + row.route_order;
         });
     }
 
@@ -1457,6 +1530,14 @@
         if (noteInput) noteInput.value = '';
     }
 
+    function syncFailReportButton() {
+        var form = document.getElementById('failStopForm');
+        var confirmBtn = document.getElementById('failStopConfirmBtn');
+        if (!confirmBtn) return;
+        var checked = form ? form.querySelector('input[name="reason_code"]:checked') : null;
+        confirmBtn.disabled = !checked;
+    }
+
     function failHqReasonLabel() {
         var form = document.getElementById('failStopForm');
         var checked = form ? form.querySelector('input[name="reason_code"]:checked') : null;
@@ -1499,6 +1580,7 @@
         var assignmentInput = document.getElementById('failStopAssignmentId');
         var noteInput = document.getElementById('failStopNote');
         var errorEl = document.getElementById('failStopError');
+        var form = document.getElementById('failStopForm');
         if (customerEl) customerEl.textContent = customerName || '';
         if (orderInput) orderInput.value = String(failModalState.dailyOrderId);
         if (assignmentInput) assignmentInput.value = String(failModalState.assignmentId);
@@ -1506,9 +1588,20 @@
             var draftNote = problemDraftNotes[String(failModalState.dailyOrderId)];
             noteInput.value = draftNote == null ? '' : draftNote;
         }
+        if (form) {
+            form.querySelectorAll('input[name="reason_code"]').forEach(function (input) {
+                input.checked = false;
+            });
+        }
+        syncFailReportButton();
         if (noteInput && noteInput.getAttribute('data-draft-bound') !== '1') {
             noteInput.setAttribute('data-draft-bound', '1');
             noteInput.addEventListener('input', rememberProblemNote);
+            noteInput.addEventListener('focus', function () {
+                if (noteInput.scrollIntoView) {
+                    noteInput.scrollIntoView({ block: 'center', inline: 'nearest' });
+                }
+            });
         }
         if (errorEl) {
             errorEl.hidden = true;
@@ -1520,11 +1613,11 @@
         paintProblemChips();
         pushLayer('problem');
         updateFailHqLinks();
-        var form = document.getElementById('failStopForm');
         if (form && form.getAttribute('data-hq-bound') !== '1') {
             form.setAttribute('data-hq-bound', '1');
             form.addEventListener('change', function (event) {
                 if (event.target && event.target.name === 'reason_code') {
+                    syncFailReportButton();
                     updateFailHqLinks();
                 }
             });
@@ -1553,6 +1646,14 @@
         var reason = '';
         var checked = form.querySelector('input[name="reason_code"]:checked');
         if (checked) reason = String(checked.value || '');
+        if (!reason) {
+            if (errorEl) {
+                errorEl.textContent = di.problem_reason_required || di.fail_reason_required || 'Pick a reason first.';
+                errorEl.hidden = false;
+            }
+            if (confirmBtn) confirmBtn.disabled = true;
+            return;
+        }
         var note = String((document.getElementById('failStopNote') || {}).value || '').trim();
         if (reason === 'other' && !note) {
             if (errorEl) {
@@ -2140,8 +2241,6 @@
             var order = String(row.order == null ? '' : row.order);
             if ((el.getAttribute('data-route-order') || '') !== order) {
                 el.setAttribute('data-route-order', order);
-                var badge = el.querySelector('.stop-item-order');
-                if (badge) badge.textContent = order ? '#' + order : '#-';
                 changed = true;
             }
             var status = String(row.status || 'pending');
@@ -2161,7 +2260,7 @@
             }
         });
         var root = routeRoot();
-        if (root && changed) root.setAttribute('data-total', String((stops || []).length));
+        if (root && changed && !missing) root.setAttribute('data-total', String(document.querySelectorAll('#stopList .stop-item, #pastStopsList .stop-item').length));
         if (changed) {
             refreshRouteUi();
             showSuccessToast(di.route_updated);
@@ -2222,7 +2321,9 @@
     document.addEventListener('DOMContentLoaded', function () {
         if (window.__DRIVER_PAGE_I18N__) di = window.__DRIVER_PAGE_I18N__;
         boot = window.__DRIVER_ROUTE_BOOT__ || boot;
+        cleanInvalidRouteParams();
         applyDriverDates();
+        bindOrientationChrome();
         applyNavigateLinks(document);
         refreshRouteUi();
         bindSkipStopButtons(document);

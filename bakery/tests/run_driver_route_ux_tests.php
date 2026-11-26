@@ -709,6 +709,241 @@ driver_ux_assert(
         && strpos($routeJs, "classList.toggle('driver-closeout-ready', show)") !== false
 );
 
+$navCss = (string)file_get_contents($root . '/css/nav.css');
+driver_ux_assert(
+    'a short coarse phone keeps the phone layout and closes sheets on rotate',
+    strpos($styles, '@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px))') !== false
+        && strpos($navCss, '@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px))') !== false
+        && strpos($routeJs, 'orientationchange') !== false
+        && strpos($routeJs, 'closeDriverSheetsForOrientation') !== false
+        && strpos($styles, '@media (max-height: 500px)') !== false
+        && strpos($styles, 'position: sticky;') !== false
+);
+
+driver_ux_assert(
+    'wizard pills are done only when that step really happened',
+    strpos($deliveryJs, 'function deliveryStepIsDone(step, info)') !== false
+        && strpos($deliveryJs, "info.proofState === 'saved'") !== false
+        && strpos($deliveryJs, "info.proofState === 'skipped'") !== false
+        && strpos($deliveryJs, 'confirmationSaved === true && info.visualStep === \'invoice\'') !== false
+);
+
+$stepFnAt = strpos($deliveryJs, 'function deliveryStepIsDone(step, info)');
+$stepFnEnd = $stepFnAt === false ? false : strpos($deliveryJs, 'function goToStep(step)', $stepFnAt);
+$stepFn = ($stepFnAt !== false && $stepFnEnd !== false) ? substr($deliveryJs, $stepFnAt, $stepFnEnd - $stepFnAt) : '';
+$stepScript = $stepFn . <<<'JS'
+
+const cases = [
+  ['photo', { proofState: '', hasProofPhoto: false, confirmationSaved: false, visualStep: 'delivery' }, false],
+  ['photo', { proofState: 'skipped', hasProofPhoto: false, confirmationSaved: false, visualStep: 'delivery' }, false],
+  ['photo', { proofState: 'saved', hasProofPhoto: false, confirmationSaved: false, visualStep: 'delivery' }, true],
+  ['photo', { proofState: '', hasProofPhoto: true, confirmationSaved: false, visualStep: 'delivery' }, true],
+  ['delivery', { proofState: 'saved', hasProofPhoto: true, confirmationSaved: false, visualStep: 'delivery' }, false],
+  ['delivery', { proofState: 'saved', hasProofPhoto: true, confirmationSaved: true, visualStep: 'invoice' }, true]
+];
+let stepFailed = 0;
+cases.forEach(function (row) {
+  const got = deliveryStepIsDone(row[0], row[1]);
+  if (got !== row[2]) {
+    console.log('STEP ' + JSON.stringify(row) + ' => ' + got);
+    stepFailed++;
+  }
+});
+if (stepFailed) process.exit(1);
+JS;
+$stepFile = tempnam(sys_get_temp_dir(), 'bakery-step-');
+$stepOk = false;
+if ($stepFn !== '' && $stepFile !== false) {
+    file_put_contents($stepFile, $stepScript);
+    $stepOut = (string)shell_exec('node ' . escapeshellarg($stepFile) . ' 2>&1');
+    $stepOk = $stepOut === '';
+    if (!$stepOk && $stepOut !== '') {
+        echo $stepOut;
+    }
+    @unlink($stepFile);
+}
+driver_ux_assert('arrive and photo pills stay undone until the step is saved', $stepOk);
+
+driver_ux_assert(
+    'first paint counts come from the same server totals as the strip',
+    strpos($page, 'data-total="<?php echo (int)$totalStops; ?>"') !== false
+        && strpos($page, 'data-remaining="<?php echo (int)$remainingStops; ?>"') !== false
+        && strpos($page, 'id="nowStripProgress"') !== false
+        && strpos($page, '(int)$driverCompletedStops; ?>/<?php echo (int)$totalStops;') !== false
+        && strpos($page, 'id="queueCount"><?php echo (int)$remainingStops;') !== false
+        && strpos($routeJs, 'var renderedTotal = active.length + past.length;') !== false
+);
+
+$numberFnAt = strpos($page, 'function bakery_driver_visible_stop_numbers(array $stops): array');
+$numberFnEnd = $numberFnAt === false ? false : strpos($page, 'function bakery_driver_stop_checked_in', $numberFnAt);
+$numberFn = ($numberFnAt !== false && $numberFnEnd !== false) ? substr($page, $numberFnAt, $numberFnEnd - $numberFnAt) : '';
+$visibleNumbers = [];
+if ($numberFn !== '') {
+    eval($numberFn);
+    $visibleNumbers = bakery_driver_visible_stop_numbers([
+        ['daily_order_id' => 10, 'delivery_status' => 'pending', 'route_order' => 1],
+        ['daily_order_id' => 11, 'delivery_status' => 'delivered', 'route_order' => 2],
+        ['daily_order_id' => 12, 'delivery_status' => 'pending', 'route_order' => 6],
+        ['daily_order_id' => 13, 'delivery_status' => 'office_flag', 'route_order' => 7],
+        ['daily_order_id' => 14, 'delivery_status' => 'pending', 'route_order' => 9],
+    ]);
+}
+driver_ux_assert(
+    'visible stops are numbered 1..N and internal gaps stay out of the badge',
+    $visibleNumbers === [10 => 1, 12 => 2, 14 => 3]
+        && strpos($page, 'data-route-order=') !== false
+        && strpos($page, 'data-visible-number=') !== false
+        && strpos($routeJs, 'function paintVisibleStopNumbers()') !== false
+);
+
+driver_ux_assert(
+    'the problem sheet starts with no reason and Report stays disabled',
+    strpos($page, "bakery_exception_desk_reason_chips_html('reason_code', false)") !== false
+        && strpos($page, 'id="failStopConfirmBtn" disabled') !== false
+        && strpos($page, "bakery_te('driver.problem_question')") !== false
+        && ($english['driver.problem_question'] ?? '') === "Can't deliver?"
+        && ($spanish['driver.problem_question'] ?? '') === '¿No puedes entregar?'
+        && strpos($routeJs, 'function syncFailReportButton()') !== false
+        && strpos($routeJs, 'confirmBtn.disabled = !checked;') !== false
+);
+
+$dateFnAt = strpos($page, 'function bakery_driver_route_date_or_today(string $raw): array');
+$dateFnEnd = $dateFnAt === false ? false : strpos($page, 'function bakery_driver_open_stop_id', $dateFnAt);
+$dateFn = ($dateFnAt !== false && $dateFnEnd !== false) ? substr($page, $dateFnAt, $dateFnEnd - $dateFnAt) : '';
+$openFnAt = strpos($page, 'function bakery_driver_open_stop_id(string $openStop, int $dailyOrderId): int');
+$openFnEnd = $openFnAt === false ? false : strpos($page, 'function bakery_driver_visible_stop_numbers', $openFnAt);
+$openFn = ($openFnAt !== false && $openFnEnd !== false) ? substr($page, $openFnAt, $openFnEnd - $openFnAt) : '';
+$invalidDate = [];
+$missingStopId = -1;
+if ($dateFn !== '' && $openFn !== '') {
+    eval($dateFn);
+    eval($openFn);
+    $invalidDate = bakery_driver_route_date_or_today('2026-13-40');
+    $missingStopId = bakery_driver_open_stop_id('999999', 0);
+}
+driver_ux_assert(
+    'a bad date falls back to today and a bare open_stop id is the order id',
+    ($invalidDate['invalid'] ?? false) === true
+        && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($invalidDate['date'] ?? '')) === 1
+        && ($invalidDate['date'] ?? '') !== '2026-13-40'
+        && bakery_driver_route_date_or_today('2026-11-26')['invalid'] === false
+        && $missingStopId === 999999
+        && bakery_driver_open_stop_id('1', 42) === 42
+        && strpos($page, 'driver.date_invalid') !== false
+        && strpos($page, 'driver.stop_not_found') !== false
+        && strpos($routeJs, 'function cleanInvalidRouteParams()') !== false
+        && ($english['driver.date_invalid'] ?? '') !== ''
+        && ($spanish['driver.stop_not_found'] ?? '') !== ''
+        && ($english['driver.date_invalid'] ?? '') !== ($spanish['driver.date_invalid'] ?? '')
+);
+
+if (!defined('ACCESS_ALLOWED')) {
+    define('ACCESS_ALLOWED', true);
+}
+require_once $root . '/includes/i18n.php';
+require_once $root . '/includes/time_clock.php';
+require_once $root . '/includes/client_request_id.php';
+$_SESSION['locale'] = 'en';
+if (function_exists('bakery_locale')) {
+    bakery_locale(true);
+}
+$earlierPunch = ['clock_in_at' => '2098-03-17 22:16:00'];
+$todayPunch = ['clock_in_at' => '2098-03-18 08:05:00'];
+$clockNow = strtotime('2098-03-18 09:30:00');
+$earlierLabel = bakery_time_clock_open_label($earlierPunch, $clockNow);
+$todayLabel = bakery_time_clock_open_label($todayPunch, $clockNow);
+$earlierNav = bakery_time_clock_nav_label($earlierPunch, $clockNow);
+driver_ux_assert(
+    'an earlier open punch uses one sentence on the page and in More',
+    $earlierLabel === 'Clock-in from 3/17 still open, clock out to fix'
+        && $earlierNav === $earlierLabel
+        && strpos($todayLabel, 'Clocked in since') === 0
+        && strpos($todayLabel, 'p. m..') === false
+        && strpos($page, 'bakery_time_clock_open_label') === false
+        && strpos((string)file_get_contents($root . '/time_clock.php'), 'bakery_time_clock_open_label') !== false
+        && strpos((string)file_get_contents($root . '/includes/nav.php'), 'bakery_time_clock_nav_label') !== false
+        && ($english['time_clock.still_open'] ?? '') === 'Clock-in from :date still open, clock out to fix'
+        && strpos((string)($spanish['time_clock.status_in'] ?? ''), ':time.') === false
+);
+$_SESSION['locale'] = 'es';
+bakery_locale(true);
+$spanishClock = bakery_time_clock_format_time('2098-03-17 22:16:00');
+driver_ux_assert(
+    'Spanish clock uses a non-breaking space and day/month',
+    strpos($spanishClock, "p.\u{00A0}m.") !== false
+        && strpos($spanishClock, '17/3') === 0
+        && strpos($spanishClock, 'p. m..') === false
+);
+$_SESSION['locale'] = 'en';
+bakery_locale(true);
+
+$dupError = new PDOException("SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'abc' for key 'uq_daily_orders_confirm_request_id'");
+driver_ux_assert(
+    'a second queued confirm is recognized as a duplicate and locked on the server',
+    bakery_is_duplicate_confirm_error($dupError) === true
+        && bakery_is_duplicate_confirm_error(new Exception('plain failure')) === false
+        && strpos((string)file_get_contents($root . '/complete_delivery.php'), 'FOR UPDATE') !== false
+        && strpos((string)file_get_contents($root . '/complete_delivery.php'), 'bakery_confirm_delivery_replay') !== false
+        && strpos((string)file_get_contents($root . '/includes/driver_offline_outbox.js'), 'function queuedConfirmForOrder') !== false
+        && strpos($page, 'id="driverOfflineBanner"') !== false
+        && ($english['driver.offline_banner'] ?? '') !== ($spanish['driver.offline_banner'] ?? '')
+        && ($english['driver.offline_finish_blocked'] ?? '') !== ''
+);
+
+$reuseFnAt = strpos((string)file_get_contents($root . '/includes/driver_offline_outbox.js'), 'function queuedConfirmForOrder(jobs, dailyOrderId)');
+$outboxJs = (string)file_get_contents($root . '/includes/driver_offline_outbox.js');
+$reuseFnEnd = $reuseFnAt === false ? false : strpos($outboxJs, 'function queuedCount', $reuseFnAt);
+$reuseFn = ($reuseFnAt !== false && $reuseFnEnd !== false) ? substr($outboxJs, $reuseFnAt, $reuseFnEnd - $reuseFnAt) : '';
+$reuseScript = $reuseFn . <<<'JS'
+
+const jobs = [
+  { id: 'confirm-a', kind: 'confirm', dailyOrderId: 9, status: 'queued' },
+  { id: 'confirm-b', kind: 'confirm', dailyOrderId: 9, status: 'synced' },
+  { id: 'photo-a', kind: 'photo', dailyOrderId: 9, status: 'queued' }
+];
+const reused = queuedConfirmForOrder(jobs, 9);
+const fresh = queuedConfirmForOrder(jobs, 10);
+if (!reused || reused.id !== 'confirm-a' || fresh !== null) {
+  console.log(JSON.stringify({ reused: reused, fresh: fresh }));
+  process.exit(1);
+}
+JS;
+$reuseFile = tempnam(sys_get_temp_dir(), 'bakery-outbox-');
+$reuseOk = false;
+if ($reuseFn !== '' && $reuseFile !== false) {
+    file_put_contents($reuseFile, $reuseScript);
+    $reuseOut = (string)shell_exec('node ' . escapeshellarg($reuseFile) . ' 2>&1');
+    $reuseOk = $reuseOut === '';
+    if (!$reuseOk && $reuseOut !== '') {
+        echo $reuseOut;
+    }
+    @unlink($reuseFile);
+}
+driver_ux_assert('a queued confirm for the same stop is not sent twice', $reuseOk);
+
+$stopsPage = (string)file_get_contents($root . '/driver_stops.php');
+driver_ux_assert(
+    'you are here waits for check-in in English and Spanish',
+    strpos($stopsPage, "bakery_te(\$currentCheckedIn ? 'driver.you_are_here' : 'driver.next_stop')") !== false
+        && strpos($stopsPage, "photo_type = 'Before'") !== false
+        && ($english['driver.you_are_here'] ?? '') === "You're here now"
+        && ($spanish['driver.you_are_here'] ?? '') === 'Estás aquí ahora'
+);
+
+driver_ux_assert(
+    'language links and the carried-stop menu are at least 44px, and recover says what it does',
+    strpos($navCss, '.bakery-nav--driver .bakery-nav__more-sheet .bakery-lang-switch__btn') !== false
+        && strpos($navCss, 'min-height: 44px;') !== false
+        && strpos($styles, '.pan-carry-menu-toggle') !== false
+        && strpos($styles, 'min-height: 44px;') !== false
+        && strpos((string)file_get_contents($root . '/includes/pan_carry.php'), 'pan-carry-menu') !== false
+        && strpos((string)file_get_contents($root . '/includes/pan_carry.php'), 'data-confirm') !== false
+        && ($english['exception_desk.cant_deliver'] ?? '') === "Can't finish, send to office"
+        && ($spanish['exception_desk.cant_deliver'] ?? '') === 'No puedo terminar, enviar a la oficina'
+        && ($spanish['driver.queue'] ?? '') === 'Tus paradas'
+        && ($spanish['nav.call_hq'] ?? '') === 'Llamar a la oficina'
+);
+
 if ($failures > 0) {
     echo "{$failures} failed\n";
     exit(1);

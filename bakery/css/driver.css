@@ -1511,7 +1511,7 @@ body.driver-workflow-page .photo-modal select:focus {
     }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
     body.driver-workflow-page .driver-route {
         min-height: 100vh;
     }
@@ -2620,13 +2620,13 @@ html {
     display: none;
 }
 
-@media (min-width: 721px) {
+@media (min-width: 721px) and (not ((pointer: coarse) and (max-height: 499px))) {
     .bakery-nav__date-toggle {
         display: none !important;
     }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
     body.workspace-driver .route-date-dock,
     body.driver-field-mode .route-date-dock {
         position: fixed;
@@ -4972,7 +4972,7 @@ body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route 
     padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
     .route-day-nav {
         grid-template-columns: minmax(68px, 78px) minmax(0, 1fr) minmax(68px, 78px);
         gap: 6px;
@@ -6372,7 +6372,7 @@ body.route-prep-sheet-open .route-prep-add-dock {
     display: none;
 }
 
-@media (min-width: 721px) {
+@media (min-width: 721px) and (not ((pointer: coarse) and (max-height: 499px))) {
     .route-prep-add-dock {
         display: none;
     }
@@ -7246,7 +7246,7 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
     cursor: pointer;
 }
 
-@media (min-width: 721px) {
+@media (min-width: 721px) and (not ((pointer: coarse) and (max-height: 499px))) {
     .bakery-nav__more-route > form,
     .bakery-nav__more-route > a {
         display: none;
@@ -7254,7 +7254,7 @@ html.driver-map-deferred .route-map-toolbar .route-map-tools {
 }
 
 /* ----- Phones (bottom nav breakpoint) ----- */
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
     body.driver-workflow-page {
         color-scheme: light;
         --driver-nav-h: calc(64px + env(safe-area-inset-bottom, 0px));
@@ -7985,7 +7985,7 @@ body.route-date-sheet-open .driver-closeout-bar {
     display: none !important;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
     .driver-closeout-bar {
         bottom: calc(var(--driver-nav-h) + 8px);
         left: 10px;
@@ -8112,4 +8112,198 @@ button.bakery-nav__more-link {
     border: 0;
     font: inherit;
     cursor: pointer;
+}
+
+/* Landscape phones are wider than 720px and shorter than 500px. Phone chrome
+   comes from the coarse+short media queries above. These rules keep sheets
+   usable when the keyboard and the dock share that short viewport. */
+.driver-offline-banner {
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #7a4b00;
+    color: #fff;
+    font-size: 0.92rem;
+    font-weight: 750;
+    line-height: 1.35;
+}
+
+.driver-offline-banner[hidden] {
+    display: none !important;
+}
+
+.driver-param-notice {
+    margin: 0 0 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: #fff6e5;
+    color: #6a4b12;
+    font-weight: 750;
+}
+
+.pan-carry-label {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: visible;
+}
+
+.stop-item-name {
+    overflow: visible;
+}
+
+.pan-carry-menu {
+    display: inline-flex;
+    position: relative;
+    margin-left: 0.2rem;
+    vertical-align: middle;
+}
+
+.pan-carry-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: 12px;
+    list-style: none;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.pan-carry-menu-toggle::-webkit-details-marker {
+    display: none;
+}
+
+.pan-carry-remove {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+}
+
+.pan-carry-menu .pan-carry-remove-form {
+    position: absolute;
+    z-index: 3;
+    right: 0;
+    top: 100%;
+    margin: 0;
+}
+
+@media (max-height: 500px) {
+    #deliveryPhotoModal .delivery-photo-modal-content {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        height: 100svh;
+        max-height: 100svh;
+    }
+
+    #deliveryPhotoModal .photo-modal-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 4px 8px;
+        overflow: visible;
+        position: relative;
+        z-index: 5;
+        background: #fff;
+    }
+
+    #deliveryPhotoModal .photo-modal-close {
+        position: static;
+        flex: 0 0 44px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+    }
+
+    #deliveryPhotoModal .photo-modal-header-text {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    #deliveryPhotoModal .photo-modal-header h3 {
+        font-size: 1rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    #deliveryPhotoModal .photo-modal-body {
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+    }
+
+    #deliveryPhotoModal .photo-modal-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 4;
+        background: #fff;
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -6px 16px rgba(16, 42, 49, 0.08);
+    }
+
+    #deliveryPhotoModal .delivery-wizard-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+    }
+
+    #deliveryPhotoModal .delivery-wizard-actions .btn,
+    #deliveryPhotoModal .delivery-wizard-actions .fail-stop-btn,
+    #deliveryPhotoModal .delivery-wizard-actions .complete-delivery-btn {
+        min-height: 40px;
+        padding: 6px 8px;
+        font-size: 0.78rem;
+        line-height: 1.15;
+        white-space: normal;
+    }
+
+    #deliveryPhotoModal .delivery-submit-note,
+    #deliveryPhotoModal .photo-finish-hint {
+        display: none;
+    }
+
+    #deliveryPhotoModal .delivery-wizard-steps {
+        padding: 4px 8px;
+    }
+
+    #deliveryPhotoModal .delivery-wizard-step {
+        min-height: 36px;
+        flex-direction: row;
+        gap: 4px;
+    }
+
+    body.driver-workflow-page #failStopModal .exception-desk__note-label,
+    body.driver-workflow-page #failStopNote {
+        scroll-margin-top: 12px;
+        scroll-margin-bottom: 72px;
+    }
+}
+
+@media (pointer: coarse) and (max-height: 499px) {
+    body.driver-workflow-page {
+        overflow-y: auto;
+    }
+
+    body.driver-field-mode.route-has-sticky-dock.driver-workflow-page .driver-route {
+        padding-bottom: calc(var(--driver-nav-h, 72px) + var(--driver-dock-h, 64px) + 28px);
+    }
+
+    .route-sticky-dock {
+        bottom: var(--driver-nav-h, 72px);
+        z-index: 1040;
+    }
+
+    .next-stop,
+    .stop-row-actions,
+    .route-day-nav {
+        scroll-margin-bottom: calc(var(--driver-nav-h, 72px) + var(--driver-dock-h, 64px) + 12px);
+    }
 }

@@ -611,14 +611,18 @@ function bakery_pan_carry_remove_form(int $carryId, string $date): string
 {
     $csrf = function_exists('bakery_csrf_field') ? bakery_csrf_field() : '';
     $label = bakery_route_load_text('pan_carry.remove', [], 'Remove carried stop');
-    return '<form method="post" class="pan-carry-remove-form">'
+    $confirm = bakery_route_load_text('pan_carry.remove_confirm', [], 'Remove this carried stop?');
+    $menu = bakery_route_load_text('pan_carry.remove_menu', [], 'Stop menu');
+    return '<details class="pan-carry-menu">'
+        . '<summary class="pan-carry-menu-toggle" aria-label="' . bakery_route_load_h($menu) . '">&#8943;</summary>'
+        . '<form method="post" class="pan-carry-remove-form" data-confirm="' . bakery_route_load_h($confirm) . '" onsubmit="return confirm(this.getAttribute(\'data-confirm\') || \'\');">'
         . $csrf
         . '<input type="hidden" name="action" value="remove_pan_carry">'
         . '<input type="hidden" name="carry_id" value="' . $carryId . '">'
         . '<input type="hidden" name="operating_date" value="' . bakery_route_load_h($date) . '">'
         . '<input type="hidden" name="date" value="' . bakery_route_load_h($date) . '">'
         . '<button type="submit" class="pan-carry-remove">' . bakery_route_load_h($label) . '</button>'
-        . '</form>';
+        . '</form></details>';
 }
 
 /**

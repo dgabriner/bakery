@@ -206,7 +206,7 @@ $headerSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/header.php'
 navigation_test_assert(strpos($headerSrc, 'workspace-cashier') !== false, 'header treats cashier as a focused workspace');
 $navCss = (string)file_get_contents(dirname(__DIR__) . '/css/nav.css');
 navigation_test_assert(strpos($navCss, '.bakery-nav--cashier .bakery-nav__groups') !== false, 'nav.css lays out the cashier focused bar');
-$phoneNavCss = (string)(preg_split('/@media \(max-width: 720px\) \{\s*body\.workspace-driver,/', $navCss)[1] ?? '');
+$phoneNavCss = (string)(preg_split('/@media \(max-width: 720px\)(?:, \(\(pointer: coarse\) and \(max-height: 499px\)\))? \{\s*body\.workspace-driver,/', $navCss)[1] ?? '');
 navigation_test_assert(
     strpos($phoneNavCss, '--sf-manager-bell-reserve: 56px') !== false
         && preg_match('/body\.workspace-manager \{[^}]*padding-bottom:\s*calc\(92px \+ var\(--sf-manager-bell-reserve\)/s', $phoneNavCss) === 1,

@@ -240,7 +240,7 @@ function bakery_exception_desk_flag_shortage(PDO $db, string $date, int $product
     ]);
 }
 
-function bakery_exception_desk_reason_chips_html(string $fieldName = 'reason_code'): string
+function bakery_exception_desk_reason_chips_html(string $fieldName = 'reason_code', bool $preselectFirst = true): string
 {
     $html = '<div class="exception-desk__chips" role="radiogroup" aria-label="' . bakery_exception_desk_h(bakery_t('exception_desk.reason')) . '">';
     $first = true;
@@ -248,7 +248,7 @@ function bakery_exception_desk_reason_chips_html(string $fieldName = 'reason_cod
         $id = 'ed-reason-' . preg_replace('/[^a-z0-9_]+/', '-', $code) . '-' . substr(sha1($fieldName . $code), 0, 6);
         $html .= '<label class="exception-desk__chip" for="' . bakery_exception_desk_h($id) . '">';
         $html .= '<input type="radio" id="' . bakery_exception_desk_h($id) . '" name="' . bakery_exception_desk_h($fieldName) . '" value="'
-            . bakery_exception_desk_h($code) . '"' . ($first ? ' checked' : '') . ' required>';
+            . bakery_exception_desk_h($code) . '"' . ($preselectFirst && $first ? ' checked' : '') . ' required>';
         $html .= '<span>' . bakery_exception_desk_h(bakery_exception_desk_reason_label($code)) . '</span></label>';
         $first = false;
     }
@@ -279,7 +279,7 @@ function bakery_exception_desk_driver_fail_form(array $stop, string $actionUrl =
         <?php if ($customer !== ''): ?>
             <p class="exception-desk__who"><?php echo bakery_exception_desk_h($customer); ?></p>
         <?php endif; ?>
-        <?php echo bakery_exception_desk_reason_chips_html(); ?>
+        <?php echo bakery_exception_desk_reason_chips_html('reason_code', false); ?>
         <label class="exception-desk__note-label" for="ed-driver-note-<?php echo $orderId; ?>"><?php echo bakery_exception_desk_h(bakery_t('exception_desk.driver_note')); ?></label>
         <textarea id="ed-driver-note-<?php echo $orderId; ?>" name="manager_note" rows="2" maxlength="2000"
             placeholder="<?php echo bakery_exception_desk_h(bakery_t('exception_desk.driver_note_ph')); ?>"></textarea>
