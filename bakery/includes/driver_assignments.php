@@ -849,9 +849,12 @@ function bakery_driver_transfer_assignments(
     array $dailyOrderIds,
     int $toDriverId,
     string $deliveryDate,
-    ?int $fromDriverId = null
+    ?int $fromDriverId = null,
+    bool $allowDriverCaller = false
 ): array {
-    bakery_require_role(['administrator', 'manager']);
+    if (!$allowDriverCaller) {
+        bakery_require_role(['administrator', 'manager']);
+    }
 
     $dailyOrderIds = array_values(array_unique(array_filter(
         array_map('intval', $dailyOrderIds),

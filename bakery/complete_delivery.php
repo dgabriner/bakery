@@ -1683,8 +1683,14 @@ try {
                 throw new Exception('Daily order ID is required');
             }
             $dailyOrderId = (int)$_POST['daily_order_id'];
-            bakery_delivery_assert_driver_access($db, $dailyOrderId);
-            bakery_unskip_delivery_stop($db, $dailyOrderId);
+            require_once __DIR__ . '/includes/driver_route_control.php';
+            $unskipUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
+            if ($unskipUser && bakery_is_driver_route_role($unskipUser['role_slug'] ?? '')) {
+                bakery_driver_route_control_unskip($db, $dailyOrderId);
+            } else {
+                bakery_delivery_assert_driver_access($db, $dailyOrderId);
+                bakery_unskip_delivery_stop($db, $dailyOrderId);
+            }
             echo json_encode([
                 'success' => true,
                 'message' => function_exists('bakery_t') ? bakery_t('driver.unskip_success') : 'Stop restored to your route.',

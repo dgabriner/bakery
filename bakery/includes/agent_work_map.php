@@ -679,6 +679,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_billing_accuracy_tests.php',
                 'tests/run_driver_route_ux_tests.php',
                 'tests/run_driver_closeout_tests.php',
+                'tests/run_driver_route_control_tests.php',
                 'tests/run_driver_photo_ui_tests.php',
                 'tests/run_driver_survey_flow_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',

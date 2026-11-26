@@ -701,7 +701,7 @@ driver_ux_assert(
         && strpos($closeoutPhp, 'value="close_route"') !== false
         && strpos($closeoutPhp, 'name="confirm_open_stops"') !== false
         && strpos($closeoutPage, 'confirm_open_stops') !== false
-        && strpos($closeoutPage, 'Only a manager can reopen a closed route.') !== false
+        && strpos($closeoutPage, 'bakery_driver_route_control_reopen') !== false
 );
 driver_ux_assert(
     'finishing the last stop reveals the closeout bar without covering the hero dock',

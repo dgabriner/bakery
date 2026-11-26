@@ -77,7 +77,7 @@ $source = (string)file_get_contents($root . '/route_closeout.php')
     . (string)file_get_contents($root . '/includes/driver_closeout.php');
 closeout_assert_true(strpos($source, 'bool $allowOpenStops = false') !== false, 'open-stop bypass is an explicit flag on the existing reconcile function');
 closeout_assert_true(strpos($source, "bakery_t('driver.closeout_own_route')") !== false, 'a driver cannot close another driver route');
-closeout_assert_true(strpos($source, 'Only a manager can reopen a closed route.') !== false, 'drivers still cannot reopen');
+closeout_assert_true(strpos($source, 'bakery_driver_route_control_reopen') !== false, 'drivers reopen through the same-day control guard');
 closeout_assert_true(
     strpos($source, '$isDriverOnly && (string)($_POST[\'confirm_open_stops\'] ?? \'\') === \'1\'') !== false,
     'only a driver confirm sets the open-stop flag'

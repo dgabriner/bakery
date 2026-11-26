@@ -89,10 +89,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $notice = 'Route closed. Loaded units are reconciled as delivered, returned, waste, and door credits.';
             $focusDriverId = $postDriverId;
         } elseif ($action === 'reopen_route') {
+            require_once __DIR__ . '/includes/driver_route_control.php';
             if ($isDriverOnly) {
-                throw new RuntimeException('Only a manager can reopen a closed route.');
+                bakery_driver_route_control_reopen($db, $selectedDate, (string)($_POST['confirm_reopen'] ?? ''));
+                $postDriverId = $driverScopedId;
+            } else {
+                bakery_inventory_reopen_driver_closeout($db, $selectedDate, $postDriverId);
+                bakery_driver_route_control_log(
+                    $db,
+                    'driver_route_reopened',
+                    'Manager reopened a route closeout',
+                    $selectedDate,
+                    $postDriverId,
+                    ['status' => 'reconciled'],
+                    ['status' => 'loaded']
+                );
             }
-            bakery_inventory_reopen_driver_closeout($db, $selectedDate, $postDriverId);
+            if ($returnToDriver) {
+                $dest = (defined('BASE_URL') ? BASE_URL : '') . 'driver.php?' . http_build_query([
+                    'date' => $selectedDate,
+                    'closeout' => '1',
+                    'notice' => bakery_t('driver.reopen_done'),
+                ]);
+                header('Location: ' . $dest);
+                exit;
+            }
             $notice = 'Route reopened. Closeout ledger movements were reversed; review pickup and close again when ready.';
             $focusDriverId = $postDriverId;
         }

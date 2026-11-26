@@ -274,6 +274,12 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
           <?php endif; ?>
           <?php if ($navDriverShowDateToggle): ?>
           <a class="bakery-nav__more-link bakery-nav__more-link--closeout" href="<?php echo htmlspecialchars($navDriverRouteHref . '&closeout=1#driver-closeout', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.close_route'); ?></a>
+          <?php if (!empty($driverRouteControls) && empty($driverRouteClosedToday)): ?>
+          <button type="button" class="bakery-nav__more-link bakery-nav__more-link--load" data-control="load"><?php bakery_te('driver.load_edit'); ?></button>
+          <?php endif; ?>
+          <?php if (!empty($driverRouteClosedToday)): ?>
+          <a class="bakery-nav__more-link bakery-nav__more-link--reopen" href="<?php echo htmlspecialchars($navDriverRouteHref . '&closeout=1#driver-reopen', ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.reopen_route'); ?></a>
+          <?php endif; ?>
           <?php endif; ?>
           <?php if ($navDriverRouteChrome && !$navDriverShowDateToggle): ?>
           <a class="bakery-nav__more-link bakery-nav__more-link--tomorrow-phone" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>

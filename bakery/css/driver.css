@@ -8021,4 +8021,95 @@ body.route-date-sheet-open .driver-closeout-bar {
         left: 8px;
         right: 8px;
     }
+
+    .driver-control-sheet {
+        left: 0;
+        right: 0;
+        bottom: calc(var(--driver-nav-h) + 8px);
+    }
+
+    body.route-has-sticky-dock .driver-control-sheet {
+        bottom: calc(var(--driver-nav-h) + var(--driver-dock-h) + 8px);
+    }
+}
+
+.driver-control-sheet[hidden] {
+    display: none !important;
+}
+
+.driver-control-sheet {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--driver-nav-h, 0px) + 8px);
+    z-index: 1200;
+    max-height: calc(100svh - var(--driver-nav-h, 72px) - 24px);
+    overflow: auto;
+    padding: 12px 12px 16px;
+    border-radius: 16px 16px 0 0;
+    background: #fff;
+    box-shadow: 0 -8px 24px rgba(16, 42, 49, 0.2);
+}
+
+body.route-has-sticky-dock .driver-control-sheet {
+    bottom: calc(var(--driver-nav-h, 72px) + var(--driver-dock-h, 72px) + 8px);
+    max-height: calc(100svh - var(--driver-nav-h, 72px) - var(--driver-dock-h, 72px) - 24px);
+}
+
+.driver-control-sheet-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.driver-control-sheet-bar h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.driver-control-back {
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 12px;
+    background: #eef4f4;
+    font-size: 1.4rem;
+    cursor: pointer;
+}
+
+.driver-control-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 12px 0;
+    font-weight: 700;
+}
+
+.driver-control-field input,
+.driver-control-field select {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid #cbd4cf;
+    border-radius: 10px;
+    font: inherit;
+    font-size: 16px;
+}
+
+.driver-control-submit {
+    width: 100%;
+    min-height: 52px;
+    border: 0;
+    border-radius: 14px;
+    background: #1f8a78;
+    color: #fff;
+    font: inherit;
+    font-weight: 800;
+}
+
+button.bakery-nav__more-link {
+    width: 100%;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
 }

@@ -370,6 +370,43 @@ function bakery_driver_closeout_render(PDO $db, string $date, int $driverId, arr
                 <p class="driver-closeout-warn" role="alert"><?php bakery_te('driver.closeout_short'); ?></p>
             <?php endif; ?>
         <?php endif; ?>
+        <?php if (!empty($options['own_today']) && !empty($options['driver_only'])): ?>
+            <?php
+            $turnedIn = function_exists('bakery_cod_turnin_get')
+                ? bakery_cod_turnin_get($db, $driverId, $date)
+                : null;
+            $expectedCash = $summary['cash_collected'];
+            $expectedNumber = $expectedCash === null ? 0.0 : (float)$expectedCash;
+            $turninDiff = $turnedIn === null ? null : round($turnedIn - $expectedNumber, 2);
+            ?>
+            <form class="driver-closeout-form" method="post" action="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'driver.php?date=' . rawurlencode($date)); ?>">
+                <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
+                <input type="hidden" name="action" value="driver_turnin">
+                <input type="hidden" name="route_date" value="<?php echo $h($date); ?>">
+                <p class="driver-closeout-quiet"><?php echo $h(bakery_t('driver.turnin_expected', ['amount' => number_format($expectedNumber, 2)])); ?></p>
+                <?php if ($turninDiff !== null && abs($turninDiff) >= 0.01): ?>
+                    <p class="driver-closeout-warn" role="status"><?php echo $h(bakery_t('driver.turnin_difference', ['difference' => number_format(abs($turninDiff), 2)])); ?></p>
+                <?php endif; ?>
+                <label class="driver-closeout-note-field"><?php bakery_te('driver.turnin_label'); ?>
+                    <input name="amount" inputmode="decimal" value="<?php echo $h($turnedIn === null ? '' : number_format($turnedIn, 2, '.', '')); ?>">
+                </label>
+                <button class="driver-closeout-submit" type="submit"><?php bakery_te('driver.turnin_save'); ?></button>
+            </form>
+            <?php if (!empty($summary['is_closed'])): ?>
+            <form id="driver-reopen" class="driver-closeout-form" method="post" action="<?php echo $h((defined('BASE_URL') ? BASE_URL : '') . 'route_closeout.php'); ?>">
+                <?php echo function_exists('bakery_csrf_field') ? bakery_csrf_field() : ''; ?>
+                <input type="hidden" name="action" value="reopen_route">
+                <input type="hidden" name="delivery_date" value="<?php echo $h($date); ?>">
+                <input type="hidden" name="driver_id" value="<?php echo (int)$driverId; ?>">
+                <input type="hidden" name="return" value="driver">
+                <label class="driver-closeout-confirm">
+                    <input type="checkbox" name="confirm_reopen" value="1" required>
+                    <span><?php bakery_te('driver.reopen_confirm'); ?></span>
+                </label>
+                <button class="driver-closeout-submit" type="submit"><?php bakery_te('driver.reopen_route'); ?></button>
+            </form>
+            <?php endif; ?>
+        <?php endif; ?>
     </section>
     <?php if ($canSubmit): ?>
     <script>
