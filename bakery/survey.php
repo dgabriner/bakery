@@ -68,13 +68,12 @@ if (!$survey && $token === '') {
     // who is driving, opens only that driver's survey.
     $useHqHub = $isManager && !$inDriverWorkspace;
     $hubSubjectId = $useHqHub ? 0 : ($selfDriverId > 0 ? $selfDriverId : 0);
-    $hubDate = $nextDeliveryDate;
-    if ($inDriverWorkspace) {
-        try {
-            $hubDate = bakery_survey_current_sell_date_from_db($db, date('Y-m-d'));
-        } catch (Throwable $e) {
-            $hubDate = date('Y-m-d');
-        }
+    $hubRole = (string)($user['role_slug'] ?? '');
+    $hubForDriverRole = function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($hubRole);
+    try {
+        $hubDate = bakery_survey_hub_date_for_viewer($db, $hubRole, date('Y-m-d'), $inDriverWorkspace);
+    } catch (Throwable $e) {
+        $hubDate = ($inDriverWorkspace || $hubForDriverRole) ? date('Y-m-d') : $nextDeliveryDate;
     }
     $requestedHubDate = trim((string)($_REQUEST['date'] ?? ''));
     if ($requestedHubDate !== '') {
@@ -88,6 +87,9 @@ if (!$survey && $token === '') {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'open_hub') {
             bakery_require_csrf();
             bakery_require_role(['administrator', 'manager', 'driver', 'driver_assistant']);
+            if (!bakery_survey_hub_open_button_for_role($hubRole)) {
+                safe_redirect('survey.php?date=' . rawurlencode($hubDate));
+            }
             try {
                 bakery_survey_dual_hub_links($db, $hubSubjectId, $hubDate, (int)($user['id'] ?? 0));
             } catch (Throwable $e) {
@@ -117,10 +119,12 @@ if (!$survey && $token === '') {
                 . '.survey-hub-date input[type=date]{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #d8d0c2;background:#fff}'
                 . '.survey-day-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}'
                 . '.survey-day-chips .btn{min-height:44px}'
+                . '.survey-hub-footer{display:flex;flex-direction:column;align-items:flex-start;gap:16px;margin-top:16px}'
+                . '.survey-hub-footer .btn,.survey-hub-footer button{min-height:44px}'
                 . '</style>';
             echo '<header class="sf-page-header"><div>';
             echo '<h1>' . $esc($pageTitle) . '</h1>';
-            $hubSubKey = $inDriverWorkspace ? 'survey.hub_sub_driver' : 'survey.hub_sub';
+            $hubSubKey = ($inDriverWorkspace || $hubForDriverRole) ? 'survey.hub_sub_driver' : 'survey.hub_sub';
             echo '<p class="sf-meta">' . $esc(bakery_t($hubSubKey, ['date' => $hub['delivery_date']])) . '</p>';
             echo '</div></header>';
             $hubToday = date('Y-m-d');
@@ -143,14 +147,14 @@ if (!$survey && $token === '') {
             $step2Help = $useHqHub
                 ? bakery_t('texts.survey_step2_help_hq')
                 : ($inDriverWorkspace ? bakery_t('texts.survey_step2_help_driver') : bakery_t('texts.survey_step2_help'));
-            $renderHubStep = static function (string $url, string $title, string $help, string $button) use ($esc, $inDriverWorkspace): void {
+            $renderHubStep = static function (string $url, string $title, string $help, string $button) use ($esc, $inDriverWorkspace, $hubForDriverRole): void {
                 if ($url !== '') {
                     echo '<a class="sf-card survey-hub-card" href="' . $esc($url) . '"><strong class="sf-card__title">' . $esc($title) . '</strong>'
                         . '<span class="sf-meta">' . $esc($help) . '</span>'
                         . '<div class="survey-hub-actions"><span class="btn btn-primary">' . $esc($button) . '</span></div></a>';
                     return;
                 }
-                if ($inDriverWorkspace) {
+                if ($inDriverWorkspace || $hubForDriverRole) {
                     echo '<section class="sf-card survey-hub-card"><strong class="sf-card__title">' . $esc($title) . '</strong>'
                         . '<span class="sf-meta">' . $esc($help) . '</span></section>';
                 }
@@ -167,17 +171,25 @@ if (!$survey && $token === '') {
                 (string)$step2Help,
                 (string)bakery_t('texts.survey_open_order')
             );
-            if ($hub['verify_url'] === '' || $hub['order_url'] === '') {
-                echo '<p class="sf-meta">' . $esc(bakery_t('survey.hub_empty', ['date' => $hubDate])) . '</p>';
-                echo '<form method="post" action="survey.php?date=' . $esc(rawurlencode($hubDate)) . '">';
-                echo '<input type="hidden" name="csrf_token" value="' . $esc(bakery_csrf_token()) . '">';
-                echo '<input type="hidden" name="action" value="open_hub">';
-                echo '<input type="hidden" name="date" value="' . $esc($hubDate) . '">';
-                echo '<button type="submit" class="btn btn-primary">' . $esc(bakery_t('survey.hub_open')) . '</button>';
-                echo '</form>';
-            }
-            if ($useHqHub) {
-                echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys&date=' . rawurlencode($hubDate)) . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
+            if ($hub['verify_url'] === '' || $hub['order_url'] === '' || $useHqHub) {
+                echo '<div class="survey-hub-footer">';
+                if ($hub['verify_url'] === '' || $hub['order_url'] === '') {
+                    if (!bakery_survey_hub_open_button_for_role($hubRole)) {
+                        echo '<p class="sf-meta">' . $esc(bakery_t('survey.hub_opened_by_hq')) . '</p>';
+                    } else {
+                        echo '<p class="sf-meta">' . $esc(bakery_t('survey.hub_empty', ['date' => $hubDate])) . '</p>';
+                        echo '<form method="post" action="survey.php?date=' . $esc(rawurlencode($hubDate)) . '">';
+                        echo '<input type="hidden" name="csrf_token" value="' . $esc(bakery_csrf_token()) . '">';
+                        echo '<input type="hidden" name="action" value="open_hub">';
+                        echo '<input type="hidden" name="date" value="' . $esc($hubDate) . '">';
+                        echo '<button type="submit" class="btn btn-primary">' . $esc(bakery_t('survey.hub_open')) . '</button>';
+                        echo '</form>';
+                    }
+                }
+                if ($useHqHub) {
+                    echo '<p><a class="btn btn-outline" href="' . $esc(BASE_URL . 'text_comms.php?view=surveys&date=' . rawurlencode($hubDate)) . '">' . $esc(bakery_t('nav.item.survey_center')) . '</a></p>';
+                }
+                echo '</div>';
             }
             echo '</div>';
             require __DIR__ . '/includes/footer.php';

@@ -608,7 +608,7 @@ $assert(strpos($surveyPhp, '$isManager && !$inDriverWorkspace') !== false, 'driv
 $assert(strpos($surveyPhp, 'survey.hub_sub_driver') !== false, 'driver survey hub names step 1 and step 2');
 $assert(strpos($surveyPhp, 'texts.survey_step1_title') !== false, 'driver survey hub labels step 1');
 $assert(strpos($surveyPhp, 'texts.survey_step2_title') !== false, 'driver survey hub labels step 2');
-$assert(strpos($surveyPhp, 'bakery_survey_current_sell_date_from_db') !== false, 'driver survey hub defaults to the current sell date');
+$assert(strpos($surveyPhp, 'bakery_survey_hub_date_for_viewer') !== false, 'driver survey hub defaults to the current sell date');
 $assert(strpos($surveyPhp, 'includes/header.php') !== false, 'logged-in survey hub uses app chrome');
 $assert(strpos($surveyPhp, 'hub_title_manager') !== false, 'manager hub uses everyone title');
 

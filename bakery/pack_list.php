@@ -61,8 +61,10 @@ $days = bakery_day_names();
 
 $packListUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
 $packForDriver = bakery_staff_in_driver_workspace($packListUser, 'pack_list');
+$packDriverOnly = function_exists('bakery_is_driver_route_role')
+    && bakery_is_driver_route_role((string)($packListUser['role_slug'] ?? ''));
 // Bakers and managers pack tomorrow's sell day. A driver is on today's route.
-$defaultDate = $packForDriver ? date('Y-m-d') : date('Y-m-d', strtotime('+1 day'));
+$defaultDate = bakery_pack_list_default_date($packForDriver);
 
 if (!function_exists('bakery_pack_list_date_for_day')) {
     /** Calendar date for a standing weekday, anchored from a reference date (default tomorrow). */
@@ -370,6 +372,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pack_
     } catch (Throwable $e) {
         $packDeskError = $e->getMessage();
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && bakery_pack_list_production_post_blocked($packListUser, (string)($_POST['action'] ?? ''))
+) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo bakery_t('pack_list.driver_production_refused');
+    exit;
 }
 
 $canBackfillProduction = !$packForDriver
@@ -769,11 +780,15 @@ require_once 'includes/nav.php';
 }
 
 .pack-date-form {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    display: grid;
+    gap: 6px;
+    isolation: isolate;
+    justify-items: start;
     margin-top: 12px;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    position: relative;
+    z-index: 2;
 }
 
 .pack-date-form label {
@@ -785,8 +800,13 @@ require_once 'includes/nav.php';
 .pack-date-form input[type="date"] {
     border: 1px solid #b8c9c3;
     border-radius: 8px;
+    box-sizing: border-box;
     font: inherit;
-    padding: 9px 10px;
+    inline-size: min(100%, 16rem);
+    max-inline-size: 100%;
+    min-block-size: 44px;
+    min-inline-size: 0;
+    padding: 9px 12px;
 }
 
 .pack-day-shortcuts {
@@ -797,13 +817,18 @@ require_once 'includes/nav.php';
 }
 
 .pack-day-btn {
+    align-items: center;
     background: #eef3f1;
     border: 1px solid #c8d8d2;
     border-radius: 999px;
     color: #34524c;
+    display: inline-flex;
     font-size: .78rem;
     font-weight: 650;
-    padding: 6px 11px;
+    justify-content: center;
+    min-block-size: 44px;
+    min-inline-size: 44px;
+    padding: 8px 10px;
     text-decoration: none;
 }
 
@@ -973,9 +998,11 @@ require_once 'includes/nav.php';
     background: var(--pack-warn);
     border-radius: 999px;
     color: #fff;
+    display: inline-block;
     font-size: .76rem;
     font-weight: 700;
     padding: 2px 8px;
+    position: static;
 }
 
 .pack-view-toggle {
@@ -1442,6 +1469,77 @@ require_once 'includes/nav.php';
     padding: 12px 14px;
 }
 
+.pack-page--driver {
+    max-inline-size: 100%;
+}
+.pack-page--driver .pack-toolbar,
+.pack-page--driver .pack-day-shortcuts,
+.pack-page--driver .pack-van-list {
+    max-inline-size: 100%;
+    min-inline-size: 0;
+}
+.pack-page--driver .pack-date-form {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+}
+.pack-page--driver .pack-date-form input[type="date"] {
+    inline-size: 100%;
+}
+.pack-page--driver .pack-day-shortcuts {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.pack-page--driver .pack-day-btn {
+    min-inline-size: 0;
+    padding-inline: 2px;
+}
+.pack-van-lead {
+    color: #45615a;
+    margin: 8px 0 0;
+}
+.pack-van-list {
+    display: grid;
+    gap: 8px;
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+}
+.pack-van-item {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--pack-border);
+    border-radius: 12px;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    min-block-size: 44px;
+    padding: 8px 12px;
+}
+.pack-van-item__name {
+    color: #173f3c;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+}
+.pack-van-item__qty {
+    color: #173f3c;
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+}
+.pack-van-check {
+    accent-color: var(--pack-accent, #1a6b63);
+    block-size: 1.25rem;
+    inline-size: 1.25rem;
+    margin: 0;
+}
+@media (pointer: coarse) {
+    .pack-page--driver .pack-day-btn,
+    .pack-page--driver .pack-van-item,
+    .pack-page--driver .pack-date-form input[type="date"] {
+        min-block-size: 44px;
+    }
+}
+
 @media (max-width: 720px) {
     .pack-page { padding: 8px 8px 20px; }
     .pack-toolbar__row { align-items: flex-start; flex-direction: column; }
@@ -1451,7 +1549,7 @@ require_once 'includes/nav.php';
 </style>
 <link rel="stylesheet" href="<?php echo bakery_asset_href('css/pack_list_print.css'); ?>">
 
-<main class="pack-page<?php echo $isBaker ? ' pack-page--baker' : ''; ?>" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
+<main class="pack-page<?php echo $isBaker ? ' pack-page--baker' : ''; ?><?php echo $packDriverOnly ? ' pack-page--driver' : ''; ?>" id="packPage" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>" data-csrf="<?php echo htmlspecialchars(bakery_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>">
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
     <?php if ($isBaker) { bakery_kitchen_segments_render('pack', $selectedDate); } ?>
     <?php
@@ -1482,7 +1580,10 @@ require_once 'includes/nav.php';
                     <a class="pack-btn" href="<?php echo htmlspecialchars($productionHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('pack_list.daily_production'); ?></a>
                     <a class="pack-btn" href="driver_load.php?date=<?php echo urlencode($selectedDate); ?>"><?php bakery_te('pack_list.driver_loads'); ?></a>
                 <?php endif; ?>
-                <?php if ($packProgressReady && !empty($allLineKeys) && !$packComplete): ?>
+                <?php if ($packDriverOnly): ?>
+                    <?php $langSwitchVariant = 'inline'; require __DIR__ . '/includes/language_switch.php'; ?>
+                <?php endif; ?>
+                <?php if ($packProgressReady && !empty($allLineKeys) && !$packComplete && !$packDriverOnly): ?>
                     <form method="post" class="pack-all-form"<?php echo bakery_pack_confirm_attr(bakery_t('pack_list.pack_all_confirm', [
                         'count' => number_format($unpackedLineCount),
                     ])); ?>>
@@ -1519,13 +1620,13 @@ require_once 'includes/nav.php';
         <div class="pack-day-shortcuts" aria-label="<?php bakery_te('pack_list.jump_weekday'); ?>">
             <?php
             $packWeekStart = date('Y-m-d', strtotime('-' . (bakery_standing_day_from_date($selectedDate) - 1) . ' days', strtotime($selectedDate)));
-            foreach ($days as $dayNum => $dayName):
+            foreach (bakery_pack_list_day_chip_labels() as $dayNum => $dayChip):
                 $dayDate = date('Y-m-d', strtotime($packWeekStart . ' +' . ((int)$dayNum - 1) . ' days'));
                 $isActiveDay = bakery_standing_day_from_date($selectedDate) === $dayNum;
             ?>
                 <a class="pack-day-btn<?php echo $isActiveDay ? ' active' : ''; ?>"
                    href="pack_list.php?date=<?php echo urlencode($dayDate); ?>&amp;view=<?php echo urlencode($viewMode); ?>">
-                    <?php echo htmlspecialchars(substr($dayName, 0, 3), ENT_QUOTES, 'UTF-8'); ?>
+                    <?php echo htmlspecialchars($dayChip, ENT_QUOTES, 'UTF-8'); ?>
                 </a>
             <?php endforeach; ?>
         </div>
@@ -1537,6 +1638,36 @@ require_once 'includes/nav.php';
         </p>
     </div>
 
+    <?php if ($packDriverOnly): ?>
+        <section class="pack-van" aria-labelledby="packVanTitle">
+            <h2 id="packVanTitle"><?php bakery_te('pack_list.driver_van_title'); ?></h2>
+            <p class="pack-van-lead"><?php bakery_te('pack_list.driver_van_lead'); ?></p>
+            <?php
+            $vanProducts = array_values($byProduct);
+            usort($vanProducts, static function (array $a, array $b): int {
+                return strcasecmp((string)($a['product_name'] ?? ''), (string)($b['product_name'] ?? ''));
+            });
+            ?>
+            <?php if ($vanProducts === []): ?>
+                <p class="pack-empty"><?php bakery_te('pack_list.driver_van_empty'); ?></p>
+            <?php else: ?>
+                <ul class="pack-van-list" id="packVanList" data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>">
+                    <?php foreach ($vanProducts as $vanProduct):
+                        $vanProductId = (int)($vanProduct['product_id'] ?? 0);
+                        $vanName = (string)($vanProduct['product_name'] ?? '');
+                        ?>
+                        <li>
+                            <label class="pack-van-item">
+                                <input class="pack-van-check" type="checkbox" data-product="<?php echo $vanProductId; ?>">
+                                <span class="pack-van-item__name"><?php echo htmlspecialchars($vanName, ENT_QUOTES, 'UTF-8'); ?></span>
+                                <span class="pack-van-item__qty"><?php echo number_format((int)($vanProduct['total'] ?? 0)); ?> <span class="pack-van-item__loaded"><?php bakery_te('pack_list.driver_loaded'); ?></span></span>
+                            </label>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+        </section>
+    <?php else: ?>
     <?php if (!empty($lineItems)): ?>
         <div class="pack-totals" aria-label="Pack totals">
             <div class="pack-total-card">
@@ -2077,6 +2208,7 @@ require_once 'includes/nav.php';
             <?php endforeach; ?>
             </div>
     <?php endif; ?>
+    <?php endif; ?>
 </main>
 
 <script>
@@ -2086,6 +2218,26 @@ require_once 'includes/nav.php';
 
     var dateKey = root.getAttribute('data-date') || 'unknown';
     var csrf = root.getAttribute('data-csrf') || '';
+    var van = document.getElementById('packVanList');
+    if (van && window.localStorage) {
+        var storeKey = 'bakeryPackVanLoaded:' + (van.getAttribute('data-date') || dateKey);
+        var saved = {};
+        try {
+            saved = JSON.parse(window.localStorage.getItem(storeKey) || '{}') || {};
+        } catch (vanReadError) {
+            saved = {};
+        }
+        van.querySelectorAll('.pack-van-check').forEach(function (box) {
+            var id = box.getAttribute('data-product') || '';
+            box.checked = saved[id] === true;
+            box.addEventListener('change', function () {
+                saved[id] = box.checked;
+                try {
+                    window.localStorage.setItem(storeKey, JSON.stringify(saved));
+                } catch (vanWriteError) {}
+            });
+        });
+    }
     // Check-offs persist server-side per date; initial state is rendered by PHP.
     var pending = {};
 
