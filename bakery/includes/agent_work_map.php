@@ -648,6 +648,7 @@ function bakery_agent_work_map_core(): array
                 'includes/driver_route.js',
                 'includes/driver_closeout.php',
                 'includes/driver_route_control.php',
+                'includes/driver_route_snapshot.php',
                 'includes/store_photo_quick.php',
                 'includes/store_photo_quick.js',
                 'css/store_photo_quick.css',
