@@ -696,3 +696,68 @@ function bakery_pack_phone_focus_nav_html(array $state, string $date, string $vi
     $html .= '</nav>';
     return $html;
 }
+
+/**
+ * Pack list opens on today for a driver workspace and on tomorrow for kitchen
+ * and manager packing. $today is Y-m-d so tests can pin the calendar.
+ */
+function bakery_pack_list_default_date(bool $forDriver, ?string $today = null): string
+{
+    $today = $today ?? date('Y-m-d');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $today)) {
+        $today = date('Y-m-d');
+    }
+    if ($forDriver) {
+        return $today;
+    }
+    return date('Y-m-d', strtotime($today . ' +1 day'));
+}
+
+/**
+ * Short weekday chips. Full names sliced with substr() drop Wednesday in
+ * Spanish because "é" is two bytes.
+ *
+ * @return array<int, string>
+ */
+function bakery_pack_list_day_chip_labels(): array
+{
+    if (function_exists('bakery_day_names')) {
+        return bakery_day_names(true);
+    }
+    return [
+        1 => 'Mon',
+        2 => 'Tue',
+        3 => 'Wed',
+        4 => 'Thu',
+        5 => 'Fri',
+        6 => 'Sat',
+        7 => 'Sun',
+    ];
+}
+
+/**
+ * Production mutations posted from the pack list. The driver's own van-load
+ * edit lives on driver.php and is not in this list.
+ *
+ * @return list<string>
+ */
+function bakery_pack_list_production_actions(): array
+{
+    return [
+        'backfill_production',
+        'backfill_day',
+        'match_supposed',
+        'match_all_supposed',
+        'set_on_hand',
+        'seed_driver_loads',
+    ];
+}
+
+function bakery_pack_list_production_post_blocked(?array $user, string $action): bool
+{
+    if (!in_array($action, bakery_pack_list_production_actions(), true)) {
+        return false;
+    }
+    $role = (string)($user['role_slug'] ?? '');
+    return function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($role);
+}

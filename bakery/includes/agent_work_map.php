@@ -681,6 +681,7 @@ function bakery_agent_work_map_core(): array
                 'tests/run_driver_route_ux_tests.php',
                 'tests/run_driver_closeout_tests.php',
                 'tests/run_driver_route_control_tests.php',
+                'tests/run_driver_qa_dq59_tests.php',
                 'tests/run_driver_photo_ui_tests.php',
                 'tests/run_driver_survey_flow_tests.php',
                 'tests/run_failed_stop_recovery_tests.php',
@@ -887,6 +888,7 @@ function bakery_agent_work_map_core(): array
             'tests' => [
                 'tests/run_pack_list_tests.php',
                 'tests/run_pack_list_coverage_tests.php',
+                'tests/run_driver_qa_dq59_tests.php',
                 'tests/run_product_pack_yield_tests.php',
                 'tests/run_i18n_tests.php',
                 'tests/run_golden_day_qa.php',

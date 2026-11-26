@@ -163,6 +163,58 @@ function bakery_survey_current_sell_date(string $fromDate, array $deliveryWeekda
 }
 
 /**
+ * Drivers do not open the day's surveys. Headquarters does.
+ */
+function bakery_survey_hub_open_button_for_role(string $roleSlug): bool
+{
+    if (function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($roleSlug)) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * A driver, or anyone already in the driver workspace, lands on today's sell
+ * day (or the next sell day when today does not deliver). Managers planning
+ * from the office still start tomorrow.
+ *
+ * @param list<int> $deliveryWeekdays
+ * @param list<string> $datedSellDates
+ */
+function bakery_survey_hub_date_for_role(
+    string $roleSlug,
+    string $today,
+    array $deliveryWeekdays,
+    array $datedSellDates,
+    bool $inDriverWorkspace = false
+): string {
+    $driverRole = function_exists('bakery_is_driver_route_role') && bakery_is_driver_route_role($roleSlug);
+    if ($inDriverWorkspace || $driverRole) {
+        return bakery_survey_current_sell_date($today, $deliveryWeekdays, $datedSellDates);
+    }
+    return bakery_survey_next_sell_date($today, $deliveryWeekdays, $datedSellDates);
+}
+
+function bakery_survey_hub_date_for_viewer(PDO $db, string $roleSlug, string $today, bool $inDriverWorkspace = false): string
+{
+    $dated = bakery_survey_dated_sell_dates($db, $today);
+    if (function_exists('table_exists') && table_exists($db, 'daily_orders')) {
+        $todayOrders = $db->prepare('SELECT 1 FROM daily_orders WHERE order_date = ? LIMIT 1');
+        $todayOrders->execute([$today]);
+        if ($todayOrders->fetchColumn()) {
+            $dated[] = $today;
+        }
+    }
+    return bakery_survey_hub_date_for_role(
+        $roleSlug,
+        $today,
+        bakery_survey_delivery_weekdays($db),
+        $dated,
+        $inDriverWorkspace
+    );
+}
+
+/**
  * @param list<array{id:int,name:string}> $stores
  * @param list<int> $assignedIds
  * @return array{assigned:list<array{id:int,name:string}>,other:list<array{id:int,name:string}>}

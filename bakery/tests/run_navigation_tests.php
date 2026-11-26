@@ -314,7 +314,7 @@ navigation_test_assert(substr_count($stopsCss, '-webkit-line-clamp: 2') >= 2, 's
 navigation_test_assert(strpos($stopsCss, 'text-overflow: ellipsis') === false, 'stop names are not truncated with an ellipsis');
 
 $packSrc = (string)file_get_contents(dirname(__DIR__) . '/pack_list.php');
-navigation_test_assert(strpos($packSrc, '$packForDriver ? date(\'Y-m-d\')') !== false, 'driver pack list defaults to today\'s sell date');
+navigation_test_assert(strpos($packSrc, 'bakery_pack_list_default_date($packForDriver)') !== false, 'driver pack list defaults to today\'s sell date');
 navigation_test_assert(strpos($packSrc, 'if (!$packForDriver)') !== false, 'driver pack list skips the manager command center and commit strip');
 navigation_test_assert(strpos($packSrc, 'bakery_ops_exceptions_for_date') !== false, 'manager pack list still loads row actions');
 

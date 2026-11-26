@@ -3153,6 +3153,21 @@ html {
     border: 1px solid var(--route-border);
 }
 
+.driver-next-work {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-block-size: 44px;
+    min-inline-size: 44px;
+    margin-top: 8px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: #0d7771;
+    color: #fff;
+    font-weight: 800;
+    text-decoration: none;
+}
+
 .auth-bar-driver {
     margin-left: 8px;
 }

@@ -738,6 +738,8 @@ function bakery_render_driver_prep_stop(array $stop, int $index, int $total, int
     <?php
 }
 
+$driverDayState = bakery_driver_route_day_state([]);
+$driverNextWorkDate = '';
 if ($selectedDriverId > 0 && $driver) {
     try {
         $assignmentHasNotes = column_exists($db, 'daily_order_assignments', 'notes');
@@ -845,10 +847,18 @@ if ($selectedDriverId > 0 && $driver) {
             $orderedStops[$stopIndex]['carry_id'] = (int)($carry['id'] ?? 0);
         }
 
-        $totalStops = count($results);
         $totalAmount = array_sum(array_column($results, 'total_amount'));
     } catch (Exception $e) {
         $error = 'Error loading driver data: ' . htmlspecialchars($e->getMessage());
+    }
+
+    // Carryover stops are in $orderedStops, so they count as today's work
+    // on the phone progress and the desktop empty card.
+    $driverDayState = bakery_driver_route_day_state($orderedStops);
+    $totalStops = (int)$driverDayState['stop_count'];
+    $driverNextWorkDate = '';
+    if ($driverDayState['empty'] && $selectedDriverId > 0) {
+        $driverNextWorkDate = bakery_driver_next_assigned_date($db, (int)$selectedDriverId, $selectedDate);
     }
 
     if (bakery_inventory_ready($db) && $selectedDriverId > 0) {
@@ -989,7 +999,7 @@ document.body.classList.add('driver-route-prep');
 .driver-pickup-manifest{margin:0;padding:0;border:0;background:transparent}.driver-pickup-manifest summary{list-style:none;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:14px 16px;border:1px solid #b8d8c2;border-radius:14px;background:#f2fbf4;cursor:pointer;-webkit-tap-highlight-color:transparent}.driver-pickup-manifest summary::-webkit-details-marker{display:none}.driver-pickup-manifest summary strong{font-size:1.05rem;color:#1f6637}.driver-pickup-manifest-body{padding:0 16px 14px;border:1px solid #b8d8c2;border-top:0;border-radius:0 0 14px 14px;margin-top:-8px;background:#f2fbf4}.driver-pickup-manifest-body p{margin:0;color:#536258}.driver-pickup-manifest-body ul{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;padding:0;list-style:none}.driver-pickup-manifest-body li{padding:7px 10px;background:#fff;border-radius:8px;color:#34483a}.driver-pickup-manifest-body li strong{color:#1f6637}
 </style>
 
-<div class="driver-route" id="driverRouteRoot"<?php echo ($selectedDriverId > 0 && !empty($driver) && empty($showSelector) && empty($routePrepMode)) ? ' data-route-view="now"' : ''; ?>
+<div class="driver-route" id="driverRouteRoot" data-day-empty="<?php echo !empty($driverDayState['empty']) ? '1' : '0'; ?>"<?php echo ($selectedDriverId > 0 && !empty($driver) && empty($showSelector) && empty($routePrepMode)) ? ' data-route-view="now"' : ''; ?>
     data-driver-id="<?php echo (int)$selectedDriverId; ?>"
     data-driver-name="<?php echo htmlspecialchars($driver['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
     data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
@@ -1158,7 +1168,7 @@ document.body.classList.add('driver-route-prep');
     ?>
     <?php if ($error): ?>
     <div class="empty-state"><p><?php echo $error; ?></p></div>
-    <?php elseif ($routePrepMode || $totalStops > 0): ?>
+    <?php elseif ($routePrepMode || !$driverDayState['empty']): ?>
 
     <div class="route-dashboard<?php echo $routePrepMode ? ' route-dashboard--prep' : ''; ?>">
         <?php if ($routePrepMode): ?>
@@ -1273,7 +1283,7 @@ document.body.classList.add('driver-route-prep');
             <?php endif; ?>
         </p>
         <div class="next-stop-heading-row">
-            <h2 class="next-stop-store" id="nextStopStore"><?php echo htmlspecialchars($heroStop['customer_name']); ?></h2>
+            <h2 class="next-stop-store" id="nextStopStore"><?php echo htmlspecialchars($heroStop['customer_name']); ?><?php echo bakery_pan_carry_stop_badge_html($heroStop, $selectedDate, function_exists('bakery_current_user') ? bakery_current_user() : null); ?></h2>
             <span class="status-badge status-badge--<?php echo htmlspecialchars($nextStatusClass); ?>" id="nextStopStatus"><?php echo htmlspecialchars(bakery_t('driver.status_' . $nextStatusClass)); ?></span>
         </div>
         <p class="next-stop-address" id="nextStopAddress"><?php echo htmlspecialchars($heroStop['customer_address'] ?: bakery_t('driver.no_address')); ?></p>
@@ -1529,6 +1539,13 @@ document.body.classList.add('driver-route-prep');
             'driver' => $driver['name'],
             'date' => $routeDateLabel,
         ])); ?></p>
+        <?php if ($driverNextWorkDate !== ''): ?>
+        <p><a class="driver-next-work" href="<?php echo htmlspecialchars(bakery_driver_route_day_url((int)$selectedDriverId, $driverNextWorkDate), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(bakery_t('driver.next_work_day', [
+            'date' => bakery_driver_chrome_date(new DateTimeImmutable($driverNextWorkDate), 'weekday'),
+        ]), ENT_QUOTES, 'UTF-8'); ?></a></p>
+        <?php else: ?>
+        <p><?php bakery_te('driver.next_work_day_none'); ?></p>
+        <?php endif; ?>
         <?php if ($routeDateKind !== 'past'): ?>
         <p><a class="route-prep-empty-edit" href="<?php echo htmlspecialchars($prepEditUrl, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('driver.prep_edit_route'); ?></a></p>
         <?php endif; ?>
