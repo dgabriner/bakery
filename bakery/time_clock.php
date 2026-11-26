@@ -187,7 +187,7 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
   <?php else: ?>
     <section class="time-clock__card" aria-live="polite">
       <?php if ($clockedIn): ?>
-        <p class="time-clock__status time-clock__status--in"><?php echo $h(bakery_t('time_clock.status_in', ['time' => bakery_time_clock_format_time((string)$open['clock_in_at'])])); ?></p>
+        <p class="time-clock__status time-clock__status--in"><?php echo $h(bakery_time_clock_open_label($open)); ?></p>
       <?php else: ?>
         <p class="time-clock__status"><?php echo $h(bakery_t('time_clock.status_out')); ?></p>
       <?php endif; ?>
@@ -204,10 +204,8 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
   <?php if ($canSeeBoard): ?>
     <section class="time-clock__board" id="time-clock-board">
       <p class="time-clock__week-jump"><a href="#time-clock-week"><?php echo $h(bakery_t('time_clock.this_week')); ?></a></p>
+      <?php if ($whoIsIn): ?>
       <h2><?php echo $h(bakery_t('time_clock.who_in')); ?></h2>
-      <?php if (!$whoIsIn): ?>
-        <p class="time-clock__empty"><?php echo $h(bakery_t('time_clock.nobody_in')); ?></p>
-      <?php else: ?>
         <ul class="time-clock__people">
           <?php foreach ($whoIsIn as $person): ?>
             <li>
@@ -219,6 +217,9 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
             </li>
           <?php endforeach; ?>
         </ul>
+      <?php elseif (!$whoEarlier): ?>
+      <h2><?php echo $h(bakery_t('time_clock.who_in')); ?></h2>
+        <p class="time-clock__empty"><?php echo $h(bakery_t('time_clock.nobody_in')); ?></p>
       <?php endif; ?>
 
       <?php if ($whoEarlier): ?>
@@ -232,7 +233,7 @@ $renderFix = static function (array $punch) use ($h, $weekMonday, $overridesRead
                 <span class="time-clock__role"><?php echo $h(bakery_navigation_role_label((string)($person['role_slug'] ?? ''))); ?></span>
               </span>
               <span>
-                <?php echo $h(bakery_t('time_clock.since', ['time' => bakery_time_clock_format_time((string)$person['clock_in_at'])])); ?>
+                <?php echo $h(bakery_time_clock_open_label($person)); ?>
                 <a class="time-clock__earlier-fix" href="<?php echo $h(BASE_URL . 'time_clock.php?week=' . rawurlencode((string)$person['week_monday']) . '#time-clock-week'); ?>"><?php echo $h(bakery_t('time_clock.earlier_open_fix')); ?></a>
               </span>
             </li>

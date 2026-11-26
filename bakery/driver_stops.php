@@ -54,6 +54,22 @@ if ($driver) {
     }
 }
 
+$arrivalPhotoCustomers = [];
+if ($stops && function_exists('table_exists') && table_exists($db, 'driver_photos')) {
+    try {
+        $photoStmt = $db->prepare(
+            "SELECT customer_id FROM driver_photos
+             WHERE driver_id = ? AND delivery_date = ? AND photo_type = 'Before'"
+        );
+        $photoStmt->execute([$selectedDriverId, $selectedDate]);
+        foreach ($photoStmt->fetchAll(PDO::FETCH_COLUMN) as $photoCustomerId) {
+            $arrivalPhotoCustomers[(int)$photoCustomerId] = true;
+        }
+    } catch (Throwable $e) {
+        $arrivalPhotoCustomers = [];
+    }
+}
+
 $completedCount = 0;
 $currentStopIndex = null;
 foreach ($stops as $index => $stop) {
@@ -142,7 +158,11 @@ require_once 'includes/nav.php';
         <section class="driver-current-stop" aria-labelledby="driverCurrentStopTitle">
             <div class="driver-current-stop-topline">
                 <span class="driver-current-stop-marker" aria-hidden="true">●</span>
-                <span><?php bakery_te('driver.you_are_here'); ?></span>
+                <?php
+                    $currentCheckedIn = (string)($currentStop['delivery_status'] ?? '') === 'in_transit'
+                        || !empty($arrivalPhotoCustomers[(int)($currentStop['customer_id'] ?? 0)]);
+                ?>
+                <span><?php bakery_te($currentCheckedIn ? 'driver.you_are_here' : 'driver.next_stop'); ?></span>
                 <span class="driver-current-stop-position"><?php echo htmlspecialchars(bakery_t('driver.stop_of', ['current' => $currentStopIndex + 1, 'total' => count($stops)]), ENT_QUOTES, 'UTF-8'); ?></span>
             </div>
             <h2 id="driverCurrentStopTitle"><?php echo htmlspecialchars($currentStop['customer_name'], ENT_QUOTES, 'UTF-8'); ?></h2>

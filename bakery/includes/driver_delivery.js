@@ -790,6 +790,18 @@
     if (eyebrow) eyebrow.textContent = isReview ? i18n('delivery_photos') : i18n('stop_workflow');
   }
 
+  function deliveryStepIsDone(step, info) {
+    info = info || {};
+    if (step === 'photo') {
+      if (info.proofState === 'skipped') return false;
+      return info.proofState === 'saved' || info.proofState === 'queued' || info.hasProofPhoto === true;
+    }
+    if (step === 'delivery') {
+      return info.confirmationSaved === true && info.visualStep === 'invoice';
+    }
+    return false;
+  }
+
   function goToStep(step) {
     if (STEPS.indexOf(step) === -1) step = 'photo';
     // Photo 2 is a detour from the charge screen; any other destination ends it.
@@ -813,8 +825,12 @@
       }
       if (stepBtn && !isReview) {
         stepBtn.classList.toggle('is-active', s === visualStep);
-        var markDone = STEPS.indexOf(s) < STEPS.indexOf(visualStep);
-        if (s === 'photo' && photoSkipped) markDone = false;
+        var markDone = deliveryStepIsDone(s, {
+          proofState: state.proofState,
+          hasProofPhoto: stopHasProofPhoto(),
+          confirmationSaved: state.confirmationSaved === true || state.isSaved === true,
+          visualStep: visualStep
+        });
         stepBtn.classList.toggle('is-done', markDone);
         stepBtn.classList.toggle('is-skipped', s === 'photo' && photoSkipped && visualStep !== 'photo');
         stepBtn.disabled = state.submitting || isDeparturePhoto;
@@ -2843,7 +2859,13 @@
 
       var data = null;
       var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      if (offline && outbox && typeof outbox.enqueueConfirm === 'function') {
+      var canQueueConfirm = !!(outbox && typeof outbox.enqueueConfirm === 'function');
+      if (offline && !canQueueConfirm) {
+        setSubmitting(false);
+        setStatus(i18n('offline_finish_blocked', "You're offline. Finish is blocked until you reconnect."), 'error');
+        return;
+      }
+      if (offline && canQueueConfirm) {
         await outbox.enqueueConfirm({ id: requestId, dailyOrderId: state.dailyOrderId, body: body });
         data = {
           success: true,

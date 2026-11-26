@@ -250,6 +250,58 @@
     return status;
   }
 
+  function queuedConfirmForOrder(jobs, dailyOrderId) {
+    var id = String(dailyOrderId || 0);
+    for (var i = 0; i < (jobs || []).length; i++) {
+      var job = jobs[i];
+      if (!job || job.kind !== 'confirm') continue;
+      if (String(job.dailyOrderId) !== id) continue;
+      if (job.status === 'queued' || job.status === 'syncing' || job.status === 'failed') return job;
+    }
+    return null;
+  }
+
+  function queuedCount(jobs) {
+    return (jobs || []).filter(function (job) {
+      return job && (job.status === 'queued' || job.status === 'syncing' || job.status === 'failed');
+    }).length;
+  }
+
+  function fillCount(template, count) {
+    return String(template || '').replace(':count', String(count));
+  }
+
+  function renderBanner(jobs) {
+    var banner = document.getElementById('driverOfflineBanner');
+    if (!banner) return;
+    var count = queuedCount(jobs);
+    var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    var canQueue = typeof enqueueConfirm === 'function';
+    if (!offline && count === 0) {
+      banner.hidden = true;
+      banner.textContent = '';
+      document.body.classList.remove('driver-offline-no-queue');
+      return;
+    }
+    var text;
+    if (offline && !canQueue) {
+      text = i18n('offline_finish_blocked', "You're offline. Finish is blocked until you reconnect.");
+      document.body.classList.add('driver-offline-no-queue');
+    } else if (!offline && count > 0) {
+      text = count === 1
+        ? i18n('offline_save_failed', "Couldn't reach the office. 1 change will send when you reconnect.")
+        : fillCount(i18n('offline_banner_count', "You're offline. :count changes will send when you reconnect."), count);
+    } else if (count === 1) {
+      text = i18n('offline_banner_one', "You're offline. 1 change will send when you reconnect.");
+    } else if (count > 1) {
+      text = fillCount(i18n('offline_banner_count', "You're offline. :count changes will send when you reconnect."), count);
+    } else {
+      text = i18n('offline_banner', "You're offline. Changes will send when you reconnect.");
+    }
+    banner.hidden = false;
+    banner.textContent = text;
+  }
+
   function renderChips() {
     listJobs().then(function (jobs) {
       var active = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'failed' || j.status === 'syncing'; });
@@ -282,6 +334,7 @@
         chip.textContent = failed ? chipLabel('failed') : chipLabel('queued');
         chip.classList.toggle('is-failed', failed);
       });
+      renderBanner(jobs);
     }).catch(function () { /* ignore */ });
   }
 
@@ -365,7 +418,10 @@
       var now = Date.now();
       for (var i = 0; i < jobs.length; i++) {
         var job = jobs[i];
-        if (job.status === 'syncing') job.status = 'queued';
+        if (job.status === 'syncing') {
+          if (inFlight[job.id]) continue;
+          job.status = 'queued';
+        }
         if (job.status !== 'queued' && !(opts.force && job.status === 'failed')) continue;
         if (!opts.force && job.nextAttemptAt && job.nextAttemptAt > now) continue;
         job.force = !!opts.force;
@@ -403,6 +459,11 @@
   }
 
   async function enqueueConfirm(fields) {
+    var existing = queuedConfirmForOrder(await listJobs(), fields.dailyOrderId || 0);
+    if (existing) {
+      renderChips();
+      return { id: existing.id, queued: true, duplicate: true };
+    }
     var id = fields.id || newId('confirm');
     var job = {
       id: id,
@@ -434,7 +495,8 @@
   }
 
   function bindUi() {
-    global.addEventListener('online', function () { safeFlush({ force: true }); });
+    global.addEventListener('online', function () { safeFlush({ force: true }); renderChips(); });
+    global.addEventListener('offline', function () { renderChips(); });
     global.addEventListener('pagehide', onPageHidden);
     if (global.document && typeof global.document.addEventListener === 'function') {
       global.document.addEventListener('visibilitychange', function () {
@@ -454,6 +516,7 @@
     newId: newId,
     enqueuePhoto: enqueuePhoto,
     enqueueConfirm: enqueueConfirm,
+    queuedConfirmForOrder: queuedConfirmForOrder,
     flush: flush,
     list: listJobs,
     render: renderChips

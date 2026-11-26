@@ -371,9 +371,32 @@ tc_assert(
 );
 $tcEn = require $root . '/lang/en.php';
 $tcEs = require $root . '/lang/es.php';
-foreach (['time_clock.earlier_open_title', 'time_clock.earlier_open_help', 'time_clock.earlier_open_fix'] as $tcKey) {
+foreach (['time_clock.earlier_open_title', 'time_clock.earlier_open_help', 'time_clock.earlier_open_fix', 'time_clock.still_open'] as $tcKey) {
     tc_assert(isset($tcEn[$tcKey], $tcEs[$tcKey]) && $tcEn[$tcKey] !== $tcEs[$tcKey], "i18n {$tcKey} exists in en and es");
 }
+$_SESSION['locale'] = 'en';
+if (function_exists('bakery_locale')) {
+    bakery_locale(true);
+}
+$earlierWhen = strtotime('2098-03-18 09:30:00');
+$stillOpen = bakery_time_clock_open_label(
+    ['clock_in_at' => '2098-03-17 22:16:00'],
+    $earlierWhen
+);
+tc_assert(
+    $stillOpen === 'Clock-in from 3/17 still open, clock out to fix',
+    'an open punch from an earlier day is one sentence, not Clocked in since'
+);
+tc_assert(
+    bakery_time_clock_nav_label(['clock_in_at' => '2098-03-17 22:16:00'], $earlierWhen) === $stillOpen,
+    'More uses the same earlier-day sentence'
+);
+tc_assert(
+    strpos(bakery_time_clock_open_label(['clock_in_at' => '2098-03-18 08:05:00'], $earlierWhen), 'Clocked in since') === 0,
+    'a punch from today still says clocked in since'
+);
+tc_assert(strpos($tcPage, 'bakery_time_clock_open_label') !== false, 'the time clock page uses the shared open-punch sentence');
+tc_assert(strpos($tcEs['time_clock.status_in'], ':time.') === false, 'Spanish status does not add a second period after p. m.');
 
 echo $failed === 0
     ? "Time clock tests passed ({$passed})\n"

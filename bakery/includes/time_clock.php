@@ -69,10 +69,56 @@ function bakery_time_clock_format_time(string $stamp): string
     $clock = function_exists('bakery_locale_time')
         ? bakery_locale_time($ts)
         : bakery_locale_time($ts);
+    if (function_exists('bakery_locale') && bakery_locale() === 'es') {
+        $clock = str_replace(' ', "\u{00A0}", $clock);
+    }
     if (date('Y-m-d', $ts) === date('Y-m-d')) {
         return $clock;
     }
-    return date('n/j', $ts) . ' ' . $clock;
+    $day = (function_exists('bakery_locale') && bakery_locale() === 'es')
+        ? date('j/n', $ts)
+        : date('n/j', $ts);
+    return $day . ' ' . $clock;
+}
+
+/** An open punch that started before today's local date. */
+function bakery_time_clock_is_earlier_open(array $punch, ?int $now = null): bool
+{
+    $now = $now ?? time();
+    $inTs = strtotime((string)($punch['clock_in_at'] ?? ''));
+    $todayStart = strtotime(date('Y-m-d', $now) . ' 00:00:00');
+    return $inTs !== false && $todayStart !== false && $inTs < $todayStart;
+}
+
+/**
+ * One sentence for an open punch. An earlier day is not "clocked in since".
+ */
+function bakery_time_clock_open_label(array $punch, ?int $now = null): string
+{
+    if (bakery_time_clock_is_earlier_open($punch, $now)) {
+        $inTs = strtotime((string)($punch['clock_in_at'] ?? ''));
+        $date = ($inTs !== false && function_exists('bakery_locale') && bakery_locale() === 'es')
+            ? date('j/n', $inTs)
+            : ($inTs !== false ? date('n/j', $inTs) : '');
+        return bakery_t('time_clock.still_open', ['date' => $date]);
+    }
+    return bakery_t('time_clock.status_in', [
+        'time' => bakery_time_clock_format_time((string)($punch['clock_in_at'] ?? '')),
+    ]);
+}
+
+/** Nav and More button: clock in, clock out, or the earlier-day sentence. */
+function bakery_time_clock_nav_label(?array $punch, ?int $now = null): string
+{
+    if (!is_array($punch) || trim((string)($punch['clock_in_at'] ?? '')) === '') {
+        return bakery_t('time_clock.clock_in');
+    }
+    if (bakery_time_clock_is_earlier_open($punch, $now)) {
+        return bakery_time_clock_open_label($punch, $now);
+    }
+    return bakery_t('time_clock.nav_out', [
+        'time' => bakery_time_clock_format_time((string)$punch['clock_in_at']),
+    ]);
 }
 
 /** @return array<string, mixed>|null */

@@ -21,12 +21,14 @@ bakery_customer_account_ensure_schema($db);
 $changeDriver = isset($_GET['change_driver']) && (string)$_GET['change_driver'] === '1';
 $routeUser = function_exists('bakery_current_user') ? bakery_current_user() : null;
 $isAuthenticatedDriver = $routeUser && bakery_is_driver_route_role($routeUser['role_slug'] ?? '');
-$selectedDate = $_GET['date'] ?? date('Y-m-d');
-$selectedDateObject = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$selectedDate);
-if (!$selectedDateObject || $selectedDateObject->format('Y-m-d') !== (string)$selectedDate) {
-    $selectedDate = date('Y-m-d');
-    $selectedDateObject = new DateTimeImmutable($selectedDate);
-}
+$routeParamNotices = [];
+$driverDateInvalid = false;
+$driverStopMissing = false;
+$rawRouteDate = isset($_GET['date']) ? (string)$_GET['date'] : '';
+$resolvedRouteDate = bakery_driver_route_date_or_today($rawRouteDate);
+$selectedDate = $resolvedRouteDate['date'];
+$driverDateInvalid = $resolvedRouteDate['invalid'];
+$selectedDateObject = new DateTimeImmutable($selectedDate);
 $returnTarget = bakery_ops_return_resolve($_GET['return'] ?? null, $selectedDate);
 $attentionFailed = (string)($_GET['attention'] ?? '') === 'failed';
 $attentionLabel = $attentionFailed
@@ -417,6 +419,64 @@ function bakery_driver_action_label(string $icon, string $text): string
 }
 
 /**
+ * @return array{date:string,invalid:bool}
+ */
+function bakery_driver_route_date_or_today(string $raw): array
+{
+    $raw = trim($raw);
+    $today = date('Y-m-d');
+    if ($raw === '') {
+        return ['date' => $today, 'invalid' => false];
+    }
+    $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+    if (!$parsed || $parsed->format('Y-m-d') !== $raw) {
+        return ['date' => $today, 'invalid' => true];
+    }
+    return ['date' => $parsed->format('Y-m-d'), 'invalid' => false];
+}
+
+/** open_stop=1 uses daily_order_id. open_stop=999999 is the order id itself. */
+function bakery_driver_open_stop_id(string $openStop, int $dailyOrderId): int
+{
+    $openStop = trim($openStop);
+    if ($openStop === '1') {
+        return $dailyOrderId > 0 ? $dailyOrderId : 0;
+    }
+    if ($openStop !== '' && preg_match('/^\d+$/', $openStop)) {
+        return (int)$openStop;
+    }
+    return 0;
+}
+
+/**
+ * Visible queue numbers are 1..N. Internal route_order stays on the row.
+ *
+ * @param list<array<string,mixed>> $stops
+ * @return array<int,int>
+ */
+function bakery_driver_visible_stop_numbers(array $stops): array
+{
+    $done = ['delivered', 'cancelled', 'failed', 'office_flag'];
+    $numbers = [];
+    $n = 0;
+    foreach ($stops as $stop) {
+        $id = (int)($stop['daily_order_id'] ?? 0);
+        $status = (string)($stop['delivery_status'] ?? 'pending');
+        if ($id <= 0 || in_array($status, $done, true)) {
+            continue;
+        }
+        $n++;
+        $numbers[$id] = $n;
+    }
+    return $numbers;
+}
+
+function bakery_driver_stop_checked_in(string $status, bool $hasArrivalPhoto): bool
+{
+    return $status === 'in_transit' || $hasArrivalPhoto;
+}
+
+/**
  * Render one driver route stop card for the active queue or history panel.
  */
 function bakery_render_driver_stop_item(
@@ -425,7 +485,8 @@ function bakery_render_driver_stop_item(
     int $selectedDriverId,
     string $selectedDate,
     string $driverName,
-    string $listKind = 'active'
+    string $listKind = 'active',
+    int $displayNumber = 0
 ): void {
     $status = $stop['delivery_status'] ?? 'pending';
     $statusClass = in_array($status, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled', 'office_flag'], true) ? $status : 'pending';
@@ -475,7 +536,7 @@ function bakery_render_driver_stop_item(
         data-lines="<?php echo htmlspecialchars(bakery_driver_stop_lines_json($stop, $selectedDate), ENT_QUOTES, 'UTF-8'); ?>"
         data-status="<?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>">
         <div class="stop-item-main">
-            <span class="stop-item-order">#<?php echo $stop['route_order'] ?: '&mdash;'; ?></span>
+            <span class="stop-item-order" data-visible-number="<?php echo (int)$displayNumber; ?>">#<?php echo $displayNumber > 0 ? (int)$displayNumber : ($stop['route_order'] ?: '&mdash;'); ?></span>
             <span class="stop-item-pick" aria-hidden="true"></span>
             <div class="stop-item-body">
                 <div class="stop-item-heading">
@@ -813,19 +874,34 @@ foreach ($orderedStops as $stop) {
 
 $showSelector = !$isAuthenticatedDriver && ($changeDriver || $selectedDriverId <= 0 || !$driver);
 $heroStop = $nextStop;
-$openStopOrderId = (string)($_GET['open_stop'] ?? '') === '1' ? (int)($_GET['daily_order_id'] ?? 0) : 0;
+$openStopOrderId = bakery_driver_open_stop_id(
+    (string)($_GET['open_stop'] ?? ''),
+    (int)($_GET['daily_order_id'] ?? 0)
+);
 $openStopOrders = $openStopOrderId > 0 && (string)($_GET['view_orders'] ?? '') === '1';
+$openStopFound = false;
 if ($openStopOrderId > 0) {
     foreach ($orderedStops as $candidateStop) {
         if ((int)($candidateStop['daily_order_id'] ?? 0) !== $openStopOrderId) {
             continue;
         }
+        $openStopFound = true;
         $candidateStatus = (string)($candidateStop['delivery_status'] ?? 'pending');
         if (!in_array($candidateStatus, ['delivered', 'cancelled', 'failed', 'office_flag'], true)) {
             $heroStop = $candidateStop;
         }
         break;
     }
+    if (!$openStopFound) {
+        $driverStopMissing = true;
+    }
+}
+$visibleStopNumbers = bakery_driver_visible_stop_numbers($orderedStops);
+if ($driverDateInvalid && function_exists('bakery_t')) {
+    $routeParamNotices[] = bakery_t('driver.date_invalid');
+}
+if ($driverStopMissing && function_exists('bakery_t')) {
+    $routeParamNotices[] = bakery_t('driver.stop_not_found');
 }
 $remainingStops = count($upcomingStops) + ($nextStop ? 1 : 0);
 $pastStopCount = count($pastStops);
@@ -919,7 +995,12 @@ document.body.classList.add('driver-route-prep');
     data-date="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES, 'UTF-8'); ?>"
     data-today="<?php echo htmlspecialchars($todayDate, ENT_QUOTES, 'UTF-8'); ?>"
     data-total="<?php echo (int)$totalStops; ?>"
+    data-remaining="<?php echo (int)$remainingStops; ?>"
     data-completed="<?php echo (int)$driverCompletedStops; ?>">
+    <?php if ($routeParamNotices): ?>
+    <p class="driver-param-notice" role="status"><?php echo htmlspecialchars(implode(' ', $routeParamNotices), ENT_QUOTES, 'UTF-8'); ?></p>
+    <?php endif; ?>
+    <p class="driver-offline-banner" id="driverOfflineBanner" hidden role="status"></p>
     <?php echo bakery_ops_render_return_banner($returnTarget, $attentionLabel); ?>
 
     <?php if ($showSelector): ?>
@@ -1186,7 +1267,7 @@ document.body.classList.add('driver-route-prep');
             $nextStatusClass = in_array($nextStatus, ['pending', 'in_transit', 'delivered', 'failed', 'cancelled'], true) ? $nextStatus : 'pending';
         ?>
         <p class="next-stop-eyebrow">
-            <span><?php bakery_te('driver.next_stop'); ?><?php if ($heroStop['route_order']): ?> &middot; #<?php echo (int)$heroStop['route_order']; ?><?php endif; ?></span>
+            <span><?php bakery_te('driver.next_stop'); ?><?php $heroVisibleNumber = (int)($visibleStopNumbers[(int)$heroStop['daily_order_id']] ?? 0); if ($heroVisibleNumber > 0): ?> &middot; #<?php echo $heroVisibleNumber; ?><?php endif; ?></span>
             <?php if ($remainingStops > 1): ?>
             <button type="button" class="change-next-btn" id="changeNextStopBtn"><?php bakery_te('driver.change_next'); ?></button>
             <?php endif; ?>
@@ -1364,11 +1445,19 @@ document.body.classList.add('driver-route-prep');
             <?php
             foreach ($orderedStops as $stop):
                 $status = $stop['delivery_status'] ?? 'pending';
-                if (in_array($status, ['delivered', 'cancelled', 'failed'], true)) {
+                if (in_array($status, ['delivered', 'cancelled', 'failed', 'office_flag'], true)) {
                     continue;
                 }
                 $isNext = $nextStop && (int)$nextStop['daily_order_id'] === (int)$stop['daily_order_id'];
-                bakery_render_driver_stop_item($stop, $isNext, (int)$selectedDriverId, $selectedDate, $driver['name'] ?? '', 'active');
+                bakery_render_driver_stop_item(
+                    $stop,
+                    $isNext,
+                    (int)$selectedDriverId,
+                    $selectedDate,
+                    $driver['name'] ?? '',
+                    'active',
+                    (int)($visibleStopNumbers[(int)$stop['daily_order_id']] ?? 0)
+                );
             endforeach;
             ?>
         </div>
@@ -1804,20 +1893,21 @@ window.__DRIVER_CONTROL__ = <?php echo json_encode([
             <button type="button" class="problem-chip" data-problem-action="empty_order"><?php bakery_te('driver.problem_empty_order'); ?></button>
         </div>
         <p class="problem-sheet-error" id="problemSheetError" hidden role="alert"></p>
-        <p class="exception-desk__detail"><?php bakery_te('driver.problem_cant_deliver_prompt'); ?></p>
         <form id="failStopForm">
             <?php echo bakery_exception_desk_csrf(); ?>
             <input type="hidden" name="action" value="report_failed_stop">
             <input type="hidden" name="assignment_id" id="failStopAssignmentId" value="">
             <input type="hidden" name="daily_order_id" id="failStopOrderId" value="">
-            <?php echo bakery_exception_desk_reason_chips_html('reason_code'); ?>
+            <p class="problem-sheet-question" id="problemCantDeliver"><?php bakery_te('driver.problem_question'); ?></p>
+            <?php echo bakery_exception_desk_reason_chips_html('reason_code', false); ?>
             <label class="exception-desk__note-label" for="failStopNote"><?php bakery_te('exception_desk.driver_note'); ?></label>
             <textarea id="failStopNote" name="manager_note" rows="2" maxlength="2000"
                 placeholder="<?php echo htmlspecialchars(bakery_t('exception_desk.driver_note_ph'), ENT_QUOTES, 'UTF-8'); ?>"></textarea>
+            <p class="exception-desk__detail"><?php bakery_te('driver.problem_cant_deliver_prompt'); ?></p>
             <p class="skip-stop-error" id="failStopError" hidden role="alert"></p>
             <div class="exception-desk__btn-row">
                 <button type="button" class="exception-desk__btn" id="failStopCancelBtn"><?php bakery_te('driver.skip_cancel'); ?></button>
-                <button type="submit" class="exception-desk__btn exception-desk__btn--primary" id="failStopConfirmBtn"><?php bakery_te('exception_desk.report'); ?></button>
+                <button type="submit" class="exception-desk__btn exception-desk__btn--primary" id="failStopConfirmBtn" disabled><?php bakery_te('exception_desk.report'); ?></button>
             </div>
             <div class="exception-desk__hq-links" id="failStopHqLinks" data-hq-phone="+14155091210" data-store="" data-order-id="">
                 <a class="exception-desk__hq-link" id="failStopCallLink" href="tel:+14155091210"><?php bakery_te('exception_desk.call_hq'); ?></a>
@@ -1862,6 +1952,12 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
     'outbox_queued' => bakery_t('driver.outbox_queued'),
     'outbox_synced' => bakery_t('driver.outbox_synced'),
     'outbox_failed' => bakery_t('driver.outbox_failed'),
+    'offline_banner' => bakery_t('driver.offline_banner'),
+    'offline_banner_one' => bakery_t('driver.offline_banner_one'),
+    'offline_banner_count' => bakery_t('driver.offline_banner_count'),
+    'offline_save_failed' => bakery_t('driver.offline_save_failed'),
+    'offline_finish_blocked' => bakery_t('driver.offline_finish_blocked'),
+    'problem_reason_required' => bakery_t('driver.problem_reason_required'),
     'phone_camera' => bakery_t('driver.phone_camera'),
     'skip_photo' => bakery_t('driver.skip_photo'),
     'skip_departure_photo' => bakery_t('driver.skip_departure_photo'),
@@ -2145,6 +2241,8 @@ window.__DRIVER_PAGE_I18N__ = <?php echo json_encode([
 window.__DRIVER_ROUTE_BOOT__ = <?php echo json_encode([
     'nextDayUrl' => $routeForwardDate !== '' ? bakery_driver_route_day_url((int)$selectedDriverId, (string)$routeForwardDate) : '',
     'previousDayUrl' => bakery_driver_route_day_url((int)$selectedDriverId, (string)$previousDate),
+    'invalidDate' => $driverDateInvalid,
+    'missingStop' => $driverStopMissing,
     'isToday' => $selectedDate === $todayDate,
     'routeDate' => $selectedDate,
     'locale' => function_exists('bakery_locale') ? bakery_locale() : 'en',

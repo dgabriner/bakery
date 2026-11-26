@@ -162,7 +162,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
       <input type="hidden" name="action" value="<?php echo $navClockOpen ? 'clock_out' : 'clock_in'; ?>">
       <input type="hidden" name="return" value="<?php echo htmlspecialchars($navClockReturn, ENT_QUOTES, 'UTF-8'); ?>">
       <?php if ($navClockOpen): ?>
-      <button class="bakery-nav__clock-btn bakery-nav__clock-btn--in" type="submit" aria-label="<?php echo htmlspecialchars(bakery_t('time_clock.clock_out'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navClockOpen['clock_in_at'])]), ENT_QUOTES, 'UTF-8'); ?></button>
+      <button class="bakery-nav__clock-btn bakery-nav__clock-btn--in" type="submit" aria-label="<?php echo htmlspecialchars(bakery_t('time_clock.clock_out'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(bakery_time_clock_nav_label($navClockOpen), ENT_QUOTES, 'UTF-8'); ?></button>
       <?php else: ?>
       <button class="bakery-nav__clock-btn bakery-nav__clock-btn--out" type="submit"><?php echo htmlspecialchars(bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?></button>
       <?php endif; ?>
@@ -254,9 +254,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
               <?php echo bakery_csrf_field(); ?>
               <input type="hidden" name="action" value="<?php echo $navClockOpen ? 'clock_out' : 'clock_in'; ?>">
               <input type="hidden" name="return" value="<?php echo htmlspecialchars($navClockReturn, ENT_QUOTES, 'UTF-8'); ?>">
-              <button class="bakery-nav__more-link bakery-nav__more-clock" type="submit"><?php echo htmlspecialchars($navClockOpen
-                  ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navClockOpen['clock_in_at'])])
-                  : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?></button>
+              <button class="bakery-nav__more-link bakery-nav__more-clock" type="submit"><?php echo htmlspecialchars(bakery_time_clock_nav_label($navClockOpen), ENT_QUOTES, 'UTF-8'); ?></button>
             </form>
             <?php endif; ?>
             <a class="bakery-nav__more-link" href="<?php echo htmlspecialchars($navTomorrowHref, ENT_QUOTES, 'UTF-8'); ?>"><?php bakery_te('nav.tomorrow_route'); ?></a>
@@ -339,9 +337,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
         <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
         <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
-          <?php echo htmlspecialchars($navBakerClockOpen
-              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
-              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+          <?php echo htmlspecialchars(bakery_time_clock_nav_label($navBakerClockOpen), ENT_QUOTES, 'UTF-8'); ?>
         </button>
       </form>
       <?php endif; ?>
@@ -395,9 +391,7 @@ $navClockReturn = (string)($_SERVER['REQUEST_URI'] ?? '');
         <input type="hidden" name="action" value="<?php echo $navBakerClockOpen ? 'clock_out' : 'clock_in'; ?>">
         <input type="hidden" name="return" value="<?php echo htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
         <button class="bakery-nav__clock-btn <?php echo $navBakerClockOpen ? 'bakery-nav__clock-btn--in' : 'bakery-nav__clock-btn--out'; ?>" type="submit">
-          <?php echo htmlspecialchars($navBakerClockOpen
-              ? bakery_t('time_clock.nav_out', ['time' => bakery_time_clock_format_time((string)$navBakerClockOpen['clock_in_at'])])
-              : bakery_t('time_clock.clock_in'), ENT_QUOTES, 'UTF-8'); ?>
+          <?php echo htmlspecialchars(bakery_time_clock_nav_label($navBakerClockOpen), ENT_QUOTES, 'UTF-8'); ?>
         </button>
       </form>
       <?php endif; ?>

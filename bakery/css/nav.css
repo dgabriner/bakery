@@ -120,7 +120,7 @@
   display: inline;
 }
 
-@media (min-width: 721px) {
+@media (min-width: 721px) and (not ((pointer: coarse) and (max-height: 499px))) {
   /* The wide bar already shows these as pills. Phones hide those pills, so Today stays in the menu. */
   .bakery-nav__group--mode_focus {
     display: none;
@@ -1203,7 +1203,7 @@
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
   body.workspace-driver,
   body.workspace-baker,
   body.workspace-manager,
@@ -1730,7 +1730,7 @@
   display: none;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
   body.workspace-sales {
     padding-bottom: 1.5rem;
   }
@@ -1798,7 +1798,7 @@
   display: none;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), ((pointer: coarse) and (max-height: 499px)) {
   .bakery-nav--driver-route .bakery-nav__driver-bar,
   .bakery-nav--driver-route .bakery-nav__my-route,
   .bakery-nav--driver-route .bakery-nav__date-toggle,
@@ -1823,6 +1823,30 @@
   body.driver-route-prep .bakery-nav--driver-route .bakery-nav__more-link.bakery-nav__more-link--survey-phone {
     display: none !important;
   }
+
+.bakery-nav--driver .bakery-nav__more-sheet .bakery-lang-switch {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+}
+
+.bakery-nav--driver .bakery-nav__more-sheet .bakery-lang-switch__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 8px 14px;
+}
+
+.bakery-nav--driver .bakery-nav__more-clock {
+  white-space: normal;
+}
+
+.bakery-nav--driver .bakery-nav__more-link {
+  min-height: 44px;
+  white-space: normal;
+}
 
   body.driver-route-prep .bakery-nav--driver-route .bakery-nav__my-route,
   body.driver-route-prep .bakery-nav--driver-route .bakery-nav__date-toggle,
