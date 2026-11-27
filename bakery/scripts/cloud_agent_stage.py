@@ -14,6 +14,7 @@ Usage from the bakery/ root:
     python3 scripts/cloud_agent_stage.py --queue-live --files-live-only path1 path2 --commit SHA
     python3 scripts/cloud_agent_stage.py --queue-live --files-live-only --list paths.txt --commit SHA
     python3 scripts/cloud_agent_stage.py --smoke
+    python3 scripts/cloud_agent_stage.py --diagnose
 
 Never point these secrets at bakery.sourflour.org/bake. Live file/DB apply
 is the hosted worker after --queue-live writes Staging's approval manifests.
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -33,6 +35,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UPLOADER = ROOT / "scripts" / "sftp_upload.py"
+
+
+def _load_sftp_upload():
+    spec = importlib.util.spec_from_file_location("bakery_sftp_upload", UPLOADER)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"Missing uploader: {UPLOADER}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+sftp_upload = _load_sftp_upload()
 
 
 def run_uploader(extra: list[str]) -> int:
@@ -61,12 +75,14 @@ def ssh_exec(command: str, timeout: int = 600) -> int:
 
 
 def ssh_capture(command: str, timeout: int = 120) -> tuple[int, str, str]:
-    import paramiko
-    host = os.environ["SFTP_HOST"]
-    user = os.environ["SFTP_USER"]
-    password = os.environ["SFTP_PASSWORD"]
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    paramiko_mod = sftp_upload.require_paramiko()
+    settings = sftp_upload.sftp_login_settings()
+    sftp_upload.assert_sftp_target(settings["user"], settings["remote_root"], settings["target"])
+    host = settings["host"]
+    user = settings["user"]
+    password = settings["password"]
+    client = paramiko_mod.SSHClient()
+    client.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
     client.connect(hostname=host, username=user, password=password, timeout=45, allow_agent=False, look_for_keys=False)
     try:
         _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
@@ -232,6 +248,7 @@ def main() -> int:
     parser.add_argument("--commit", default="", help="Git commit whose bytes Staging must match")
     parser.add_argument("--smoke", action="store_true", help="Hit Staging login.php")
     parser.add_argument("--check-target", action="store_true")
+    parser.add_argument("--diagnose", action="store_true", help="Check the SFTP login and print non-secret facts")
     args = parser.parse_args()
 
     live_only = args.files_live_only is not None
@@ -242,8 +259,27 @@ def main() -> int:
     if live_only and args.files_live_only and args.list:
         raise SystemExit("Refusing: pass files-only paths or --list, not both.")
 
+    if args.diagnose:
+        return sftp_upload.sftp_login_preflight(diagnose=True)
+
     if args.check_target:
         return run_uploader(["--check-target"])
+
+    needs_login = bool(
+        args.files
+        or (bool(args.list) and not live_only)
+        or args.migration
+        or args.migrate_hosted
+        or args.queue_live
+    )
+    if needs_login:
+        preflight_code = sftp_upload.sftp_login_preflight(diagnose=False)
+        if preflight_code != 0:
+            return preflight_code
+    return stage_after_preflight(args, live_only)
+
+
+def stage_after_preflight(args, live_only: bool) -> int:
     if args.files or (args.list and not live_only):
         extra = ["--list", args.list] if args.list and not live_only else []
         if args.files:
