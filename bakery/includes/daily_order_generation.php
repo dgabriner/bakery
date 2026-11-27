@@ -18,6 +18,7 @@ require_once __DIR__ . '/customer_portal.php';
 require_once __DIR__ . '/customer_order_mutations.php';
 require_once __DIR__ . '/operational_timeline.php';
 require_once __DIR__ . '/cron_run.php';
+require_once __DIR__ . '/time_clock.php';
 
 /**
  * Next free dated position for one standing stop.
@@ -1413,6 +1414,9 @@ function bakery_demand_self_heal_if_stale(PDO $db, ?DateTimeImmutable $now = nul
     if (!bakery_demand_self_heal_window_open($now)) {
         return bakery_demand_self_heal_result(false, 'before_window', $sellDay);
     }
+    // POST and the nightly script are the writers. Backfill stays off so a
+    // page heal cannot rewrite a punch older than 7 days.
+    bakery_time_clock_autoclose_stale($db, $now->getTimestamp(), false);
     if (bakery_demand_self_heal_recorded($db, $sellDay)) {
         return bakery_demand_self_heal_result(false, 'already_built', $sellDay);
     }
