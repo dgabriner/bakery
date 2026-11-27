@@ -614,6 +614,20 @@ if (!$isPrint) {
                                 <?php echo htmlspecialchars($standard['label']); ?>
                             </p>
                         <?php endif; ?>
+                        <?php if ((float)($dough['piece_dough_grams'] ?? 0) > 0):
+                            $lossKey = !empty($dough['dough_loss_is_default'])
+                                ? 'formula.mix_loss_line_default'
+                                : 'formula.mix_loss_line';
+                        ?>
+                            <p class="pmd-mix-loss">
+                                <?php echo htmlspecialchars(bakery_t($lossKey, [
+                                    'piece' => number_format((float)$dough['piece_dough_grams'], 0),
+                                    'loss' => number_format((float)$dough['dough_loss_grams'], 0),
+                                ]), ENT_QUOTES, 'UTF-8'); ?>
+                                <strong><?php echo htmlspecialchars(number_format((float)$dough['dough_grams']) . ' g', ENT_QUOTES, 'UTF-8'); ?></strong>
+                                <span><?php bakery_te('formula.total_dough'); ?></span>
+                            </p>
+                        <?php endif; ?>
 
                         <div class="pmd-table-wrap">
                             <table class="pmd-table">

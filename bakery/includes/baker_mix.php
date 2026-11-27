@@ -216,16 +216,15 @@ function bakery_baker_mix_sheet(PDO $db, string $date, ?array $bakerProductIds =
         foreach ($batches as &$batch) {
             $structure = $structures[(int) ($batch['dough_type_id'] ?? 0)] ?? bakery_formula_normalize_structure([]);
             $batch['formula_structure'] = $structure;
-            $lossRows = [];
-            foreach ($batch['products'] as $product) {
-                $lossRows[] = [
-                    'weight_grams' => $product['weight_grams'],
-                    'quantity' => $product['planned_quantity'],
-                ];
-            }
-            $loss = bakery_formula_mix_loss_grams($structure, $lossRows);
-            $batch['dough_loss_applied_grams'] = $loss;
-            $batch['formula_dough_grams'] = (float) $batch['total_weight_grams'] + $loss;
+            $doughId = (int) ($batch['dough_type_id'] ?? 0);
+            $storedLoss = $doughId > 0 ? ($structure['dough_loss_grams'] ?? null) : 0;
+            $mixTotal = bakery_formula_mix_total_grams(
+                (float) $batch['total_weight_grams'],
+                $storedLoss
+            );
+            $batch['mix_total'] = $mixTotal;
+            $batch['dough_loss_applied_grams'] = $mixTotal['loss_grams'];
+            $batch['formula_dough_grams'] = $mixTotal['total_grams'];
             $reference = bakery_formula_batch_reference($structure, null);
             $batch['batch_multiplier_applied'] = $reference['multiplier_applied'];
             $batch['batch_multiplier'] = $reference['multiplier'];
@@ -385,7 +384,8 @@ function bakery_baker_mix_echo_formula(
     float $totalDoughGrams,
     bool $isBaker,
     ?array $structure = null,
-    array $addInRows = []
+    array $addInRows = [],
+    ?array $mixTotal = null
 ): void {
     $normalized = is_array($structure) ? bakery_formula_normalize_structure($structure) : null;
     $foldable = false;
@@ -406,7 +406,6 @@ function bakery_baker_mix_echo_formula(
     if ($foldable) {
         echo '<p class="bm-batch__hint">' . htmlspecialchars(bakery_t('formula_structure.mix_folded'), ENT_QUOTES, 'UTF-8') . '</p>';
     }
-    $doughClassification = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
     echo '<ul class="bm-formula" data-formula-units data-unit-mode="'
         . htmlspecialchars(bakery_formula_default_unit_mode($isBaker), ENT_QUOTES, 'UTF-8')
         . '">';
@@ -461,9 +460,13 @@ function bakery_baker_mix_echo_formula(
             null
         );
     }
-    echo '<li class="bm-formula__total" data-grams="' . htmlspecialchars((string)$totalDoughGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'
-        . '<span>' . htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8') . '</span>'
-        . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($totalDoughGrams, $doughClassification) . '</strong></li>';
+    $mixLines = is_array($mixTotal) ? $mixTotal : [
+        'piece_grams' => $totalDoughGrams,
+        'loss_grams' => 0.0,
+        'total_grams' => $totalDoughGrams,
+        'loss_is_default' => false,
+    ];
+    bakery_formula_echo_mix_loss_lines($mixLines, 'bm-formula__loss', 'bm-formula__total');
     echo '</ul>';
 }
 

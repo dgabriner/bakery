@@ -11,10 +11,71 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/formula_units.php';
 
-/** Suggested dough loss once a baker types it in. Blank stays unset. */
+/** Shared dough loss for a mix when the formula field is blank. */
 function bakery_formula_default_dough_loss_grams(): float
 {
     return 50.0;
+}
+
+/**
+ * Mix total = pieces x piece weight + dough loss, once per mix.
+ * Blank, NULL, and negative loss use the shared 50 g default.
+ * Zero is an explicit choice and stays zero. No piece weight means no mix.
+ *
+ * @param mixed $stored
+ * @return array{piece_grams:float,loss_grams:float,total_grams:float,loss_is_default:bool}
+ */
+function bakery_formula_mix_total_grams(float $pieceGrams, $stored): array
+{
+    $pieceGrams = $pieceGrams > 0 ? $pieceGrams : 0.0;
+    $normalized = bakery_formula_normalize_optional_number($stored);
+    $lossIsDefault = $normalized === null || $normalized < 0;
+    $loss = $lossIsDefault ? bakery_formula_default_dough_loss_grams() : $normalized;
+    if ($pieceGrams <= 0) {
+        return [
+            'piece_grams' => 0.0,
+            'loss_grams' => 0.0,
+            'total_grams' => 0.0,
+            'loss_is_default' => $lossIsDefault,
+        ];
+    }
+    return [
+        'piece_grams' => $pieceGrams,
+        'loss_grams' => $loss,
+        'total_grams' => $pieceGrams + $loss,
+        'loss_is_default' => $lossIsDefault,
+    ];
+}
+
+/**
+ * Piece dough, the included loss, and the mix total. The loss line is not an extra weigh.
+ *
+ * @param array{piece_grams?:float,loss_grams?:float,total_grams?:float,loss_is_default?:bool} $mix
+ */
+function bakery_formula_echo_mix_loss_lines(array $mix, string $rowClass, string $totalClass): void
+{
+    $pieceGrams = (float) ($mix['piece_grams'] ?? 0);
+    $lossGrams = (float) ($mix['loss_grams'] ?? 0);
+    $totalGrams = (float) ($mix['total_grams'] ?? $pieceGrams);
+    $lossIsDefault = !empty($mix['loss_is_default']);
+    $dry = ['liquid' => false, 'kind' => 'dry', 'density_lb_per_gal' => null];
+    $rowClass = trim($rowClass);
+    $totalClass = trim($totalClass);
+    if ($pieceGrams > 0) {
+        $labelKey = $lossIsDefault ? 'formula.mix_loss_line_default' : 'formula.mix_loss_line';
+        $label = bakery_t($labelKey, [
+            'piece' => number_format($pieceGrams, 0),
+            'loss' => number_format($lossGrams, 0),
+        ]);
+        echo '<li class="' . htmlspecialchars($rowClass, ENT_QUOTES, 'UTF-8') . '" data-grams="'
+            . htmlspecialchars((string) $lossGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'
+            . '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>'
+            . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($lossGrams, $dry) . '</strong></li>';
+    }
+    echo '<li class="' . htmlspecialchars($totalClass, ENT_QUOTES, 'UTF-8') . '" data-grams="'
+        . htmlspecialchars((string) $totalGrams, ENT_QUOTES, 'UTF-8') . '" data-liquid="0">'
+        . '<span>' . htmlspecialchars(bakery_t('formula.total_dough'), ENT_QUOTES, 'UTF-8') . '</span>'
+        . '<strong class="ingredient-amount">' . bakery_formula_amount_markup($totalGrams, $dry) . '</strong></li>';
 }
 
 function bakery_formula_normalize_optional_number($value): ?float

@@ -292,6 +292,20 @@
   color: var(--sf-text-muted, #6b7d78);
 }
 
+.pmd-mix-loss {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--sf-radius-sm, 8px);
+  background: #e7f3ec;
+  color: #174f36;
+  font-size: 0.95rem;
+}
+
+.pmd-mix-loss strong {
+  display: inline-block;
+  margin-left: 8px;
+}
+
 .pmd-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--sf-border, #ddd4c6);
