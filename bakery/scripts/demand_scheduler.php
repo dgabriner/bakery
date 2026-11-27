@@ -6,7 +6,7 @@
  * Local one-shot: php scripts/demand_scheduler.php --force
  *
  * DreamHost (daily, early morning):
- *   /usr/local/bin/php /home/YOUR_USER/bakery.sourflour.org/bake/scripts/demand_scheduler.php
+ *   /usr/local/bin/php /home/dh_dp755h/bakery.sourflour.org/bake/scripts/demand_scheduler.php
  */
 define('ACCESS_ALLOWED', true);
 
